@@ -1,0 +1,20 @@
+{
+  "name": "@heripo/logger",
+  "private": true,
+  "version": "0.0.0",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
+  },
+  "devDependencies": {
+    "@heripo/tsconfig": "workspace:*",
+    "@heripo/tsup-config": "workspace:*",
+    "tsup": "catalog:"
+  }
+}

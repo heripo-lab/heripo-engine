@@ -1,0 +1,175 @@
+name: Deploy Demo Web
+
+on:
+  push:
+    tags:
+      - 'demo-web-release-*'
+
+jobs:
+  deploy:
+    name: Build and Deploy Demo Web
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Backup existing data
+        run: |
+          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
+          BACKUP_DIR="/tmp/demo-web-backup-$(date +%s)"
+
+          echo "📦 Backing up data and output directories..."
+          mkdir -p "$BACKUP_DIR"
+
+          if [ -d "$DEPLOY_PATH/apps/demo-web/data" ]; then
+            cp -r "$DEPLOY_PATH/apps/demo-web/data" "$BACKUP_DIR/"
+            echo "✅ data/ backed up"
+          else
+            echo "⚠️ No existing data/ directory found"
+          fi
+
+          if [ -d "$DEPLOY_PATH/apps/demo-web/output" ]; then
+            cp -r "$DEPLOY_PATH/apps/demo-web/output" "$BACKUP_DIR/"
+            echo "✅ output/ backed up"
+          else
+            echo "⚠️ No existing output/ directory found"
+          fi
+
+          echo "BACKUP_DIR=$BACKUP_DIR" >> $GITHUB_ENV
+
+      - name: Sync code to deploy path
+        run: |
+          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
+
+          echo "🔄 Syncing code to $DEPLOY_PATH..."
+          mkdir -p "$DEPLOY_PATH"
+          rsync -av --delete ./ "$DEPLOY_PATH/"
+          echo "✅ Code sync complete"
+
+      - name: Restore data from backup or initialize
+        run: |
+          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
+
+          echo "📦 Restoring data and output directories..."
+
+          if [ -d "$BACKUP_DIR/data" ]; then
+            cp -r "$BACKUP_DIR/data" "$DEPLOY_PATH/apps/demo-web/"
+            echo "✅ data/ restored"
+          else
+            echo "⚠️ No backup data found, creating empty directories..."
+            mkdir -p "$DEPLOY_PATH/apps/demo-web/data"
+            echo "✅ data/ created"
+          fi
+
+          if [ -d "$BACKUP_DIR/output" ]; then
+            cp -r "$BACKUP_DIR/output" "$DEPLOY_PATH/apps/demo-web/"
+            echo "✅ output/ restored"
+          else
+            mkdir -p "$DEPLOY_PATH/apps/demo-web/output"
+            echo "✅ output/ created"
+          fi
+
+          rm -rf "$BACKUP_DIR"
+          echo "🧹 Backup directory cleaned up"
+
+      - name: Create .env file
+        run: |
+          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
+
+          cat > "$DEPLOY_PATH/apps/demo-web/.env" <<EOF
+          # LLM API Keys
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_GENERATIVE_AI_API_KEY=${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          TOGETHER_AI_API_KEY=${{ secrets.TOGETHER_AI_API_KEY }}
+
+          # PDF Parser Settings (optional)
+          PDF_PARSER_PORT=${{ vars.DEMO_WEB_PDF_PARSER_PORT }}
+          PDF_PARSER_TIMEOUT=${{ vars.DEMO_WEB_PDF_PARSER_TIMEOUT }}
+
+          # Debug Settings (optional)
+          AI_SDK_LOG_WARNINGS=false
+
+          # Public Mode Settings
+          NEXT_PUBLIC_PUBLIC_MODE=${{ vars.DEMO_WEB_PUBLIC_MODE }}
+          NEXT_PUBLIC_GA_MEASUREMENT_ID=${{ vars.DEMO_WEB_GA_ID }}
+
+          # Official Demo Settings
+          NEXT_PUBLIC_HERIPO_OFFICIAL_DEMO=${{ vars.DEMO_WEB_OFFICIAL_DEMO }}
+
+          # Data Retention Settings
+          NEXT_PUBLIC_DATA_RETENTION_DAYS=${{ vars.DEMO_WEB_DATA_RETENTION_DAYS }}
+
+          # Rate Limiting (server-side only)
+          TOTP_SECRET=${{ secrets.DEMO_WEB_TOTP_SECRET }}
+          DAILY_LIMIT=${{ vars.DEMO_WEB_DAILY_LIMIT }}
+          OTP_MAX_ATTEMPTS=${{ vars.DEMO_WEB_OTP_MAX_ATTEMPTS }}
+
+          # Webhook Settings
+          WEBHOOK_URL=${{ secrets.DEMO_WEB_WEBHOOK_URL }}
+          WEBHOOK_SECRET=${{ secrets.DEMO_WEB_WEBHOOK_SECRET }}
+          
+          # Sample Task Settings
+          NEXT_PUBLIC_ALLOW_SAMPLE_DELETION=${{ vars.DEMO_WEB_ALLOW_SAMPLE_DELETION }}
+
+          # Turnstile Settings (Cloudflare CAPTCHA, Public Mode only)
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY=${{ secrets.DEMO_WEB_TURNSTILE_SITE_KEY }}
+          TURNSTILE_SECRET_KEY=${{ secrets.DEMO_WEB_TURNSTILE_SECRET_KEY }}
+          
+          # Chunked Upload Settings (required for large file uploads >= 50MB)
+          UPLOAD_SESSION_SECRET=${{ secrets.DEMO_WEB_UPLOAD_SESSION_SECRET }}
+          EOF
+
+          # Remove leading whitespace from each line
+          sed -i '' 's/^[[:space:]]*//' "$DEPLOY_PATH/apps/demo-web/.env"
+
+          chmod 600 "$DEPLOY_PATH/apps/demo-web/.env"
+          echo "✅ .env file created"
+
+      - name: Install dependencies
+        run: |
+          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
+          cd "$DEPLOY_PATH"
+          pnpm install
+          echo "✅ Dependencies installed"
+
+      - name: Build
+        run: |
+          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
+          cd "$DEPLOY_PATH"
+          pnpm build
+          echo "✅ Build complete"
+
+      - name: Restart application with pm2
+        run: |
+          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
+          cd "$DEPLOY_PATH"
+
+          pm2 restart demo-web || pm2 start pnpm --name "demo-web" -- demo-web:start
+          pm2 save
+          echo "✅ Application restarted"
+
+      - name: Slack notification
+        uses: slackapi/slack-github-action@v2
+        if: always()
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: "${{ vars.SLACK_ALERT_DEV_CHANNEL }}"
+            text: "${{ job.status == 'success' && '🚀 배포 완료' || '❌ 배포 실패' }}: ${{ github.repository }} (demo-web)"
+            blocks:
+              - type: section
+                text:
+                  type: mrkdwn
+                  text: |
+                    *${{ job.status == 'success' && '🚀 배포 완료' || '❌ 배포 실패' }}*
+
+                    *프로젝트:* ${{ github.repository }} (demo-web)
+                    *태그:* ${{ github.ref_name }}
+                    *배포자:* ${{ github.actor }}
+                    *커밋:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>
+
+                    ${{ job.status == 'success' && '✅ 데모 사이트: https://engine-demo.heripo.com' || '🚨 로그 확인이 필요합니다.' }}
+
+                    <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 워크플로우 로그 보기>

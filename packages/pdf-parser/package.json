@@ -1,0 +1,96 @@
+{
+  "name": "@heripo/pdf-parser",
+  "private": false,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "PDF parsing library using Docling SDK with OCR support for macOS",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "sideEffects": false,
+  "author": "heripo lab",
+  "contributors": [
+    "Kim Hongyeon <kimhongyeon89@gmail.com>",
+    "Cho Hayoung <hmys0500@gmail.com>"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heripo-lab/heripo-engine",
+    "directory": "packages/pdf-parser"
+  },
+  "bugs": {
+    "url": "https://github.com/heripo-lab/heripo-engine/issues"
+  },
+  "homepage": "https://github.com/heripo-lab/heripo-engine/tree/main/packages/pdf-parser",
+  "keywords": [
+    "heripo",
+    "pdf",
+    "parser",
+    "ocr",
+    "docling",
+    "archaeology",
+    "macos"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "os": [
+    "darwin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "pnpm clean && tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "TEST_MODE=ci vitest run --coverage",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:watch": "vitest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepublishOnly": "pnpm build",
+    "preversion": "pnpm build",
+    "postversion": "git push --follow-tags",
+    "release": "npm publish --access public",
+    "release:patch": "npm version patch && npm publish --access public",
+    "release:minor": "npm version minor && npm publish --access public",
+    "release:major": "npm version major && npm publish --access public"
+  },
+  "dependencies": {
+    "@heripo/model": "workspace:*",
+    "docling-sdk": "^1.3.6",
+    "es-toolkit": "catalog:",
+    "yauzl": "^3.2.0"
+  },
+  "devDependencies": {
+    "@heripo/logger": "workspace:*",
+    "@heripo/shared": "workspace:*",
+    "@heripo/tsconfig": "workspace:*",
+    "@heripo/tsup-config": "workspace:*",
+    "@heripo/vitest-config": "workspace:*",
+    "@types/yauzl": "^2.10.3",
+    "@vitest/coverage-v8": "catalog:",
+    "@vitest/expect": "catalog:",
+    "tsup": "catalog:",
+    "vitest": "catalog:"
+  }
+}
