@@ -62,13 +62,9 @@
     "test:coverage:watch": "vitest --coverage",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "prepublishOnly": "pnpm build",
-    "preversion": "pnpm build",
-    "postversion": "git push --follow-tags",
-    "release": "pnpm pack && npm publish *.tgz --access public && rm *.tgz",
-    "release:patch": "pnpm version patch && pnpm pack && npm publish *.tgz --access public && rm *.tgz",
-    "release:minor": "pnpm version minor && pnpm pack && npm publish *.tgz --access public && rm *.tgz",
-    "release:major": "pnpm version major && pnpm pack && npm publish *.tgz --access public && rm *.tgz"
+    "version:patch": "pnpm version patch",
+    "version:minor": "pnpm version minor",
+    "version:major": "pnpm version major"
   },
   "dependencies": {
     "@heripo/model": "workspace:*",
