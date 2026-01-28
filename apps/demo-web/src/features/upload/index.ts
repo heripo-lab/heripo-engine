@@ -10,6 +10,7 @@ export { AdvancedOptionsCard } from './components/advanced-options-card';
 export { RateLimitBanner } from './components/rate-limit-banner';
 export { BypassDialog } from './components/bypass-dialog';
 export { ConsentDialog } from './components/consent-dialog';
+export { GuidanceDialog } from './components/guidance-dialog';
 export { PublicModeInfoBanner } from './components/public-mode-info-banner';
 export { UploadProgressDialog } from './components/upload-progress-dialog';
 
