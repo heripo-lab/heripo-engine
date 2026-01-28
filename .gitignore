@@ -56,3 +56,6 @@ CLAUDE.md
 .aider*
 .claude/
 *.ai.md
+
+# Package tarballs
+*.tgz
