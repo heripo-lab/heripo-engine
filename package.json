@@ -1,6 +1,6 @@
 {
   "name": "heripo-engine",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript library for extracting structured data from archaeological excavation report PDFs using Docling SDK and LLM-powered analysis",
   "keywords": [
     "pdf",
