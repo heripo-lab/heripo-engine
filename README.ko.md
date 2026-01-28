@@ -179,9 +179,9 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model
 
 | 패키지                                                      | 버전  | 설명                       |
 | ----------------------------------------------------------- | ----- | -------------------------- |
-| [@heripo/pdf-parser](./packages/pdf-parser)                 | 0.1.0 | PDF 파싱 및 OCR            |
-| [@heripo/document-processor](./packages/document-processor) | 0.1.0 | 문서 구조 분석 및 LLM 처리 |
-| [@heripo/model](./packages/model)                           | 0.1.0 | 데이터 모델 및 타입 정의   |
+| [@heripo/pdf-parser](./packages/pdf-parser)                 | 0.1.x | PDF 파싱 및 OCR            |
+| [@heripo/document-processor](./packages/document-processor) | 0.1.x | 문서 구조 분석 및 LLM 처리 |
+| [@heripo/model](./packages/model)                           | 0.1.x | 데이터 모델 및 타입 정의   |
 
 ## 사용 예제
 
@@ -303,7 +303,7 @@ pnpm dev
 
 ## 로드맵
 
-현재 버전: **v0.1.0** (초기 공개)
+현재 버전: **v0.1.x** (초기 공개)
 
 ### v0.1.x - 원천 데이터 추출 (현재)
 

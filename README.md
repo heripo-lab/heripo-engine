@@ -179,9 +179,9 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model
 
 | Package                                                     | Version | Description                                    |
 | ----------------------------------------------------------- | ------- | ---------------------------------------------- |
-| [@heripo/pdf-parser](./packages/pdf-parser)                 | 0.1.0   | PDF parsing and OCR                            |
-| [@heripo/document-processor](./packages/document-processor) | 0.1.0   | Document structure analysis and LLM processing |
-| [@heripo/model](./packages/model)                           | 0.1.0   | Data models and type definitions               |
+| [@heripo/pdf-parser](./packages/pdf-parser)                 | 0.1.x   | PDF parsing and OCR                            |
+| [@heripo/document-processor](./packages/document-processor) | 0.1.x   | Document structure analysis and LLM processing |
+| [@heripo/model](./packages/model)                           | 0.1.x   | Data models and type definitions               |
 
 ## Usage Examples
 
@@ -303,7 +303,7 @@ For detailed usage, see [apps/demo-web/README.md](./apps/demo-web/README.md).
 
 ## Roadmap
 
-Current version: **v0.1.0** (Initial Release)
+Current version: **v0.1.x** (Initial Release)
 
 ### v0.1.x - Raw Data Extraction (Current)
 
