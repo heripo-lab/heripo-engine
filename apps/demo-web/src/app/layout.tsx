@@ -27,7 +27,7 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="ko">
+    <html lang="en">
       <body
         className={`${spaceGrotesk.variable} bg-background min-h-screen font-sans antialiased`}
       >
