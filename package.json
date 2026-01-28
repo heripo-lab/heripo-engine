@@ -22,6 +22,11 @@
     "cultural-heritage"
   ],
   "private": true,
+  "author": "heripo lab",
+  "contributors": [
+    "Kim Hongyeon <kimhongyeon89@gmail.com>",
+    "Cho Hayoung <hmys0500@gmail.com>"
+  ],
   "workspaces": [
     "apps/*",
     "packages/*",
