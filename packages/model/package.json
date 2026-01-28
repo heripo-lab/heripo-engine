@@ -56,10 +56,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix",
-    "version:patch": "pnpm version patch",
-    "version:minor": "pnpm version minor",
-    "version:major": "pnpm version major"
+    "lint:fix": "eslint src/**/*.ts --fix"
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
