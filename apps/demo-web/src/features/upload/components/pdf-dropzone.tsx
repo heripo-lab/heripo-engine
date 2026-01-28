@@ -8,6 +8,7 @@ import { useRef, useState } from 'react';
 import { cn } from '~/lib/utils';
 
 import { useProcessingForm } from '../contexts/processing-form-context';
+import { GuidanceDialog } from './guidance-dialog';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
 
@@ -38,6 +39,8 @@ export function PdfDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [guidanceDialogOpen, setGuidanceDialogOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   const form = useProcessingForm();
 
@@ -75,7 +78,8 @@ export function PdfDropzone() {
 
           const files = e.dataTransfer.files;
           if (files.length > 0) {
-            handleFile(files[0]);
+            setPendingFile(files[0]);
+            setGuidanceDialogOpen(true);
           }
         };
 
@@ -89,7 +93,17 @@ export function PdfDropzone() {
         };
 
         const handleClick = () => {
-          inputRef.current?.click();
+          setPendingFile(null);
+          setGuidanceDialogOpen(true);
+        };
+
+        const handleGuidanceConfirm = () => {
+          if (pendingFile) {
+            handleFile(pendingFile);
+            setPendingFile(null);
+          } else {
+            inputRef.current?.click();
+          }
         };
 
         const handleRemoveFile = (e: MouseEvent) => {
@@ -131,45 +145,52 @@ export function PdfDropzone() {
 
         // Show dropzone
         return (
-          <div
-            onClick={handleClick}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            className={cn(
-              'border-muted-foreground/25 bg-muted/50 relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 transition-colors',
-              'hover:border-muted-foreground/50 hover:bg-muted/80',
-              'cursor-pointer',
-              isDragging && 'border-primary bg-primary/5',
-            )}
-          >
-            <input
-              ref={inputRef}
-              type="file"
-              accept="application/pdf"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <div className="flex flex-col items-center justify-center space-y-4 text-center">
-              <div className="bg-primary/10 rounded-full p-4">
-                <FileUp className="text-primary h-10 w-10" />
-              </div>
-              <div className="space-y-2">
-                <p className="text-lg font-medium">
-                  Drop your PDF file here, or click to browse
-                </p>
-                <p className="text-muted-foreground text-sm">
-                  Please upload an archaeological excavation report PDF (max
-                  2GB)
-                </p>
-                {error && <p className="text-destructive text-sm">{error}</p>}
-              </div>
-              <div className="bg-primary text-primary-foreground flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium">
-                <Upload className="h-4 w-4" />
-                Select File
+          <>
+            <div
+              onClick={handleClick}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={cn(
+                'border-muted-foreground/25 bg-muted/50 relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 transition-colors',
+                'hover:border-muted-foreground/50 hover:bg-muted/80',
+                'cursor-pointer',
+                isDragging && 'border-primary bg-primary/5',
+              )}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept="application/pdf"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <div className="flex flex-col items-center justify-center space-y-4 text-center">
+                <div className="bg-primary/10 rounded-full p-4">
+                  <FileUp className="text-primary h-10 w-10" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-lg font-medium">
+                    Drop your PDF file here, or click to browse
+                  </p>
+                  <p className="text-muted-foreground text-sm">
+                    Please upload an archaeological excavation report PDF (max
+                    2GB)
+                  </p>
+                  {error && <p className="text-destructive text-sm">{error}</p>}
+                </div>
+                <div className="bg-primary text-primary-foreground flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium">
+                  <Upload className="h-4 w-4" />
+                  Select File
+                </div>
               </div>
             </div>
-          </div>
+            <GuidanceDialog
+              open={guidanceDialogOpen}
+              onOpenChange={setGuidanceDialogOpen}
+              onConfirm={handleGuidanceConfirm}
+            />
+          </>
         );
       }}
     </form.Field>
