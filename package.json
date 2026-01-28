@@ -1,0 +1,72 @@
+{
+  "name": "heripo-engine",
+  "version": "0.1.0",
+  "description": "TypeScript library for extracting structured data from archaeological excavation report PDFs using Docling SDK and LLM-powered analysis",
+  "keywords": [
+    "pdf",
+    "pdf-parser",
+    "ocr",
+    "docling",
+    "archaeology",
+    "excavation-report",
+    "document-processing",
+    "structured-data",
+    "llm",
+    "ai",
+    "typescript",
+    "monorepo",
+    "korean",
+    "apple-silicon",
+    "digitization",
+    "digital-transformation",
+    "cultural-heritage"
+  ],
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "build": "turbo build",
+    "demo-web:dev": "pnpm --filter @heripo/demo-web dev",
+    "demo-web:build": "pnpm --filter @heripo/demo-web build",
+    "demo-web:start": "pnpm --filter @heripo/demo-web start",
+    "demo-web:release": "pnpm --filter @heripo/demo-web release",
+    "lint": "turbo lint",
+    "lint:fix": "turbo lint:fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,mdx}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,mdx}\"",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "test:watch": "turbo test:watch",
+    "test:coverage": "turbo test:coverage",
+    "shared:test:coverage": "pnpm --filter shared test:coverage",
+    "pdf-parser:test:coverage": "pnpm --filter pdf-parser test:coverage",
+    "document-processor:test:coverage": "pnpm --filter document-processor test:coverage",
+    "test:ci": "turbo test:ci"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
+    "@types/node": "^25.0.10",
+    "eslint": "^9.39.2",
+    "eslint-plugin-unused-imports": "^4.3.0",
+    "prettier": "^3.8.1",
+    "prettier-plugin-tailwindcss": "^0.7.2",
+    "rimraf": "^6.1.2",
+    "turbo": "^2.7.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0"
+  },
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "overrides": {
+      "lodash-es": "^4.17.23",
+      "lodash": "^4.17.23"
+    }
+  }
+}

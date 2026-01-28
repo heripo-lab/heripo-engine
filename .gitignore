@@ -1,0 +1,58 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+.venv
+
+# Testing
+coverage
+
+# Build outputs
+dist
+.next
+out
+build
+output
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Local env files
+.env*.local
+.env
+*.local.*
+
+# Turbo
+.turbo
+
+# IDEs
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# local
+.private
+
+# Demo-web data
+apps/demo-web/data
+
+# AI assistant files
+CLAUDE.md
+.cursorrules
+.cursor/
+.aider*
+.claude/
+*.ai.md

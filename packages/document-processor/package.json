@@ -1,0 +1,89 @@
+{
+  "name": "@heripo/document-processor",
+  "private": false,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Document processor with LLM-based analysis for heripo engine",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "sideEffects": false,
+  "author": "heripo lab",
+  "contributors": [
+    "Kim Hongyeon <kimhongyeon89@gmail.com>",
+    "Cho Hayoung <hmys0500@gmail.com>"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heripo-lab/heripo-engine",
+    "directory": "packages/document-processor"
+  },
+  "bugs": {
+    "url": "https://github.com/heripo-lab/heripo-engine/issues"
+  },
+  "homepage": "https://github.com/heripo-lab/heripo-engine/tree/main/packages/document-processor",
+  "keywords": [
+    "heripo",
+    "document",
+    "processor",
+    "llm",
+    "archaeology"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "pnpm clean && tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "TEST_MODE=ci vitest run --coverage",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:watch": "vitest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepublishOnly": "pnpm build",
+    "preversion": "pnpm build",
+    "postversion": "git push --follow-tags",
+    "release": "npm publish --access public",
+    "release:patch": "npm version patch && npm publish --access public",
+    "release:minor": "npm version minor && npm publish --access public",
+    "release:major": "npm version major && npm publish --access public"
+  },
+  "dependencies": {
+    "@heripo/model": "workspace:*",
+    "ai": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@heripo/logger": "workspace:*",
+    "@heripo/shared": "workspace:*",
+    "@heripo/tsconfig": "workspace:*",
+    "@heripo/tsup-config": "workspace:*",
+    "@heripo/vitest-config": "workspace:*",
+    "@vitest/coverage-v8": "catalog:",
+    "@vitest/expect": "catalog:",
+    "tsup": "catalog:",
+    "vitest": "catalog:"
+  }
+}
