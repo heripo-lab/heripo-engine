@@ -45,14 +45,14 @@ heripo lab is an open-source R&D group that combines archaeological domain knowl
 #### Kim, Hongyeon (Lead Engineer)
 
 - Role: Design of LLM-based unstructured data extraction pipeline and system implementation
-- Background: Software Engineer (BA in Archaeology & Computer Science)
+- Background: Software Engineer (B.S. in Computer Science and B.A. in Archaeology)
 - Research:
   - ["A Study on Archaeological Informatization Using Large Language Models (LLMs) - Proof of Concept for an Automated Metadata Extraction Pipeline from Archaeological Excavation Reports -"](https://koreascience.kr/article/JAKO202570361249829.page) (2025, KCI Listed)
 
 #### Cho, Hayoung (Domain Researcher)
 
 - Role: Archaeological data ontology design, data schema definition, and academic validation
-- Background: PhD candidate in Archaeology, MA in Cultural Informatics
+- Background: Ph.D. Candidate in Archaeology, M.A. in Cultural Informatics
 - Research:
   - ["Considerations for Structuring Maritime Cultural Heritage Data"](https://doi.org/10.22917/island.2025..66.271) (2025, KCI Listed)
   - ["Semantic Data Design for Maritime Cultural Heritage: Focusing on Ancient Shipwrecks and Wooden Tablets Excavated from the Taean Mado waters"](https://lib.aks.ac.kr/#/search/detail/1036933) (2025, Master's Thesis)
