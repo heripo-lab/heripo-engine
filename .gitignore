@@ -51,6 +51,7 @@ apps/demo-web/data
 
 # AI assistant files
 CLAUDE.md
+AGENTS.md
 .cursorrules
 .cursor/
 .aider*
