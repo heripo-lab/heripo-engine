@@ -24,9 +24,9 @@ if (!['none', 'patch', 'minor', 'major'].includes(bumpType)) {
 
 const distTagIndex = args.indexOf('--tag');
 const distTag = distTagIndex >= 0 ? args[distTagIndex + 1] : null;
-const noGit = args.includes('--no-git');
 const allowDirty = args.includes('--allow-dirty');
 const dryRun = args.includes('--dry-run');
+const noGit = args.includes('--no-git') || dryRun;
 
 if (distTagIndex >= 0 && !distTag) {
   console.error('--tag requires a value, e.g. --tag next');
