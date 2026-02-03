@@ -40,8 +40,8 @@
     "demo-web:release": "pnpm --filter @heripo/demo-web release",
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,mdx}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,mdx}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,json,md,mdx}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,json,md,mdx}\"",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "test:watch": "turbo test:watch",
@@ -49,7 +49,11 @@
     "shared:test:coverage": "pnpm --filter shared test:coverage",
     "pdf-parser:test:coverage": "pnpm --filter pdf-parser test:coverage",
     "document-processor:test:coverage": "pnpm --filter document-processor test:coverage",
-    "test:ci": "turbo test:ci"
+    "test:ci": "turbo test:ci",
+    "release": "node scripts/publish-all.mjs none",
+    "release:patch": "node scripts/publish-all.mjs patch",
+    "release:minor": "node scripts/publish-all.mjs minor",
+    "release:major": "node scripts/publish-all.mjs major"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
