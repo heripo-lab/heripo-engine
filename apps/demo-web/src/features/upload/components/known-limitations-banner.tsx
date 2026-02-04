@@ -21,6 +21,7 @@ export function KnownLimitationsBanner() {
   return (
     <div className="relative mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
       <button
+        type="button"
         onClick={() => setDismissed(true)}
         className="absolute top-2 right-2 rounded-md p-1 text-amber-600 hover:bg-amber-100 hover:text-amber-800"
         aria-label={lang === 'ko' ? '닫기' : 'Dismiss'}
