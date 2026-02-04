@@ -18,6 +18,7 @@ import {
   BypassDialog,
   ConsentDialog,
   DEFAULT_FORM_VALUES,
+  KnownLimitationsBanner,
   LLMModelSettingsCard,
   PdfDropzone,
   ProcessingFormProvider,
@@ -247,6 +248,9 @@ function HomePageContent() {
           {/* Stage Content */}
           {selectedStage === 'raw-data' ? (
             <form onSubmit={handleFormSubmit}>
+              {/* Known Limitations Banner */}
+              <KnownLimitationsBanner />
+
               {/* Info Banner - Always visible in public mode when not blocked */}
               {isPublicMode && !isBlocked && rateLimit && (
                 <PublicModeInfoBanner

@@ -13,6 +13,7 @@ export { ConsentDialog } from './components/consent-dialog';
 export { GuidanceDialog } from './components/guidance-dialog';
 export { PublicModeInfoBanner } from './components/public-mode-info-banner';
 export { UploadProgressDialog } from './components/upload-progress-dialog';
+export { KnownLimitationsBanner } from './components/known-limitations-banner';
 
 // Hooks
 export { useCreateTask } from './hooks/use-create-task';
@@ -23,10 +24,14 @@ export type {
   ChunkedUploadState,
   ChunkedUploadStatus,
 } from './hooks/use-chunked-upload';
+export { useBrowserLanguage } from './hooks/use-browser-language';
+export type { SupportedLanguage } from './hooks/use-browser-language';
 
 // Constants
 export { LLM_MODELS, VISION_MODELS } from './constants/llm-models';
 export type { LLMModel } from './constants/llm-models';
+export { KNOWN_LIMITATIONS } from './constants/known-limitations';
+export type { KnownLimitation } from './constants/known-limitations';
 
 // Types
 export type {
