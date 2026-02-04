@@ -1398,11 +1398,14 @@ describe('DocumentProcessor', () => {
 
       const mockTocContentValidator = {
         validate: vi.fn().mockResolvedValue({
-          isToc: true,
+          isValid: true,
           confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '- Chapter 1 ..... 1',
           reason: 'Content appears to be a table of contents',
         }),
         isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('- Chapter 1 ..... 1'),
       };
 
       const mockTocExtractor = {
@@ -1524,11 +1527,14 @@ describe('DocumentProcessor', () => {
 
       const mockTocContentValidator = {
         validate: vi.fn().mockResolvedValue({
-          isToc: false,
+          isValid: false,
           confidence: 0.3,
+          contentType: 'resource_only',
+          validTocMarkdown: null,
           reason: 'Content does not appear to be a table of contents',
         }),
         isValid: vi.fn().mockReturnValue(false),
+        getValidMarkdown: vi.fn().mockReturnValue(null),
       };
 
       const mockTocExtractor = {
@@ -1612,6 +1618,248 @@ describe('DocumentProcessor', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('TOC validation failed'),
       );
+    });
+
+    test('should log mixed TOC message when contentType is mixed', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const extractedToc = '제1장 서론 ..... 1\n제2장 조사개요 ..... 5';
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.85,
+          contentType: 'mixed',
+          validTocMarkdown: extractedToc,
+          reason: 'Contains both main TOC and photo index',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue(extractedToc),
+      };
+
+      const mockTocExtractor = {
+        extract: vi.fn().mockResolvedValue({
+          entries: [
+            { title: '제1장 서론', level: 1, pageNo: 1 },
+            { title: '제2장 조사개요', level: 1, pageNo: 5 },
+          ],
+          usage: {
+            component: 'TocExtractor',
+            phase: 'extraction',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+          },
+        }),
+      };
+
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue(null),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockImplementation((ref: string) => {
+          if (ref === '#/groups/0') {
+            return {
+              name: 'list',
+              label: 'list',
+              self_ref: '#/groups/0',
+              children: [{ $ref: '#/texts/0' }],
+            };
+          }
+          return {
+            text: '제1장 서론 ..... 1',
+            orig: '제1장 서론 ..... 1',
+            label: 'text',
+            self_ref: '#/texts/0',
+          };
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: '제1장 서론 ..... 1',
+          orig: '제1장 서론 ..... 1',
+          label: 'text',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc: DoclingDocument = {
+        schema_name: 'DoclingDocument',
+        version: '1.0.0',
+        name: 'test-doc',
+        origin: {
+          mimetype: 'application/pdf',
+          binary_hash: 123,
+          filename: 'test.pdf',
+        },
+        furniture: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/furniture',
+          children: [],
+          content_layer: 'furniture',
+        },
+        texts: [],
+        pictures: [],
+        tables: [],
+        groups: [],
+        body: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/body',
+          children: [],
+          content_layer: 'body',
+        },
+        pages: { '1': {} as any, '2': {} as any },
+      } as DoclingDocument;
+
+      const result = await (processor as any).extractTableOfContents(
+        mockDoc,
+        [],
+      );
+
+      expect(mockTocContentValidator.validate).toHaveBeenCalled();
+      expect(mockTocContentValidator.getValidMarkdown).toHaveBeenCalled();
+      expect(result).toHaveLength(2);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Mixed TOC detected'),
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('TOC validation passed'),
+      );
+    });
+
+    test('should use vision fallback when isValid is true but getValidMarkdown returns null', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.5,
+          contentType: 'pure_toc',
+          validTocMarkdown: null,
+          reason: 'Low confidence TOC',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue(null),
+      };
+
+      const mockTocExtractor = {
+        extract: vi.fn().mockResolvedValue({
+          entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
+          usage: {
+            component: 'TocExtractor',
+            phase: 'extraction',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+          },
+        }),
+      };
+
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- Chapter 1 ..... 1'),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          label: 'text',
+          text: '목차 - Chapter 1 ..... 1',
+        }),
+        resolveText: vi.fn().mockReturnValue({ text: 'test content' }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc: DoclingDocument = {
+        schema_name: 'DoclingDocument',
+        version: '1.0.0',
+        name: 'test-doc',
+        origin: {
+          mimetype: 'application/pdf',
+          binary_hash: 123,
+          filename: 'test.pdf',
+        },
+        furniture: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/furniture',
+          children: [],
+          content_layer: 'furniture',
+        },
+        texts: [],
+        pictures: [],
+        tables: [],
+        groups: [],
+        body: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/body',
+          children: [],
+          content_layer: 'body',
+        },
+        pages: { '1': {} as any, '2': {} as any },
+      } as DoclingDocument;
+
+      const result = await (processor as any).extractTableOfContents(
+        mockDoc,
+        [],
+      );
+
+      expect(mockTocContentValidator.validate).toHaveBeenCalled();
+      expect(mockTocContentValidator.isValid).toHaveBeenCalled();
+      expect(mockTocContentValidator.getValidMarkdown).toHaveBeenCalled();
+      expect(mockVisionTocExtractor.extract).toHaveBeenCalledWith(2);
+      expect(result).toHaveLength(1);
     });
   });
 

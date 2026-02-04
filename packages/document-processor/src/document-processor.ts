@@ -608,9 +608,21 @@ export class DocumentProcessor {
         );
         markdown = null;
       } else {
-        this.logger.info(
-          `[DocumentProcessor] TOC validation passed (confidence: ${validation.confidence})`,
-        );
+        const validMarkdown =
+          this.tocContentValidator!.getValidMarkdown(validation);
+        if (validMarkdown) {
+          if (validation.contentType === 'mixed') {
+            this.logger.info(
+              `[DocumentProcessor] Mixed TOC detected, using extracted main TOC (${validMarkdown.length} chars)`,
+            );
+          }
+          markdown = validMarkdown;
+          this.logger.info(
+            `[DocumentProcessor] TOC validation passed (confidence: ${validation.confidence})`,
+          );
+        } else {
+          markdown = null;
+        }
       }
     } catch (error) {
       if (error instanceof TocNotFoundError) {
