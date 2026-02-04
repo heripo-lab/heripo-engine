@@ -14,6 +14,12 @@
 > ⚠️ **macOS Only**: This project currently supports only macOS (Apple Silicon or Intel).
 > See [@heripo/pdf-parser README](./packages/pdf-parser/README.md#prerequisites) for detailed system requirements.
 
+> ⚠️ **Known Limitations (v0.1.x)**:
+>
+> - **Hanja OCR**: Chinese characters may not be recognized correctly in mixed Korean-Chinese documents (improvement in progress)
+> - **TOC Extraction**: May fail if TOC is missing or has unusual structure. Some seemingly normal TOCs also fail occasionally (continuously improving)
+> - **Vertical Text**: Old documents with vertical text and Chinese numeral page numbers are planned for long-term support, but not currently scheduled
+
 > 🌐 **Online Demo**: Try it without local installation → [engine-demo.heripo.com](https://engine-demo.heripo.com)
 
 ## Table of Contents

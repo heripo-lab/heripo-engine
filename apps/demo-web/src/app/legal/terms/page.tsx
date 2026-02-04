@@ -1,6 +1,12 @@
+import type { Metadata } from 'next';
+
 import { notFound } from 'next/navigation';
 
 import { publicModeConfig } from '~/lib/config/public-mode';
+
+export const metadata: Metadata = {
+  title: 'Terms of Service - heripo engine',
+};
 
 export default function TermsOfServicePage() {
   if (!publicModeConfig.isOfficialDemo) {

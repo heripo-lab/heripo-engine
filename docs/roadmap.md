@@ -36,6 +36,14 @@ Each stage:
 
 ### ✅ Implemented
 
+### ⚠️ Known Limitations
+
+| Limitation         | Description                                                                                                 | Status         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- | -------------- |
+| **Hanja OCR**      | Chinese characters may not be recognized correctly in mixed Korean-Chinese documents                        | 🔧 In Progress |
+| **TOC Extraction** | May fail if TOC is missing or has unusual structure. Some seemingly normal TOCs also fail occasionally      | 🔧 In Progress |
+| **Vertical Text**  | Old documents with vertical text and Chinese numeral page numbers (long-term goal, not currently scheduled) | 📅 Long-term   |
+
 **PDF Parsing and OCR**
 
 - PDF parsing using Docling SDK

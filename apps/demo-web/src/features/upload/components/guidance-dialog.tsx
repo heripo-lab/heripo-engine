@@ -1,6 +1,12 @@
 'use client';
 
-import { AlertTriangle, FileCheck, FileQuestion, ImageOff } from 'lucide-react';
+import {
+  AlertTriangle,
+  Construction,
+  FileCheck,
+  FileQuestion,
+  ImageOff,
+} from 'lucide-react';
 
 import { Button } from '~/components/ui/button';
 import {
@@ -11,6 +17,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog';
+
+import { KNOWN_LIMITATIONS } from '../constants/known-limitations';
+import { useBrowserLanguage } from '../hooks/use-browser-language';
 
 interface GuidanceDialogProps {
   open: boolean;
@@ -23,10 +32,14 @@ export function GuidanceDialog({
   onOpenChange,
   onConfirm,
 }: GuidanceDialogProps) {
+  const lang = useBrowserLanguage();
   const handleConfirm = () => {
     onConfirm();
     onOpenChange(false);
   };
+
+  const limitationsTitle =
+    lang === 'ko' ? '알려진 제한사항' : 'Known Limitations';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -59,6 +72,26 @@ export function GuidanceDialog({
             title="Archaeological Reports Recommended"
             description="While any structured PDF can be processed technically, this system is optimized for archaeological excavation reports. Results for other document types are not guaranteed."
           />
+
+          {/* Known Limitations Section */}
+          <div className="mt-4 border-t pt-4">
+            <p className="mb-3 flex items-center gap-2 text-sm font-medium text-amber-700">
+              <Construction className="h-4 w-4" />
+              {limitationsTitle}
+            </p>
+            {KNOWN_LIMITATIONS.map((limitation) => (
+              <GuidanceItem
+                key={limitation.id}
+                icon={<Construction className="h-4 w-4" />}
+                title={lang === 'ko' ? limitation.titleKo : limitation.titleEn}
+                description={
+                  lang === 'ko'
+                    ? limitation.descriptionKo
+                    : limitation.descriptionEn
+                }
+              />
+            ))}
+          </div>
         </div>
 
         <DialogFooter className="gap-2">
