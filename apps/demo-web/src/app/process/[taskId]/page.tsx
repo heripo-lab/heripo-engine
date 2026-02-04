@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { use, useState } from 'react';
 
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
@@ -26,15 +26,17 @@ interface PageProps {
 export default function ProcessPage({ params }: PageProps) {
   const { taskId } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const deleteTaskMutation = useDeleteTask();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const disableAutoNavigate = searchParams.get('stay') === 'true';
 
   const { data: task } = useTask(taskId);
   const { status, progress, currentStep, logs, error, resultUrl } =
     useTaskStream(taskId);
   const isProcessing = status === 'queued' || status === 'running';
 
-  useAutoNavigate({ status, resultUrl, taskId });
+  useAutoNavigate({ status, resultUrl, taskId, disabled: disableAutoNavigate });
 
   const handleCancelClick = () => {
     setShowCancelDialog(true);

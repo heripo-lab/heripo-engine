@@ -10,6 +10,7 @@ interface UseAutoNavigateOptions {
   resultUrl: string | undefined;
   taskId: string;
   delay?: number;
+  disabled?: boolean;
 }
 
 /**
@@ -20,15 +21,18 @@ export function useAutoNavigate({
   resultUrl,
   taskId,
   delay = 1500,
+  disabled = false,
 }: UseAutoNavigateOptions): void {
   const router = useRouter();
 
   useEffect(() => {
+    if (disabled) return;
+
     if (status === 'completed' && resultUrl) {
       const timer = setTimeout(() => {
         router.push(`/result/${taskId}`);
       }, delay);
       return () => clearTimeout(timer);
     }
-  }, [status, resultUrl, router, taskId, delay]);
+  }, [status, resultUrl, router, taskId, delay, disabled]);
 }
