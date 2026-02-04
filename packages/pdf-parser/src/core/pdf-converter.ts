@@ -240,6 +240,12 @@ export class PDFConverter {
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',
       ocr_engine: 'ocrmac',
+      ocr_options: {
+        kind: 'ocrmac',
+        lang: options.ocr_lang ?? ['ko-KR', 'en-US'],
+        recognition: 'accurate',
+        framework: 'livetext',
+      },
       generate_picture_images: true,
       images_scale: 2.0,
       /**

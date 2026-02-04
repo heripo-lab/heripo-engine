@@ -119,10 +119,15 @@ describe('PDFConverter', () => {
       expect(client.convertSourceAsync).toHaveBeenCalledWith({
         sources: [{ kind: 'http', url: 'http://test.com/doc.pdf' }],
         options: {
-          num_threads: undefined,
           to_formats: ['json', 'html'],
           image_export_mode: 'embedded',
           ocr_engine: 'ocrmac',
+          ocr_options: {
+            kind: 'ocrmac',
+            lang: ['ko-KR', 'en-US'],
+            recognition: 'accurate',
+            framework: 'livetext',
+          },
           generate_picture_images: true,
           images_scale: 2.0,
           force_ocr: true,
@@ -154,10 +159,15 @@ describe('PDFConverter', () => {
 
       const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
       expect(callArgs.options).toEqual({
-        num_threads: undefined,
         to_formats: ['json', 'html'],
         image_export_mode: 'embedded',
         ocr_engine: 'ocrmac',
+        ocr_options: {
+          kind: 'ocrmac',
+          lang: ['ko-KR', 'en-US'],
+          recognition: 'accurate',
+          framework: 'livetext',
+        },
         generate_picture_images: true,
         images_scale: 2.0,
         force_ocr: true,
