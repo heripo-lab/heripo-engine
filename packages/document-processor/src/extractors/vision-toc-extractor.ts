@@ -181,8 +181,16 @@ export class VisionTocExtractor extends VisionLLMComponent {
   ): Promise<VisionTocExtractionResult> {
     this.log('info', `Extracting from pages ${startPage}-${endPage}`);
 
+    this.log(
+      'info',
+      `Preparing images for vision analysis. This can be very slow (10+ minutes, sometimes 30+ minutes) depending on batch size and image resolution.`,
+    );
     const imageContents = this.loadPageImages(startPage, endPage);
 
+    this.log(
+      'info',
+      `Calling vision LLM for TOC extraction (pages ${startPage}-${endPage})`,
+    );
     const result = await LLMCaller.callVision({
       schema: VisionTocExtractionSchema,
       messages: [
@@ -205,6 +213,10 @@ export class VisionTocExtractor extends VisionLLMComponent {
       component: 'VisionTocExtractor',
       phase: 'extraction',
     });
+    this.log(
+      'info',
+      `Vision LLM call completed (pages ${startPage}-${endPage})`,
+    );
 
     this.trackUsage(result.usage);
 

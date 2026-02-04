@@ -6,8 +6,10 @@ export {
   TocContentValidationSchema,
 } from './toc-content-validator';
 export type {
+  TocContentType,
   TocContentValidationResult,
   TocContentValidatorOptions,
+  TocValidationOutput,
 } from './toc-content-validator';
 
 export { CaptionValidator, CaptionValidationError } from './caption-validator';
