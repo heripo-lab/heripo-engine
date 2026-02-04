@@ -1,6 +1,12 @@
+import type { Metadata } from 'next';
+
 import { notFound } from 'next/navigation';
 
 import { publicModeConfig } from '~/lib/config/public-mode';
+
+export const metadata: Metadata = {
+  title: 'Privacy Policy - heripo engine',
+};
 
 export default function PrivacyPolicyPage() {
   if (!publicModeConfig.isOfficialDemo) {
