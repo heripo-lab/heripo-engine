@@ -19,6 +19,7 @@
 > - **Hanja OCR**: Chinese characters may not be recognized correctly in mixed Korean-Chinese documents (improvement in progress)
 > - **TOC Extraction**: May fail if TOC is missing or has unusual structure. Some seemingly normal TOCs also fail occasionally (continuously improving)
 > - **Vertical Text**: Old documents with vertical text and Chinese numeral page numbers are planned for long-term support, but not currently scheduled
+> - **Automation Scope**: Does not aim for full automation. Goal is to automate 90% of previously 100% manual work. Page mapping/TOC extraction are the pipeline foundation but near-100% automation is impossible—focusing on common patterns and stopping at optimal point. Reports difficult even for humans are expected to fail. Subsequent stages (feature/artifact extraction) aim for near-100% automation. Edge cases handled via hybrid approach
 
 > 🌐 **Online Demo**: Try it without local installation → [engine-demo.heripo.com](https://engine-demo.heripo.com)
 

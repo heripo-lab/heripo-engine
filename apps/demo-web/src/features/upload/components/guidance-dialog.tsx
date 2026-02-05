@@ -43,7 +43,10 @@ export function GuidanceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg" showCloseButton={false}>
+      <DialogContent
+        className="flex max-h-[90dvh] max-w-lg flex-col"
+        showCloseButton={false}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -54,7 +57,7 @@ export function GuidanceDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 overflow-y-auto py-4">
           <GuidanceItem
             icon={<FileCheck className="h-4 w-4" />}
             title="Complete Report Required"
@@ -79,7 +82,9 @@ export function GuidanceDialog({
               <Construction className="h-4 w-4" />
               {limitationsTitle}
             </p>
-            {KNOWN_LIMITATIONS.map((limitation) => (
+            {KNOWN_LIMITATIONS.filter(
+              (limitation) => limitation.id !== 'automation-scope',
+            ).map((limitation) => (
               <GuidanceItem
                 key={limitation.id}
                 icon={<Construction className="h-4 w-4" />}

@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, Construction, X } from 'lucide-react';
+import { AlertTriangle, Construction, Info, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { KNOWN_LIMITATIONS } from '../constants/known-limitations';
@@ -17,6 +17,12 @@ export function KnownLimitationsBanner() {
   if (dismissed) return null;
 
   const title = lang === 'ko' ? '알려진 제한사항' : 'Known Limitations';
+  const technicalLimitations = KNOWN_LIMITATIONS.filter(
+    (l) => l.id !== 'automation-scope',
+  );
+  const automationScope = KNOWN_LIMITATIONS.find(
+    (l) => l.id === 'automation-scope',
+  );
 
   return (
     <div className="relative mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -33,7 +39,7 @@ export function KnownLimitationsBanner() {
         <div className="pr-6">
           <p className="font-medium text-amber-800">{title}</p>
           <ul className="mt-2 space-y-2 text-sm text-amber-700">
-            {KNOWN_LIMITATIONS.map((limitation) => (
+            {technicalLimitations.map((limitation) => (
               <li key={limitation.id} className="flex items-start gap-2">
                 <Construction className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
@@ -49,6 +55,30 @@ export function KnownLimitationsBanner() {
           </ul>
         </div>
       </div>
+
+      {/* Automation Scope - separate section */}
+      {automationScope && (
+        <div className="mt-4 flex items-start gap-3 border-t border-amber-200 pt-4">
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+          <div className="pr-6">
+            <p className="font-medium text-amber-800">
+              {lang === 'ko'
+                ? automationScope.titleKo
+                : automationScope.titleEn}
+            </p>
+            <div className="mt-1 space-y-2 text-sm leading-relaxed text-amber-700">
+              {(lang === 'ko'
+                ? automationScope.descriptionKo
+                : automationScope.descriptionEn
+              )
+                .split('\n')
+                .map((paragraph, index) => (
+                  <p key={index}>{paragraph}</p>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
