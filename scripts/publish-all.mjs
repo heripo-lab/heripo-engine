@@ -110,9 +110,9 @@ const bumpVersions = () => {
     return;
   }
   for (const pkg of packages) {
-    run('pnpm', ['-C', pkg.dir, 'version', bumpType, '--no-git-tag-version']);
+    run('npm', ['-C', pkg.dir, 'version', bumpType, '--no-git-tag-version']);
   }
-  run('pnpm', ['version', bumpType, '--no-git-tag-version']);
+  run('npm', ['version', bumpType, '--no-git-tag-version']);
 };
 
 const findPackedTarball = (packOutput, tempDir) => {
