@@ -9,7 +9,7 @@ const args = process.argv.slice(2);
 
 if (args.length === 0 || args[0].startsWith('-')) {
   console.error(
-    'Usage: pnpm release[:patch|:minor|:major] [--tag <dist-tag>] [--no-git] [--allow-dirty] [--dry-run]',
+    'Usage: pnpm release[:patch|:minor|:major] [--tag <dist-tag>] [--otp <code>] [--no-git] [--allow-dirty] [--dry-run]',
   );
   process.exit(1);
 }
@@ -24,12 +24,19 @@ if (!['none', 'patch', 'minor', 'major'].includes(bumpType)) {
 
 const distTagIndex = args.indexOf('--tag');
 const distTag = distTagIndex >= 0 ? args[distTagIndex + 1] : null;
+const otpIndex = args.indexOf('--otp');
+const otp = otpIndex >= 0 ? args[otpIndex + 1] : null;
 const allowDirty = args.includes('--allow-dirty');
 const dryRun = args.includes('--dry-run');
 const noGit = args.includes('--no-git') || dryRun;
 
 if (distTagIndex >= 0 && !distTag) {
   console.error('--tag requires a value, e.g. --tag next');
+  process.exit(1);
+}
+
+if (otpIndex >= 0 && !otp) {
+  console.error('--otp requires a value, e.g. --otp 123456');
   process.exit(1);
 }
 
@@ -148,6 +155,9 @@ const packAndPublish = () => {
       const publishArgs = ['publish', tarball];
       if (distTag) {
         publishArgs.push('--tag', distTag);
+      }
+      if (otp) {
+        publishArgs.push('--otp', otp);
       }
       if (dryRun) {
         publishArgs.push('--dry-run');
