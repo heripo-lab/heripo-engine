@@ -6,7 +6,7 @@ import type { TocEntry } from '../types';
 import { LLMCaller } from '@heripo/shared';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { TocValidationError } from './toc-extract-error';
+import { TocParseError, TocValidationError } from './toc-extract-error';
 import {
   TocEntrySchema,
   TocExtractor,
@@ -296,19 +296,18 @@ describe('TocExtractor', () => {
       expect(result.entries[0].title).toBe('Chapter 1');
     });
 
-    test('returns empty entries and zero usage for empty markdown', async () => {
-      const result = await extractor.extract('');
-
-      expect(result.entries).toHaveLength(0);
-      expect(result.usage.inputTokens).toBe(0);
-      expect(result.usage.outputTokens).toBe(0);
+    test('throws TocParseError for empty markdown', async () => {
+      await expect(extractor.extract('')).rejects.toThrow(TocParseError);
+      await expect(extractor.extract('')).rejects.toThrow(
+        'TOC extraction failed: provided markdown content is empty',
+      );
       expect(mockLLMCaller).not.toHaveBeenCalled();
     });
 
-    test('returns empty entries for whitespace-only markdown', async () => {
-      const result = await extractor.extract('   \n\n  ');
-
-      expect(result.entries).toHaveLength(0);
+    test('throws TocParseError for whitespace-only markdown', async () => {
+      await expect(extractor.extract('   \n\n  ')).rejects.toThrow(
+        TocParseError,
+      );
       expect(mockLLMCaller).not.toHaveBeenCalled();
     });
 
@@ -455,14 +454,14 @@ describe('TocExtractor', () => {
       expect(result.entries).toHaveLength(1);
     });
 
-    test('returns entries for empty markdown even with validation', async () => {
+    test('throws TocParseError for empty markdown even with validation', async () => {
       const extractorWithValidation = new TocExtractor(mockLogger, mockModel, {
         skipValidation: false,
       });
 
-      const result = await extractorWithValidation.extract('   ');
-
-      expect(result.entries).toHaveLength(0);
+      await expect(extractorWithValidation.extract('   ')).rejects.toThrow(
+        TocParseError,
+      );
     });
   });
 

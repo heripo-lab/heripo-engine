@@ -10,7 +10,6 @@ import type {
   ProcessedImage,
   ProcessedTable,
   ProcessedTableCell,
-  TextBlock,
 } from '@heripo/model';
 import type { LanguageModel } from 'ai';
 
@@ -641,10 +640,14 @@ export class DocumentProcessor {
       markdown = await this.visionTocExtractor!.extract(totalPages);
 
       if (!markdown) {
-        this.logger.warn(
-          '[DocumentProcessor] TOC not found in any method, returning empty',
+        const reason =
+          'Both rule-based search and vision fallback failed to locate TOC';
+        this.logger.error(
+          `[DocumentProcessor] TOC extraction failed: ${reason}`,
         );
-        return [];
+        throw new TocNotFoundError(
+          `Table of contents not found in the document. ${reason}.`,
+        );
       }
 
       this.logger.info(
@@ -657,6 +660,13 @@ export class DocumentProcessor {
 
     // Track token usage
     this.usageAggregator.track(tocResult.usage);
+
+    if (tocResult.entries.length === 0) {
+      const reason =
+        'TOC area was detected but LLM could not extract any structured entries';
+      this.logger.error(`[DocumentProcessor] TOC extraction failed: ${reason}`);
+      throw new TocNotFoundError(`${reason}.`);
+    }
 
     this.logger.info(
       `[DocumentProcessor] Extracted ${tocResult.entries.length} top-level TOC entries`,
@@ -990,7 +1000,7 @@ export class DocumentProcessor {
    * Convert chapters and link resources
    *
    * Generates chapters based on TOC and links images/tables/footnotes using ChapterConverter.
-   * Falls back to single "Document" chapter when TOC is empty.
+   * Throws TocNotFoundError if TOC entries are empty (defensive assertion).
    */
   private async convertChapters(
     doclingDoc: DoclingDocument,
@@ -1002,18 +1012,11 @@ export class DocumentProcessor {
   ): Promise<Chapter[]> {
     this.logger.info('[DocumentProcessor] Converting chapters...');
 
-    // Handle empty TOC case - create fallback chapter
+    // Defensive assertion - TOC entries should always be present at this point
     if (tocEntries.length === 0) {
-      this.logger.info(
-        '[DocumentProcessor] No TOC entries, creating fallback chapter',
-      );
-      return this.createFallbackChapter(
-        doclingDoc,
-        pageRangeMap,
-        images,
-        tables,
-        footnotes,
-      );
+      const reason = 'Cannot convert chapters without TOC entries';
+      this.logger.error(`[DocumentProcessor] ${reason}`);
+      throw new TocNotFoundError(reason);
     }
 
     // Use ChapterConverter for TOC-based conversion
@@ -1031,73 +1034,5 @@ export class DocumentProcessor {
     );
 
     return chapters;
-  }
-
-  /**
-   * Create a fallback chapter when TOC is not available
-   *
-   * Creates a single "Document" chapter containing all text blocks,
-   * images, tables, and footnotes from the document.
-   */
-  private createFallbackChapter(
-    doclingDoc: DoclingDocument,
-    pageRangeMap: Record<number, PageRange>,
-    images: ProcessedImage[],
-    tables: ProcessedTable[],
-    footnotes: ProcessedFootnote[],
-  ): Chapter[] {
-    // Convert text items to text blocks (excluding footnotes - they are handled separately)
-    const textBlocks: TextBlock[] = doclingDoc.texts
-      .filter(
-        (item) =>
-          item.label !== 'footnote' && this.textCleaner.isValidText(item.text),
-      )
-      .map((item) => ({
-        text: this.textCleaner.normalize(item.text),
-        pdfPageNo: item.prov?.[0]?.page_no ?? 1,
-      }));
-
-    // Return empty if no content
-    if (
-      textBlocks.length === 0 &&
-      images.length === 0 &&
-      tables.length === 0 &&
-      footnotes.length === 0
-    ) {
-      this.logger.info(
-        '[DocumentProcessor] No content found for fallback chapter',
-      );
-      return [];
-    }
-
-    // Determine the first page number from pageRangeMap
-    const firstPdfPage = Math.min(
-      ...Object.keys(pageRangeMap)
-        .map(Number)
-        .filter((n) => !isNaN(n)),
-      1,
-    );
-    const firstPageRange = pageRangeMap[firstPdfPage];
-    const pageNo = firstPageRange?.startPageNo ?? 1;
-
-    const fallbackChapter: Chapter = {
-      id: this.idGenerator.generateChapterId(),
-      originTitle: 'Document',
-      title: 'Document',
-      pageNo,
-      level: 1,
-      textBlocks,
-      imageIds: images.map((img) => img.id),
-      tableIds: tables.map((tbl) => tbl.id),
-      footnoteIds: footnotes.map((ftn) => ftn.id),
-      children: [],
-    };
-
-    this.logger.info(
-      `[DocumentProcessor] Created fallback chapter with ${textBlocks.length} text blocks, ` +
-        `${images.length} images, ${tables.length} tables, ${footnotes.length} footnotes`,
-    );
-
-    return [fallbackChapter];
   }
 }

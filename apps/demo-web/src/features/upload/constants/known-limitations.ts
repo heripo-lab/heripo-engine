@@ -24,13 +24,27 @@ export const KNOWN_LIMITATIONS: KnownLimitation[] = [
     status: 'in-progress',
   },
   {
-    id: 'toc-extraction',
-    titleKo: '목차 추출 문제',
-    titleEn: 'TOC Extraction Issues',
+    id: 'toc-required',
+    titleKo: '목차 필수',
+    titleEn: 'TOC Required',
     descriptionKo:
-      '목차가 없거나 특이한 구조면 추출이 실패할 수 있습니다. 특이사항이 없어 보이는 목차도 일부 실패하는 케이스가 있습니다. 지속 개선 중입니다.',
+      '목차(TOC)가 없는 보고서는 처리가 실패합니다. 이는 의도된 동작입니다.\n' +
+      '목차는 유구·유물 등 객체 탐색의 기준점이 되며, 목차 없이는 구조화된 데이터 추출 효율이 크게 떨어집니다. 따라서 목차가 없는 경우는 앞으로도 실패 처리됩니다.\n' +
+      '실제 DB 구축 과정에서는 목차가 없을 경우 사용자가 직접 목차를 입력하는 하이브리드 방식으로 대응할 예정입니다.',
     descriptionEn:
-      'May fail if TOC is missing or has unusual structure. Some seemingly normal TOCs also fail occasionally. Continuously improving.',
+      'Reports without a table of contents (TOC) will fail processing. This is intentional.\n' +
+      'The TOC serves as the reference point for locating features and artifacts. Without it, structured data extraction efficiency drops significantly, so TOC-less cases will continue to be treated as failures.\n' +
+      'In the actual DB construction process, when the TOC is missing, users will be able to manually input the TOC via a hybrid approach.',
+    status: 'not-planned',
+  },
+  {
+    id: 'toc-extraction',
+    titleKo: '목차 추출 실패',
+    titleEn: 'TOC Extraction Failures',
+    descriptionKo:
+      '목차가 있더라도 특이한 구조이면 추출이 실패할 수 있습니다. 특이사항이 없어 보이는 목차도 일부 실패하는 케이스가 있습니다. 지속 개선 중입니다.',
+    descriptionEn:
+      'Even when a TOC exists, extraction may fail if it has an unusual structure. Some seemingly normal TOCs also fail occasionally. Continuously improving.',
     status: 'in-progress',
   },
   {

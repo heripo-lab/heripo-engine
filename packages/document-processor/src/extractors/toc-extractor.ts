@@ -93,11 +93,10 @@ export class TocExtractor extends TextLLMComponent {
     this.log('info', `Starting TOC extraction (${markdown.length} chars)`);
 
     if (!markdown.trim()) {
-      this.log('info', 'Empty markdown, returning empty array');
-      return {
-        entries: [],
-        usage: this.createEmptyUsage('extraction'),
-      };
+      this.log('error', 'Cannot extract TOC from empty markdown content');
+      throw new TocParseError(
+        'TOC extraction failed: provided markdown content is empty',
+      );
     }
 
     try {
