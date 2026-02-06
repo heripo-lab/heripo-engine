@@ -86,35 +86,38 @@ export async function POST(request: NextRequest) {
     // Public mode: enforce rate limiting and default options
     const isPublicMode = process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true';
 
+    // Parse and validate options (common for both modes)
+    if (!optionsJson) {
+      return NextResponse.json(
+        { error: 'No options provided' },
+        { status: 400 },
+      );
+    }
+
+    let parsedOptions: unknown;
+    try {
+      parsedOptions = JSON.parse(optionsJson);
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid options JSON' },
+        { status: 400 },
+      );
+    }
+
+    const optionsValidation = processingOptionsSchema.safeParse(parsedOptions);
+    if (!optionsValidation.success) {
+      return createValidationErrorResponse(optionsValidation.error);
+    }
+
     let options: ProcessingOptions;
     if (isPublicMode) {
-      // Use default options, ignore client-provided options
+      // Use default options, but allow user-provided ocrLanguages
       const { file: _, ...defaultOptions } = DEFAULT_FORM_VALUES;
-      options = defaultOptions;
+      options = {
+        ...defaultOptions,
+        ocrLanguages: optionsValidation.data.ocrLanguages,
+      };
     } else {
-      // Non-public mode: validate options
-      if (!optionsJson) {
-        return NextResponse.json(
-          { error: 'No options provided' },
-          { status: 400 },
-        );
-      }
-
-      let parsedOptions: unknown;
-      try {
-        parsedOptions = JSON.parse(optionsJson);
-      } catch {
-        return NextResponse.json(
-          { error: 'Invalid options JSON' },
-          { status: 400 },
-        );
-      }
-
-      const optionsValidation =
-        processingOptionsSchema.safeParse(parsedOptions);
-      if (!optionsValidation.success) {
-        return createValidationErrorResponse(optionsValidation.error);
-      }
       options = optionsValidation.data;
     }
 
