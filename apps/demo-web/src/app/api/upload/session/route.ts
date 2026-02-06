@@ -86,9 +86,13 @@ export async function POST(request: NextRequest) {
 
     let options = validation.data.options;
     if (isPublicMode) {
-      // Use default options, ignore client-provided options
+      // Use default options, but allow user-provided ocrLanguages
       const { file: _, ...defaultOptions } = DEFAULT_FORM_VALUES;
-      options = defaultOptions;
+      options = {
+        ...defaultOptions,
+        ocrLanguages:
+          validation.data.options?.ocrLanguages ?? defaultOptions.ocrLanguages,
+      };
     } else if (!options) {
       return NextResponse.json(
         { error: 'No options provided' },

@@ -139,6 +139,9 @@ export class PDFConverter {
     const conversionOptions = this.buildConversionOptions(options);
 
     this.logger.info(
+      `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
+    );
+    this.logger.info(
       '[PDFConverter] Converting document with Async Source API...',
     );
     this.logger.info('[PDFConverter] Server will download from URL directly');
