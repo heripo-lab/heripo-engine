@@ -155,7 +155,7 @@ describe('DocumentProcessor', () => {
   });
 
   describe('process', () => {
-    test('execute process method and return basic data', async () => {
+    test('should throw TocNotFoundError when TOC extraction fails', async () => {
       const processor = new DocumentProcessor({
         logger: mockLogger,
         fallbackModel: mockModel,
@@ -210,20 +210,12 @@ describe('DocumentProcessor', () => {
         pages: {},
       } as DoclingDocument;
 
-      const result = await processor.process(mockDoc, 'report-001', '/path');
-
-      // Verify basic ProcessedDocument structure
-      expect(result).toBeDefined();
-      expect(result.document.reportId).toBe('report-001');
-      expect(result.document.pageRangeMap).toBeDefined();
-      expect(result.document.chapters).toBeDefined();
-      expect(result.document.images).toEqual([]);
-      expect(result.document.tables).toEqual([]);
-      expect(result.usage).toBeDefined();
-      expect(result.usage.total).toBeDefined();
+      await expect(
+        processor.process(mockDoc, 'report-001', '/path'),
+      ).rejects.toThrow(TocNotFoundError);
     });
 
-    test('images and tables are processed correctly', async () => {
+    test('should complete successfully when TOC extraction succeeds', async () => {
       const processor = new DocumentProcessor({
         logger: mockLogger,
         fallbackModel: mockModel,
@@ -231,6 +223,85 @@ describe('DocumentProcessor', () => {
         captionParserBatchSize: 5,
         captionValidatorBatchSize: 5,
       });
+
+      // Spy on initializeProcessors to inject mocks after real initialization
+      const originalInit = (processor as any).initializeProcessors.bind(
+        processor,
+      );
+      vi.spyOn(processor as any, 'initializeProcessors').mockImplementation(
+        (...args: any[]) => {
+          originalInit(...args);
+
+          (processor as any).refResolver = {
+            resolve: vi.fn().mockReturnValue({
+              text: 'Chapter 1 ..... 1',
+              orig: 'Chapter 1 ..... 1',
+              label: 'text',
+              self_ref: '#/texts/0',
+            }),
+            resolveText: vi.fn().mockReturnValue({
+              text: 'Chapter 1 ..... 1',
+            }),
+          };
+          (processor as any).tocFinder = {
+            find: vi.fn().mockReturnValue({
+              startPage: 1,
+              endPage: 1,
+              itemRefs: ['#/texts/0'],
+            }),
+          };
+          (processor as any).tocContentValidator = {
+            validate: vi.fn().mockResolvedValue({
+              isValid: true,
+              confidence: 0.9,
+              contentType: 'pure_toc',
+              validTocMarkdown: '- Chapter 1 ..... 1',
+              reason: 'Valid TOC',
+            }),
+            isValid: vi.fn().mockReturnValue(true),
+            getValidMarkdown: vi.fn().mockReturnValue('- Chapter 1 ..... 1'),
+          };
+          (processor as any).tocExtractor = {
+            extract: vi.fn().mockResolvedValue({
+              entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
+              usage: {
+                component: 'TocExtractor',
+                phase: 'extraction',
+                model: 'primary',
+                modelName: 'test-model',
+                inputTokens: 100,
+                outputTokens: 50,
+                totalTokens: 150,
+              },
+            }),
+          };
+          (processor as any).visionTocExtractor = {
+            extract: vi.fn().mockResolvedValue(null),
+          };
+          (processor as any).captionParser = {
+            parseBatch: vi.fn().mockResolvedValue([]),
+          };
+          (processor as any).captionValidator = {
+            validateBatch: vi.fn().mockResolvedValue([]),
+          };
+          (processor as any).chapterConverter = {
+            convert: vi.fn().mockReturnValue([
+              {
+                id: 'ch-001',
+                originTitle: 'Chapter 1',
+                title: 'Chapter 1',
+                pageNo: 1,
+                level: 1,
+                textBlocks: [],
+                imageIds: [],
+                tableIds: [],
+                footnoteIds: [],
+                children: [],
+              },
+            ]),
+          };
+        },
+      );
 
       const mockDoc: DoclingDocument = {
         schema_name: 'DoclingDocument',
@@ -275,13 +346,20 @@ describe('DocumentProcessor', () => {
           children: [],
           content_layer: 'body',
         },
-        pages: {},
+        pages: { '1': {} as any },
       } as DoclingDocument;
 
       const result = await processor.process(mockDoc, 'report-001', '/path');
 
-      expect(result.document.images).toHaveLength(0);
-      expect(result.document.tables).toHaveLength(0);
+      expect(result).toBeDefined();
+      expect(result.document.reportId).toBe('report-001');
+      expect(result.document.chapters).toHaveLength(1);
+      expect(result.document.chapters[0].title).toBe('Chapter 1');
+      expect(result.document.images).toEqual([]);
+      expect(result.document.tables).toEqual([]);
+      expect(result.document.footnotes).toEqual([]);
+      expect(result.document.pageRangeMap).toBeDefined();
+      expect(result.usage).toBeDefined();
     });
   });
 
@@ -763,7 +841,7 @@ describe('DocumentProcessor', () => {
       expect(processor).toBeDefined();
     });
 
-    test('process method passes undefined fallbackModel when enableFallbackRetry is false', async () => {
+    test('process method throws TocNotFoundError when enableFallbackRetry is false and no TOC', async () => {
       const processor = new DocumentProcessor({
         logger: mockLogger,
         fallbackModel: mockModel,
@@ -803,13 +881,12 @@ describe('DocumentProcessor', () => {
         pages: {},
       } as DoclingDocument;
 
-      const result = await processor.process(mockDoc, 'report-001', '/path');
-
-      expect(result).toBeDefined();
-      expect(result.document.reportId).toBe('report-001');
+      await expect(
+        processor.process(mockDoc, 'report-001', '/path'),
+      ).rejects.toThrow(TocNotFoundError);
     });
 
-    test('process method passes fallbackModel when enableFallbackRetry is true', async () => {
+    test('process method throws TocNotFoundError when enableFallbackRetry is true and no TOC', async () => {
       const processor = new DocumentProcessor({
         logger: mockLogger,
         fallbackModel: mockModel,
@@ -849,10 +926,9 @@ describe('DocumentProcessor', () => {
         pages: {},
       } as DoclingDocument;
 
-      const result = await processor.process(mockDoc, 'report-001', '/path');
-
-      expect(result).toBeDefined();
-      expect(result.document.reportId).toBe('report-001');
+      await expect(
+        processor.process(mockDoc, 'report-001', '/path'),
+      ).rejects.toThrow(TocNotFoundError);
     });
   });
 
@@ -1929,7 +2005,7 @@ describe('DocumentProcessor', () => {
       );
     });
 
-    test('should create fallback chapter when TOC is empty', async () => {
+    test('should throw TocNotFoundError when TOC is empty', async () => {
       const processor = new DocumentProcessor({
         logger: mockLogger,
         fallbackModel: mockModel,
@@ -1947,183 +2023,21 @@ describe('DocumentProcessor', () => {
         ],
       };
       const pageRangeMap = { 1: { startPageNo: 1, endPageNo: 1 } };
-      const images = [{ id: 'img-001', pdfPageNo: 1, path: '/img.png' }];
-      const tables = [
-        { id: 'tbl-001', pdfPageNo: 1, numRows: 1, numCols: 1, grid: [] },
-      ];
-      const footnotes = [
-        { id: 'ftn-001', text: 'Test footnote', pdfPageNo: 1 },
-      ];
 
-      const result = await (processor as any).convertChapters(
-        mockDoc,
-        [], // Empty TOC
-        pageRangeMap,
-        images,
-        tables,
-        footnotes,
+      await expect(
+        (processor as any).convertChapters(
+          mockDoc,
+          [], // Empty TOC
+          pageRangeMap,
+          [],
+          [],
+          [],
+        ),
+      ).rejects.toThrow(TocNotFoundError);
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        '[DocumentProcessor] Cannot convert chapters without TOC entries',
       );
-
-      expect(result).toHaveLength(1);
-      expect(result[0].title).toBe('Document');
-      expect(result[0].originTitle).toBe('Document');
-      expect(result[0].level).toBe(1);
-      expect(result[0].textBlocks).toHaveLength(1);
-      expect(result[0].imageIds).toContain('img-001');
-      expect(result[0].tableIds).toContain('tbl-001');
-      expect(result[0].footnoteIds).toContain('ftn-001');
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '[DocumentProcessor] No TOC entries, creating fallback chapter',
-      );
-    });
-
-    test('should return empty array when TOC is empty and no content exists', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockDoc = {
-        texts: [],
-      };
-      const pageRangeMap = {};
-
-      const result = await (processor as any).convertChapters(
-        mockDoc,
-        [], // Empty TOC
-        pageRangeMap,
-        [], // No images
-        [], // No tables
-        [], // No footnotes
-      );
-
-      expect(result).toHaveLength(0);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '[DocumentProcessor] No content found for fallback chapter',
-      );
-    });
-
-    test('should filter invalid texts in fallback chapter', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockDoc = {
-        texts: [
-          { text: 'Valid text', prov: [{ page_no: 1 }] },
-          { text: '123', prov: [{ page_no: 1 }] }, // Invalid: numbers only
-          { text: '', prov: [{ page_no: 1 }] }, // Invalid: empty
-          { text: 'Another valid', prov: [{ page_no: 2 }] },
-        ],
-      };
-      const pageRangeMap = { 1: { startPageNo: 1, endPageNo: 1 } };
-
-      const result = await (processor as any).convertChapters(
-        mockDoc,
-        [], // Empty TOC
-        pageRangeMap,
-        [],
-        [],
-        [],
-      );
-
-      expect(result[0].textBlocks).toHaveLength(2);
-      expect(result[0].textBlocks[0].text).toBe('Valid text');
-      expect(result[0].textBlocks[1].text).toBe('Another valid');
-    });
-
-    test('should use first page from pageRangeMap for fallback chapter pageNo', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockDoc = {
-        texts: [{ text: 'Test', prov: [{ page_no: 5 }] }],
-      };
-      // Only one page in pageRangeMap to ensure the minimum is clear
-      const pageRangeMap = {
-        1: { startPageNo: 5, endPageNo: 6 },
-      };
-
-      const result = await (processor as any).convertChapters(
-        mockDoc,
-        [], // Empty TOC
-        pageRangeMap,
-        [],
-        [],
-        [],
-      );
-
-      // Should use the minimum PDF page's startPageNo (page 1 -> startPageNo 5)
-      expect(result[0].pageNo).toBe(5);
-    });
-
-    test('should default to pageNo 1 when pageRangeMap is empty', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockDoc = {
-        texts: [{ text: 'Test', prov: [{ page_no: 1 }] }],
-      };
-      const pageRangeMap = {};
-
-      const result = await (processor as any).convertChapters(
-        mockDoc,
-        [], // Empty TOC
-        pageRangeMap,
-        [],
-        [],
-        [],
-      );
-
-      expect(result[0].pageNo).toBe(1);
-    });
-
-    test('should default to pdfPageNo 1 when text item has no prov', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockDoc = {
-        texts: [
-          { text: 'Text without prov' }, // No prov property
-          { text: 'Text with empty prov', prov: [] }, // Empty prov array
-        ],
-      };
-      const pageRangeMap = {};
-
-      const result = await (processor as any).convertChapters(
-        mockDoc,
-        [], // Empty TOC
-        pageRangeMap,
-        [],
-        [],
-        [],
-      );
-
-      expect(result[0].textBlocks).toHaveLength(2);
-      expect(result[0].textBlocks[0].pdfPageNo).toBe(1); // Falls back to 1
-      expect(result[0].textBlocks[1].pdfPageNo).toBe(1); // Falls back to 1
     });
   });
 
@@ -2269,7 +2183,7 @@ describe('DocumentProcessor', () => {
       expect(mockVisionTocExtractor.extract).toHaveBeenCalledWith(1);
     });
 
-    test('should return empty array when vision fallback also fails', async () => {
+    test('should throw TocNotFoundError when vision fallback also fails', async () => {
       const processor = new DocumentProcessor({
         logger: mockLogger,
         fallbackModel: mockModel,
@@ -2326,12 +2240,99 @@ describe('DocumentProcessor', () => {
         pages: { '1': {} as any },
       } as DoclingDocument;
 
-      const result = await (processor as any).extractTableOfContents(
-        mockDoc,
-        [],
-      );
+      await expect(
+        (processor as any).extractTableOfContents(mockDoc, []),
+      ).rejects.toThrow(TocNotFoundError);
 
-      expect(result).toEqual([]);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Both rule-based search and vision fallback failed to locate TOC',
+        ),
+      );
+    });
+
+    test('should throw TocNotFoundError when LLM extracts 0 entries', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockImplementation(() => {
+          throw new TocNotFoundError('TOC not found');
+        }),
+      };
+
+      const mockTocExtractor = {
+        extract: vi.fn().mockResolvedValue({
+          entries: [],
+          usage: {
+            component: 'TocExtractor',
+            phase: 'extraction',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+          },
+        }),
+      };
+
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- Some markdown content'),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc: DoclingDocument = {
+        schema_name: 'DoclingDocument',
+        version: '1.0.0',
+        name: 'test-doc',
+        origin: {
+          mimetype: 'application/pdf',
+          binary_hash: 123,
+          filename: 'test.pdf',
+        },
+        furniture: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/furniture',
+          children: [],
+          content_layer: 'furniture',
+        },
+        texts: [],
+        pictures: [],
+        tables: [],
+        groups: [],
+        body: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/body',
+          children: [],
+          content_layer: 'body',
+        },
+        pages: { '1': {} as any },
+      } as DoclingDocument;
+
+      await expect(
+        (processor as any).extractTableOfContents(mockDoc, []),
+      ).rejects.toThrow(TocNotFoundError);
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'TOC area was detected but LLM could not extract any structured entries',
+        ),
+      );
     });
   });
 
