@@ -79,8 +79,14 @@ export class TocValidator {
     const result = this.validate(entries);
 
     if (!result.valid) {
+      const details = result.issues
+        .map(
+          (issue) =>
+            `  [${issue.code}] ${issue.message} (path: ${issue.path}, entry: "${issue.entry.title}" page ${issue.entry.pageNo})`,
+        )
+        .join('\n');
       throw new TocValidationError(
-        `TOC validation failed with ${result.errorCount} error(s)`,
+        `TOC validation failed with ${result.errorCount} error(s):\n${details}`,
         result,
       );
     }

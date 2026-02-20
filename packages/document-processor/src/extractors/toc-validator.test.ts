@@ -440,5 +440,32 @@ describe('TocValidator', () => {
 
       expect(() => validator.validateOrThrow(entries)).toThrow(/2 error\(s\)/);
     });
+
+    test('error message contains detailed issue information', () => {
+      const entries: TocEntry[] = [
+        { title: '', level: 1, pageNo: 1 },
+        { title: 'Chapter 2', level: 1, pageNo: 30 },
+        { title: 'Chapter 1', level: 1, pageNo: 10 },
+      ];
+
+      try {
+        validator.validateOrThrow(entries);
+        expect.fail('Expected error to be thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(TocValidationError);
+        const validationError = error as TocValidationError;
+        expect(validationError.message).toContain('[V003]');
+        expect(validationError.message).toContain(
+          'Title is empty or contains only whitespace',
+        );
+        expect(validationError.message).toContain('path: [0]');
+        expect(validationError.message).toContain('[V001]');
+        expect(validationError.message).toContain(
+          'Page number decreased from 30 to 10',
+        );
+        expect(validationError.message).toContain('path: [2]');
+        expect(validationError.message).toContain('entry: "Chapter 1" page 10');
+      }
+    });
   });
 });

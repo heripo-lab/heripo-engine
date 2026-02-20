@@ -411,8 +411,18 @@ describe('TocExtractor', () => {
         skipValidation: false,
       });
 
-      // @ts-ignore
-      const validationError = new TocValidationError('Validation failed');
+      const validationError = new TocValidationError('Validation failed', {
+        valid: false,
+        errorCount: 1,
+        issues: [
+          {
+            code: 'V003',
+            message: 'Title is empty or contains only whitespace',
+            path: '[0]',
+            entry: { title: '', level: 1, pageNo: 1 },
+          },
+        ],
+      });
       mockLLMCaller.mockRejectedValueOnce(validationError);
 
       await expect(

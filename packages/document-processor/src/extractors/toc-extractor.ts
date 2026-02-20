@@ -123,7 +123,7 @@ export class TocExtractor extends TextLLMComponent {
     } catch (error) {
       // Re-throw TocValidationError as-is
       if (error instanceof TocValidationError) {
-        this.log('error', `Validation failed: ${error.message}`);
+        this.log('error', `Validation failed:\n${error.getSummary()}`);
         throw error;
       }
 
