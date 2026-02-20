@@ -69,7 +69,7 @@ interface SampleResult {
 export class PageRangeParser extends VisionLLMComponent {
   // Configuration constants
   private readonly SAMPLE_SIZE = 3;
-  private readonly MAX_PATTERN_RETRIES = 6;
+  private readonly MAX_PATTERN_RETRIES = 19;
   private readonly SIZE_TOLERANCE = 5.0;
 
   constructor(
