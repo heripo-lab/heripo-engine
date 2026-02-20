@@ -23,6 +23,16 @@ export function Header() {
             <Image src={logoIcon} alt="heripo engine" width={24} height={24} />
             <span className="font-bold">heripo engine</span>
           </Link>
+          {process.env.NEXT_PUBLIC_APP_VERSION && (
+            <a
+              href="https://github.com/heripo-lab/heripo-engine/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-muted text-muted-foreground hover:bg-muted/80 ml-2 rounded-full px-2 py-0.5 text-xs"
+            >
+              v{process.env.NEXT_PUBLIC_APP_VERSION}
+            </a>
+          )}
         </div>
         <nav className="flex items-center">
           <LinkButton href="/tasks" variant="ghost" size="sm">

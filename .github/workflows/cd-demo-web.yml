@@ -118,6 +118,9 @@ jobs:
           
           # Chunked Upload Settings (required for large file uploads >= 50MB)
           UPLOAD_SESSION_SECRET=${{ secrets.DEMO_WEB_UPLOAD_SESSION_SECRET }}
+
+          # App Version (from root package.json)
+          NEXT_PUBLIC_APP_VERSION=$(node -p "require('./package.json').version")
           EOF
 
           # Remove leading whitespace from each line
