@@ -31,6 +31,19 @@ export function Footer() {
           >
             GitHub
           </a>
+          {process.env.NEXT_PUBLIC_APP_VERSION && (
+            <>
+              <span>|</span>
+              <a
+                href="https://github.com/heripo-lab/heripo-engine/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-foreground underline underline-offset-4"
+              >
+                v{process.env.NEXT_PUBLIC_APP_VERSION} Releases
+              </a>
+            </>
+          )}
           {publicModeConfig.isOfficialDemo && (
             <>
               <span>|</span>
