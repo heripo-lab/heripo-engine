@@ -124,7 +124,11 @@ export function TaskListTable() {
   const handleRowClick = (task: Task) => {
     if (task.status === 'completed') {
       router.push(`/result/${task.id}`);
-    } else if (task.status === 'running' || task.status === 'queued') {
+    } else if (
+      task.status === 'running' ||
+      task.status === 'queued' ||
+      task.status === 'failed'
+    ) {
       router.push(`/process/${task.id}`);
     }
   };
