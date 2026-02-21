@@ -15,17 +15,19 @@ vi.mock('@heripo/shared', () => ({
   LLMCaller: {
     call: vi.fn(),
   },
-  LLMTokenUsageAggregator: vi.fn(() => ({
-    reset: vi.fn(),
-    track: vi.fn(),
-    logSummary: vi.fn(),
-    getByComponent: vi.fn(() => []),
-    getTotalUsage: vi.fn(() => ({
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-    })),
-  })),
+  LLMTokenUsageAggregator: vi.fn(function () {
+    return {
+      reset: vi.fn(),
+      track: vi.fn(),
+      logSummary: vi.fn(),
+      getByComponent: vi.fn(() => []),
+      getTotalUsage: vi.fn(() => ({
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+      })),
+    };
+  }),
 }));
 
 describe('CaptionParser', () => {
@@ -153,6 +155,39 @@ describe('CaptionParser', () => {
       expect(result[2]).toEqual({ fullText: '도판 3 층위', num: '도판 3' });
     });
 
+    test('should invoke parseBatchInternal through BatchProcessor callback', async () => {
+      const captions = ['도판 1 유적 전경'];
+      const parser = new CaptionParser(mockLogger, mockModel);
+
+      vi.mocked(BatchProcessor.processBatch).mockImplementation(
+        async (items: any[], _batchSize: number, callback: any) => {
+          return callback(items);
+        },
+      );
+
+      vi.mocked(LLMCaller.call).mockResolvedValue({
+        output: {
+          results: [{ index: 0, num: '도판 1' }],
+        },
+        usage: {
+          component: 'CaptionParser',
+          phase: 'caption-extraction',
+          model: 'primary',
+          modelName: 'test-model',
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+        usedFallback: false,
+      } as any);
+
+      const result = await parser.parseBatch(captions, 5);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].num).toBe('도판 1');
+      expect(LLMCaller.call).toHaveBeenCalled();
+    });
+
     test('should preserve original order when results are out of order', async () => {
       const captions = ['Caption A', 'Caption B', 'Caption C'];
       const parser = new CaptionParser(mockLogger, mockModel);
@@ -185,7 +220,9 @@ describe('CaptionParser', () => {
           totalTokens: 0,
         })),
       };
-      vi.mocked(LLMTokenUsageAggregator).mockReturnValue(mockAggregator as any);
+      vi.mocked(LLMTokenUsageAggregator).mockImplementation(function () {
+        return mockAggregator as any;
+      });
 
       vi.mocked(BatchProcessor.processBatch).mockResolvedValue([
         { index: 0, caption: { fullText: '도판 1', num: '도판 1' } },
@@ -662,7 +699,9 @@ describe('CaptionParser', () => {
           totalTokens: 0,
         })),
       };
-      vi.mocked(LLMTokenUsageAggregator).mockReturnValue(mockAggregator as any);
+      vi.mocked(LLMTokenUsageAggregator).mockImplementation(function () {
+        return mockAggregator as any;
+      });
 
       const extendedUsage = {
         component: 'CaptionParser',

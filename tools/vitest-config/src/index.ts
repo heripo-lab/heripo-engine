@@ -1,6 +1,6 @@
-import type { UserConfig } from 'vitest/config';
+import type { ViteUserConfig } from 'vitest/config';
 
-export const defineConfig = (options: UserConfig = {}): UserConfig => {
+export const defineConfig = (options: ViteUserConfig = {}): ViteUserConfig => {
   return {
     test: {
       environment: 'node',

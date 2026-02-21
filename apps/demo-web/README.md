@@ -22,7 +22,7 @@ Demo Web is a full-stack Next.js application that allows you to monitor and visu
 
 ### Technology Stack
 
-- **Framework**: Next.js 15 (App Router)
+- **Framework**: Next.js 16 (App Router)
 - **State Management**: React Query (TanStack Query)
 - **Form Management**: TanStack React Form
 - **UI**: shadcn/ui + Tailwind CSS

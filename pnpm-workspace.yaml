@@ -4,15 +4,15 @@ packages:
   - 'tools/*'
 
 catalog:
-  "@ai-sdk/anthropic": "^3.0.37"
-  "@ai-sdk/google": "^3.0.21"
-  "@ai-sdk/openai": "^3.0.25"
-  "@ai-sdk/togetherai": "^2.0.30"
-  "@vitest/coverage-v8": "^3.2.4"
-  "@vitest/expect": "^3.2.4"
-  "ai": "^6.0.73"
+  "@ai-sdk/anthropic": "^3.0.46"
+  "@ai-sdk/google": "^3.0.30"
+  "@ai-sdk/openai": "^3.0.30"
+  "@ai-sdk/togetherai": "^2.0.33"
+  "@vitest/coverage-v8": "^4.0.18"
+  "@vitest/expect": "^4.0.18"
+  "ai": "^6.0.97"
   "es-toolkit": "^1.44.0"
   "tsup": "^8.5.1"
   "tsx": "^4.21.0"
-  "vitest": "^3.2.4"
+  "vitest": "^4.0.18"
   "zod": "^4.3.6"

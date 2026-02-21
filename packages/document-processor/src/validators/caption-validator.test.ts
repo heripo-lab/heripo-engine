@@ -18,11 +18,13 @@ vi.mock('@heripo/shared', () => ({
   LLMCaller: {
     call: vi.fn(),
   },
-  LLMTokenUsageAggregator: vi.fn(() => ({
-    reset: vi.fn(),
-    track: vi.fn(),
-    logSummary: vi.fn(),
-  })),
+  LLMTokenUsageAggregator: vi.fn(function () {
+    return {
+      reset: vi.fn(),
+      track: vi.fn(),
+      logSummary: vi.fn(),
+    };
+  }),
   LLMTokenUsageTracker: vi.fn(() => ({
     reset: vi.fn(),
     track: vi.fn(),
@@ -109,6 +111,41 @@ describe('CaptionValidator', () => {
       const result = await validator.validateBatch(captions, originalTexts, 2);
 
       expect(result).toEqual([true, true]);
+    });
+
+    test('should invoke validateBatchInternal through BatchProcessor callback', async () => {
+      const validator = new CaptionValidator(mockLogger, mockModel);
+      const captions: Caption[] = [
+        { fullText: '도판 1 유적 전경', num: '도판 1' },
+      ];
+      const originalTexts = ['도판 1 유적 전경'];
+
+      vi.mocked(BatchProcessor.processBatch).mockImplementation(
+        async (items: any[], _batchSize: number, callback: any) => {
+          return callback(items);
+        },
+      );
+
+      vi.mocked(LLMCaller.call).mockResolvedValue({
+        output: {
+          results: [{ index: 0, isValid: true, reason: null }],
+        },
+        usage: {
+          component: 'CaptionValidator',
+          phase: 'validation',
+          model: 'primary',
+          modelName: 'test-model',
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+        usedFallback: false,
+      } as any);
+
+      const result = await validator.validateBatch(captions, originalTexts, 5);
+
+      expect(result).toEqual([true]);
+      expect(LLMCaller.call).toHaveBeenCalled();
     });
 
     test('should preserve original order when results are out of order', async () => {

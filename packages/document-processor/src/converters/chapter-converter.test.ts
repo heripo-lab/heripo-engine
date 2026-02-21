@@ -578,6 +578,152 @@ describe('ChapterConverter', () => {
       expect(chapters[1].textBlocks).toHaveLength(1);
       expect(chapters[1].textBlocks[0].pdfPageNo).toBe(1);
     });
+
+    test('should link footnotes to correct chapters via convert', () => {
+      const tocEntries: TocEntry[] = [
+        { title: 'Chapter 1', level: 1, pageNo: 1 },
+        { title: 'Chapter 2', level: 1, pageNo: 10 },
+      ];
+
+      const footnotes: ProcessedFootnote[] = [
+        { id: 'ftn-001', text: 'First footnote', pdfPageNo: 3 },
+        { id: 'ftn-002', text: 'Second footnote', pdfPageNo: 7 },
+        { id: 'ftn-003', text: 'Third footnote', pdfPageNo: 12 },
+        { id: 'ftn-004', text: 'Fourth footnote', pdfPageNo: 20 },
+      ];
+
+      const pageRangeMap: Record<number, PageRange> = {
+        3: { startPageNo: 3, endPageNo: 3 },
+        7: { startPageNo: 7, endPageNo: 7 },
+        12: { startPageNo: 12, endPageNo: 12 },
+        20: { startPageNo: 20, endPageNo: 20 },
+      };
+
+      const chapters = converter.convert(
+        tocEntries,
+        [],
+        pageRangeMap,
+        [],
+        [],
+        footnotes,
+      );
+
+      // chapters[0] = Front Matter, chapters[1] = Chapter 1 (1-9), chapters[2] = Chapter 2 (10+)
+      expect(chapters[0].footnoteIds).toHaveLength(0);
+      expect(chapters[1].footnoteIds).toEqual(['ftn-001', 'ftn-002']);
+      expect(chapters[2].footnoteIds).toEqual(['ftn-003', 'ftn-004']);
+    });
+
+    test('should skip resources on pages that do not match any chapter range', () => {
+      // Chapter starts at page 10, so Front Matter covers pages 1-9.
+      // Resources on page 0 (before Front Matter) won't match any range
+      // because Front Matter starts at page 1 and no chapter covers page 0.
+      // We achieve "unmapped" by using a pageRangeMap that maps a PDF page
+      // to actual page 0, which is before Front Matter's startPage of 1.
+      const tocEntries: TocEntry[] = [
+        { title: 'Chapter 1', level: 1, pageNo: 10 },
+      ];
+
+      const textItems: DoclingTextItem[] = [
+        createTextItem('Unmapped text', 50), // PDF page 50 maps to actual page 0
+        createTextItem('Valid text', 12), // PDF page 12 maps to actual page 12
+      ];
+
+      const images: ProcessedImage[] = [
+        { id: 'img-unmatched', pdfPageNo: 50, path: '/unmatched.png' },
+        { id: 'img-matched', pdfPageNo: 12, path: '/matched.png' },
+      ];
+
+      const tables: ProcessedTable[] = [
+        createTable('tbl-unmatched', 50),
+        createTable('tbl-matched', 12),
+      ];
+
+      const footnotes: ProcessedFootnote[] = [
+        { id: 'ftn-unmatched', text: 'Unmatched footnote', pdfPageNo: 50 },
+        { id: 'ftn-matched', text: 'Matched footnote', pdfPageNo: 12 },
+      ];
+
+      // PDF page 50 maps to actual page 0, which falls outside all ranges
+      // (Front Matter: [1, 9], Chapter 1: [10, MAX])
+      const pageRangeMap: Record<number, PageRange> = {
+        50: { startPageNo: 0, endPageNo: 0 },
+        12: { startPageNo: 12, endPageNo: 12 },
+      };
+
+      const chapters = converter.convert(
+        tocEntries,
+        textItems,
+        pageRangeMap,
+        images,
+        tables,
+        footnotes,
+      );
+
+      // chapters[0] = Front Matter (pages 1-9), chapters[1] = Chapter 1 (pages 10+)
+
+      // Unmatched resources (page 0) should be silently skipped
+      const allTextBlocks = chapters.flatMap((c) => c.textBlocks);
+      expect(allTextBlocks).toHaveLength(1);
+      expect(allTextBlocks[0].text).toBe('Valid text');
+
+      // Only matched image should be linked
+      expect(chapters[0].imageIds).toHaveLength(0);
+      expect(chapters[1].imageIds).toEqual(['img-matched']);
+
+      // Only matched table should be linked
+      expect(chapters[0].tableIds).toHaveLength(0);
+      expect(chapters[1].tableIds).toEqual(['tbl-matched']);
+
+      // Only matched footnote should be linked
+      expect(chapters[0].footnoteIds).toHaveLength(0);
+      expect(chapters[1].footnoteIds).toEqual(['ftn-matched']);
+    });
+
+    test('should prefer chapter with largest startPage when ranges overlap', () => {
+      // The findChapterForPage method uses "start page first" strategy:
+      // when multiple ranges cover the same page, the one with the largest
+      // startPage wins. To test the false branch (range.startPage > bestStartPage
+      // evaluates to false), we need overlapping ranges where a later-iterated
+      // range has a smaller startPage than the current best.
+      //
+      // Since calculatePageRanges produces non-overlapping ranges by construction,
+      // we test findChapterForPage directly with a crafted overlapping range map.
+      const findChapterForPage = (
+        converter as unknown as {
+          findChapterForPage: (
+            actualPageNo: number,
+            chapterRanges: Map<string, { startPage: number; endPage: number }>,
+          ) => string | null;
+        }
+      ).findChapterForPage.bind(converter);
+
+      // Create overlapping ranges: both cover page 5
+      // ch-A: [3, 10] (broader range, smaller startPage)
+      // ch-B: [5, 8]  (narrower range, larger startPage)
+      const overlappingRanges = new Map<
+        string,
+        { startPage: number; endPage: number }
+      >();
+      // Insert the one with larger startPage FIRST so it becomes bestMatch first
+      overlappingRanges.set('ch-B', { startPage: 5, endPage: 8 });
+      // Then insert the one with smaller startPage - its startPage (3) is NOT > bestStartPage (5)
+      // so the false branch at line 328 is triggered
+      overlappingRanges.set('ch-A', { startPage: 3, endPage: 10 });
+
+      // For page 5, both ranges match. ch-B (startPage=5) is found first and becomes best.
+      // ch-A (startPage=3) matches but 3 > 5 is false -> false branch hit, ch-B remains best.
+      const result = findChapterForPage(5, overlappingRanges);
+      expect(result).toBe('ch-B');
+
+      // For page 9, only ch-A matches (9 > 8 excludes ch-B)
+      const result2 = findChapterForPage(9, overlappingRanges);
+      expect(result2).toBe('ch-A');
+
+      // For page 2, neither matches (2 < 3 and 2 < 5)
+      const result3 = findChapterForPage(2, overlappingRanges);
+      expect(result3).toBeNull();
+    });
   });
 
   describe('page range calculation edge cases', () => {

@@ -167,14 +167,13 @@ describe('TocExtractor', () => {
     mockLLMCaller.mockClear();
 
     // Default: TocValidator.validate() returns valid result
-    vi.mocked(TocValidator).mockImplementation(
-      () =>
-        ({
-          validate: vi
-            .fn()
-            .mockReturnValue({ valid: true, errorCount: 0, issues: [] }),
-        }) as any,
-    );
+    vi.mocked(TocValidator).mockImplementation(function () {
+      return {
+        validate: vi
+          .fn()
+          .mockReturnValue({ valid: true, errorCount: 0, issues: [] }),
+      } as any;
+    });
 
     mockLogger = {
       info: vi.fn(),
@@ -652,9 +651,9 @@ describe('TocExtractor', () => {
         })
         .mockReturnValueOnce({ valid: true, errorCount: 0, issues: [] });
 
-      vi.mocked(TocValidator).mockImplementation(
-        () => ({ validate: mockValidate }) as any,
-      );
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
 
       const result = await extractorWithValidation.extract('- some markdown');
 
@@ -700,9 +699,9 @@ describe('TocExtractor', () => {
         ],
       });
 
-      vi.mocked(TocValidator).mockImplementation(
-        () => ({ validate: mockValidate }) as any,
-      );
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
 
       await expect(
         extractorWithValidation.extract('- some markdown'),
@@ -778,9 +777,9 @@ describe('TocExtractor', () => {
         })
         .mockReturnValueOnce({ valid: true, errorCount: 0, issues: [] });
 
-      vi.mocked(TocValidator).mockImplementation(
-        () => ({ validate: mockValidate }) as any,
-      );
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
 
       const result = await extractorWithValidation.extract('- some markdown');
 
@@ -816,9 +815,9 @@ describe('TocExtractor', () => {
         ],
       });
 
-      vi.mocked(TocValidator).mockImplementation(
-        () => ({ validate: mockValidate }) as any,
-      );
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
 
       await expect(
         extractorWithValidation.extract('- some markdown'),
@@ -917,9 +916,9 @@ describe('TocExtractor', () => {
       const mockValidate = vi
         .fn()
         .mockReturnValue({ valid: true, errorCount: 0, issues: [] });
-      vi.mocked(TocValidator).mockImplementation(
-        () => ({ validate: mockValidate }) as any,
-      );
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
 
       const result = (ext as any).tryValidateEntries(
         [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
@@ -946,9 +945,9 @@ describe('TocExtractor', () => {
           },
         ],
       });
-      vi.mocked(TocValidator).mockImplementation(
-        () => ({ validate: mockValidate }) as any,
-      );
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
 
       const result = (ext as any).tryValidateEntries(
         [{ title: 'Chapter 1', level: 1, pageNo: 1 }],

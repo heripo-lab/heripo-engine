@@ -1083,6 +1083,161 @@ describe('TocFinder', () => {
       });
     });
 
+    describe('findContinuationOnPage edge cases', () => {
+      test('skips continuation marker text with no parent', () => {
+        // Page 1: TOC keyword
+        // Page 2: continuation marker text WITHOUT parent (text.parent is undefined)
+        // This covers the false branch at line 404 (parentRef is falsy)
+        const texts = [
+          createMockTextItem(0, '목차', 1, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter 1 ..... 1', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          // Continuation marker on page 2 but NO parent
+          createMockTextItem(2, '(continued)', 2, {
+            label: 'section_header',
+            parent: undefined,
+          }),
+        ];
+        const groups = [createMockGroupItem(0, ['#/texts/0', '#/texts/1'])];
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        // Should not expand to page 2 since the continuation marker has no parent
+        expect(result.startPage).toBe(1);
+        expect(result.endPage).toBe(1);
+        expect(result.itemRefs).toContain('#/groups/0');
+        expect(result.itemRefs).not.toContain('#/texts/2');
+      });
+
+      test('skips continuation marker text when resolveGroup returns null', () => {
+        // Page 1: TOC keyword
+        // Page 2: continuation marker text with parent pointing to a non-group item (e.g., table)
+        // resolveGroup returns null for that parent ref
+        // This covers the false branch at line 406 (group is null)
+        const texts = [
+          createMockTextItem(0, '목차', 1, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter 1 ..... 1', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          // Continuation marker on page 2 with parent pointing to a text item (not a group)
+          createMockTextItem(2, '(계속)', 2, {
+            label: 'section_header',
+            parent: { $ref: '#/texts/3' },
+          }),
+          // This text item is the parent - resolveGroup will return null for it
+          createMockTextItem(3, 'Some non-group item', 2),
+        ];
+        const groups = [createMockGroupItem(0, ['#/texts/0', '#/texts/1'])];
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        // Should not expand to page 2 since resolveGroup returns null for the parent
+        expect(result.startPage).toBe(1);
+        expect(result.endPage).toBe(1);
+        expect(result.itemRefs).toContain('#/groups/0');
+      });
+
+      test('skips non-TOC-like table on continuation page', () => {
+        // Page 1: TOC keyword
+        // Page 2: table that is NOT TOC-like (no document_index label, only 1 column)
+        // This covers the false branch at line 431 (isTableTocLike returns false)
+        const texts = [
+          createMockTextItem(0, '목차', 1, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter 1 ..... 1', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        const groups = [createMockGroupItem(0, ['#/texts/0', '#/texts/1'])];
+        // Non-TOC-like table: only 1 column, not document_index
+        const grid = [
+          [createMockTableCell('Header', 0, 0)],
+          [createMockTableCell('Row 1', 1, 0)],
+          [createMockTableCell('Row 2', 2, 0)],
+          [createMockTableCell('Row 3', 3, 0)],
+        ];
+        const tables = [createMockTableItem(0, grid, 2)];
+        const doc = createMockDocument(texts, groups, tables);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        // Should not expand to page 2 since the table is not TOC-like
+        expect(result.startPage).toBe(1);
+        expect(result.endPage).toBe(1);
+        expect(result.itemRefs).not.toContain('#/tables/0');
+      });
+    });
+
+    describe('calculateScore edge cases', () => {
+      test('does not add page number score for children without page number pattern', () => {
+        // Group children have text but no page number patterns (no dots followed by numbers)
+        // This covers the false branch at line 493 (PAGE_NUMBER_PATTERN.test returns false)
+        const texts = [
+          createMockTextItem(0, 'Introduction', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter One', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Appendix', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        // Use a group with enough children that have page number patterns (>= 3)
+        // to pass isGroupTocLike, but also include children without patterns.
+        // Actually, we need at least 3 children with patterns to pass isGroupTocLike.
+        // So we mix: 3 with patterns (to pass isGroupTocLike) + 3 without (to cover false branch in calculateScore)
+        const textsWithPatterns = [
+          createMockTextItem(3, 'Part A ..... 1', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(4, 'Part B ..... 10', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(5, 'Part C ..... 20', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        const allTexts = [...texts, ...textsWithPatterns];
+        const groups = [
+          createMockGroupItem(0, [
+            '#/texts/0',
+            '#/texts/1',
+            '#/texts/2',
+            '#/texts/3',
+            '#/texts/4',
+            '#/texts/5',
+          ]),
+        ];
+        const doc = createMockDocument(allTexts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        // Should still find TOC via structure analysis (3 items have page number patterns)
+        expect(result.itemRefs).toContain('#/groups/0');
+        expect(result.startPage).toBe(1);
+      });
+    });
+
     describe('isGroupTocLike edge cases', () => {
       test('returns false for group with unsupported name', () => {
         // Create text items that look like TOC but parent group has unsupported name
@@ -1118,6 +1273,56 @@ describe('TocFinder', () => {
 
         // Should not find TOC because group has unsupported name
         expect(() => finder.find(doc)).toThrow(TocNotFoundError);
+      });
+
+      test('skips non-text children in group when counting page numbers', () => {
+        // No keyword texts - forces findByStructure (Stage 2)
+        const texts = [
+          createMockTextItem(0, 'Chapter 1 ..... 1', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter 2 ..... 10', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Chapter 3 ..... 20', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+
+        // Nested group has no 'text' or 'orig' properties
+        const nestedGroup: DoclingGroupItem = {
+          self_ref: '#/groups/1',
+          parent: { $ref: '#/groups/0' },
+          children: [],
+          content_layer: 'body',
+          name: 'group',
+          label: 'group',
+        };
+
+        const groups: DoclingGroupItem[] = [
+          {
+            self_ref: '#/groups/0',
+            parent: { $ref: '#/body' },
+            children: [
+              { $ref: '#/texts/0' },
+              { $ref: '#/texts/1' },
+              { $ref: '#/groups/1' },
+              { $ref: '#/texts/2' },
+            ],
+            content_layer: 'body',
+            name: 'list',
+            label: 'list',
+          },
+          nestedGroup,
+        ];
+
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // findByStructure calls isGroupTocLike, exercising the non-text child branch
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/groups/0');
       });
     });
 
@@ -1361,6 +1566,71 @@ describe('TocFinder', () => {
         const finder = new TocFinder(mockLogger, resolver);
 
         expect(() => finder.find(doc)).toThrow(TocNotFoundError);
+      });
+
+      test('checks non-numeric last column cells in table', () => {
+        // No keyword texts - forces findByStructure (Stage 2)
+        const doc = createMockDocument([]);
+        doc.tables = [
+          {
+            self_ref: '#/tables/0',
+            parent: { $ref: '#/body' },
+            children: [],
+            content_layer: 'body',
+            label: 'table',
+            prov: [
+              {
+                page_no: 1,
+                bbox: {
+                  t: 0,
+                  l: 0,
+                  b: 0,
+                  r: 0,
+                  coord_origin: 'TOPLEFT' as const,
+                },
+                charspan: [0, 0],
+              },
+            ],
+            captions: [],
+            references: [],
+            footnotes: [],
+            data: {
+              table_cells: [],
+              num_rows: 5,
+              num_cols: 2,
+              grid: [
+                [
+                  createMockTableCell('Title', 0, 0),
+                  createMockTableCell('Page', 0, 1),
+                ],
+                [
+                  createMockTableCell('Chapter 1', 1, 0),
+                  createMockTableCell('1', 1, 1),
+                ],
+                [
+                  createMockTableCell('Chapter 2', 2, 0),
+                  createMockTableCell('abc', 2, 1),
+                ],
+                [
+                  createMockTableCell('Chapter 3', 3, 0),
+                  createMockTableCell('10', 3, 1),
+                ],
+                [
+                  createMockTableCell('Chapter 4', 4, 0),
+                  createMockTableCell('20', 4, 1),
+                ],
+              ],
+            },
+          },
+        ];
+
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // 3/4 numeric last cells (75% > 50%), TOC-like.
+        // Row with 'abc' covers the false branch at line 323.
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/tables/0');
       });
     });
   });

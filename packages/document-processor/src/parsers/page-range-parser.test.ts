@@ -13,11 +13,13 @@ vi.mock('@heripo/shared', () => ({
   LLMCaller: {
     callVision: vi.fn(),
   },
-  LLMTokenUsageAggregator: vi.fn(() => ({
-    reset: vi.fn(),
-    track: vi.fn(),
-    logSummary: vi.fn(),
-  })),
+  LLMTokenUsageAggregator: vi.fn(function () {
+    return {
+      reset: vi.fn(),
+      track: vi.fn(),
+      logSummary: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('node:fs', () => ({

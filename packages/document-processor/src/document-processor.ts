@@ -757,6 +757,7 @@ export class DocumentProcessor {
       }
 
       // Re-map parsedCaptions to match the filtered data
+      /* c8 ignore start - defensive guard: recoveredData only contains items where parsedMap.has() returned true */
       const recoveredCaptions: Caption[] = [];
       for (const item of recoveredData) {
         const caption = parsedMap.get(item.text);
@@ -764,6 +765,7 @@ export class DocumentProcessor {
           recoveredCaptions.push(caption);
         }
       }
+      /* c8 ignore stop */
 
       /* c8 ignore start - defensive guard: recoveredData only contains items where parsedMap.has() returned true */
       if (recoveredCaptions.length !== recoveredData.length) {

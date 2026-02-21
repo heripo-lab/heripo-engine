@@ -22,7 +22,7 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 
 ### 기술 스택
 
-- **프레임워크**: Next.js 15 (App Router)
+- **프레임워크**: Next.js 16 (App Router)
 - **상태 관리**: React Query (TanStack Query)
 - **폼 관리**: TanStack React Form
 - **UI**: shadcn/ui + Tailwind CSS

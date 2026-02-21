@@ -11,11 +11,13 @@ vi.mock('@heripo/shared', () => ({
   LLMCaller: {
     call: vi.fn(),
   },
-  LLMTokenUsageAggregator: vi.fn(() => ({
-    reset: vi.fn(),
-    track: vi.fn(),
-    logSummary: vi.fn(),
-  })),
+  LLMTokenUsageAggregator: vi.fn(function () {
+    return {
+      reset: vi.fn(),
+      track: vi.fn(),
+      logSummary: vi.fn(),
+    };
+  }),
 }));
 
 // Concrete implementation for testing

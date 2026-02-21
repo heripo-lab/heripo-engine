@@ -156,6 +156,64 @@ describe('LLMTokenUsageAggregator', () => {
       );
       expect(pageRangeComponent?.total.inputTokens).toBe(500);
     });
+
+    test('should aggregate multiple fallback usages for the same phase', () => {
+      const fallbackUsage1: ExtendedTokenUsage = {
+        component: 'TocExtractor',
+        phase: 'extraction',
+        model: 'fallback',
+        modelName: 'claude-opus-4-5',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+      };
+
+      const fallbackUsage2: ExtendedTokenUsage = {
+        component: 'TocExtractor',
+        phase: 'extraction',
+        model: 'fallback',
+        modelName: 'claude-opus-4-5',
+        inputTokens: 200,
+        outputTokens: 75,
+        totalTokens: 275,
+      };
+
+      aggregator.track(fallbackUsage1);
+      aggregator.track(fallbackUsage2);
+
+      const byComponent = aggregator.getByComponent();
+      const phase = byComponent[0].phases['extraction'];
+
+      expect(phase.fallback?.inputTokens).toBe(300);
+      expect(phase.fallback?.outputTokens).toBe(125);
+      expect(phase.fallback?.totalTokens).toBe(425);
+      expect(phase.fallback?.modelName).toBe('claude-opus-4-5');
+    });
+
+    test('should handle unknown model type gracefully (skip primary/fallback tracking)', () => {
+      const unknownModelUsage = {
+        component: 'TocExtractor',
+        phase: 'extraction',
+        model: 'unknown' as 'primary' | 'fallback',
+        modelName: 'some-model',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+      };
+
+      aggregator.track(unknownModelUsage);
+
+      const byComponent = aggregator.getByComponent();
+      const phase = byComponent[0].phases['extraction'];
+
+      // Neither primary nor fallback should be set
+      expect(phase.primary).toBeUndefined();
+      expect(phase.fallback).toBeUndefined();
+      // But total should still be updated
+      expect(phase.total.inputTokens).toBe(100);
+      expect(phase.total.outputTokens).toBe(50);
+      expect(phase.total.totalTokens).toBe(150);
+    });
   });
 
   describe('getTotalUsage', () => {
