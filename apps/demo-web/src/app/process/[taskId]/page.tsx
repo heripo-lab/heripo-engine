@@ -10,6 +10,7 @@ import { Progress } from '~/components/ui/progress';
 import {
   LogViewer,
   ProcessErrorAlert,
+  ProcessErrorDialog,
   ProcessHeader,
   ProcessInfoCard,
   ProcessTimeline,
@@ -68,13 +69,23 @@ export default function ProcessPage({ params }: PageProps) {
         <ProcessErrorAlert error={error} />
         <div className="flex flex-col gap-6 lg:flex-row">
           <div className="w-full lg:w-2/5">
-            <ProcessTimeline currentStep={currentStep} progress={progress} />
+            <ProcessTimeline
+              currentStep={currentStep}
+              progress={progress}
+              status={status}
+            />
           </div>
           <div className="w-full lg:w-3/5">
             <LogViewer logs={logs} />
           </div>
         </div>
         <ProcessInfoCard />
+
+        <ProcessErrorDialog
+          open={status === 'failed'}
+          onOpenChange={() => {}}
+          error={error}
+        />
 
         <ConfirmDialog
           open={showCancelDialog}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Circle, Clock, Loader2 } from 'lucide-react';
+import { Check, Circle, Clock, Loader2, X } from 'lucide-react';
 
 import { cn } from '~/lib/utils';
 
@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from '~/components/ui/card';
+import type { TaskStatus } from '~/features/process/hooks/use-task-stream';
 
 interface TimelineStep {
   id: string;
@@ -50,7 +51,7 @@ function getStepStatus(
   step: TimelineStep,
   currentStep: string,
   progress: number,
-): 'pending' | 'in_progress' | 'completed' {
+): 'pending' | 'in_progress' | 'completed' | 'failed' {
   const stepIndex = STEPS.findIndex((s) => s.id === step.id);
   const currentIndex = STEPS.findIndex((s) => s.id === currentStep);
 
@@ -80,11 +81,13 @@ function getStepStatus(
 interface ProcessTimelineProps {
   currentStep?: string;
   progress?: number;
+  status?: TaskStatus;
 }
 
 export function ProcessTimeline({
   currentStep = '',
   progress = 0,
+  status,
 }: ProcessTimelineProps) {
   return (
     <Card className="h-full">
@@ -97,7 +100,10 @@ export function ProcessTimeline({
       <CardContent className="flex flex-col">
         <div className="space-y-4">
           {STEPS.map((step, index) => {
-            const status = getStepStatus(step, currentStep, progress);
+            let stepStatus = getStepStatus(step, currentStep, progress);
+            if (status === 'failed' && stepStatus === 'in_progress') {
+              stepStatus = 'failed';
+            }
 
             return (
               <div key={step.id} className="flex gap-4">
@@ -106,25 +112,30 @@ export function ProcessTimeline({
                   <div
                     className={cn(
                       'flex h-8 w-8 items-center justify-center rounded-full border-2',
-                      status === 'completed' &&
+                      stepStatus === 'completed' &&
                         'border-green-500 bg-green-500 text-white',
-                      status === 'in_progress' &&
+                      stepStatus === 'in_progress' &&
                         'border-blue-500 bg-blue-50 text-blue-500',
-                      status === 'pending' &&
+                      stepStatus === 'failed' &&
+                        'border-red-500 bg-red-500 text-white',
+                      stepStatus === 'pending' &&
                         'border-muted-foreground/25 text-muted-foreground/50',
                     )}
                   >
-                    {status === 'completed' && <Check className="h-4 w-4" />}
-                    {status === 'in_progress' && (
+                    {stepStatus === 'completed' && (
+                      <Check className="h-4 w-4" />
+                    )}
+                    {stepStatus === 'in_progress' && (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     )}
-                    {status === 'pending' && <Circle className="h-4 w-4" />}
+                    {stepStatus === 'failed' && <X className="h-4 w-4" />}
+                    {stepStatus === 'pending' && <Circle className="h-4 w-4" />}
                   </div>
                   {index < STEPS.length - 1 && (
                     <div
                       className={cn(
                         'min-h-[2rem] w-0.5 flex-1',
-                        status === 'completed'
+                        stepStatus === 'completed'
                           ? 'bg-green-500'
                           : 'bg-muted-foreground/25',
                       )}
@@ -138,7 +149,7 @@ export function ProcessTimeline({
                     <h4
                       className={cn(
                         'font-medium',
-                        status === 'pending' && 'text-muted-foreground',
+                        stepStatus === 'pending' && 'text-muted-foreground',
                       )}
                     >
                       {step.title}

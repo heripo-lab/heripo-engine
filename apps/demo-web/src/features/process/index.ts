@@ -1,6 +1,7 @@
 // Components
 export { LogViewer } from './components/log-viewer';
 export { ProcessErrorAlert } from './components/process-error-alert';
+export { ProcessErrorDialog } from './components/process-error-dialog';
 export { ProcessHeader } from './components/process-header';
 export { ProcessInfoCard } from './components/process-info-card';
 export { ProcessTimeline } from './components/process-timeline';
