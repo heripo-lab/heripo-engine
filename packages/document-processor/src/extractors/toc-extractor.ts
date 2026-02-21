@@ -22,7 +22,9 @@ export const TocEntrySchema: z.ZodType<TocEntry> = z.lazy(() =>
     title: z.string().describe('Chapter or section title'),
     level: z.number().int().min(1).describe('Hierarchy depth (1 = top level)'),
     pageNo: z.number().int().min(1).describe('Starting page number'),
-    children: z.array(TocEntrySchema).optional().describe('Child sections'),
+    children: z
+      .array(TocEntrySchema)
+      .describe('Child sections (use empty array [] if none)'),
   }),
 );
 
@@ -165,11 +167,12 @@ export class TocExtractor extends TextLLMComponent {
    - Level 3: Subsections (e.g., "1.1.1", "a.", "(1)")
    - Use indentation and numbering patterns to infer level
 
-3. **Page Number**: Extract the page number from each entry. Convert Roman numerals to Arabic numerals if present (e.g., "iv" → 4).
+3. **Page Number**: Extract the page number from each entry. Use only Arabic numerals for page numbers.
 
 4. **Children**: Nest child entries under parent entries based on their hierarchy level.
 
-5. **IMPORTANT - Extract Main TOC Only**: Only extract the main document table of contents. EXCLUDE the following supplementary indices:
+5. **IMPORTANT - Extract Main TOC Only**: Only extract the main document table of contents. EXCLUDE the following:
+   - **Front matter with Roman numeral pages**: Entries whose page numbers are Roman numerals (i, ii, xxi, etc.) such as 일러두기, 발간사, 서문, 범례, Preface, Foreword, Editorial Notes. These use a separate page numbering system and are not part of the main content.
    - Photo/image indices (사진 목차, 사진목차, 화보 목차, Photo Index, List of Photos, List of Figures)
    - Drawing/diagram indices (도면 목차, 도면목차, 삽도 목차, Drawing Index, List of Drawings)
    - Table indices (표 목차, 표목차, Table Index, List of Tables)
@@ -196,11 +199,11 @@ Output:
       "level": 1,
       "pageNo": 1,
       "children": [
-        { "title": "1. 연구 배경", "level": 2, "pageNo": 3 },
-        { "title": "2. 연구 목적", "level": 2, "pageNo": 5 }
+        { "title": "1. 연구 배경", "level": 2, "pageNo": 3, "children": [] },
+        { "title": "2. 연구 목적", "level": 2, "pageNo": 5, "children": [] }
       ]
     },
-    { "title": "제2장 방법론", "level": 1, "pageNo": 10 }
+    { "title": "제2장 방법론", "level": 1, "pageNo": 10, "children": [] }
   ]
 }`;
   }

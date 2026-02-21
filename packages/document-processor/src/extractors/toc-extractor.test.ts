@@ -23,10 +23,11 @@ vi.mock('./toc-validator');
 
 describe('TocEntrySchema', () => {
   test('validates valid TOC entry structure', () => {
-    const validEntry: TocEntry = {
+    const validEntry = {
       title: 'Chapter 1',
       level: 1,
       pageNo: 1,
+      children: [],
     };
 
     const result = TocEntrySchema.safeParse(validEntry);
@@ -44,8 +45,8 @@ describe('TocEntrySchema', () => {
       level: 1,
       pageNo: 1,
       children: [
-        { title: 'Section 1.1', level: 2, pageNo: 3 },
-        { title: 'Section 1.2', level: 2, pageNo: 5 },
+        { title: 'Section 1.1', level: 2, pageNo: 3, children: [] },
+        { title: 'Section 1.2', level: 2, pageNo: 5, children: [] },
       ],
     };
 
@@ -67,7 +68,9 @@ describe('TocEntrySchema', () => {
           title: 'Chapter 1',
           level: 2,
           pageNo: 2,
-          children: [{ title: 'Section 1.1', level: 3, pageNo: 3 }],
+          children: [
+            { title: 'Section 1.1', level: 3, pageNo: 3, children: [] },
+          ],
         },
       ],
     };
@@ -81,6 +84,7 @@ describe('TocEntrySchema', () => {
       title: 'Chapter 1',
       level: 0,
       pageNo: 1,
+      children: [],
     };
 
     const result = TocEntrySchema.safeParse(invalidEntry);
@@ -92,6 +96,7 @@ describe('TocEntrySchema', () => {
       title: 'Chapter 1',
       level: 1,
       pageNo: 0,
+      children: [],
     };
 
     const result = TocEntrySchema.safeParse(invalidEntry);
@@ -112,8 +117,8 @@ describe('TocResponseSchema', () => {
   test('validates valid TOC response', () => {
     const validResponse = {
       entries: [
-        { title: 'Chapter 1', level: 1, pageNo: 1 },
-        { title: 'Chapter 2', level: 1, pageNo: 10 },
+        { title: 'Chapter 1', level: 1, pageNo: 1, children: [] },
+        { title: 'Chapter 2', level: 1, pageNo: 10, children: [] },
       ],
     };
 
