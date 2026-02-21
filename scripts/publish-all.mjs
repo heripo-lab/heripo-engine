@@ -138,10 +138,18 @@ const promptOtp = () =>
       input: process.stdin,
       output: process.stderr,
     });
-    rl.question('Enter OTP code: ', (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
+    const ask = () => {
+      rl.question('Enter OTP code: ', (answer) => {
+        const trimmed = answer.trim();
+        if (!trimmed) {
+          ask();
+          return;
+        }
+        rl.close();
+        resolve(trimmed);
+      });
+    };
+    ask();
   });
 
 const packAndPublish = async () => {
@@ -234,4 +242,7 @@ const main = async () => {
   console.log('Release publish complete.');
 };
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
