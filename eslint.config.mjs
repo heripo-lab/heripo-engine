@@ -38,6 +38,8 @@ export default tsEslint.config(
       ],
       '@typescript-eslint/ban-ts-comment': 'warn',
       'no-async-promise-executor': 'off',
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
     },
   },
 );
