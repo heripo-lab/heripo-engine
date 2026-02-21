@@ -661,8 +661,10 @@ export class DocumentProcessor {
       totalPages,
     });
 
-    // Track token usage
-    this.usageAggregator.track(tocResult.usage);
+    // Track token usage (initial extraction + any correction retries)
+    for (const usage of tocResult.usages) {
+      this.usageAggregator.track(usage);
+    }
 
     if (tocResult.entries.length === 0) {
       const reason =
