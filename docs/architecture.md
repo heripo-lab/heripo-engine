@@ -496,7 +496,7 @@ heripo-engine/
 
 ### Demo Web Application (`demo-web`)
 
-A Next.js 15-based web application for visualizing and testing the PDF processing pipeline.
+A Next.js 16-based web application for visualizing and testing the PDF processing pipeline.
 
 **Key Features:**
 
@@ -508,7 +508,7 @@ A Next.js 15-based web application for visualizing and testing the PDF processin
 
 **Technology Stack:**
 
-- Next.js 15 (App Router)
+- Next.js 16 (App Router)
 - React Query (server state management)
 - shadcn/ui + Tailwind CSS
 

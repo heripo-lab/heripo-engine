@@ -496,7 +496,7 @@ heripo-engine/
 
 ### Demo Web Application (`demo-web`)
 
-PDF 처리 파이프라인을 시각화하고 테스트할 수 있는 Next.js 15 기반 웹 애플리케이션입니다.
+PDF 처리 파이프라인을 시각화하고 테스트할 수 있는 Next.js 16 기반 웹 애플리케이션입니다.
 
 **주요 기능:**
 
@@ -508,7 +508,7 @@ PDF 처리 파이프라인을 시각화하고 테스트할 수 있는 Next.js 15
 
 **기술 스택:**
 
-- Next.js 15 (App Router)
+- Next.js 16 (App Router)
 - React Query (서버 상태 관리)
 - shadcn/ui + Tailwind CSS
 
