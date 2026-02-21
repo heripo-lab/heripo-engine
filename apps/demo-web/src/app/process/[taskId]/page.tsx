@@ -30,6 +30,7 @@ export default function ProcessPage({ params }: PageProps) {
   const searchParams = useSearchParams();
   const deleteTaskMutation = useDeleteTask();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [errorDialogDismissed, setErrorDialogDismissed] = useState(false);
   const disableAutoNavigate = searchParams.get('stay') === 'true';
 
   const { data: task } = useTask(taskId);
@@ -82,8 +83,10 @@ export default function ProcessPage({ params }: PageProps) {
         <ProcessInfoCard />
 
         <ProcessErrorDialog
-          open={status === 'failed'}
-          onOpenChange={() => {}}
+          open={status === 'failed' && !errorDialogDismissed}
+          onOpenChange={(open) => {
+            if (!open) setErrorDialogDismissed(true);
+          }}
           error={error}
         />
 
