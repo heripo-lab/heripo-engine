@@ -39,6 +39,10 @@ async function mergeChunks(
   const uploadPaths = paths.upload(uploadId);
   const writeStream = createWriteStream(outputPath);
 
+  // Each pipeline() call adds an error listener to the writeStream.
+  // For files with many chunks, this exceeds the default limit of 10.
+  writeStream.setMaxListeners(totalChunks + 1);
+
   try {
     for (let i = 0; i < totalChunks; i++) {
       const chunkPath = uploadPaths.chunk(i);
