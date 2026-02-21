@@ -239,6 +239,50 @@ describe('MarkdownConverter', () => {
 
       expect(result).toBe('- Chapter 1');
     });
+
+    test('skips text items that produce empty markdown', () => {
+      const texts = [
+        createMockTextItem(0, ''),
+        createMockTextItem(1, 'Valid text'),
+      ];
+      const doc = createMockDocument(texts);
+      const resolver = new RefResolver(mockLogger, doc);
+
+      const result = MarkdownConverter.convert(
+        ['#/texts/0', '#/texts/1'],
+        resolver,
+      );
+
+      expect(result).toBe('- Valid text');
+    });
+
+    test('skips group refs that produce empty markdown', () => {
+      const texts = [createMockTextItem(0, 'Valid text')];
+      const groups = [createMockGroupItem(0, [])];
+      const doc = createMockDocument(texts, groups);
+      const resolver = new RefResolver(mockLogger, doc);
+
+      const result = MarkdownConverter.convert(
+        ['#/groups/0', '#/texts/0'],
+        resolver,
+      );
+
+      expect(result).toBe('- Valid text');
+    });
+
+    test('skips table refs that produce empty markdown', () => {
+      const texts = [createMockTextItem(0, 'Valid text')];
+      const tables = [createMockTableItem(0, [])];
+      const doc = createMockDocument(texts, [], tables);
+      const resolver = new RefResolver(mockLogger, doc);
+
+      const result = MarkdownConverter.convert(
+        ['#/tables/0', '#/texts/0'],
+        resolver,
+      );
+
+      expect(result).toBe('- Valid text');
+    });
   });
 
   describe('groupToMarkdown', () => {
@@ -352,6 +396,54 @@ describe('MarkdownConverter', () => {
       const result = MarkdownConverter.groupToMarkdown(group, resolver);
 
       expect(result).toBe('- Item');
+    });
+
+    test('skips nested group that produces empty markdown', () => {
+      const texts = [
+        createMockTextItem(0, 'Valid item'),
+        createMockTextItem(1, '   '),
+      ];
+      const nestedGroup = createMockGroupItem(1, ['#/texts/1']);
+      const parentGroup = createMockGroupItem(0, ['#/groups/1', '#/texts/0']);
+      const doc = createMockDocument(texts, [parentGroup, nestedGroup]);
+      const resolver = new RefResolver(mockLogger, doc);
+
+      const result = MarkdownConverter.groupToMarkdown(parentGroup, resolver);
+
+      expect(result).toBe('- Valid item');
+    });
+
+    test('skips child with unrecognized name that is neither text nor group', () => {
+      const texts = [createMockTextItem(0, 'Valid item')];
+      const unknownGroup: DoclingGroupItem = {
+        self_ref: '#/groups/1',
+        parent: { $ref: '#/body' },
+        children: [],
+        content_layer: 'body',
+        name: 'unknown',
+        label: 'list',
+      };
+      const parentGroup = createMockGroupItem(0, ['#/groups/1', '#/texts/0']);
+      const doc = createMockDocument(texts, [parentGroup, unknownGroup]);
+      const resolver = new RefResolver(mockLogger, doc);
+
+      const result = MarkdownConverter.groupToMarkdown(parentGroup, resolver);
+
+      expect(result).toBe('- Valid item');
+    });
+
+    test('skips text items with empty text inside a group', () => {
+      const texts = [
+        createMockTextItem(0, '   '),
+        createMockTextItem(1, 'Valid item'),
+      ];
+      const group = createMockGroupItem(0, ['#/texts/0', '#/texts/1']);
+      const doc = createMockDocument(texts, [group]);
+      const resolver = new RefResolver(mockLogger, doc);
+
+      const result = MarkdownConverter.groupToMarkdown(group, resolver);
+
+      expect(result).toBe('- Valid item');
     });
   });
 

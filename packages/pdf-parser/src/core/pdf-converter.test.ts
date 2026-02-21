@@ -83,13 +83,12 @@ describe('PDFConverter', () => {
     vi.mocked(join).mockImplementation((...args) => args.join('/'));
 
     // Mock LocalFileServer
-    vi.mocked(LocalFileServer).mockImplementation(
-      () =>
-        ({
-          start: vi.fn().mockResolvedValue('http://127.0.0.1:12345/test.pdf'),
-          stop: vi.fn().mockResolvedValue(undefined),
-        }) as unknown as LocalFileServer,
-    );
+    vi.mocked(LocalFileServer).mockImplementation(function () {
+      return {
+        start: vi.fn().mockResolvedValue('http://127.0.0.1:12345/test.pdf'),
+        stop: vi.fn().mockResolvedValue(undefined),
+      } as unknown as LocalFileServer;
+    });
   });
 
   describe('constructor', () => {
@@ -948,9 +947,9 @@ describe('PDFConverter', () => {
         convert: vi.fn().mockResolvedValue('/tmp/test-image.pdf'),
         cleanup: vi.fn(),
       };
-      vi.mocked(ImagePdfConverter).mockImplementation(
-        () => mockImagePdfConverter as any,
-      );
+      vi.mocked(ImagePdfConverter).mockImplementation(function () {
+        return mockImagePdfConverter as any;
+      });
 
       const writeStream = { write: vi.fn(), end: vi.fn() };
       vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
@@ -1000,9 +999,9 @@ describe('PDFConverter', () => {
           .mockRejectedValue(new Error('ImageMagick conversion failed')),
         cleanup: vi.fn(),
       };
-      vi.mocked(ImagePdfConverter).mockImplementation(
-        () => mockImagePdfConverter as any,
-      );
+      vi.mocked(ImagePdfConverter).mockImplementation(function () {
+        return mockImagePdfConverter as any;
+      });
 
       const converterWithFallback = new PDFConverter(logger, client, true);
 
@@ -1045,9 +1044,9 @@ describe('PDFConverter', () => {
         convert: vi.fn().mockResolvedValue('/tmp/test-image.pdf'),
         cleanup: vi.fn(),
       };
-      vi.mocked(ImagePdfConverter).mockImplementation(
-        () => mockImagePdfConverter as any,
-      );
+      vi.mocked(ImagePdfConverter).mockImplementation(function () {
+        return mockImagePdfConverter as any;
+      });
 
       const converterWithFallback = new PDFConverter(logger, client, true);
 
@@ -1092,9 +1091,9 @@ describe('PDFConverter', () => {
         convert: vi.fn().mockResolvedValue('/tmp/test-image.pdf'),
         cleanup: vi.fn(),
       };
-      vi.mocked(ImagePdfConverter).mockImplementation(
-        () => mockImagePdfConverter as any,
-      );
+      vi.mocked(ImagePdfConverter).mockImplementation(function () {
+        return mockImagePdfConverter as any;
+      });
 
       const writeStream = { write: vi.fn(), end: vi.fn() };
       vi.mocked(createWriteStream).mockReturnValue(writeStream as any);

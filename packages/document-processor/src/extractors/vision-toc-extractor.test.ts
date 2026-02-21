@@ -26,7 +26,7 @@ vi.mock('node:path', () => ({
   resolve: vi.fn((...args: string[]) => args.join('/')),
 }));
 
-const mockLLMCaller = vi.mocked(LLMCaller);
+const mockCallVision = vi.mocked(LLMCaller.callVision);
 const mockLLMTokenUsageAggregator = vi.mocked(LLMTokenUsageAggregator);
 const mockReadFileSync = vi.mocked(fs.readFileSync);
 const mockPathResolve = vi.mocked(path.resolve);
@@ -47,7 +47,7 @@ describe('VisionTocExtractor', () => {
 - 제2장 연구 방법 ..... 10`;
 
   beforeEach(() => {
-    mockLLMCaller.callVision.mockClear();
+    mockCallVision.mockClear();
     mockLLMTokenUsageAggregator.mockClear();
     mockReadFileSync.mockClear();
     mockPathResolve.mockClear();
@@ -57,9 +57,9 @@ describe('VisionTocExtractor', () => {
       track: vi.fn(),
       logSummary: vi.fn(),
     };
-    mockLLMTokenUsageAggregator.mockReturnValue(
-      mockAggregator as unknown as LLMTokenUsageAggregator,
-    );
+    mockLLMTokenUsageAggregator.mockImplementation(function () {
+      return mockAggregator as unknown as LLMTokenUsageAggregator;
+    });
 
     mockModel = { modelId: 'test-model' } as LanguageModel;
     mockLogger = {
@@ -118,14 +118,14 @@ describe('VisionTocExtractor', () => {
       const result = await extractor.extract(0);
 
       expect(result).toBeNull();
-      expect(mockLLMCaller.callVision).not.toHaveBeenCalled();
+      expect(mockCallVision).not.toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[VisionTocExtractor] No pages to search',
       );
     });
 
     test('finds TOC in first batch', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -146,7 +146,7 @@ describe('VisionTocExtractor', () => {
       const result = await extractor.extract(20);
 
       expect(result).toBe(sampleTocMarkdown);
-      expect(mockLLMCaller.callVision).toHaveBeenCalledTimes(1);
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('TOC found in first batch'),
       );
@@ -154,7 +154,7 @@ describe('VisionTocExtractor', () => {
 
     test('finds TOC in second batch when not in first', async () => {
       // First batch: no TOC
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -173,7 +173,7 @@ describe('VisionTocExtractor', () => {
       });
 
       // Second batch: TOC found
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -194,14 +194,14 @@ describe('VisionTocExtractor', () => {
       const result = await extractor.extract(20);
 
       expect(result).toBe(sampleTocMarkdown);
-      expect(mockLLMCaller.callVision).toHaveBeenCalledTimes(2);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('TOC found in second batch'),
       );
     });
 
     test('returns null when TOC not found in any batch', async () => {
-      mockLLMCaller.callVision.mockResolvedValue({
+      mockCallVision.mockResolvedValue({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -222,7 +222,7 @@ describe('VisionTocExtractor', () => {
       const result = await extractor.extract(20);
 
       expect(result).toBeNull();
-      expect(mockLLMCaller.callVision).toHaveBeenCalledTimes(2);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[VisionTocExtractor] TOC not found in any batch',
       );
@@ -235,7 +235,7 @@ describe('VisionTocExtractor', () => {
 - 제2장 연구 방법 ..... 10`;
 
       // First batch: TOC found, continues
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: firstPart,
@@ -254,7 +254,7 @@ describe('VisionTocExtractor', () => {
       });
 
       // Continuation batch
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: secondPart,
@@ -276,7 +276,7 @@ describe('VisionTocExtractor', () => {
 
       // mergeMarkdown trims both parts and joins with newline
       expect(result).toBe(`${firstPart.trim()}\n${secondPart.trim()}`);
-      expect(mockLLMCaller.callVision).toHaveBeenCalledTimes(2);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[VisionTocExtractor] TOC continues on next pages, extracting more',
       );
@@ -284,7 +284,7 @@ describe('VisionTocExtractor', () => {
 
     test('handles continuation with no additional TOC content', async () => {
       // First batch: TOC found, indicates continuation
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -303,7 +303,7 @@ describe('VisionTocExtractor', () => {
       });
 
       // Continuation batch: no TOC content
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -328,7 +328,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('handles document with fewer pages than first batch size', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -357,7 +357,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('does not search second batch when document has only first batch pages', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -378,11 +378,11 @@ describe('VisionTocExtractor', () => {
       const result = await extractor.extract(10);
 
       expect(result).toBeNull();
-      expect(mockLLMCaller.callVision).toHaveBeenCalledTimes(1);
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
 
     test('loads correct page images', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -418,7 +418,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('passes correct options to LLMCaller', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -445,7 +445,7 @@ describe('VisionTocExtractor', () => {
 
       await customExtractor.extract(3);
 
-      expect(mockLLMCaller.callVision).toHaveBeenCalledWith(
+      expect(mockCallVision).toHaveBeenCalledWith(
         expect.objectContaining({
           primaryModel: mockModel,
           temperature: 0,
@@ -457,7 +457,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('uses default options', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -477,7 +477,7 @@ describe('VisionTocExtractor', () => {
 
       await extractor.extract(3);
 
-      expect(mockLLMCaller.callVision).toHaveBeenCalledWith(
+      expect(mockCallVision).toHaveBeenCalledWith(
         expect.objectContaining({
           temperature: 0,
           maxRetries: 3,
@@ -489,7 +489,7 @@ describe('VisionTocExtractor', () => {
       const fakeImageBuffer = Buffer.from('test-image-content');
       mockReadFileSync.mockReturnValue(fakeImageBuffer);
 
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -510,7 +510,7 @@ describe('VisionTocExtractor', () => {
       await extractor.extract(2);
 
       const expectedBase64 = fakeImageBuffer.toString('base64');
-      const callArgs = mockLLMCaller.callVision.mock.calls[0][0];
+      const callArgs = mockCallVision.mock.calls[0][0];
       const messages = callArgs.messages as Array<{
         role: string;
         content: Array<{ type: string; image?: string; text?: string }>;
@@ -529,7 +529,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('tracks token usage', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -562,7 +562,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('logs extraction progress', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -591,9 +591,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('propagates LLM errors', async () => {
-      mockLLMCaller.callVision.mockRejectedValueOnce(
-        new Error('API rate limit'),
-      );
+      mockCallVision.mockRejectedValueOnce(new Error('API rate limit'));
 
       await expect(extractor.extract(5)).rejects.toThrow('API rate limit');
     });
@@ -616,7 +614,7 @@ describe('VisionTocExtractor', () => {
         { firstBatchSize: 5 },
       );
 
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -634,7 +632,7 @@ describe('VisionTocExtractor', () => {
         usedFallback: false,
       });
 
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -670,7 +668,7 @@ describe('VisionTocExtractor', () => {
         { firstBatchSize: 5, secondBatchSize: 3 },
       );
 
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -688,7 +686,7 @@ describe('VisionTocExtractor', () => {
         usedFallback: false,
       });
 
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -716,7 +714,7 @@ describe('VisionTocExtractor', () => {
 
   describe('edge cases', () => {
     test('handles hasToc true but tocMarkdown null', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: null,
@@ -734,7 +732,7 @@ describe('VisionTocExtractor', () => {
         usedFallback: false,
       });
 
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -756,11 +754,11 @@ describe('VisionTocExtractor', () => {
 
       // Should treat as not found and continue to second batch
       expect(result).toBeNull();
-      expect(mockLLMCaller.callVision).toHaveBeenCalledTimes(2);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
     });
 
     test('handles hasToc true but empty tocMarkdown', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: '',
@@ -778,7 +776,7 @@ describe('VisionTocExtractor', () => {
         usedFallback: false,
       });
 
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: false,
           tocMarkdown: null,
@@ -803,7 +801,7 @@ describe('VisionTocExtractor', () => {
     });
 
     test('handles continuation when document ends before second batch', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: sampleTocMarkdown,
@@ -826,11 +824,11 @@ describe('VisionTocExtractor', () => {
 
       // Should return first batch result without continuation
       expect(result).toBe(sampleTocMarkdown);
-      expect(mockLLMCaller.callVision).toHaveBeenCalledTimes(1);
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
 
     test('handles single page document', async () => {
-      mockLLMCaller.callVision.mockResolvedValueOnce({
+      mockCallVision.mockResolvedValueOnce({
         output: {
           hasToc: true,
           tocMarkdown: '- Single Chapter ..... 1',

@@ -20,7 +20,9 @@ vi.mock('docling-sdk', () => {
     health: vi.fn<() => Promise<void>>(),
     destroy: vi.fn<() => void>(),
   };
-  const Docling = vi.fn(() => client);
+  const Docling = vi.fn(function () {
+    return client;
+  });
   return {
     Docling,
     __clientMock: client,
@@ -29,9 +31,9 @@ vi.mock('docling-sdk', () => {
 
 vi.mock('../environment/docling-environment', () => {
   const setupMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-  const DoclingEnvironment = vi.fn((_: any) => ({
-    setup: setupMock,
-  })) as any;
+  const DoclingEnvironment = vi.fn(function (_: any) {
+    return { setup: setupMock };
+  }) as any;
   (DoclingEnvironment as any).killProcessOnPort = vi
     .fn<(logger: any, port: number) => Promise<void>>()
     .mockResolvedValue(undefined);
@@ -43,7 +45,9 @@ vi.mock('../environment/docling-environment', () => {
 
 vi.mock('./pdf-converter', () => {
   const convert = vi.fn();
-  const PDFConverter = vi.fn(() => ({ convert }));
+  const PDFConverter = vi.fn(function () {
+    return { convert };
+  });
   return {
     PDFConverter,
     __convertMock: convert,
@@ -469,10 +473,12 @@ describe('PDFParser', () => {
 
       // Mock for startServer call during recovery
       const startServerMock = vi.fn().mockResolvedValue(undefined);
-      (DoclingEnvironment as any).mockImplementation(() => ({
-        setup: envMocks.setupMock,
-        startServer: startServerMock,
-      }));
+      (DoclingEnvironment as any).mockImplementation(function () {
+        return {
+          setup: envMocks.setupMock,
+          startServer: startServerMock,
+        };
+      });
 
       const logger = makeLogger();
       const parser = new PDFParser({ logger, port: 5001 });
@@ -540,10 +546,12 @@ describe('PDFParser', () => {
 
       // Mock for startServer call during recovery
       const startServerMock = vi.fn().mockResolvedValue(undefined);
-      (DoclingEnvironment as any).mockImplementation(() => ({
-        setup: envMocks.setupMock,
-        startServer: startServerMock,
-      }));
+      (DoclingEnvironment as any).mockImplementation(function () {
+        return {
+          setup: envMocks.setupMock,
+          startServer: startServerMock,
+        };
+      });
 
       const logger = makeLogger();
       const parser = new PDFParser({ logger, port: 5001 });

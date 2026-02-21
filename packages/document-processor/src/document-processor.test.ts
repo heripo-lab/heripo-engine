@@ -16,25 +16,31 @@ vi.mock('./parsers/caption-parser.js', () => ({
 
 // Mock utilities
 vi.mock('./utils/ref-resolver.js', () => ({
-  RefResolver: vi.fn(() => ({})),
+  RefResolver: vi.fn(function () {
+    return {};
+  }),
 }));
 
 vi.mock('./utils/id-generator.js', () => ({
-  IdGenerator: vi.fn(() => ({
-    generateChapterId: vi.fn(() => 'ch-001'),
-    generateImageId: vi.fn(() => 'img-001'),
-    generateTableId: vi.fn(() => 'tbl-001'),
-    generateFootnoteId: vi.fn(() => 'ftn-001'),
-  })),
+  IdGenerator: vi.fn(function () {
+    return {
+      generateChapterId: vi.fn(() => 'ch-001'),
+      generateImageId: vi.fn(() => 'img-001'),
+      generateTableId: vi.fn(() => 'tbl-001'),
+      generateFootnoteId: vi.fn(() => 'ftn-001'),
+    };
+  }),
 }));
 
 vi.mock('./parsers/page-range-parser.js', () => ({
-  PageRangeParser: vi.fn(() => ({
-    parse: vi.fn().mockResolvedValue({
-      pageRangeMap: { 1: { startPageNo: 1, endPageNo: 1 } },
-      usage: [],
-    }),
-  })),
+  PageRangeParser: vi.fn(function () {
+    return {
+      parse: vi.fn().mockResolvedValue({
+        pageRangeMap: { 1: { startPageNo: 1, endPageNo: 1 } },
+        usage: [],
+      }),
+    };
+  }),
 }));
 
 describe('DocumentProcessor', () => {
@@ -568,12 +574,11 @@ describe('DocumentProcessor', () => {
       const mockFallbackParseBatch = vi.fn().mockResolvedValue([
         { fullText: 'Caption B', num: 'B' }, // Reparsed result
       ]);
-      vi.mocked(CaptionParser).mockImplementation(
-        () =>
-          ({
-            parseBatch: mockFallbackParseBatch,
-          }) as any,
-      );
+      vi.mocked(CaptionParser).mockImplementation(function () {
+        return {
+          parseBatch: mockFallbackParseBatch,
+        } as any;
+      });
 
       const mockCaptionValidator = {
         validateBatch: vi.fn().mockResolvedValue([true, false]), // B fails validation
@@ -677,12 +682,11 @@ describe('DocumentProcessor', () => {
         { fullText: 'Caption A', num: 'A' },
         { fullText: 'Caption C', num: 'C' },
       ]);
-      vi.mocked(CaptionParser).mockImplementation(
-        () =>
-          ({
-            parseBatch: mockFallbackParseBatch,
-          }) as any,
-      );
+      vi.mocked(CaptionParser).mockImplementation(function () {
+        return {
+          parseBatch: mockFallbackParseBatch,
+        } as any;
+      });
 
       const mockCaptionValidator = {
         validateBatch: vi.fn().mockResolvedValue([false, true, false]), // A and C fail
