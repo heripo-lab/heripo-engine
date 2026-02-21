@@ -656,10 +656,15 @@ export class DocumentProcessor {
     }
 
     // Stage 5: Extract structure with LLM (with fallback retry)
-    const tocResult = await this.tocExtractor!.extract(markdown);
+    const totalPages = Object.keys(doclingDoc.pages).length;
+    const tocResult = await this.tocExtractor!.extract(markdown, {
+      totalPages,
+    });
 
-    // Track token usage
-    this.usageAggregator.track(tocResult.usage);
+    // Track token usage (initial extraction + any correction retries)
+    for (const usage of tocResult.usages) {
+      this.usageAggregator.track(usage);
+    }
 
     if (tocResult.entries.length === 0) {
       const reason =

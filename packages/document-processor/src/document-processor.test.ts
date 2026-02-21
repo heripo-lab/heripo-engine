@@ -264,15 +264,17 @@ describe('DocumentProcessor', () => {
           (processor as any).tocExtractor = {
             extract: vi.fn().mockResolvedValue({
               entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
-              usage: {
-                component: 'TocExtractor',
-                phase: 'extraction',
-                model: 'primary',
-                modelName: 'test-model',
-                inputTokens: 100,
-                outputTokens: 50,
-                totalTokens: 150,
-              },
+              usages: [
+                {
+                  component: 'TocExtractor',
+                  phase: 'extraction',
+                  model: 'primary',
+                  modelName: 'test-model',
+                  inputTokens: 100,
+                  outputTokens: 50,
+                  totalTokens: 150,
+                },
+              ],
             }),
           };
           (processor as any).visionTocExtractor = {
@@ -1487,15 +1489,17 @@ describe('DocumentProcessor', () => {
       const mockTocExtractor = {
         extract: vi.fn().mockResolvedValue({
           entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
-          usage: {
-            component: 'TocExtractor',
-            phase: 'extraction',
-            model: 'primary',
-            modelName: 'test-model',
-            inputTokens: 100,
-            outputTokens: 50,
-            totalTokens: 150,
-          },
+          usages: [
+            {
+              component: 'TocExtractor',
+              phase: 'extraction',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 50,
+              totalTokens: 150,
+            },
+          ],
         }),
       };
 
@@ -1616,15 +1620,17 @@ describe('DocumentProcessor', () => {
       const mockTocExtractor = {
         extract: vi.fn().mockResolvedValue({
           entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
-          usage: {
-            component: 'TocExtractor',
-            phase: 'extraction',
-            model: 'primary',
-            modelName: 'test-model',
-            inputTokens: 100,
-            outputTokens: 50,
-            totalTokens: 150,
-          },
+          usages: [
+            {
+              component: 'TocExtractor',
+              phase: 'extraction',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 50,
+              totalTokens: 150,
+            },
+          ],
         }),
       };
 
@@ -1732,15 +1738,17 @@ describe('DocumentProcessor', () => {
             { title: '제1장 서론', level: 1, pageNo: 1 },
             { title: '제2장 조사개요', level: 1, pageNo: 5 },
           ],
-          usage: {
-            component: 'TocExtractor',
-            phase: 'extraction',
-            model: 'primary',
-            modelName: 'test-model',
-            inputTokens: 100,
-            outputTokens: 50,
-            totalTokens: 150,
-          },
+          usages: [
+            {
+              component: 'TocExtractor',
+              phase: 'extraction',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 50,
+              totalTokens: 150,
+            },
+          ],
         }),
       };
 
@@ -1861,15 +1869,17 @@ describe('DocumentProcessor', () => {
       const mockTocExtractor = {
         extract: vi.fn().mockResolvedValue({
           entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
-          usage: {
-            component: 'TocExtractor',
-            phase: 'extraction',
-            model: 'primary',
-            modelName: 'test-model',
-            inputTokens: 100,
-            outputTokens: 50,
-            totalTokens: 150,
-          },
+          usages: [
+            {
+              component: 'TocExtractor',
+              phase: 'extraction',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 50,
+              totalTokens: 150,
+            },
+          ],
         }),
       };
 
@@ -2118,15 +2128,17 @@ describe('DocumentProcessor', () => {
       const mockTocExtractor = {
         extract: vi.fn().mockResolvedValue({
           entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
-          usage: {
-            component: 'TocExtractor',
-            phase: 'extraction',
-            model: 'primary',
-            modelName: 'test-model',
-            inputTokens: 100,
-            outputTokens: 50,
-            totalTokens: 150,
-          },
+          usages: [
+            {
+              component: 'TocExtractor',
+              phase: 'extraction',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 50,
+              totalTokens: 150,
+            },
+          ],
         }),
       };
 
@@ -2269,15 +2281,17 @@ describe('DocumentProcessor', () => {
       const mockTocExtractor = {
         extract: vi.fn().mockResolvedValue({
           entries: [],
-          usage: {
-            component: 'TocExtractor',
-            phase: 'extraction',
-            model: 'primary',
-            modelName: 'test-model',
-            inputTokens: 100,
-            outputTokens: 50,
-            totalTokens: 150,
-          },
+          usages: [
+            {
+              component: 'TocExtractor',
+              phase: 'extraction',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 50,
+              totalTokens: 150,
+            },
+          ],
         }),
       };
 

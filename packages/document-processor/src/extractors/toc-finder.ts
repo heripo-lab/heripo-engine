@@ -330,16 +330,34 @@ export class TocFinder {
   }
 
   /**
-   * Expand TOC area to consecutive pages
+   * Expand TOC area to consecutive pages (both backward and forward)
    */
   private expandToConsecutivePages(
     initial: TocAreaResult,
     doc: DoclingDocument,
   ): TocAreaResult {
     const itemRefs = [...initial.itemRefs];
+    const seenRefs = new Set<string>(itemRefs);
+    let startPage = initial.startPage;
     let endPage = initial.endPage;
 
-    // Look for continuation on subsequent pages
+    // Backward expansion (preceding pages)
+    for (let pageNo = initial.startPage - 1; pageNo >= 1; pageNo--) {
+      const continuationItems = this.findContinuationOnPage(doc, pageNo);
+      if (continuationItems.length === 0) {
+        break;
+      }
+
+      const newItems = continuationItems.filter((ref) => !seenRefs.has(ref));
+      for (const ref of newItems) {
+        seenRefs.add(ref);
+      }
+      itemRefs.unshift(...newItems);
+      startPage = pageNo;
+      this.logger.info(`[TocFinder] Expanded TOC backward to page ${pageNo}`);
+    }
+
+    // Forward expansion (subsequent pages)
     for (
       let pageNo = initial.endPage + 1;
       pageNo <= this.maxSearchPages;
@@ -350,13 +368,18 @@ export class TocFinder {
         break;
       }
 
-      itemRefs.push(...continuationItems);
+      const newItems = continuationItems.filter((ref) => !seenRefs.has(ref));
+      for (const ref of newItems) {
+        seenRefs.add(ref);
+      }
+      itemRefs.push(...newItems);
       endPage = pageNo;
+      this.logger.info(`[TocFinder] Expanded TOC forward to page ${pageNo}`);
     }
 
     return {
       itemRefs,
-      startPage: initial.startPage,
+      startPage,
       endPage,
     };
   }
