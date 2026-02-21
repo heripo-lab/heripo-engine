@@ -690,6 +690,38 @@ describe('TocExtractor', () => {
       expect(result.entries).toHaveLength(1);
     });
 
+    test('passes validation overrides to validator', async () => {
+      const extractorWithValidation = new TocExtractor(mockLogger, mockModel, {
+        skipValidation: false,
+        validation: { maxTitleLength: 100 },
+      });
+
+      mockLLMCaller.mockResolvedValueOnce({
+        output: {
+          entries: [{ title: 'Chapter 1', level: 1, pageNo: 1 }],
+        },
+        usage: {
+          component: 'TocExtractor',
+          phase: 'extraction',
+          model: 'primary',
+          modelName: 'test-model',
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+        },
+        usedFallback: false,
+      });
+
+      // Pass totalPages override - should merge with constructor validation options
+      const result = await extractorWithValidation.extract(
+        '- Chapter 1 ..... 1',
+        { totalPages: 200 },
+      );
+
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].title).toBe('Chapter 1');
+    });
+
     test('does not validate empty entries list', async () => {
       const extractorWithValidation = new TocExtractor(mockLogger, mockModel, {
         skipValidation: false,

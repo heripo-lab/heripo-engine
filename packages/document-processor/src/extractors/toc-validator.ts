@@ -20,6 +20,13 @@ export interface TocValidationOptions {
    * Maximum allowed title length (default: 200)
    */
   maxTitleLength?: number;
+
+  /**
+   * Maximum ratio of the first entry's page to total pages (default: 0.3)
+   * Used for V007 completeness check - if the first level-1 entry
+   * starts beyond max(50, totalPages * ratio), the TOC may be incomplete.
+   */
+  maxFirstEntryPageRatio?: number;
 }
 
 /**
@@ -28,6 +35,7 @@ export interface TocValidationOptions {
 const DEFAULT_OPTIONS: Required<TocValidationOptions> = {
   totalPages: Infinity,
   maxTitleLength: 200,
+  maxFirstEntryPageRatio: 0.3,
 };
 
 /**
@@ -59,6 +67,9 @@ export class TocValidator {
 
     // Validate all entries recursively
     this.validateEntries(entries, '', null, new Set<string>());
+
+    // V007: First entry page position (completeness check)
+    this.validateFirstEntryPagePosition(entries);
 
     const errorCount = this.issues.length;
 
@@ -239,6 +250,38 @@ export class TocValidator {
         message: `Duplicate entry: "${entry.title}" at page ${entry.pageNo}`,
         path,
         entry,
+      });
+    }
+  }
+
+  /**
+   * V007: Validate first entry page position (completeness check)
+   *
+   * If the first level-1 entry starts too late in the document,
+   * earlier entries might be missing from the TOC.
+   */
+  private validateFirstEntryPagePosition(entries: TocEntry[]): void {
+    if (entries.length === 0) {
+      return;
+    }
+
+    // Skip when totalPages is not provided (Infinity)
+    if (!isFinite(this.options.totalPages)) {
+      return;
+    }
+
+    const firstEntry = entries[0];
+    const threshold = Math.max(
+      50,
+      Math.floor(this.options.totalPages * this.options.maxFirstEntryPageRatio),
+    );
+
+    if (firstEntry.pageNo > threshold) {
+      this.addIssue({
+        code: 'V007',
+        message: `TOC may be incomplete - first entry starts at page ${firstEntry.pageNo}, expected within first ${threshold} pages. Earlier entries might be missing.`,
+        path: '[0]',
+        entry: firstEntry,
       });
     }
   }

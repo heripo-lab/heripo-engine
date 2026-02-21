@@ -874,6 +874,158 @@ describe('TocFinder', () => {
       });
     });
 
+    describe('backward expansion', () => {
+      test('expands TOC to preceding pages (backward expansion)', () => {
+        // Structure analysis picks page 4 group, but page 3 also has TOC content
+        const texts = [
+          // Page 3: TOC-like items
+          createMockTextItem(0, 'Chapter 1 ..... 1', 3, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter 2 ..... 10', 3, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Chapter 3 ..... 20', 3, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          // Page 4: TOC keyword triggers keyword search
+          createMockTextItem(3, '목차', 4, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(4, 'Chapter 4 ..... 30', 4, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(5, 'Chapter 5 ..... 40', 4, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(6, 'Chapter 6 ..... 50', 4, {
+            parent: { $ref: '#/groups/1' },
+          }),
+        ];
+        const groups = [
+          createMockGroupItem(0, ['#/texts/0', '#/texts/1', '#/texts/2']),
+          createMockGroupItem(1, [
+            '#/texts/3',
+            '#/texts/4',
+            '#/texts/5',
+            '#/texts/6',
+          ]),
+        ];
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        expect(result.startPage).toBe(3);
+        expect(result.endPage).toBe(4);
+        expect(result.itemRefs).toContain('#/groups/0');
+        expect(result.itemRefs).toContain('#/groups/1');
+        // Backward-expanded items should come first
+        expect(result.itemRefs.indexOf('#/groups/0')).toBeLessThan(
+          result.itemRefs.indexOf('#/groups/1'),
+        );
+      });
+
+      test('expands bidirectionally for multi-page TOC', () => {
+        const texts = [
+          // Page 2: TOC items (backward)
+          createMockTextItem(0, 'Part A ..... 1', 2, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Part B ..... 10', 2, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Part C ..... 20', 2, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          // Page 3: TOC keyword (initial)
+          createMockTextItem(3, '목차', 3, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(4, 'Part D ..... 30', 3, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          // Page 4: TOC items (forward)
+          createMockTextItem(5, 'Part E ..... 40', 4, {
+            parent: { $ref: '#/groups/2' },
+          }),
+          createMockTextItem(6, 'Part F ..... 50', 4, {
+            parent: { $ref: '#/groups/2' },
+          }),
+          createMockTextItem(7, 'Part G ..... 60', 4, {
+            parent: { $ref: '#/groups/2' },
+          }),
+        ];
+        const groups = [
+          createMockGroupItem(0, ['#/texts/0', '#/texts/1', '#/texts/2']),
+          createMockGroupItem(1, ['#/texts/3', '#/texts/4']),
+          createMockGroupItem(2, ['#/texts/5', '#/texts/6', '#/texts/7']),
+        ];
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        expect(result.startPage).toBe(2);
+        expect(result.endPage).toBe(4);
+        expect(result.itemRefs).toContain('#/groups/0');
+        expect(result.itemRefs).toContain('#/groups/1');
+        expect(result.itemRefs).toContain('#/groups/2');
+      });
+
+      test('stops backward expansion when no TOC content found', () => {
+        const texts = [
+          // Page 1: non-TOC content
+          createMockTextItem(0, 'Some random text', 1),
+          // Page 2: TOC keyword
+          createMockTextItem(1, '목차', 2, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Chapter 1 ..... 1', 2, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        const groups = [createMockGroupItem(0, ['#/texts/1', '#/texts/2'])];
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        // Should not expand backward since page 1 has no TOC content
+        expect(result.startPage).toBe(2);
+        expect(result.endPage).toBe(2);
+        expect(result.itemRefs).toHaveLength(1);
+        expect(result.itemRefs).toContain('#/groups/0');
+      });
+
+      test('does not expand backward when initial page is 1', () => {
+        const texts = [
+          createMockTextItem(0, '목차', 1, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter 1 ..... 1', 1, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        const groups = [createMockGroupItem(0, ['#/texts/0', '#/texts/1'])];
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        expect(result.startPage).toBe(1);
+        expect(result.endPage).toBe(1);
+      });
+    });
+
     describe('isGroupTocLike edge cases', () => {
       test('returns false for group with unsupported name', () => {
         // Create text items that look like TOC but parent group has unsupported name

@@ -293,6 +293,102 @@ describe('TocValidator', () => {
       });
     });
 
+    describe('V007: First entry page position (completeness)', () => {
+      test('returns error when first entry starts too late', () => {
+        const validatorWithPages = new TocValidator({ totalPages: 200 });
+        const entries: TocEntry[] = [
+          { title: 'Chapter 8', level: 1, pageNo: 95 },
+        ];
+
+        const result = validatorWithPages.validate(entries);
+
+        expect(result.valid).toBe(false);
+        const v007Issue = result.issues.find((i) => i.code === 'V007');
+        expect(v007Issue).toBeDefined();
+        expect(v007Issue!.message).toContain('TOC may be incomplete');
+        expect(v007Issue!.message).toContain(
+          'Earlier entries might be missing',
+        );
+      });
+
+      test('passes when first entry starts early', () => {
+        const validatorWithPages = new TocValidator({ totalPages: 200 });
+        const entries: TocEntry[] = [
+          { title: 'Chapter 1', level: 1, pageNo: 1 },
+          { title: 'Chapter 2', level: 1, pageNo: 50 },
+        ];
+
+        const result = validatorWithPages.validate(entries);
+
+        const v007Issue = result.issues.find((i) => i.code === 'V007');
+        expect(v007Issue).toBeUndefined();
+      });
+
+      test('skips V007 when totalPages not provided', () => {
+        const validatorNoPages = new TocValidator();
+        const entries: TocEntry[] = [
+          { title: 'Chapter 8', level: 1, pageNo: 500 },
+        ];
+
+        const result = validatorNoPages.validate(entries);
+
+        const v007Issue = result.issues.find((i) => i.code === 'V007');
+        expect(v007Issue).toBeUndefined();
+      });
+
+      test('respects custom maxFirstEntryPageRatio', () => {
+        const validatorCustomRatio = new TocValidator({
+          totalPages: 200,
+          maxFirstEntryPageRatio: 0.1,
+        });
+        // threshold = max(50, 200 * 0.1) = max(50, 20) = 50
+        const entries: TocEntry[] = [
+          { title: 'Chapter 5', level: 1, pageNo: 51 },
+        ];
+
+        const result = validatorCustomRatio.validate(entries);
+
+        const v007Issue = result.issues.find((i) => i.code === 'V007');
+        expect(v007Issue).toBeDefined();
+      });
+
+      test('uses max(50, ratio) threshold for short documents', () => {
+        // For a 100-page document with ratio 0.3: threshold = max(50, 30) = 50
+        const validatorShortDoc = new TocValidator({ totalPages: 100 });
+        const entries: TocEntry[] = [
+          { title: 'Chapter 3', level: 1, pageNo: 45 },
+        ];
+
+        const result = validatorShortDoc.validate(entries);
+
+        // 45 <= 50, so should pass
+        const v007Issue = result.issues.find((i) => i.code === 'V007');
+        expect(v007Issue).toBeUndefined();
+      });
+
+      test('uses ratio threshold for large documents', () => {
+        // For a 500-page document with ratio 0.3: threshold = max(50, 150) = 150
+        const validatorLargeDoc = new TocValidator({ totalPages: 500 });
+        const entries: TocEntry[] = [
+          { title: 'Chapter 10', level: 1, pageNo: 151 },
+        ];
+
+        const result = validatorLargeDoc.validate(entries);
+
+        const v007Issue = result.issues.find((i) => i.code === 'V007');
+        expect(v007Issue).toBeDefined();
+      });
+
+      test('skips V007 for empty entries', () => {
+        const validatorWithPages = new TocValidator({ totalPages: 200 });
+        const entries: TocEntry[] = [];
+
+        const result = validatorWithPages.validate(entries);
+
+        expect(result.valid).toBe(true);
+      });
+    });
+
     describe('Complex scenarios', () => {
       test('validates deeply nested entries', () => {
         const entries: TocEntry[] = [

@@ -85,12 +85,14 @@ export class TocExtractor extends TextLLMComponent {
    * Extract TOC structure from Markdown
    *
    * @param markdown - Markdown representation of TOC area
+   * @param validationOverrides - Optional overrides for validation options (merged with constructor options)
    * @returns Object with entries array and token usage information
    * @throws {TocParseError} When LLM fails to parse structure
    * @throws {TocValidationError} When validation fails
    */
   async extract(
     markdown: string,
+    validationOverrides?: Partial<TocValidationOptions>,
   ): Promise<{ entries: TocEntry[]; usage: ExtendedTokenUsage }> {
     this.log('info', `Starting TOC extraction (${markdown.length} chars)`);
 
@@ -113,7 +115,7 @@ export class TocExtractor extends TextLLMComponent {
 
       // Validate entries
       if (!this.skipValidation) {
-        this.validateEntries(entries);
+        this.validateEntries(entries, validationOverrides);
       }
 
       this.log(
@@ -142,12 +144,16 @@ export class TocExtractor extends TextLLMComponent {
    *
    * @throws {TocValidationError} When validation fails
    */
-  private validateEntries(entries: TocEntry[]): void {
+  private validateEntries(
+    entries: TocEntry[],
+    overrides?: Partial<TocValidationOptions>,
+  ): void {
     if (entries.length === 0) {
       return;
     }
 
-    const validator = new TocValidator(this.validationOptions);
+    const options = { ...this.validationOptions, ...overrides };
+    const validator = new TocValidator(options);
     validator.validateOrThrow(entries);
   }
 
