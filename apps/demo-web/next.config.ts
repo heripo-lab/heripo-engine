@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['@heripo/pdf-parser'],
   compiler: {
     removeConsole:
       process.env.NODE_ENV === 'production' ? { exclude: ['error'] } : false,
