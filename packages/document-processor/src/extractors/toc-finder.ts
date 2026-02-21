@@ -337,6 +337,7 @@ export class TocFinder {
     doc: DoclingDocument,
   ): TocAreaResult {
     const itemRefs = [...initial.itemRefs];
+    const seenRefs = new Set<string>(itemRefs);
     let startPage = initial.startPage;
     let endPage = initial.endPage;
 
@@ -347,7 +348,11 @@ export class TocFinder {
         break;
       }
 
-      itemRefs.unshift(...continuationItems);
+      const newItems = continuationItems.filter((ref) => !seenRefs.has(ref));
+      for (const ref of newItems) {
+        seenRefs.add(ref);
+      }
+      itemRefs.unshift(...newItems);
       startPage = pageNo;
       this.logger.info(`[TocFinder] Expanded TOC backward to page ${pageNo}`);
     }
@@ -363,7 +368,11 @@ export class TocFinder {
         break;
       }
 
-      itemRefs.push(...continuationItems);
+      const newItems = continuationItems.filter((ref) => !seenRefs.has(ref));
+      for (const ref of newItems) {
+        seenRefs.add(ref);
+      }
+      itemRefs.push(...newItems);
       endPage = pageNo;
       this.logger.info(`[TocFinder] Expanded TOC forward to page ${pageNo}`);
     }

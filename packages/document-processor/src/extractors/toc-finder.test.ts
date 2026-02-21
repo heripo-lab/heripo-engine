@@ -1024,6 +1024,63 @@ describe('TocFinder', () => {
         expect(result.startPage).toBe(1);
         expect(result.endPage).toBe(1);
       });
+
+      test('deduplicates refs when backward expansion returns already-known ref', () => {
+        // Scenario: keyword is on page 3, group spans pages 2-3.
+        // initial.itemRefs contains #/groups/1 (from keyword search on page 3).
+        // Backward expansion finds page 2, where #/groups/1 has its first child.
+        // Without dedup, #/groups/1 would appear twice.
+        const texts = [
+          // Page 2: first children of group 1 (same group as keyword page)
+          createMockTextItem(0, 'Chapter 1 ..... 1', 2, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(1, 'Chapter 2 ..... 10', 2, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(2, 'Chapter 3 ..... 20', 2, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          // Page 3: keyword + more children of the same group
+          createMockTextItem(3, '목차', 3, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(4, 'Chapter 4 ..... 30', 3, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(5, 'Chapter 5 ..... 40', 3, {
+            parent: { $ref: '#/groups/1' },
+          }),
+          createMockTextItem(6, 'Chapter 6 ..... 50', 3, {
+            parent: { $ref: '#/groups/1' },
+          }),
+        ];
+        const groups = [
+          // group 1 spans both page 2 and page 3
+          createMockGroupItem(1, [
+            '#/texts/0',
+            '#/texts/1',
+            '#/texts/2',
+            '#/texts/3',
+            '#/texts/4',
+            '#/texts/5',
+            '#/texts/6',
+          ]),
+        ];
+        const doc = createMockDocument(texts, groups);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        // #/groups/1 should appear exactly once despite backward expansion
+        const occurrences = result.itemRefs.filter(
+          (ref) => ref === '#/groups/1',
+        );
+        expect(occurrences).toHaveLength(1);
+        expect(result.startPage).toBeLessThanOrEqual(3);
+      });
     });
 
     describe('isGroupTocLike edge cases', () => {
