@@ -7,6 +7,7 @@ import type { QueuedTask, SSEEvent } from './task-queue-manager';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { readFileSync, writeFileSync } from 'fs';
 
+import { featureFlags } from '../config/feature-flags';
 import { calculateCost } from '../cost/model-pricing';
 import { createLog } from '../db/repositories/log-repository';
 import {
@@ -161,7 +162,7 @@ function createTaskLogger(
     const timestamp = new Date().toISOString();
 
     // Detect VLM fallback - reset progress back to PDF parsing
-    if (message.startsWith(VLM_FALLBACK_PREFIX)) {
+    if (featureFlags.enableVlm && message.startsWith(VLM_FALLBACK_PREFIX)) {
       detectedSteps.clear();
       emitProgress('pdf-parse', 0);
     }
@@ -263,7 +264,7 @@ export async function runTaskWorker(
     );
 
     // Hanja quality assessment: auto-fallback to VLM if KCJ corruption detected
-    if (pipelineType === 'standard') {
+    if (featureFlags.enableVlm && pipelineType === 'standard') {
       const assessment = await processor.assessHanjaQuality(
         doclingDocument,
         outputPath,

@@ -3,6 +3,8 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { use, useEffect, useState } from 'react';
 
+import { featureFlags } from '~/lib/config/feature-flags';
+
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
 import { ConfirmDialog } from '~/components/ui/confirm-dialog';
@@ -51,7 +53,7 @@ export default function ProcessPage({ params }: PageProps) {
   const pipeline = task?.options?.pipeline ?? 'standard';
 
   useEffect(() => {
-    if (vlmFallbackTriggered) {
+    if (featureFlags.enableVlm && vlmFallbackTriggered) {
       setShowVlmFallback(true);
     }
   }, [vlmFallbackTriggered]);
@@ -126,10 +128,12 @@ export default function ProcessPage({ params }: PageProps) {
           pipeline={pipeline}
         />
 
-        <VlmFallbackDialog
-          open={showVlmFallback}
-          onOpenChange={setShowVlmFallback}
-        />
+        {featureFlags.enableVlm && (
+          <VlmFallbackDialog
+            open={showVlmFallback}
+            onOpenChange={setShowVlmFallback}
+          />
+        )}
       </div>
     </div>
   );

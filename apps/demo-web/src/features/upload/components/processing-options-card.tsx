@@ -2,6 +2,8 @@
 
 import { Cpu, Info } from 'lucide-react';
 
+import { featureFlags } from '~/lib/config/feature-flags';
+
 import { Badge } from '~/components/ui/badge';
 import {
   Card,
@@ -136,91 +138,95 @@ export function ProcessingOptionsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Pipeline Selection */}
-        <form.Field name="pipeline">
-          {(field: StringFieldApi) => (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Pipeline</label>
-              <p className="text-muted-foreground text-xs">
-                Standard uses OCR; VLM uses a local vision model for parsing
-              </p>
-              <DisabledWrapper disabled={disabled}>
-                <Select
-                  value={field.state.value}
-                  onValueChange={field.handleChange}
-                  disabled={disabled}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select pipeline" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="standard">Standard (OCR)</SelectItem>
-                    <SelectItem value="vlm">
-                      VLM (Vision Language Model)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </DisabledWrapper>
-            </div>
-          )}
-        </form.Field>
+        {featureFlags.enableVlm && (
+          <form.Field name="pipeline">
+            {(field: StringFieldApi) => (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Pipeline</label>
+                <p className="text-muted-foreground text-xs">
+                  Standard uses OCR; VLM uses a local vision model for parsing
+                </p>
+                <DisabledWrapper disabled={disabled}>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={field.handleChange}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select pipeline" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="standard">Standard (OCR)</SelectItem>
+                      <SelectItem value="vlm">
+                        VLM (Vision Language Model)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </DisabledWrapper>
+              </div>
+            )}
+          </form.Field>
+        )}
 
         {/* VLM Model Selection */}
-        <form.Field name="vlmModel">
-          {(field: OptionalStringFieldApi) => (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium">VLM Model</label>
-                <Badge variant="secondary" className="gap-1 text-xs">
-                  <Cpu className="h-3 w-3" />
-                  Local
-                </Badge>
+        {featureFlags.enableVlm && (
+          <form.Field name="vlmModel">
+            {(field: OptionalStringFieldApi) => (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium">VLM Model</label>
+                  <Badge variant="secondary" className="gap-1 text-xs">
+                    <Cpu className="h-3 w-3" />
+                    Local
+                  </Badge>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Local vision model for VLM pipeline. Also used for hanja
+                  auto-fallback.
+                </p>
+                <DisabledWrapper disabled={disabled}>
+                  <Select
+                    value={field.state.value ?? '__default__'}
+                    onValueChange={(v) =>
+                      field.handleChange(v === '__default__' ? undefined : v)
+                    }
+                    disabled={disabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={`Default: ${DEFAULT_VLM_MODEL_KEY}`}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">
+                        Default ({DEFAULT_VLM_MODEL_KEY})
+                      </SelectItem>
+                      <SelectGroup>
+                        <SelectLabel>DocTags</SelectLabel>
+                        {VLM_DOCTAGS_MODELS.map((model) => (
+                          <SelectItem key={model.key} value={model.key}>
+                            {model.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                      <SelectGroup>
+                        <SelectLabel>Markdown</SelectLabel>
+                        {VLM_MARKDOWN_MODELS.map((model) => (
+                          <SelectItem key={model.key} value={model.key}>
+                            <span>{model.label}</span>
+                            <span className="text-muted-foreground ml-2 text-xs">
+                              {model.description}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </DisabledWrapper>
               </div>
-              <p className="text-muted-foreground text-xs">
-                Local vision model for VLM pipeline. Also used for hanja
-                auto-fallback.
-              </p>
-              <DisabledWrapper disabled={disabled}>
-                <Select
-                  value={field.state.value ?? '__default__'}
-                  onValueChange={(v) =>
-                    field.handleChange(v === '__default__' ? undefined : v)
-                  }
-                  disabled={disabled}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={`Default: ${DEFAULT_VLM_MODEL_KEY}`}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__default__">
-                      Default ({DEFAULT_VLM_MODEL_KEY})
-                    </SelectItem>
-                    <SelectGroup>
-                      <SelectLabel>DocTags</SelectLabel>
-                      {VLM_DOCTAGS_MODELS.map((model) => (
-                        <SelectItem key={model.key} value={model.key}>
-                          {model.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                    <SelectGroup>
-                      <SelectLabel>Markdown</SelectLabel>
-                      {VLM_MARKDOWN_MODELS.map((model) => (
-                        <SelectItem key={model.key} value={model.key}>
-                          <span>{model.label}</span>
-                          <span className="text-muted-foreground ml-2 text-xs">
-                            {model.description}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </DisabledWrapper>
-            </div>
-          )}
-        </form.Field>
+            )}
+          </form.Field>
+        )}
 
         {/* OCR Languages */}
         <form.Field name="ocrLanguages">
