@@ -163,6 +163,11 @@ export async function POST(request: NextRequest) {
 
         // OTP passed - skip Turnstile
         isOtpBypass = true;
+
+        // OTP bypass: use user-provided options instead of defaults
+        if (validation.data.options) {
+          options = validation.data.options;
+        }
       } else {
         // Step 2: No bypassCode - require Turnstile
         if (!turnstileToken) {

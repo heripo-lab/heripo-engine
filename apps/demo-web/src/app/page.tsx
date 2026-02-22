@@ -282,16 +282,15 @@ function HomePageContent() {
               <div className="mt-8 space-y-6">
                 {/* Row 1: Processing + Advanced Options */}
                 <div className="grid gap-6 md:grid-cols-2">
-                  {/* TEMP:vlm-flag — remove enableVlmOverride prop */}
                   <ProcessingOptionsCard
-                    disabled={isPublicMode}
+                    disabled={isPublicMode && !isOtpMode}
                     enableVlmOverride={isOtpMode}
                   />
-                  <AdvancedOptionsCard disabled={isPublicMode} />
+                  <AdvancedOptionsCard disabled={isPublicMode && !isOtpMode} />
                 </div>
 
                 {/* Row 2: LLM Model Settings (full width) */}
-                <LLMModelSettingsCard disabled={isPublicMode} />
+                <LLMModelSettingsCard disabled={isPublicMode && !isOtpMode} />
               </div>
 
               {/* Start Button */}

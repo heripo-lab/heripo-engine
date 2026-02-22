@@ -184,6 +184,9 @@ export async function POST(request: NextRequest) {
 
         // OTP passed - skip Turnstile
         isOtpBypass = true;
+
+        // OTP bypass: use user-provided options instead of defaults
+        options = optionsValidation.data;
       } else {
         // Step 2: No bypassCode - require Turnstile
         if (!turnstileToken) {
@@ -271,7 +274,7 @@ export async function POST(request: NextRequest) {
       clientIP: clientInfo.ip,
       userAgent: clientInfo.userAgent,
       filename: file.name,
-      isOtpBypass: otpMode, // TEMP:vlm-flag
+      isOtpBypass: otpMode,
     });
 
     // Send webhook for task started

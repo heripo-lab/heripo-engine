@@ -8,7 +8,6 @@ import { DocumentProcessor } from '@heripo/document-processor';
 import { readFileSync, writeFileSync } from 'fs';
 
 import { featureFlags } from '../config/feature-flags';
-// TEMP:vlm-flag
 import { calculateCost } from '../cost/model-pricing';
 import { createLog } from '../db/repositories/log-repository';
 import {
@@ -144,7 +143,7 @@ function createTaskLogger(
   taskId: string,
   emitter: EventEmitter,
   emitProgress: (step: string, percent: number) => void,
-  enableVlm: boolean, // TEMP:vlm-flag — remove param, inline true
+  enableVlm: boolean,
 ): TaskLoggerContext {
   const detectedSteps = new Set<string>();
 
@@ -165,7 +164,6 @@ function createTaskLogger(
 
     // Detect VLM fallback - reset progress back to PDF parsing
     if (enableVlm && message.startsWith(VLM_FALLBACK_PREFIX)) {
-      // TEMP:vlm-flag — remove enableVlm guard
       detectedSteps.clear();
       emitProgress('pdf-parse', 0);
     }
@@ -208,7 +206,7 @@ export async function runTaskWorker(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   const { taskId, filePath, options } = task;
-  const enableVlm = featureFlags.enableVlm || task.isOtpBypass; // TEMP:vlm-flag — delete line
+  const enableVlm = featureFlags.enableVlm || task.isOtpBypass;
 
   const emitProgress = (step: string, percent: number) => {
     updateTaskProgress(taskId, step, percent);
@@ -219,7 +217,7 @@ export async function runTaskWorker(
     emitter.emit(`task:${taskId}`, event);
   };
 
-  const { logger } = createTaskLogger(taskId, emitter, emitProgress, enableVlm); // TEMP:vlm-flag — remove enableVlm arg
+  const { logger } = createTaskLogger(taskId, emitter, emitProgress, enableVlm);
 
   const pdfParserManager = PDFParserManager.getInstance();
 
@@ -269,7 +267,6 @@ export async function runTaskWorker(
 
     // Hanja quality assessment: auto-fallback to VLM if KCJ corruption detected
     if (enableVlm && pipelineType === 'standard') {
-      // TEMP:vlm-flag — remove enableVlm guard
       const assessment = await processor.assessHanjaQuality(
         doclingDocument,
         outputPath,

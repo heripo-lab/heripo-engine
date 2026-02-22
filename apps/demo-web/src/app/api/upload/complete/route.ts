@@ -205,7 +205,7 @@ export async function POST(request: NextRequest) {
       clientIP: clientInfo.ip,
       userAgent: request.headers.get('user-agent') || 'unknown',
       filename: uploadSession.filename,
-      isOtpBypass: uploadSession.isOtpBypass, // TEMP:vlm-flag
+      isOtpBypass: uploadSession.isOtpBypass,
     });
 
     // Send webhook for task started

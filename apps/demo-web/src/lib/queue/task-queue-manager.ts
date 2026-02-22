@@ -20,7 +20,6 @@ export interface QueuedTask {
   clientIP: string;
   userAgent: string;
   filename: string;
-  // TEMP:vlm-flag — OTP bypass overrides feature flags
   isOtpBypass: boolean;
 }
 
