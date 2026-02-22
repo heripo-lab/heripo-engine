@@ -10,7 +10,6 @@ import { featureFlags } from '~/lib/config/feature-flags';
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
 import { ConfirmDialog } from '~/components/ui/confirm-dialog';
-import { Progress } from '~/components/ui/progress';
 import {
   LogViewer,
   ProcessErrorAlert,
@@ -91,7 +90,7 @@ export default function ProcessPage({ params }: PageProps) {
           onCancel={handleCancelClick}
           isCancelling={deleteTaskMutation.isPending}
         />
-        {isProcessing && <Progress value={progress} indeterminate />}
+        {/*{isProcessing && <Progress value={progress} indeterminate />}*/}
         <ProcessErrorAlert error={error} />
         <div className="flex flex-col gap-6 lg:flex-row">
           <div className="w-full lg:w-2/5">
