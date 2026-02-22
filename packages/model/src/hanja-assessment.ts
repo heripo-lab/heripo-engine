@@ -20,7 +20,7 @@ export interface HanjaAssessment {
   severity: 'none' | 'minor' | 'severe';
 
   /**
-   * Total number of pages containing KCJ (KCJ) text
+   * Total number of text pages considered as candidates for assessment
    */
   kcjPageCount: number;
 

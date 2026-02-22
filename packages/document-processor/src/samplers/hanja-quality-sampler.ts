@@ -12,9 +12,10 @@ import { z } from 'zod';
 import { VisionLLMComponent } from '../core';
 
 /**
- * Minimum number of KCJ characters on a page to consider it for sampling
+ * Minimum text length on a page to consider it for sampling.
+ * Pages with fewer characters (e.g., page numbers, headers only) are excluded.
  */
-const MIN_KCJ_CHARS_THRESHOLD = 5;
+const MIN_TEXT_LENGTH = 100;
 
 /**
  * Maximum number of pages to sample for quality assessment
@@ -38,16 +39,6 @@ const IMAGE_PAGE_TEXT_THRESHOLD = 50;
  * (0.5 = 50% of sampled pages have severe corruption)
  */
 const CORRUPTION_THRESHOLD = 0.5;
-
-/**
- * Unicode range regex for KCJ characters (Chinese/Japanese/Korean ideographs)
- *
- * Covers:
- * - KCJ Unified Ideographs (4E00-9FFF)
- * - KCJ Unified Ideographs Extension A (3400-4DBF)
- * - KCJ Compatibility Ideographs (F900-FAFF)
- */
-const KCJ_CHAR_REGEX = /[\u4E00-\u9FFF\u3400-\u4DBF\uF900-\uFAFF]/g;
 
 /**
  * Schema for Vision LLM response evaluating KCJ character quality
@@ -78,11 +69,11 @@ const HanjaQualityResponseSchema = z.object({
 type HanjaQualityResponse = z.infer<typeof HanjaQualityResponseSchema>;
 
 /**
- * Page data with KCJ character density information
+ * Page data with text density information
  */
-interface KcjPageData {
+interface PageData {
   pageNo: number;
-  kcjCharCount: number;
+  textLength: number;
   texts: string[];
 }
 
@@ -137,29 +128,29 @@ export class HanjaQualitySampler extends VisionLLMComponent {
         `image-only pages excluded: ${imageOnlyPages.size}`,
     );
 
-    // Step 2: Find ALL pages with KCJ characters (no filtering)
-    const kcjPages = this.findKcjPages(doclingDoc);
+    // Step 2: Find ALL pages with substantial text content (no filtering)
+    const textPages = this.getTextPages(doclingDoc);
 
-    if (kcjPages.length === 0) {
-      this.log('info', 'No KCJ characters found in document');
+    if (textPages.length === 0) {
+      this.log('info', 'No text pages found for assessment');
       return {
         needsVlmReparse: false,
         severity: 'none',
         kcjPageCount: 0,
         sampledPageCount: 0,
         corruptedRatio: 0,
-        reason: 'No KCJ characters found in document',
+        reason: 'No text pages found for assessment',
       };
     }
 
     this.log(
       'info',
-      `Found ${kcjPages.length} pages with KCJ characters (threshold: ${MIN_KCJ_CHARS_THRESHOLD})`,
+      `Found ${textPages.length} text pages (min length: ${MIN_TEXT_LENGTH})`,
     );
 
     // Step 3: Select pages to sample (prefer eligible, non-image pages; fallback to all)
     const sampled = this.selectSamplePages(
-      kcjPages,
+      textPages,
       totalPages,
       imageOnlyPages,
     );
@@ -173,7 +164,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
 
     // Step 5: Aggregate results
     const assessment = this.aggregateResults(
-      kcjPages.length,
+      textPages.length,
       sampled.length,
       results,
     );
@@ -242,68 +233,63 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   /**
-   * Find all pages containing KCJ characters above the threshold.
-   * No filtering is applied here — filtering happens during sample selection.
+   * Get all pages with substantial text content.
+   * Pages with fewer characters than MIN_TEXT_LENGTH (e.g., page numbers, headers only) are excluded.
    */
-  private findKcjPages(doclingDoc: DoclingDocument): KcjPageData[] {
-    const pageMap = new Map<number, { kcjCount: number; texts: string[] }>();
+  private getTextPages(doclingDoc: DoclingDocument): PageData[] {
+    const pageMap = new Map<number, { textLength: number; texts: string[] }>();
 
     for (const text of doclingDoc.texts) {
       const pageNo = this.getPageNo(text);
-      const kcjChars = text.text.match(KCJ_CHAR_REGEX);
-      if (!kcjChars || kcjChars.length === 0) continue;
-
-      const entry = pageMap.get(pageNo) ?? { kcjCount: 0, texts: [] };
-      entry.kcjCount += kcjChars.length;
+      const entry = pageMap.get(pageNo) ?? { textLength: 0, texts: [] };
+      entry.textLength += text.text.length;
       entry.texts.push(text.text);
       pageMap.set(pageNo, entry);
     }
 
     return Array.from(pageMap.entries())
-      .filter(([, data]) => data.kcjCount >= MIN_KCJ_CHARS_THRESHOLD)
+      .filter(([, data]) => data.textLength >= MIN_TEXT_LENGTH)
       .map(([pageNo, data]) => ({
         pageNo,
-        kcjCharCount: data.kcjCount,
+        textLength: data.textLength,
         texts: data.texts,
       }));
   }
 
   /**
-   * Select sample pages with highest KCJ density.
+   * Select sample pages with highest text density.
    * Prefers pages in the eligible range (not edge-trimmed) and not image-only.
-   * Falls back to all KCJ pages if filtering leaves too few candidates.
+   * Falls back to all text pages if filtering leaves too few candidates.
    */
   private selectSamplePages(
-    kcjPages: KcjPageData[],
+    textPages: PageData[],
     totalPages: number,
     imageOnlyPages: Set<number>,
-  ): KcjPageData[] {
+  ): PageData[] {
     const { frontCutoff, backCutoff } = this.getEligiblePageRange(totalPages);
 
     // Apply filters: prefer eligible range and non-image pages
     const filtered =
       totalPages > 0
-        ? kcjPages.filter(
+        ? textPages.filter(
             (p) =>
               p.pageNo > frontCutoff &&
               p.pageNo <= backCutoff &&
               !imageOnlyPages.has(p.pageNo),
           )
-        : kcjPages;
+        : textPages;
 
-    // Fall back to all KCJ pages if filtering removes everything
-    const candidates = filtered.length > 0 ? filtered : kcjPages;
+    // Fall back to all text pages if filtering removes everything
+    const candidates = filtered.length > 0 ? filtered : textPages;
 
     if (candidates !== filtered) {
       this.log(
         'warn',
-        `All KCJ pages were filtered out by edge/image exclusion. Falling back to all ${kcjPages.length} KCJ pages.`,
+        `All text pages were filtered out by edge/image exclusion. Falling back to all ${textPages.length} text pages.`,
       );
     }
 
-    const sorted = [...candidates].sort(
-      (a, b) => b.kcjCharCount - a.kcjCharCount,
-    );
+    const sorted = [...candidates].sort((a, b) => b.textLength - a.textLength);
     const count = Math.min(MAX_SAMPLE_PAGES, sorted.length);
     return sorted.slice(0, count);
   }
@@ -312,7 +298,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
    * Evaluate sampled pages using Vision LLM
    */
   private async evaluatePages(
-    pages: KcjPageData[],
+    pages: PageData[],
   ): Promise<HanjaQualityResponse[]> {
     const results: HanjaQualityResponse[] = [];
 
@@ -328,7 +314,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
    * Evaluate a single page by comparing OCR text against the page image
    */
   private async evaluateSinglePage(
-    page: KcjPageData,
+    page: PageData,
   ): Promise<HanjaQualityResponse> {
     // Page images use 0-based indexing (page_1 -> page_0.png)
     const imagePath = `pages/page_${page.pageNo - 1}.png`;
@@ -344,7 +330,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
       return {
         isCorrupted: false,
         corruptedCharCount: 0,
-        totalKcjCharCount: page.kcjCharCount,
+        totalKcjCharCount: 0,
         explanation: `Page image not available for page ${page.pageNo}`,
       };
     }
@@ -383,7 +369,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
    * Aggregate individual page results into final assessment
    */
   private aggregateResults(
-    totalKcjPages: number,
+    totalTextPages: number,
     sampledCount: number,
     results: HanjaQualityResponse[],
   ): HanjaAssessment {
@@ -406,13 +392,13 @@ export class HanjaQualitySampler extends VisionLLMComponent {
 
     const reason =
       corruptedCount === 0
-        ? 'No KCJ character corruption detected'
-        : `${corruptedCount}/${sampledCount} sampled pages have corrupted KCJ characters (ratio: ${corruptedRatio.toFixed(2)})`;
+        ? 'No Hanja character corruption detected'
+        : `${corruptedCount}/${sampledCount} sampled pages have corrupted Hanja characters (ratio: ${corruptedRatio.toFixed(2)})`;
 
     return {
       needsVlmReparse,
       severity,
-      kcjPageCount: totalKcjPages,
+      kcjPageCount: totalTextPages,
       sampledPageCount: sampledCount,
       corruptedRatio,
       reason,
@@ -431,19 +417,21 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   protected buildUserPrompt(ocrText: string): string {
-    return `You are evaluating the quality of OCR text extraction for KCJ (Chinese/Japanese/Korean) characters, specifically Hanja (漢字) used in Korean archaeological reports.
+    return `You are evaluating the quality of OCR text extraction for Hanja (漢字) characters used in Korean archaeological reports.
 
-Compare the KCJ characters in the OCR text below with what you can see in the page image.
+Look at the page image and find any Hanja (漢字) characters visible in the original document. Then compare them against the OCR text below.
 
 ## Evaluation Criteria
-- Focus ONLY on KCJ ideographic characters (漢字/한자), not Korean hangul (한글)
-- A character is "corrupted" if the OCR text shows a wrong character, garbled text, or unrecognizable symbols where a KCJ character should be
-- Common corruption patterns: wrong character substitution, partial character recognition, question marks or boxes replacing characters
+- Find Hanja (漢字) characters in the page image first
+- Check if each Hanja character is correctly recognized in the OCR text
+- A character is "corrupted" if a Hanja character in the image was replaced by Korean hangul, garbled text, symbols, or a completely different character in the OCR text
+- Common corruption patterns: Hanja replaced by similar-looking hangul (e.g., 粘土 → 그으), wrong character substitution, partial recognition, question marks or boxes
 - Minor font rendering differences are NOT corruption
+- If no Hanja characters are visible in the page image, report as not corrupted with 0 total characters
 
 ## OCR Text to Evaluate
 ${ocrText}
 
-Evaluate the accuracy of the KCJ characters in the OCR text compared to the page image.`;
+Compare the Hanja characters visible in the page image against the OCR text above and assess whether they were correctly recognized.`;
   }
 }
