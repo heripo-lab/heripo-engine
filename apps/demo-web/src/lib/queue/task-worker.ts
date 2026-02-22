@@ -274,6 +274,15 @@ export async function runTaskWorker(
           `Hanja quality insufficient (severity: ${assessment.severity}, ratio: ${assessment.corruptedRatio}), re-parsing with VLM pipeline...`,
         );
 
+        // Notify client about VLM fallback
+        const vlmFallbackEvent: SSEEvent = {
+          type: 'vlm-fallback',
+          data: {
+            reason: `Hanja quality insufficient (severity: ${assessment.severity})`,
+          },
+        };
+        emitter.emit(`task:${taskId}`, vlmFallbackEvent);
+
         pdfParserManager.setTaskLogger(taskId, logger);
         try {
           const vlmResult = await parsePdf(

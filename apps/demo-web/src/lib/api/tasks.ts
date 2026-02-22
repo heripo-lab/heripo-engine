@@ -33,6 +33,7 @@ export interface Task {
   errorCode: string | null;
   errorMessage: string | null;
   queuePosition?: number;
+  options?: { pipeline: 'standard' | 'vlm' };
 }
 
 export interface TaskListResponse {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { use, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
@@ -11,9 +11,11 @@ import {
   LogViewer,
   ProcessErrorAlert,
   ProcessErrorDialog,
+  ProcessGuideDialog,
   ProcessHeader,
   ProcessInfoCard,
   ProcessTimeline,
+  VlmFallbackDialog,
   useAutoNavigate,
   useTask,
   useTaskStream,
@@ -31,12 +33,28 @@ export default function ProcessPage({ params }: PageProps) {
   const deleteTaskMutation = useDeleteTask();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [errorDialogDismissed, setErrorDialogDismissed] = useState(false);
+  const [showEntryGuide, setShowEntryGuide] = useState(true);
+  const [showVlmFallback, setShowVlmFallback] = useState(false);
   const disableAutoNavigate = searchParams.get('stay') === 'true';
 
   const { data: task } = useTask(taskId);
-  const { status, progress, currentStep, logs, error, resultUrl } =
-    useTaskStream(taskId);
+  const {
+    status,
+    progress,
+    currentStep,
+    logs,
+    error,
+    resultUrl,
+    vlmFallbackTriggered,
+  } = useTaskStream(taskId);
   const isProcessing = status === 'queued' || status === 'running';
+  const pipeline = task?.options?.pipeline ?? 'standard';
+
+  useEffect(() => {
+    if (vlmFallbackTriggered) {
+      setShowVlmFallback(true);
+    }
+  }, [vlmFallbackTriggered]);
 
   useAutoNavigate({ status, resultUrl, taskId, disabled: disableAutoNavigate });
 
@@ -100,6 +118,17 @@ export default function ProcessPage({ params }: PageProps) {
           cancelText="Continue Processing"
           variant="destructive"
           isPending={deleteTaskMutation.isPending}
+        />
+
+        <ProcessGuideDialog
+          open={isProcessing && showEntryGuide}
+          onOpenChange={setShowEntryGuide}
+          pipeline={pipeline}
+        />
+
+        <VlmFallbackDialog
+          open={showVlmFallback}
+          onOpenChange={setShowVlmFallback}
         />
       </div>
     </div>
