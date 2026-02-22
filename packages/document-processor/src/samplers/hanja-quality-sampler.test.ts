@@ -488,6 +488,98 @@ describe('HanjaQualitySampler', () => {
       );
     });
 
+    test('returns severity=severe when corrupted count reaches MIN_SEVERE_CORRUPTED_COUNT even with low ratio', async () => {
+      // 9 eligible pages (page 3 trimmed by edge), 3 corrupted
+      // ratio = 3/9 ≈ 0.33 < 0.5, but count = 3 >= MIN_SEVERE_CORRUPTED_COUNT -> severe
+      const texts: DoclingTextItem[] = [];
+      for (let i = 3; i <= 12; i++) {
+        texts.push(createTextItem(generateText(100 + i * 10), i));
+      }
+      const doc = createDoclingDoc(texts, { totalPages: 30 });
+
+      mockCallVision
+        .mockResolvedValueOnce(
+          createVisionResponse(true, 8, 22, 'Corrupted', 'page-12'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(true, 6, 21, 'Corrupted', 'page-11'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(true, 4, 20, 'Corrupted', 'page-10'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 19, 'Clean', 'page-9'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 18, 'Clean', 'page-8'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 17, 'Clean', 'page-7'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 16, 'Clean', 'page-6'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 15, 'Clean', 'page-5'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 14, 'Clean', 'page-4'),
+        );
+
+      const result = await sampler.assess(doc);
+
+      expect(result.severity).toBe('severe');
+      expect(result.needsVlmReparse).toBe(true);
+      expect(result.sampledPageCount).toBe(9);
+      expect(result.corruptedRatio).toBeCloseTo(3 / 9);
+    });
+
+    test('returns severity=minor when corrupted count is below MIN_SEVERE_CORRUPTED_COUNT with low ratio', async () => {
+      // 9 eligible pages (page 3 trimmed by edge), 2 corrupted
+      // ratio = 2/9 ≈ 0.22 < 0.5, count = 2 < MIN_SEVERE_CORRUPTED_COUNT -> minor
+      const texts: DoclingTextItem[] = [];
+      for (let i = 3; i <= 12; i++) {
+        texts.push(createTextItem(generateText(100 + i * 10), i));
+      }
+      const doc = createDoclingDoc(texts, { totalPages: 30 });
+
+      mockCallVision
+        .mockResolvedValueOnce(
+          createVisionResponse(true, 8, 22, 'Corrupted', 'page-12'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(true, 6, 21, 'Corrupted', 'page-11'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 20, 'Clean', 'page-10'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 19, 'Clean', 'page-9'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 18, 'Clean', 'page-8'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 17, 'Clean', 'page-7'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 16, 'Clean', 'page-6'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 15, 'Clean', 'page-5'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 14, 'Clean', 'page-4'),
+        );
+
+      const result = await sampler.assess(doc);
+
+      expect(result.severity).toBe('minor');
+      expect(result.needsVlmReparse).toBe(false);
+      expect(result.sampledPageCount).toBe(9);
+      expect(result.corruptedRatio).toBeCloseTo(2 / 9);
+    });
+
     test('handles exact corruption threshold boundary (corruptedRatio = 0.5 -> severe)', async () => {
       const texts: DoclingTextItem[] = [];
       for (let i = 5; i <= 8; i++) {

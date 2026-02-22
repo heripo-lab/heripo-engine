@@ -41,6 +41,13 @@ const IMAGE_PAGE_TEXT_THRESHOLD = 50;
 const CORRUPTION_THRESHOLD = 0.5;
 
 /**
+ * Minimum number of corrupted pages to trigger severe assessment,
+ * regardless of the corruption ratio.
+ * Even a low ratio can indicate systemic OCR issues when multiple pages are affected.
+ */
+const MIN_SEVERE_CORRUPTED_COUNT = 3;
+
+/**
  * Schema for Vision LLM response evaluating KCJ character quality
  */
 const HanjaQualityResponseSchema = z.object({
@@ -379,7 +386,10 @@ export class HanjaQualitySampler extends VisionLLMComponent {
     let severity: HanjaAssessment['severity'];
     let needsVlmReparse: boolean;
 
-    if (corruptedRatio >= CORRUPTION_THRESHOLD) {
+    if (
+      corruptedRatio >= CORRUPTION_THRESHOLD ||
+      corruptedCount >= MIN_SEVERE_CORRUPTED_COUNT
+    ) {
       severity = 'severe';
       needsVlmReparse = true;
     } else if (corruptedCount > 0) {
