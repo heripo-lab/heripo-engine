@@ -225,7 +225,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('returns severity=none when KCJ characters are below threshold per page', async () => {
-      // Each page has fewer than 5 KCJ characters, so no pages qualify
       const doc = createDoclingDoc(
         [
           createTextItem('Some text with 漢字品質 only 4 chars', 5),
@@ -248,7 +247,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('returns severity=severe when majority of sampled pages are corrupted', async () => {
-      // Create 3 pages with enough KCJ characters (>= 5 each), in middle range
       const doc = createDoclingDoc(
         [
           createTextItem(`Text with KCJ: ${generateKcjText(10)}`, 5),
@@ -258,7 +256,6 @@ describe('HanjaQualitySampler', () => {
         { totalPages: 20 },
       );
 
-      // All 3 pages corrupted -> ratio = 3/3 = 1.0 >= 0.5 -> severe
       mockCallVision
         .mockResolvedValueOnce(
           createVisionResponse(
@@ -294,7 +291,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('returns severity=minor when some pages corrupted but below 50% threshold', async () => {
-      // Create 4 pages with KCJ in middle range -> sample min(10, 4) = 4
       const doc = createDoclingDoc(
         [
           createTextItem(`KCJ text: ${generateKcjText(20)}`, 5),
@@ -305,7 +301,7 @@ describe('HanjaQualitySampler', () => {
         { totalPages: 20 },
       );
 
-      // 1 out of 4 sampled corrupted -> ratio = 1/4 = 0.25 < 0.5 -> minor
+      // 1 out of 4 corrupted -> ratio = 0.25 < 0.5 -> minor
       mockCallVision
         .mockResolvedValueOnce(
           createVisionResponse(true, 5, 20, 'Some corruption', 'page-5'),
@@ -340,7 +336,6 @@ describe('HanjaQualitySampler', () => {
         { totalPages: 20 },
       );
 
-      // All pages clean -> corruptedCount = 0 -> severity=none
       mockCallVision
         .mockResolvedValueOnce(
           createVisionResponse(false, 0, 10, 'All clean', 'page-5'),
@@ -372,7 +367,6 @@ describe('HanjaQualitySampler', () => {
         { totalPages: 20 },
       );
 
-      // Make image loading fail for first page (page 5 -> page_4.png)
       mockReadFileSync.mockImplementation((filePath: unknown) => {
         if (typeof filePath === 'string' && filePath.includes('page_4')) {
           throw new Error('File not found: page_4.png');
@@ -380,7 +374,6 @@ describe('HanjaQualitySampler', () => {
         return Buffer.from('fake-image-data');
       });
 
-      // Only 2 callVision calls should happen (pages 6 and 7)
       mockCallVision
         .mockResolvedValueOnce(
           createVisionResponse(false, 0, 8, 'Clean page', 'page-6'),
@@ -396,7 +389,6 @@ describe('HanjaQualitySampler', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Failed to load page image for page'),
       );
-      // callVision should NOT be called for the failed page
       expect(mockCallVision).toHaveBeenCalledTimes(2);
     });
 
@@ -412,7 +404,6 @@ describe('HanjaQualitySampler', () => {
 
       await sampler.assess(doc);
 
-      // Page 5 should load page_4.png (0-based index)
       expect(mockPathResolve).toHaveBeenCalledWith(
         '/output/path',
         'pages/page_4.png',
@@ -420,15 +411,12 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('defaults to page 1 when prov is missing', async () => {
-      // Create text items without prov — will default to page 1
-      // With no pages object, page 1 is within eligible range for 0-page doc
       const textWithoutProv = {
         text: generateKcjText(10),
         label: 'text',
         orig: generateKcjText(10),
       } as unknown as DoclingTextItem;
 
-      // Use 0 totalPages (empty pages object) so no edge trimming applies
       const doc = createDoclingDoc([textWithoutProv], { totalPages: 0 });
 
       mockCallVision.mockResolvedValueOnce(
@@ -437,7 +425,6 @@ describe('HanjaQualitySampler', () => {
 
       await sampler.assess(doc);
 
-      // Should default to page 1, so image path should be page_0.png
       expect(mockPathResolve).toHaveBeenCalledWith(
         '/output/path',
         'pages/page_0.png',
@@ -460,7 +447,6 @@ describe('HanjaQualitySampler', () => {
 
       await sampler.assess(doc);
 
-      // prov[0] is undefined -> page_no is undefined -> defaults to 1 -> page_0.png
       expect(mockPathResolve).toHaveBeenCalledWith(
         '/output/path',
         'pages/page_0.png',
@@ -490,7 +476,6 @@ describe('HanjaQualitySampler', () => {
 
       await sampler.assess(doc);
 
-      // Each callVisionLLM call tracks usage
       expect(mockAggregator.track).toHaveBeenCalledTimes(3);
     });
 
@@ -509,7 +494,6 @@ describe('HanjaQualitySampler', () => {
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[HanjaQualitySampler] Starting KCJ quality assessment...',
       );
-      // Should log trimming info: frontCutoff=2, backCutoff=18 for 20 pages
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Total pages: 20, eligible range: (2, 18]'),
       );
@@ -519,14 +503,12 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('handles exact corruption threshold boundary (corruptedRatio = 0.5 -> severe)', async () => {
-      // Create 4 pages in middle range, corrupt exactly 2 -> ratio 2/4 = 0.5
       const texts: DoclingTextItem[] = [];
       for (let i = 5; i <= 8; i++) {
         texts.push(createTextItem(`KCJ: ${generateKcjText(5 + i)}`, i));
       }
       const doc = createDoclingDoc(texts, { totalPages: 20 });
 
-      // 4 sampled pages: 2 corrupted, 2 clean -> ratio = 2/4 = 0.5 exactly
       mockCallVision
         .mockResolvedValueOnce(
           createVisionResponse(true, 5, 13, 'Corrupted', 'page-8'),
@@ -543,7 +525,6 @@ describe('HanjaQualitySampler', () => {
 
       const result = await sampler.assess(doc);
 
-      // 0.5 >= 0.5 -> severe
       expect(result.severity).toBe('severe');
       expect(result.needsVlmReparse).toBe(true);
       expect(result.corruptedRatio).toBe(0.5);
@@ -560,7 +541,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('aggregates KCJ characters from multiple texts on the same page', async () => {
-      // 3 KCJ chars per text item, 2 items on page 5 = 6 total -> qualifies (>= 5)
       const doc = createDoclingDoc(
         [
           createTextItem('Text with 漢字品', 5),
@@ -583,15 +563,12 @@ describe('HanjaQualitySampler', () => {
 
   describe('selectSamplePages', () => {
     test('selects max 10 pages when there are many KCJ pages', async () => {
-      // 15 pages in the middle range of a 100-page doc
-      // frontCutoff = ceil(100*0.1) = 10, backCutoff = 100 - 10 = 90
       const texts: DoclingTextItem[] = [];
       for (let i = 11; i <= 25; i++) {
         texts.push(createTextItem(`KCJ: ${generateKcjText(5 + i)}`, i));
       }
       const doc = createDoclingDoc(texts, { totalPages: 100 });
 
-      // Should sample exactly 10 pages (the ones with highest KCJ density)
       for (let i = 0; i < 10; i++) {
         mockCallVision.mockResolvedValueOnce(
           createVisionResponse(false, 0, 20, 'Clean', `page-${25 - i}`),
@@ -605,7 +582,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('selects all pages when fewer than MAX_SAMPLE_PAGES qualify', async () => {
-      // Only 2 pages with enough KCJ -> min(10, 2) = 2
       const doc = createDoclingDoc(
         [
           createTextItem(`KCJ: ${generateKcjText(10)}`, 5),
@@ -645,7 +621,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('sorts pages by KCJ density (highest first)', async () => {
-      // Create pages with different KCJ densities in middle range
       const doc = createDoclingDoc(
         [
           createTextItem(`Low KCJ: ${generateKcjText(6)}`, 5),
@@ -664,13 +639,10 @@ describe('HanjaQualitySampler', () => {
 
       await sampler.assess(doc);
 
-      // Pages should be evaluated in order of KCJ density (highest first)
-      // Page 6 (50 chars) -> Page 7 (20 chars) -> Page 5 (6 chars)
       expect(callOrder).toEqual(['page-6', 'page-7', 'page-5']);
     });
 
     test('uses all pages when fewer than 10 qualify (exhaustive check)', async () => {
-      // 7 pages in eligible range -> min(10, 7) = 7
       const texts: DoclingTextItem[] = [];
       for (let i = 5; i <= 11; i++) {
         texts.push(createTextItem(`KCJ: ${generateKcjText(5 + i)}`, i));
@@ -691,79 +663,96 @@ describe('HanjaQualitySampler', () => {
   });
 
   describe('edge trimming', () => {
-    test('excludes pages in the front 10% of the document', async () => {
-      // 100-page doc: frontCutoff = ceil(100*0.1) = 10
-      // Page 10 should be excluded (pageNo <= frontCutoff), page 11 should be included
+    test('prefers pages in the middle range over edge pages for sampling', async () => {
+      // 100-page doc: frontCutoff=10, backCutoff=90
+      // Page 5 (edge) and page 50 (middle) both have KCJ
+      // Should prefer page 50; page 5 is filtered out from sampling
       const doc = createDoclingDoc(
         [
-          createTextItem(`KCJ front: ${generateKcjText(10)}`, 10),
-          createTextItem(`KCJ eligible: ${generateKcjText(10)}`, 11),
+          createTextItem(`KCJ: ${generateKcjText(10)}`, 5),
+          createTextItem(`KCJ: ${generateKcjText(10)}`, 50),
         ],
         { totalPages: 100 },
       );
 
-      mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-11'),
-      );
+      const callOrder: string[] = [];
+      mockCallVision.mockImplementation(async (args: unknown) => {
+        const typedArgs = args as { phase: string };
+        callOrder.push(typedArgs.phase);
+        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+      });
 
       const result = await sampler.assess(doc);
 
-      // Only page 11 should qualify (page 10 is trimmed)
-      expect(result.kcjPageCount).toBe(1);
-      expect(mockCallVision).toHaveBeenCalledTimes(1);
+      // Both pages found as KCJ pages
+      expect(result.kcjPageCount).toBe(2);
+      // Only middle page sampled (edge page filtered from sampling)
+      expect(result.sampledPageCount).toBe(1);
+      expect(callOrder).toEqual(['page-50']);
     });
 
-    test('excludes pages in the back 10% of the document', async () => {
-      // 100-page doc: backCutoff = 100 - ceil(100*0.1) = 90
-      // Page 91 should be excluded (pageNo > backCutoff), page 90 should be included
-      const doc = createDoclingDoc(
-        [
-          createTextItem(`KCJ eligible: ${generateKcjText(10)}`, 90),
-          createTextItem(`KCJ back: ${generateKcjText(10)}`, 91),
-        ],
-        { totalPages: 100 },
-      );
-
-      mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-90'),
-      );
-
-      const result = await sampler.assess(doc);
-
-      // Only page 90 should qualify (page 91 is trimmed)
-      expect(result.kcjPageCount).toBe(1);
-      expect(mockCallVision).toHaveBeenCalledTimes(1);
-    });
-
-    test('trims correctly for small documents (e.g., 5 pages)', async () => {
-      // 5-page doc: frontCutoff = ceil(5*0.1) = 1, backCutoff = 5 - 1 = 4
-      // Eligible pages: 2, 3, 4
-      const doc = createDoclingDoc(
-        [
-          createTextItem(`KCJ p1: ${generateKcjText(10)}`, 1),
-          createTextItem(`KCJ p2: ${generateKcjText(10)}`, 2),
-          createTextItem(`KCJ p3: ${generateKcjText(10)}`, 3),
-          createTextItem(`KCJ p4: ${generateKcjText(10)}`, 4),
-          createTextItem(`KCJ p5: ${generateKcjText(10)}`, 5),
-        ],
-        { totalPages: 5 },
-      );
-
-      for (let i = 0; i < 3; i++) {
-        mockCallVision.mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', `page-${2 + i}`),
-        );
+    test('excludes edge pages from sampling when enough middle pages exist', async () => {
+      // 100-page doc: frontCutoff=10, backCutoff=90
+      // 12 pages total: 2 edge + 10 middle -> should sample 10 middle pages only
+      const texts: DoclingTextItem[] = [
+        createTextItem(`KCJ edge: ${generateKcjText(10)}`, 5),
+        createTextItem(`KCJ edge: ${generateKcjText(10)}`, 95),
+      ];
+      for (let i = 20; i <= 29; i++) {
+        texts.push(createTextItem(`KCJ mid: ${generateKcjText(10)}`, i));
       }
+      const doc = createDoclingDoc(texts, { totalPages: 100 });
+
+      const calledPages: number[] = [];
+      mockCallVision.mockImplementation(async (args: unknown) => {
+        const typedArgs = args as { phase: string };
+        const pageNo = parseInt(typedArgs.phase.replace('page-', ''));
+        calledPages.push(pageNo);
+        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+      });
 
       const result = await sampler.assess(doc);
 
-      // Pages 1 and 5 should be trimmed -> 3 eligible pages
-      expect(result.kcjPageCount).toBe(3);
-      expect(mockCallVision).toHaveBeenCalledTimes(3);
+      // All 12 pages have KCJ
+      expect(result.kcjPageCount).toBe(12);
+      // Only 10 sampled (the middle ones)
+      expect(result.sampledPageCount).toBe(10);
+      // Edge pages (5, 95) should NOT be in sampled pages
+      expect(calledPages).not.toContain(5);
+      expect(calledPages).not.toContain(95);
+    });
+
+    test('falls back to all KCJ pages when filtering removes everything', async () => {
+      // All KCJ pages are in the edge range
+      const doc = createDoclingDoc(
+        [
+          createTextItem(`KCJ edge front: ${generateKcjText(10)}`, 2),
+          createTextItem(`KCJ edge back: ${generateKcjText(10)}`, 99),
+        ],
+        { totalPages: 100 },
+      );
+
+      mockCallVision
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 10, 'Clean', 'page-2'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 10, 'Clean', 'page-99'),
+        );
+
+      const result = await sampler.assess(doc);
+
+      // Should still find and sample both pages (fallback)
+      expect(result.kcjPageCount).toBe(2);
+      expect(result.sampledPageCount).toBe(2);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      // Should log the fallback warning
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Falling back to all'),
+      );
     });
 
     test('includes all pages when totalPages is 0 (no pages metadata)', async () => {
-      // When totalPages is 0, edge trimming is skipped
       const doc = createDoclingDoc(
         [
           createTextItem(`KCJ: ${generateKcjText(10)}`, 1),
@@ -786,53 +775,45 @@ describe('HanjaQualitySampler', () => {
       expect(mockCallVision).toHaveBeenCalledTimes(2);
     });
 
-    test('boundary: page exactly at frontCutoff is excluded', async () => {
-      // 20-page doc: frontCutoff = ceil(20*0.1) = 2
-      // Page 2 -> pageNo <= frontCutoff -> excluded
-      // Page 3 -> pageNo > frontCutoff -> included
+    test('trims correctly for small documents (e.g., 5 pages)', async () => {
+      // 5-page doc: frontCutoff=1, backCutoff=4
+      // Eligible: pages 2,3,4
+      // KCJ on all 5 pages -> findKcjPages finds all 5
+      // selectSamplePages filters to 3 eligible, samples those
       const doc = createDoclingDoc(
         [
-          createTextItem(`KCJ: ${generateKcjText(10)}`, 2),
-          createTextItem(`KCJ: ${generateKcjText(10)}`, 3),
+          createTextItem(`KCJ p1: ${generateKcjText(10)}`, 1),
+          createTextItem(`KCJ p2: ${generateKcjText(10)}`, 2),
+          createTextItem(`KCJ p3: ${generateKcjText(10)}`, 3),
+          createTextItem(`KCJ p4: ${generateKcjText(10)}`, 4),
+          createTextItem(`KCJ p5: ${generateKcjText(10)}`, 5),
         ],
-        { totalPages: 20 },
+        { totalPages: 5 },
       );
 
-      mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-3'),
-      );
+      const calledPages: number[] = [];
+      mockCallVision.mockImplementation(async (args: unknown) => {
+        const typedArgs = args as { phase: string };
+        calledPages.push(parseInt(typedArgs.phase.replace('page-', '')));
+        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+      });
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
-    });
-
-    test('boundary: page exactly at backCutoff is included', async () => {
-      // 20-page doc: backCutoff = 20 - ceil(20*0.1) = 18
-      // Page 18 -> pageNo <= backCutoff -> included
-      // Page 19 -> pageNo > backCutoff -> excluded
-      const doc = createDoclingDoc(
-        [
-          createTextItem(`KCJ: ${generateKcjText(10)}`, 18),
-          createTextItem(`KCJ: ${generateKcjText(10)}`, 19),
-        ],
-        { totalPages: 20 },
-      );
-
-      mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-18'),
-      );
-
-      const result = await sampler.assess(doc);
-
-      expect(result.kcjPageCount).toBe(1);
+      // All 5 pages have KCJ
+      expect(result.kcjPageCount).toBe(5);
+      // Only 3 middle pages sampled (2,3,4)
+      expect(result.sampledPageCount).toBe(3);
+      expect(calledPages).not.toContain(1);
+      expect(calledPages).not.toContain(5);
     });
   });
 
   describe('image-only page exclusion', () => {
-    test('excludes pages with pictures and minimal text', async () => {
-      // Page 5 has a picture and short text (< 50 chars) -> image-only -> excluded
-      // Page 6 has KCJ text only -> included
+    test('excludes image-only pages from sampling but still counts them as KCJ pages', async () => {
+      // Page 5 has a picture and short text (< 50 chars) -> image-only
+      // Page 6 has KCJ text only
+      // Both have KCJ -> both counted, but page 5 excluded from sampling
       const doc = createDoclingDoc(
         [
           createTextItem(`${generateKcjText(10)}`, 5),
@@ -850,13 +831,14 @@ describe('HanjaQualitySampler', () => {
 
       const result = await sampler.assess(doc);
 
-      // Only page 6 should qualify (page 5 is image-only)
-      expect(result.kcjPageCount).toBe(1);
+      // Both pages have KCJ
+      expect(result.kcjPageCount).toBe(2);
+      // Only page 6 sampled (page 5 is image-only)
+      expect(result.sampledPageCount).toBe(1);
       expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
 
     test('includes pages with pictures but substantial text (>= 50 chars)', async () => {
-      // Page 5 has a picture but also long text (>= 50 chars) -> NOT image-only -> included
       const longText = 'A'.repeat(40) + generateKcjText(10);
       const doc = createDoclingDoc([createTextItem(longText, 5)], {
         totalPages: 20,
@@ -870,12 +852,11 @@ describe('HanjaQualitySampler', () => {
       const result = await sampler.assess(doc);
 
       expect(result.kcjPageCount).toBe(1);
+      expect(result.sampledPageCount).toBe(1);
       expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
 
     test('handles pages with pictures but no text at all', async () => {
-      // Page 5 has only a picture, no text items -> text length = 0 < 50 -> image-only
-      // Page 6 has KCJ text
       const doc = createDoclingDoc(
         [createTextItem(`KCJ: ${generateKcjText(10)}`, 6)],
         {
@@ -894,7 +875,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('does not exclude pages without pictures', async () => {
-      // No pictures at all -> imageOnlyPages should be empty
       const doc = createDoclingDoc(
         [createTextItem(`KCJ: ${generateKcjText(10)}`, 5)],
         { totalPages: 20, pictures: [] },
@@ -910,7 +890,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('handles picture items without prov', async () => {
-      // Picture without prov should be ignored
       const pictureWithoutProv = {
         self_ref: '#/pictures/0',
         children: [],
@@ -953,6 +932,39 @@ describe('HanjaQualitySampler', () => {
 
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('image-only pages excluded: 2'),
+      );
+    });
+
+    test('falls back to image-only KCJ pages when no other candidates remain', async () => {
+      // All KCJ pages are image-only (picture + short text)
+      const doc = createDoclingDoc(
+        [
+          createTextItem(`${generateKcjText(10)}`, 5),
+          createTextItem(`${generateKcjText(8)}`, 6),
+        ],
+        {
+          totalPages: 20,
+          pictures: [createPictureItem(5), createPictureItem(6)],
+        },
+      );
+
+      mockCallVision
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        )
+        .mockResolvedValueOnce(
+          createVisionResponse(false, 0, 8, 'Clean', 'page-6'),
+        );
+
+      const result = await sampler.assess(doc);
+
+      // Both pages found
+      expect(result.kcjPageCount).toBe(2);
+      // Both sampled via fallback
+      expect(result.sampledPageCount).toBe(2);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Falling back to all'),
       );
     });
   });
@@ -1072,16 +1084,13 @@ describe('HanjaQualitySampler', () => {
         phase: string;
       };
 
-      // Verify message structure
       expect(callArgs.messages).toHaveLength(1);
       expect(callArgs.messages[0].role).toBe('user');
 
       const content = callArgs.messages[0].content;
-      // First content should be the image
       expect(content[0].type).toBe('image');
       expect(content[0].image).toBe(`data:image/png;base64,${expectedBase64}`);
 
-      // Second content should be the text prompt
       expect(content[1].type).toBe('text');
       expect(content[1].text).toContain('OCR Text to Evaluate');
     });
@@ -1128,7 +1137,6 @@ describe('HanjaQualitySampler', () => {
         }>;
       };
       const textContent = callArgs.messages[0].content[1];
-      // The OCR text should contain both texts joined with newline
       expect(textContent.text).toContain('First text');
       expect(textContent.text).toContain('Second text');
     });
@@ -1171,7 +1179,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('detects KCJ Extension A characters (U+3400-U+4DBF)', async () => {
-      // Characters from KCJ Extension A range
       const extAChars = '\u3400\u3401\u3402\u3403\u3404';
       const doc = createDoclingDoc(
         [createTextItem(`Extension A: ${extAChars}`, 5)],
@@ -1188,7 +1195,6 @@ describe('HanjaQualitySampler', () => {
     });
 
     test('detects KCJ Compatibility Ideographs (U+F900-U+FAFF)', async () => {
-      // Characters from KCJ Compatibility Ideographs range
       const compatChars = '\uF900\uF901\uF902\uF903\uF904';
       const doc = createDoclingDoc(
         [createTextItem(`Compatibility: ${compatChars}`, 5)],
@@ -1219,8 +1225,29 @@ describe('HanjaQualitySampler', () => {
 
       const result = await sampler.assess(doc);
 
-      // Only page 6 should qualify
       expect(result.kcjPageCount).toBe(1);
+    });
+
+    test('finds KCJ pages regardless of edge position (discovery is unfiltered)', async () => {
+      // Pages in edge range still get discovered
+      const doc = createDoclingDoc(
+        [
+          createTextItem(`KCJ front: ${generateKcjText(10)}`, 1),
+          createTextItem(`KCJ back: ${generateKcjText(10)}`, 100),
+          createTextItem(`KCJ middle: ${generateKcjText(10)}`, 50),
+        ],
+        { totalPages: 100 },
+      );
+
+      mockCallVision.mockImplementation(async (args: unknown) => {
+        const typedArgs = args as { phase: string };
+        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+      });
+
+      const result = await sampler.assess(doc);
+
+      // All 3 pages should be found as KCJ pages
+      expect(result.kcjPageCount).toBe(3);
     });
   });
 
@@ -1280,7 +1307,6 @@ describe('HanjaQualitySampler', () => {
 
   describe('aggregateResults with zero sampled pages', () => {
     test('returns corruptedRatio 0 when sampledCount is 0', () => {
-      // Access the private method directly to test the sampledCount === 0 branch
       const result = (sampler as any).aggregateResults(0, 0, []);
 
       expect(result.corruptedRatio).toBe(0);

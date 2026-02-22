@@ -127,7 +127,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
     const totalPages = Object.keys(doclingDoc.pages).length;
     this.log('info', 'Starting KCJ quality assessment...');
 
-    // Step 1: Compute eligible page range and image-only pages
+    // Step 1: Compute filtering metadata for sampling
     const { frontCutoff, backCutoff } = this.getEligiblePageRange(totalPages);
     const imageOnlyPages = this.getImageOnlyPages(doclingDoc);
 
@@ -137,8 +137,8 @@ export class HanjaQualitySampler extends VisionLLMComponent {
         `image-only pages excluded: ${imageOnlyPages.size}`,
     );
 
-    // Step 2: Group texts by page and count KCJ characters
-    const kcjPages = this.findKcjPages(doclingDoc, totalPages, imageOnlyPages);
+    // Step 2: Find ALL pages with KCJ characters (no filtering)
+    const kcjPages = this.findKcjPages(doclingDoc);
 
     if (kcjPages.length === 0) {
       this.log('info', 'No KCJ characters found in document');
@@ -157,8 +157,12 @@ export class HanjaQualitySampler extends VisionLLMComponent {
       `Found ${kcjPages.length} pages with KCJ characters (threshold: ${MIN_KCJ_CHARS_THRESHOLD})`,
     );
 
-    // Step 3: Select pages to sample (highest KCJ density)
-    const sampled = this.selectSamplePages(kcjPages);
+    // Step 3: Select pages to sample (prefer eligible, non-image pages; fallback to all)
+    const sampled = this.selectSamplePages(
+      kcjPages,
+      totalPages,
+      imageOnlyPages,
+    );
     this.log(
       'info',
       `Sampling ${sampled.length} pages: [${sampled.map((p) => p.pageNo).join(', ')}]`,
@@ -238,28 +242,14 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   /**
-   * Find all pages containing KCJ characters above the threshold,
-   * excluding edge-trimmed pages and image-only pages.
+   * Find all pages containing KCJ characters above the threshold.
+   * No filtering is applied here — filtering happens during sample selection.
    */
-  private findKcjPages(
-    doclingDoc: DoclingDocument,
-    totalPages: number,
-    imageOnlyPages: Set<number>,
-  ): KcjPageData[] {
-    const { frontCutoff, backCutoff } = this.getEligiblePageRange(totalPages);
+  private findKcjPages(doclingDoc: DoclingDocument): KcjPageData[] {
     const pageMap = new Map<number, { kcjCount: number; texts: string[] }>();
 
     for (const text of doclingDoc.texts) {
       const pageNo = this.getPageNo(text);
-
-      // Skip pages outside eligible range (only when totalPages > 0)
-      if (totalPages > 0 && (pageNo <= frontCutoff || pageNo > backCutoff)) {
-        continue;
-      }
-
-      // Skip image-only pages
-      if (imageOnlyPages.has(pageNo)) continue;
-
       const kcjChars = text.text.match(KCJ_CHAR_REGEX);
       if (!kcjChars || kcjChars.length === 0) continue;
 
@@ -279,13 +269,42 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   /**
-   * Select sample pages with highest KCJ density
+   * Select sample pages with highest KCJ density.
+   * Prefers pages in the eligible range (not edge-trimmed) and not image-only.
+   * Falls back to all KCJ pages if filtering leaves too few candidates.
    */
-  private selectSamplePages(kcjPages: KcjPageData[]): KcjPageData[] {
-    const sorted = [...kcjPages].sort(
+  private selectSamplePages(
+    kcjPages: KcjPageData[],
+    totalPages: number,
+    imageOnlyPages: Set<number>,
+  ): KcjPageData[] {
+    const { frontCutoff, backCutoff } = this.getEligiblePageRange(totalPages);
+
+    // Apply filters: prefer eligible range and non-image pages
+    const filtered =
+      totalPages > 0
+        ? kcjPages.filter(
+            (p) =>
+              p.pageNo > frontCutoff &&
+              p.pageNo <= backCutoff &&
+              !imageOnlyPages.has(p.pageNo),
+          )
+        : kcjPages;
+
+    // Fall back to all KCJ pages if filtering removes everything
+    const candidates = filtered.length > 0 ? filtered : kcjPages;
+
+    if (candidates !== filtered) {
+      this.log(
+        'warn',
+        `All KCJ pages were filtered out by edge/image exclusion. Falling back to all ${kcjPages.length} KCJ pages.`,
+      );
+    }
+
+    const sorted = [...candidates].sort(
       (a, b) => b.kcjCharCount - a.kcjCharCount,
     );
-    const count = Math.min(MAX_SAMPLE_PAGES, kcjPages.length);
+    const count = Math.min(MAX_SAMPLE_PAGES, sorted.length);
     return sorted.slice(0, count);
   }
 
