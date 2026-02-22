@@ -4,12 +4,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
 
 if (args.length === 0 || args[0].startsWith('-')) {
   console.error(
-    'Usage: pnpm release[:patch|:minor|:major] [--tag <dist-tag>] [--otp <code>] [--no-git] [--allow-dirty] [--dry-run]',
+    'Usage: pnpm release[:patch|:minor|:major] [--tag <dist-tag>] [--no-git] [--allow-dirty] [--dry-run]',
   );
   process.exit(1);
 }
@@ -24,19 +25,12 @@ if (!['none', 'patch', 'minor', 'major'].includes(bumpType)) {
 
 const distTagIndex = args.indexOf('--tag');
 const distTag = distTagIndex >= 0 ? args[distTagIndex + 1] : null;
-const otpIndex = args.indexOf('--otp');
-const otp = otpIndex >= 0 ? args[otpIndex + 1] : null;
 const allowDirty = args.includes('--allow-dirty');
 const dryRun = args.includes('--dry-run');
 const noGit = args.includes('--no-git') || dryRun;
 
 if (distTagIndex >= 0 && !distTag) {
   console.error('--tag requires a value, e.g. --tag next');
-  process.exit(1);
-}
-
-if (otpIndex >= 0 && !otp) {
-  console.error('--otp requires a value, e.g. --otp 123456');
   process.exit(1);
 }
 
@@ -138,11 +132,51 @@ const findPackedTarball = (packOutput, tempDir) => {
   return resolve(tempDir, files[0].name);
 };
 
-const packAndPublish = () => {
+const promptOtp = () => {
+  if (!process.stdin.isTTY) {
+    console.error(
+      'OTP is required but stdin is not a TTY. Run in an interactive terminal or use --dry-run.',
+    );
+    process.exit(1);
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.on('close', () => {
+      if (!settled) {
+        settled = true;
+        reject(new Error('OTP prompt closed unexpectedly (EOF or Ctrl-D).'));
+      }
+    });
+    const ask = () => {
+      rl.question('Enter OTP code: ', (answer) => {
+        const trimmed = answer.trim();
+        if (!trimmed) {
+          ask();
+          return;
+        }
+        settled = true;
+        rl.close();
+        resolve(trimmed);
+      });
+    };
+    ask();
+  });
+};
+
+const packAndPublish = async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'heripo-pack-'));
 
   try {
-    for (const pkg of packages) {
+    // Phase 1: pack all packages
+    const tarballs = [];
+    for (let i = 0; i < packages.length; i++) {
+      const pkg = packages[i];
+      console.log(`Packing ${pkg.name} (${i + 1}/${packages.length})...`);
       const packOutput = runCapture('pnpm', [
         '-C',
         pkg.dir,
@@ -150,8 +184,18 @@ const packAndPublish = () => {
         '--pack-destination',
         tempDir,
       ]);
-      const tarball = findPackedTarball(packOutput, tempDir);
+      tarballs.push(findPackedTarball(packOutput, tempDir));
+    }
 
+    // Phase 2: prompt OTP right before publishing
+    const otp = dryRun ? null : await promptOtp();
+
+    // Phase 3: publish all packages
+    for (let i = 0; i < tarballs.length; i++) {
+      const tarball = tarballs[i];
+      console.log(
+        `Publishing ${packages[i].name} (${i + 1}/${packages.length})...`,
+      );
       const publishArgs = ['publish', tarball];
       if (distTag) {
         publishArgs.push('--tag', distTag);
@@ -206,14 +250,21 @@ const commitAndTag = (version) => {
   }
 };
 
-ensureCleanGit();
-bumpVersions();
-run('pnpm', ['build']);
-packAndPublish();
+const main = async () => {
+  ensureCleanGit();
+  bumpVersions();
+  run('pnpm', ['build']);
+  await packAndPublish();
 
-if (!noGit) {
-  const version = readVersion();
-  commitAndTag(version);
-}
+  if (!noGit) {
+    const version = readVersion();
+    commitAndTag(version);
+  }
 
-console.log('Release publish complete.');
+  console.log('Release publish complete.');
+};
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
