@@ -29,6 +29,9 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   tocExtractorModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
   visionTocExtractorModel: 'google/gemini-3-flash-preview',
   captionParserModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
+  // Optional models (undefined = use defaults)
+  hanjaQualitySamplerModel: 'openai/gpt-5.2',
+  vlmModel: undefined,
   // Batch & Retry
   textCleanerBatchSize: 20,
   captionParserBatchSize: 0,

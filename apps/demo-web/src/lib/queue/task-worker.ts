@@ -233,6 +233,7 @@ export async function runTaskWorker(
           ocr_lang: options.ocrLanguages,
           num_threads: options.threadCount,
           pipeline: pipelineType,
+          vlm_model: options.vlmModel,
         },
         abortSignal,
       );
@@ -274,6 +275,7 @@ export async function runTaskWorker(
               ocr_lang: options.ocrLanguages,
               num_threads: options.threadCount,
               pipeline: 'vlm',
+              vlm_model: options.vlmModel,
             },
             abortSignal,
           );

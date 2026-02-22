@@ -4,6 +4,7 @@ import {
   LLM_MODELS,
   VISION_MODELS,
 } from '~/features/upload/constants/llm-models';
+import { VLM_MODEL_KEYS } from '~/features/upload/constants/vlm-models';
 
 import {
   imageIdSchema,
@@ -34,6 +35,15 @@ const visionModelSchema = z
   });
 
 /**
+ * VLM model key validator (local vision model presets)
+ */
+const vlmModelKeySchema = z
+  .string()
+  .refine((val) => VLM_MODEL_KEYS.includes(val), {
+    message: 'Invalid VLM model key',
+  });
+
+/**
  * Processing options schema for PDF processing.
  * Used for POST /api/tasks request body validation.
  */
@@ -58,6 +68,9 @@ export const processingOptionsSchema = z.object({
   visionTocExtractorModel: visionModelSchema,
   captionParserModel: llmModelSchema,
   hanjaQualitySamplerModel: visionModelSchema.optional(),
+
+  // VLM Model (local vision model for VLM pipeline and hanja auto-fallback)
+  vlmModel: vlmModelKeySchema.optional(),
 
   // Batch & Retry
   textCleanerBatchSize: z.number().int().nonnegative().default(20),
