@@ -6,6 +6,7 @@ import type {
   VlmModelLocal,
 } from 'docling-sdk';
 
+import { ValidationUtils } from 'docling-sdk';
 import { omit } from 'es-toolkit';
 import { createWriteStream, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,6 +18,18 @@ import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { LocalFileServer } from '../utils/local-file-server';
 import { ImagePdfConverter } from './image-pdf-converter';
+
+// Workaround for docling-sdk@1.3.6 validation bug:
+// ValidationUtils.validateProcessingPipeline() uses a Zod enum ["default","fast","accurate"]
+// which doesn't include "vlm", even though the TypeScript ConversionOptions interface allows it.
+// This patch strips the `pipeline` field before validation to avoid the false rejection.
+// TODO: Remove this patch when docling-sdk fixes ProcessingPipelineSchema to include "vlm".
+const _origAssertValidConversionOptions =
+  ValidationUtils.assertValidConversionOptions.bind(ValidationUtils);
+ValidationUtils.assertValidConversionOptions = (options: unknown) => {
+  const { pipeline: _pipeline, ...rest } = options as Record<string, unknown>;
+  _origAssertValidConversionOptions(rest);
+};
 
 /**
  * Callback function invoked after PDF conversion completes

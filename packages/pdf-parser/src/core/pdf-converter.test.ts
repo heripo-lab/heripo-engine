@@ -6,6 +6,7 @@ import type {
 } from 'docling-sdk';
 import type { Readable } from 'node:stream';
 
+import { ValidationUtils } from 'docling-sdk';
 import { omit } from 'es-toolkit';
 import { createWriteStream, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1237,6 +1238,35 @@ describe('PDFConverter', () => {
         '[PDFConverter] Fallback conversion succeeded',
       );
     });
+  });
+});
+
+describe('ValidationUtils monkey-patch', () => {
+  test('should strip pipeline field before delegating to original validation', () => {
+    const options = {
+      pipeline: 'vlm',
+      to_formats: ['json'],
+    } as unknown as Parameters<
+      typeof ValidationUtils.assertValidConversionOptions
+    >[0];
+
+    // The patched assertValidConversionOptions should not throw
+    // even though "vlm" is not in the original ProcessingPipelineSchema
+    expect(() =>
+      ValidationUtils.assertValidConversionOptions(options),
+    ).not.toThrow();
+  });
+
+  test('should still validate other fields normally', () => {
+    const options = {
+      to_formats: ['json'],
+    } as unknown as Parameters<
+      typeof ValidationUtils.assertValidConversionOptions
+    >[0];
+
+    expect(() =>
+      ValidationUtils.assertValidConversionOptions(options),
+    ).not.toThrow();
   });
 });
 
