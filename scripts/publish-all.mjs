@@ -136,7 +136,7 @@ const promptOtp = () =>
   new Promise((resolve) => {
     const rl = createInterface({
       input: process.stdin,
-      output: process.stderr,
+      output: process.stdout,
     });
     const ask = () => {
       rl.question('Enter OTP code: ', (answer) => {
@@ -158,7 +158,9 @@ const packAndPublish = async () => {
   try {
     // Phase 1: pack all packages
     const tarballs = [];
-    for (const pkg of packages) {
+    for (let i = 0; i < packages.length; i++) {
+      const pkg = packages[i];
+      console.log(`Packing ${pkg.name} (${i + 1}/${packages.length})...`);
       const packOutput = runCapture('pnpm', [
         '-C',
         pkg.dir,
@@ -173,7 +175,11 @@ const packAndPublish = async () => {
     const otp = dryRun ? null : await promptOtp();
 
     // Phase 3: publish all packages
-    for (const tarball of tarballs) {
+    for (let i = 0; i < tarballs.length; i++) {
+      const tarball = tarballs[i];
+      console.log(
+        `Publishing ${packages[i].name} (${i + 1}/${packages.length})...`,
+      );
       const publishArgs = ['publish', tarball];
       if (distTag) {
         publishArgs.push('--tag', distTag);
