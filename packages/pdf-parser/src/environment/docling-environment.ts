@@ -188,13 +188,22 @@ export class DoclingEnvironment {
    * Install VLM-specific dependencies for the Docling VLM pipeline.
    *
    * Installs:
-   * 1. docling[vlm] - VLM model support for docling
+   * 1. docling-serve[vlm] - VLM model support for docling-serve
    * 2. mlx + mlx-lm (macOS ARM64 only) - Apple Silicon optimized inference
    *
    * This is idempotent - subsequent calls skip if already installed.
    */
   async setupVlmDependencies(): Promise<void> {
     if (this.vlmDependenciesInstalled) {
+      this.logger.info(
+        '[DoclingEnvironment] VLM dependencies already installed, skipping',
+      );
+      return;
+    }
+
+    // Check if VLM modules are already importable (e.g., from a previous session)
+    if (await this.isVlmReady()) {
+      this.vlmDependenciesInstalled = true;
       this.logger.info(
         '[DoclingEnvironment] VLM dependencies already installed, skipping',
       );

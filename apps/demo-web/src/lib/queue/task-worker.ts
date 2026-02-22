@@ -1,4 +1,5 @@
 import type { DoclingDocument, TokenUsageReport } from '@heripo/model';
+import type { PDFConvertOptions, PDFParser } from '@heripo/pdf-parser';
 import type { EventEmitter } from 'events';
 
 import type { QueuedTask, SSEEvent } from './task-queue-manager';
@@ -21,6 +22,41 @@ import {
   sendWebhookAsync,
 } from '../webhook';
 import { PDFParserManager } from './pdf-parser-manager';
+
+/**
+ * Parse a PDF using the given parser and return the DoclingDocument with output path.
+ */
+function parsePdf(
+  pdfParser: PDFParser,
+  pdfUrl: string,
+  taskId: string,
+  options: PDFConvertOptions,
+  abortSignal?: AbortSignal,
+): Promise<{ doclingDocument: DoclingDocument; outputPath: string }> {
+  return new Promise((resolve, reject) => {
+    pdfParser
+      .parse(
+        pdfUrl,
+        taskId,
+        (outPath) => {
+          try {
+            const resultPath = `${outPath}/result.json`;
+            const json = readFileSync(resultPath, 'utf8');
+            resolve({
+              doclingDocument: JSON.parse(json) as DoclingDocument,
+              outputPath: outPath,
+            });
+          } catch (err) {
+            reject(err);
+          }
+        },
+        false,
+        options,
+        abortSignal,
+      )
+      .catch(reject);
+  });
+}
 
 function calculateTotalCost(usage: TokenUsageReport): number {
   let total = 0;
@@ -189,36 +225,17 @@ export async function runTaskWorker(
     let outputPath: string;
 
     try {
-      const parseResult = await new Promise<{
-        doclingDocument: DoclingDocument;
-        outputPath: string;
-      }>((resolve, reject) => {
-        pdfParser
-          .parse(
-            pdfUrl,
-            taskId,
-            (outPath) => {
-              try {
-                const resultPath = `${outPath}/result.json`;
-                const json = readFileSync(resultPath, 'utf8');
-                resolve({
-                  doclingDocument: JSON.parse(json) as DoclingDocument,
-                  outputPath: outPath,
-                });
-              } catch (err) {
-                reject(err);
-              }
-            },
-            false,
-            {
-              ocr_lang: options.ocrLanguages,
-              num_threads: options.threadCount,
-              pipeline: pipelineType,
-            },
-            abortSignal,
-          )
-          .catch(reject);
-      });
+      const parseResult = await parsePdf(
+        pdfParser,
+        pdfUrl,
+        taskId,
+        {
+          ocr_lang: options.ocrLanguages,
+          num_threads: options.threadCount,
+          pipeline: pipelineType,
+        },
+        abortSignal,
+      );
 
       doclingDocument = parseResult.doclingDocument;
       outputPath = parseResult.outputPath;
@@ -249,36 +266,17 @@ export async function runTaskWorker(
 
         pdfParserManager.setTaskLogger(taskId, logger);
         try {
-          const vlmResult = await new Promise<{
-            doclingDocument: DoclingDocument;
-            outputPath: string;
-          }>((resolve, reject) => {
-            pdfParser
-              .parse(
-                pdfUrl,
-                taskId,
-                (outPath) => {
-                  try {
-                    const resultPath = `${outPath}/result.json`;
-                    const json = readFileSync(resultPath, 'utf8');
-                    resolve({
-                      doclingDocument: JSON.parse(json) as DoclingDocument,
-                      outputPath: outPath,
-                    });
-                  } catch (err) {
-                    reject(err);
-                  }
-                },
-                false,
-                {
-                  ocr_lang: options.ocrLanguages,
-                  num_threads: options.threadCount,
-                  pipeline: 'vlm' as const,
-                },
-                abortSignal,
-              )
-              .catch(reject);
-          });
+          const vlmResult = await parsePdf(
+            pdfParser,
+            pdfUrl,
+            taskId,
+            {
+              ocr_lang: options.ocrLanguages,
+              num_threads: options.threadCount,
+              pipeline: 'vlm',
+            },
+            abortSignal,
+          );
 
           doclingDocument = vlmResult.doclingDocument;
           outputPath = vlmResult.outputPath;

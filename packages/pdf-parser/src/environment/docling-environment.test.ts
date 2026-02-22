@@ -1067,6 +1067,7 @@ describe('DoclingEnvironment', () => {
   describe('setupVlmDependencies', () => {
     test('should install docling-serve[vlm] and mlx on macOS ARM64', async () => {
       mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
         .mockResolvedValueOnce(createSpawnResult({})) // docling-serve[vlm]
         .mockResolvedValueOnce(createSpawnResult({})); // mlx + mlx-lm
 
@@ -1089,8 +1090,32 @@ describe('DoclingEnvironment', () => {
       );
     });
 
+    test('should skip if VLM modules are already importable', async () => {
+      mockSpawnAsync.mockResolvedValueOnce(createSpawnResult({ code: 0 })); // isVlmReady -> ready
+
+      const env = new DoclingEnvironment({
+        logger,
+        venvPath: '/test/venv',
+        port: 8080,
+        killExistingProcess: false,
+      });
+
+      await env.setupVlmDependencies();
+
+      // Only 1 call (isVlmReady), no pip install calls
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(1);
+      expect(mockSpawnAsync).toHaveBeenCalledWith('/test/venv/bin/python', [
+        '-c',
+        'import docling_core; import docling',
+      ]);
+      expect(logger.info).toHaveBeenCalledWith(
+        '[DoclingEnvironment] VLM dependencies already installed, skipping',
+      );
+    });
+
     test('should skip if already installed (idempotent)', async () => {
       mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
         .mockResolvedValueOnce(createSpawnResult({})) // docling-serve[vlm]
         .mockResolvedValueOnce(createSpawnResult({})); // mlx + mlx-lm
 
@@ -1114,9 +1139,11 @@ describe('DoclingEnvironment', () => {
     });
 
     test('should throw on docling-serve[vlm] installation failure', async () => {
-      mockSpawnAsync.mockResolvedValueOnce(
-        createSpawnResult({ stderr: 'VLM install error', code: 1 }),
-      );
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
+        .mockResolvedValueOnce(
+          createSpawnResult({ stderr: 'VLM install error', code: 1 }),
+        );
 
       const env = new DoclingEnvironment({
         logger,
@@ -1138,7 +1165,9 @@ describe('DoclingEnvironment', () => {
       mockPlatformFn.mockReturnValue('linux');
       mockArchFn.mockReturnValue('x64');
 
-      mockSpawnAsync.mockResolvedValueOnce(createSpawnResult({})); // docling-serve[vlm] only
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
+        .mockResolvedValueOnce(createSpawnResult({})); // docling-serve[vlm] only
 
       const env = new DoclingEnvironment({
         logger,
@@ -1149,8 +1178,8 @@ describe('DoclingEnvironment', () => {
 
       await env.setupVlmDependencies();
 
-      // Only 1 call (docling-serve[vlm]), no mlx install
-      expect(mockSpawnAsync).toHaveBeenCalledTimes(1);
+      // 2 calls: isVlmReady + docling-serve[vlm], no mlx install
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(2);
       expect(mockSpawnAsync).toHaveBeenCalledWith(
         '/test/venv/bin/pip',
         ['install', 'docling-serve[vlm]'],
@@ -1166,6 +1195,7 @@ describe('DoclingEnvironment', () => {
 
     test('should throw on mlx installation failure', async () => {
       mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
         .mockResolvedValueOnce(createSpawnResult({})) // docling-serve[vlm] success
         .mockResolvedValueOnce(
           createSpawnResult({ stderr: 'mlx error', code: 1 }),
