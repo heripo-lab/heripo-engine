@@ -355,6 +355,7 @@ export class PDFConverter {
   private async trackTaskProgress(task: AsyncConversionTask): Promise<void> {
     const conversionStartTime = Date.now();
     let lastStatus = '';
+    let lastProgressLine = '';
     let isCompleted = false;
 
     const pollInterval = setInterval(() => {
@@ -367,10 +368,29 @@ export class PDFConverter {
 
     task.on('progress', (status) => {
       lastStatus = status.task_status;
+
+      const parts: string[] = [`Status: ${status.task_status}`];
+
       if (status.task_position !== undefined) {
-        process.stdout.write(
-          `\r[PDFConverter] Status: ${status.task_status} (position: ${status.task_position})`,
-        );
+        parts.push(`position: ${status.task_position}`);
+      }
+
+      const meta = status.task_meta;
+      if (meta) {
+        if (
+          meta.processed_documents !== undefined &&
+          meta.total_documents !== undefined
+        ) {
+          parts.push(
+            `progress: ${meta.processed_documents}/${meta.total_documents}`,
+          );
+        }
+      }
+
+      const progressLine = `\r[PDFConverter] ${parts.join(' | ')}`;
+      if (progressLine !== lastProgressLine) {
+        lastProgressLine = progressLine;
+        process.stdout.write(progressLine);
       }
     });
 

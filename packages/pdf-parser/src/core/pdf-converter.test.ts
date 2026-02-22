@@ -580,7 +580,7 @@ describe('PDFConverter', () => {
   });
 
   describe('trackTaskProgress', () => {
-    test('should track progress events', async () => {
+    test('should track progress events with status and position', async () => {
       const mockTask = createMockTask();
       const handlers: Record<string, any> = {};
 
@@ -622,8 +622,165 @@ describe('PDFConverter', () => {
         {},
       );
 
-      expect(process.stdout.write).toHaveBeenCalled();
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started',
+      );
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started | position: 50',
+      );
       expect(clearInterval).toHaveBeenCalled();
+    });
+
+    test('should log document progress from task_meta', async () => {
+      const mockTask = createMockTask();
+      const handlers: Record<string, any> = {};
+
+      mockTask.on = vi.fn((event, handler) => {
+        handlers[event] = handler;
+        return mockTask;
+      });
+
+      mockTask.waitForCompletion = vi.fn(async () => {
+        if (handlers['progress']) {
+          handlers['progress']({
+            task_id: 'task-123',
+            task_status: 'started' as const,
+            task_meta: {
+              total_documents: 10,
+              processed_documents: 3,
+            },
+          });
+          handlers['progress']({
+            task_id: 'task-123',
+            task_status: 'started' as const,
+            task_position: 1,
+            task_meta: {
+              total_documents: 10,
+              processed_documents: 7,
+            },
+          });
+        }
+        return {
+          task_id: 'task-123',
+          task_status: 'success' as const,
+        };
+      });
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started | progress: 3/10',
+      );
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started | position: 1 | progress: 7/10',
+      );
+    });
+
+    test('should ignore task_meta without document counts', async () => {
+      const mockTask = createMockTask();
+      const handlers: Record<string, any> = {};
+
+      mockTask.on = vi.fn((event, handler) => {
+        handlers[event] = handler;
+        return mockTask;
+      });
+
+      mockTask.waitForCompletion = vi.fn(async () => {
+        if (handlers['progress']) {
+          handlers['progress']({
+            task_id: 'task-123',
+            task_status: 'started' as const,
+            task_meta: {},
+          });
+        }
+        return {
+          task_id: 'task-123',
+          task_status: 'success' as const,
+        };
+      });
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      // Should only show status, not progress
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started',
+      );
+    });
+
+    test('should deduplicate identical progress lines', async () => {
+      const mockTask = createMockTask();
+      const handlers: Record<string, any> = {};
+
+      mockTask.on = vi.fn((event, handler) => {
+        handlers[event] = handler;
+        return mockTask;
+      });
+
+      mockTask.waitForCompletion = vi.fn(async () => {
+        if (handlers['progress']) {
+          handlers['progress']({
+            task_id: 'task-123',
+            task_status: 'started' as const,
+          });
+          // Same status again — should be deduplicated
+          handlers['progress']({
+            task_id: 'task-123',
+            task_status: 'started' as const,
+          });
+        }
+        return {
+          task_id: 'task-123',
+          task_status: 'success' as const,
+        };
+      });
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      const calls = vi
+        .mocked(process.stdout.write)
+        .mock.calls.filter(
+          (call) => call[0] === '\r[PDFConverter] Status: started',
+        );
+      expect(calls).toHaveLength(1);
     });
 
     test('should handle complete event', async () => {
