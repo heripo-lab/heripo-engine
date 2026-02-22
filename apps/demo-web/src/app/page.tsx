@@ -5,7 +5,7 @@ import type { FormEvent } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Lock } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ApiResponseError } from '~/lib/api/tasks';
 import { publicModeConfig } from '~/lib/config/public-mode';
@@ -175,6 +175,12 @@ function HomePageContent() {
       performSubmit(value);
     },
   });
+
+  // Reset form to defaults when returning to this page after navigation.
+  // React 19 Activity re-fires useEffect on show, ensuring stale values are cleared.
+  useEffect(() => {
+    form.reset();
+  }, [form]);
 
   // Store form reset function in ref for use in callbacks
   formResetRef.current = form.reset;
