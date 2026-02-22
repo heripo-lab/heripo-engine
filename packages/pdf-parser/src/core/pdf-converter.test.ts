@@ -197,7 +197,7 @@ describe('PDFConverter', () => {
         'report123',
         vi.fn(),
         false,
-        { pipeline: 'vlm', num_threads: 4 },
+        { pipeline: 'vlm', num_threads: 4, ocr_lang: ['ko', 'en'] },
       );
 
       const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
@@ -218,6 +218,7 @@ describe('PDFConverter', () => {
       expect(callArgs.options).not.toHaveProperty('ocr_engine');
       expect(callArgs.options).not.toHaveProperty('ocr_options');
       expect(callArgs.options).not.toHaveProperty('force_ocr');
+      expect(callArgs.options).not.toHaveProperty('ocr_lang');
     });
 
     test('should resolve VLM model preset from string key', async () => {

@@ -280,7 +280,7 @@ export class PDFConverter {
     const vlmModel = resolveVlmModel(options.vlm_model ?? DEFAULT_VLM_MODEL);
 
     return {
-      ...omit(options, ['num_threads', 'pipeline', 'vlm_model']),
+      ...omit(options, ['num_threads', 'pipeline', 'vlm_model', 'ocr_lang']),
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',
       pipeline: 'vlm',
