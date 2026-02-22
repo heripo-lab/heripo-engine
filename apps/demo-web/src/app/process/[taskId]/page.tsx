@@ -5,6 +5,8 @@ import { use, useEffect, useState } from 'react';
 
 import { featureFlags } from '~/lib/config/feature-flags';
 
+// TEMP:vlm-flag
+
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
 import { ConfirmDialog } from '~/components/ui/confirm-dialog';
@@ -51,12 +53,15 @@ export default function ProcessPage({ params }: PageProps) {
   } = useTaskStream(taskId);
   const isProcessing = status === 'queued' || status === 'running';
   const pipeline = task?.options?.pipeline ?? 'standard';
+  // TEMP:vlm-flag — delete line, unwrap enableVlm guards
+  const enableVlm = featureFlags.enableVlm || (task?.isOtpBypass ?? false);
 
   useEffect(() => {
-    if (featureFlags.enableVlm && vlmFallbackTriggered) {
+    if (enableVlm && vlmFallbackTriggered) {
+      // TEMP:vlm-flag — remove enableVlm guard
       setShowVlmFallback(true);
     }
-  }, [vlmFallbackTriggered]);
+  }, [enableVlm, vlmFallbackTriggered]);
 
   useAutoNavigate({ status, resultUrl, taskId, disabled: disableAutoNavigate });
 
@@ -128,7 +133,8 @@ export default function ProcessPage({ params }: PageProps) {
           pipeline={pipeline}
         />
 
-        {featureFlags.enableVlm && (
+        {/* TEMP:vlm-flag — unwrap this conditional */}
+        {enableVlm && (
           <VlmFallbackDialog
             open={showVlmFallback}
             onOpenChange={setShowVlmFallback}

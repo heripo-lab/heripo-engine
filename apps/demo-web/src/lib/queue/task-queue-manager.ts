@@ -20,6 +20,8 @@ export interface QueuedTask {
   clientIP: string;
   userAgent: string;
   filename: string;
+  // TEMP:vlm-flag — OTP bypass overrides feature flags
+  isOtpBypass: boolean;
 }
 
 export type SSEEventType =
@@ -112,6 +114,7 @@ class TaskQueueManager {
         clientIP: task.clientIp ?? 'unknown',
         userAgent: task.userAgent ?? 'unknown',
         filename: task.originalFilename,
+        isOtpBypass: task.isOtpBypass, // TEMP:vlm-flag
       });
     }
 

@@ -282,7 +282,11 @@ function HomePageContent() {
               <div className="mt-8 space-y-6">
                 {/* Row 1: Processing + Advanced Options */}
                 <div className="grid gap-6 md:grid-cols-2">
-                  <ProcessingOptionsCard disabled={isPublicMode} />
+                  {/* TEMP:vlm-flag — remove enableVlmOverride prop */}
+                  <ProcessingOptionsCard
+                    disabled={isPublicMode}
+                    enableVlmOverride={isOtpMode}
+                  />
                   <AdvancedOptionsCard disabled={isPublicMode} />
                 </div>
 

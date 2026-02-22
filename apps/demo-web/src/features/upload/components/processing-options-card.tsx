@@ -4,6 +4,8 @@ import { Cpu, Info } from 'lucide-react';
 
 import { featureFlags } from '~/lib/config/feature-flags';
 
+// TEMP:vlm-flag
+
 import { Badge } from '~/components/ui/badge';
 import {
   Card,
@@ -106,12 +108,15 @@ function DisabledWrapper({
 
 interface ProcessingOptionsCardProps {
   disabled?: boolean;
+  enableVlmOverride?: boolean; // TEMP:vlm-flag
 }
 
 export function ProcessingOptionsCard({
   disabled = false,
+  enableVlmOverride = false, // TEMP:vlm-flag
 }: ProcessingOptionsCardProps) {
   const form = useProcessingForm();
+  const showVlm = featureFlags.enableVlm || enableVlmOverride; // TEMP:vlm-flag — delete line, unwrap showVlm guards
 
   return (
     <Card>
@@ -138,7 +143,8 @@ export function ProcessingOptionsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Pipeline Selection */}
-        {featureFlags.enableVlm && (
+        {/* TEMP:vlm-flag — unwrap this conditional */}
+        {showVlm && (
           <form.Field name="pipeline">
             {(field: StringFieldApi) => (
               <div className="space-y-2">
@@ -169,7 +175,8 @@ export function ProcessingOptionsCard({
         )}
 
         {/* VLM Model Selection */}
-        {featureFlags.enableVlm && (
+        {/* TEMP:vlm-flag — unwrap this conditional */}
+        {showVlm && (
           <form.Field name="vlmModel">
             {(field: OptionalStringFieldApi) => (
               <div className="space-y-2">

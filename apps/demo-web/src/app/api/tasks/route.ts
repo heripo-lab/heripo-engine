@@ -271,6 +271,7 @@ export async function POST(request: NextRequest) {
       clientIP: clientInfo.ip,
       userAgent: clientInfo.userAgent,
       filename: file.name,
+      isOtpBypass: otpMode, // TEMP:vlm-flag
     });
 
     // Send webhook for task started
