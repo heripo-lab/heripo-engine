@@ -8,6 +8,7 @@ import { DocumentProcessor } from '@heripo/document-processor';
 import { readFileSync, writeFileSync } from 'fs';
 
 import { featureFlags } from '../config/feature-flags';
+import { publicModeConfig } from '../config/public-mode';
 import { calculateCost } from '../cost/model-pricing';
 import { createLog } from '../db/repositories/log-repository';
 import {
@@ -206,7 +207,10 @@ export async function runTaskWorker(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   const { taskId, filePath, options } = task;
-  const enableVlm = featureFlags.enableVlm || task.isOtpBypass;
+  const enableVlm =
+    featureFlags.enableVlm ||
+    task.isOtpBypass ||
+    !publicModeConfig.isPublicMode;
 
   const emitProgress = (step: string, percent: number) => {
     updateTaskProgress(taskId, step, percent);

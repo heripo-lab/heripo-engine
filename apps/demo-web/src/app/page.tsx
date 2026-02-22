@@ -284,7 +284,7 @@ function HomePageContent() {
                 <div className="grid gap-6 md:grid-cols-2">
                   <ProcessingOptionsCard
                     disabled={isPublicMode && !isOtpMode}
-                    enableVlmOverride={isOtpMode}
+                    enableVlmOverride={!isPublicMode || isOtpMode}
                   />
                   <AdvancedOptionsCard disabled={isPublicMode && !isOtpMode} />
                 </div>
