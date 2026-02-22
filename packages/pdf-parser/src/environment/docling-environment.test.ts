@@ -1194,6 +1194,9 @@ describe('DoclingEnvironment', () => {
     });
 
     test('should throw on mlx installation failure', async () => {
+      mockPlatformFn.mockReturnValue('darwin');
+      mockArchFn.mockReturnValue('arm64');
+
       mockSpawnAsync
         .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
         .mockResolvedValueOnce(createSpawnResult({})) // docling-serve[vlm] success
@@ -1215,6 +1218,9 @@ describe('DoclingEnvironment', () => {
         '[DoclingEnvironment] Failed to install mlx/mlx-lm:',
         'mlx error',
       );
+
+      mockPlatformFn.mockRestore();
+      mockArchFn.mockRestore();
     });
   });
 
