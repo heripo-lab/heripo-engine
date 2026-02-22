@@ -2,6 +2,8 @@
 
 import { Clock, Info, MonitorX } from 'lucide-react';
 
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
+
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -11,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '~/components/ui/dialog';
-import { useBrowserLanguage } from '~/features/upload/hooks/use-browser-language';
 
 const TEXT = {
   ko: {

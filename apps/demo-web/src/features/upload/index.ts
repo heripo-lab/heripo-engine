@@ -24,9 +24,6 @@ export type {
   ChunkedUploadState,
   ChunkedUploadStatus,
 } from './hooks/use-chunked-upload';
-export { useBrowserLanguage } from './hooks/use-browser-language';
-export type { SupportedLanguage } from './hooks/use-browser-language';
-
 // Constants
 export { LLM_MODELS, VISION_MODELS } from './constants/llm-models';
 export type { LLMModel } from './constants/llm-models';

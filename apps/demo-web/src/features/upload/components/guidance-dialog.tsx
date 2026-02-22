@@ -8,6 +8,8 @@ import {
   ImageOff,
 } from 'lucide-react';
 
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
+
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -19,7 +21,6 @@ import {
 } from '~/components/ui/dialog';
 
 import { KNOWN_LIMITATIONS } from '../constants/known-limitations';
-import { useBrowserLanguage } from '../hooks/use-browser-language';
 
 interface GuidanceDialogProps {
   open: boolean;
