@@ -20,9 +20,16 @@ export interface QueuedTask {
   clientIP: string;
   userAgent: string;
   filename: string;
+  isOtpBypass: boolean;
 }
 
-export type SSEEventType = 'status' | 'progress' | 'log' | 'complete' | 'error';
+export type SSEEventType =
+  | 'status'
+  | 'progress'
+  | 'log'
+  | 'complete'
+  | 'error'
+  | 'vlm-fallback';
 
 export interface SSEStatusEvent {
   type: 'status';
@@ -49,12 +56,18 @@ export interface SSEErrorEvent {
   data: { code: string; message: string };
 }
 
+export interface SSEVlmFallbackEvent {
+  type: 'vlm-fallback';
+  data: { reason: string };
+}
+
 export type SSEEvent =
   | SSEStatusEvent
   | SSEProgressEvent
   | SSELogEvent
   | SSECompleteEvent
-  | SSEErrorEvent;
+  | SSEErrorEvent
+  | SSEVlmFallbackEvent;
 
 type WorkerFactory = (
   task: QueuedTask,
@@ -100,6 +113,7 @@ class TaskQueueManager {
         clientIP: task.clientIp ?? 'unknown',
         userAgent: task.userAgent ?? 'unknown',
         filename: task.originalFilename,
+        isOtpBypass: task.isOtpBypass, // TEMP:vlm-flag
       });
     }
 

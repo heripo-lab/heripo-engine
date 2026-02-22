@@ -33,6 +33,8 @@ export interface Task {
   errorCode: string | null;
   errorMessage: string | null;
   queuePosition?: number;
+  options?: { pipeline: 'standard' | 'vlm' };
+  isOtpBypass: boolean; // TEMP:vlm-flag
 }
 
 export interface TaskListResponse {

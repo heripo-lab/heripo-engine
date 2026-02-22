@@ -1,4 +1,5 @@
 import type { DoclingDocument, TokenUsageReport } from '@heripo/model';
+import type { PDFConvertOptions, PDFParser } from '@heripo/pdf-parser';
 import type { EventEmitter } from 'events';
 
 import type { QueuedTask, SSEEvent } from './task-queue-manager';
@@ -6,6 +7,8 @@ import type { QueuedTask, SSEEvent } from './task-queue-manager';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { readFileSync, writeFileSync } from 'fs';
 
+import { featureFlags } from '../config/feature-flags';
+import { publicModeConfig } from '../config/public-mode';
 import { calculateCost } from '../cost/model-pricing';
 import { createLog } from '../db/repositories/log-repository';
 import {
@@ -21,6 +24,41 @@ import {
   sendWebhookAsync,
 } from '../webhook';
 import { PDFParserManager } from './pdf-parser-manager';
+
+/**
+ * Parse a PDF using the given parser and return the DoclingDocument with output path.
+ */
+function parsePdf(
+  pdfParser: PDFParser,
+  pdfUrl: string,
+  taskId: string,
+  options: PDFConvertOptions,
+  abortSignal?: AbortSignal,
+): Promise<{ doclingDocument: DoclingDocument; outputPath: string }> {
+  return new Promise((resolve, reject) => {
+    pdfParser
+      .parse(
+        pdfUrl,
+        taskId,
+        (outPath) => {
+          try {
+            const resultPath = `${outPath}/result.json`;
+            const json = readFileSync(resultPath, 'utf8');
+            resolve({
+              doclingDocument: JSON.parse(json) as DoclingDocument,
+              outputPath: outPath,
+            });
+          } catch (err) {
+            reject(err);
+          }
+        },
+        false,
+        options,
+        abortSignal,
+      )
+      .catch(reject);
+  });
+}
 
 function calculateTotalCost(usage: TokenUsageReport): number {
   let total = 0;
@@ -60,6 +98,9 @@ const STEP_PREFIXES: Record<string, string> = {
   '[TocFinder]': 'toc-extract',
   '[CaptionParser]': 'resource-process',
 };
+
+// VLM fallback detection - resets progress back to PDF parsing
+const VLM_FALLBACK_PREFIX = '[PDFParser] VLM pipeline requested';
 
 function getStepIndex(stepId: string): number {
   return PROCESSING_STEPS.findIndex((s) => s.id === stepId);
@@ -103,6 +144,7 @@ function createTaskLogger(
   taskId: string,
   emitter: EventEmitter,
   emitProgress: (step: string, percent: number) => void,
+  enableVlm: boolean,
 ): TaskLoggerContext {
   const detectedSteps = new Set<string>();
 
@@ -120,6 +162,12 @@ function createTaskLogger(
         .join(' '),
     );
     const timestamp = new Date().toISOString();
+
+    // Detect VLM fallback - reset progress back to PDF parsing
+    if (enableVlm && message.startsWith(VLM_FALLBACK_PREFIX)) {
+      detectedSteps.clear();
+      emitProgress('pdf-parse', 0);
+    }
 
     // Detect step change from log prefix
     for (const [prefix, stepId] of Object.entries(STEP_PREFIXES)) {
@@ -159,6 +207,10 @@ export async function runTaskWorker(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   const { taskId, filePath, options } = task;
+  const enableVlm =
+    featureFlags.enableVlm ||
+    task.isOtpBypass ||
+    !publicModeConfig.isPublicMode;
 
   const emitProgress = (step: string, percent: number) => {
     updateTaskProgress(taskId, step, percent);
@@ -169,13 +221,14 @@ export async function runTaskWorker(
     emitter.emit(`task:${taskId}`, event);
   };
 
-  const { logger } = createTaskLogger(taskId, emitter, emitProgress);
+  const { logger } = createTaskLogger(taskId, emitter, emitProgress, enableVlm);
 
   const pdfParserManager = PDFParserManager.getInstance();
 
   try {
     // Step 1: PDF Parsing
-    logger.info('Starting PDF parsing...');
+    const pipelineType = options.pipeline ?? 'standard';
+    logger.info(`Starting PDF parsing (pipeline: ${pipelineType})...`);
     emitProgress('pdf-parse', calculateProgress(1, 0));
 
     // Register task logger to receive PDF parser logs
@@ -188,38 +241,21 @@ export async function runTaskWorker(
     let outputPath: string;
 
     try {
-      const result = await new Promise<{
-        doclingDocument: DoclingDocument;
-        outputPath: string;
-      }>((resolve, reject) => {
-        pdfParser
-          .parse(
-            pdfUrl,
-            taskId,
-            (outPath) => {
-              try {
-                const resultPath = `${outPath}/result.json`;
-                const json = readFileSync(resultPath, 'utf8');
-                resolve({
-                  doclingDocument: JSON.parse(json) as DoclingDocument,
-                  outputPath: outPath,
-                });
-              } catch (err) {
-                reject(err);
-              }
-            },
-            false,
-            {
-              ocr_lang: options.ocrLanguages,
-              num_threads: options.threadCount,
-            },
-            abortSignal,
-          )
-          .catch(reject);
-      });
+      const parseResult = await parsePdf(
+        pdfParser,
+        pdfUrl,
+        taskId,
+        {
+          ocr_lang: options.ocrLanguages,
+          num_threads: options.threadCount,
+          pipeline: pipelineType,
+          vlm_model: options.vlmModel,
+        },
+        abortSignal,
+      );
 
-      doclingDocument = result.doclingDocument;
-      outputPath = result.outputPath;
+      doclingDocument = parseResult.doclingDocument;
+      outputPath = parseResult.outputPath;
     } finally {
       // Clear task logger after PDF parsing
       pdfParserManager.clearTaskLogger(taskId);
@@ -228,12 +264,62 @@ export async function runTaskWorker(
     logger.info('PDF parsing completed');
     emitProgress('pdf-parse', calculateProgress(1, 100));
 
-    // Step 2-5: Document Processing
-    logger.info('Starting document processing...');
-
+    // Create DocumentProcessor (used for both hanja assessment and document processing)
     const processor = new DocumentProcessor(
       createProcessorOptions(options, logger, abortSignal),
     );
+
+    // Hanja quality assessment: auto-fallback to VLM if KCJ corruption detected
+    if (enableVlm && pipelineType === 'standard') {
+      const assessment = await processor.assessHanjaQuality(
+        doclingDocument,
+        outputPath,
+      );
+
+      if (assessment.needsVlmReparse) {
+        logger.info(
+          `Hanja quality insufficient (severity: ${assessment.severity}, ratio: ${assessment.corruptedRatio}), re-parsing with VLM pipeline...`,
+        );
+
+        // Notify client about VLM fallback
+        const vlmFallbackEvent: SSEEvent = {
+          type: 'vlm-fallback',
+          data: {
+            reason: `Hanja quality insufficient (severity: ${assessment.severity})`,
+          },
+        };
+        emitter.emit(`task:${taskId}`, vlmFallbackEvent);
+
+        pdfParserManager.setTaskLogger(taskId, logger);
+        try {
+          const vlmResult = await parsePdf(
+            pdfParser,
+            pdfUrl,
+            taskId,
+            {
+              ocr_lang: options.ocrLanguages,
+              num_threads: options.threadCount,
+              pipeline: 'vlm',
+              vlm_model: options.vlmModel,
+            },
+            abortSignal,
+          );
+
+          doclingDocument = vlmResult.doclingDocument;
+          outputPath = vlmResult.outputPath;
+          logger.info('VLM re-parsing completed');
+        } finally {
+          pdfParserManager.clearTaskLogger(taskId);
+        }
+      } else {
+        logger.info(
+          `Hanja quality acceptable (severity: ${assessment.severity}), continuing with OCR result`,
+        );
+      }
+    }
+
+    // Step 2-5: Document Processing
+    logger.info('Starting document processing...');
 
     const result = await processor.process(doclingDocument, taskId, outputPath);
 

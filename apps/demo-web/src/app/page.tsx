@@ -5,7 +5,7 @@ import type { FormEvent } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Lock } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ApiResponseError } from '~/lib/api/tasks';
 import { publicModeConfig } from '~/lib/config/public-mode';
@@ -176,6 +176,12 @@ function HomePageContent() {
     },
   });
 
+  // Reset form to defaults when returning to this page after navigation.
+  // React 19 Activity re-fires useEffect on show, ensuring stale values are cleared.
+  useEffect(() => {
+    form.reset();
+  }, [form]);
+
   // Store form reset function in ref for use in callbacks
   formResetRef.current = form.reset;
 
@@ -276,12 +282,15 @@ function HomePageContent() {
               <div className="mt-8 space-y-6">
                 {/* Row 1: Processing + Advanced Options */}
                 <div className="grid gap-6 md:grid-cols-2">
-                  <ProcessingOptionsCard disabled={isPublicMode} />
-                  <AdvancedOptionsCard disabled={isPublicMode} />
+                  <ProcessingOptionsCard
+                    disabled={isPublicMode && !isOtpMode}
+                    enableVlmOverride={!isPublicMode || isOtpMode}
+                  />
+                  <AdvancedOptionsCard disabled={isPublicMode && !isOtpMode} />
                 </div>
 
                 {/* Row 2: LLM Model Settings (full width) */}
-                <LLMModelSettingsCard disabled={isPublicMode} />
+                <LLMModelSettingsCard disabled={isPublicMode && !isOtpMode} />
               </div>
 
               {/* Start Button */}

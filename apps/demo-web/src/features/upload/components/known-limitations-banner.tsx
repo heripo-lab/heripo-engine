@@ -3,8 +3,9 @@
 import { AlertTriangle, Construction, Info, X } from 'lucide-react';
 import { useState } from 'react';
 
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
+
 import { KNOWN_LIMITATIONS } from '../constants/known-limitations';
-import { useBrowserLanguage } from '../hooks/use-browser-language';
 
 /**
  * Banner component displaying known limitations of the current version.

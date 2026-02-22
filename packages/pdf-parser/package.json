@@ -13,6 +13,12 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs",
       "default": "./dist/index.js"
+    },
+    "./vlm-models": {
+      "types": "./dist/vlm-models.d.ts",
+      "import": "./dist/vlm-models.js",
+      "require": "./dist/vlm-models.cjs",
+      "default": "./dist/vlm-models.js"
     }
   },
   "files": [

@@ -4,6 +4,7 @@ import type {
   Chapter,
   DoclingDocument,
   DocumentProcessResult,
+  HanjaAssessment,
   PageRange,
   ProcessedDocument,
   ProcessedFootnote,
@@ -25,6 +26,7 @@ import {
   VisionTocExtractor,
 } from './extractors';
 import { CaptionParser, PageRangeParser } from './parsers';
+import { HanjaQualitySampler } from './samplers';
 import {
   IdGenerator,
   MarkdownConverter,
@@ -78,6 +80,12 @@ export interface DocumentProcessorOptions {
    * Falls back to 'fallbackModel' if not provided.
    */
   captionParserModel?: LanguageModel;
+
+  /**
+   * Model for HanjaQualitySampler - evaluates KCJ character quality in OCR output.
+   * Requires vision capabilities. Falls back to 'fallbackModel' if not provided.
+   */
+  hanjaQualitySamplerModel?: LanguageModel;
 
   /**
    * Batch size for TextCleaner text normalization (synchronous processing)
@@ -174,6 +182,7 @@ export class DocumentProcessor {
   private readonly validatorModel: LanguageModel;
   private readonly visionTocExtractorModel: LanguageModel;
   private readonly captionParserModel: LanguageModel;
+  private readonly hanjaQualitySamplerModel: LanguageModel;
   private readonly textCleanerBatchSize: number;
   private readonly captionParserBatchSize: number;
   private readonly captionValidatorBatchSize: number;
@@ -204,6 +213,8 @@ export class DocumentProcessor {
       options.visionTocExtractorModel ?? options.fallbackModel;
     this.captionParserModel =
       options.captionParserModel ?? options.fallbackModel;
+    this.hanjaQualitySamplerModel =
+      options.hanjaQualitySamplerModel ?? options.fallbackModel;
     this.textCleanerBatchSize = options.textCleanerBatchSize;
     this.captionParserBatchSize = options.captionParserBatchSize;
     this.captionValidatorBatchSize = options.captionValidatorBatchSize;
@@ -223,6 +234,44 @@ export class DocumentProcessor {
       error.name = 'AbortError';
       throw error;
     }
+  }
+
+  /**
+   * Assess the quality of KCJ (Hanja) character recognition in the OCR output.
+   *
+   * Samples pages containing KCJ characters and uses Vision LLM to compare
+   * the OCR text against the original page images. Returns an assessment
+   * indicating whether the document should be re-parsed with VLM pipeline.
+   *
+   * @param doclingDoc - Original document extracted from Docling SDK
+   * @param outputPath - Path containing pages subdirectory (pages/page_0.png, etc.)
+   * @returns Assessment result with severity and recommendation
+   */
+  async assessHanjaQuality(
+    doclingDoc: DoclingDocument,
+    outputPath: string,
+  ): Promise<HanjaAssessment> {
+    this.logger.info(
+      '[DocumentProcessor] Starting Hanja quality assessment...',
+    );
+
+    const sampler = new HanjaQualitySampler(
+      this.logger,
+      this.hanjaQualitySamplerModel,
+      outputPath,
+      this.maxRetries,
+      this.enableFallbackRetry ? this.fallbackModel : undefined,
+      this.usageAggregator,
+      this.abortSignal,
+    );
+
+    const assessment = await sampler.assess(doclingDoc);
+
+    this.logger.info(
+      `[DocumentProcessor] Hanja assessment: severity=${assessment.severity}, needsVlmReparse=${assessment.needsVlmReparse}`,
+    );
+
+    return assessment;
   }
 
   /**

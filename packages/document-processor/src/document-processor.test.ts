@@ -14,6 +14,14 @@ vi.mock('./parsers/caption-parser.js', () => ({
   CaptionParser: vi.fn(),
 }));
 
+// Mock HanjaQualitySampler
+const mockAssess = vi.fn();
+vi.mock('./samplers/index.js', () => ({
+  HanjaQualitySampler: vi.fn(function () {
+    return { assess: mockAssess };
+  }),
+}));
+
 // Mock utilities
 vi.mock('./utils/ref-resolver.js', () => ({
   RefResolver: vi.fn(function () {
@@ -2582,6 +2590,121 @@ describe('DocumentProcessor', () => {
       const result = (processor as any).convertFootnotes(mockDoc);
 
       expect(result).toHaveLength(0);
+    });
+  });
+
+  describe('assessHanjaQuality', () => {
+    test('should create HanjaQualitySampler and return assessment result', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockAssessment = {
+        needsVlmReparse: false,
+        severity: 'none' as const,
+        kcjPageCount: 0,
+        sampledPageCount: 0,
+        corruptedRatio: 0,
+        reason: 'No KCJ characters found in document',
+      };
+
+      mockAssess.mockResolvedValueOnce(mockAssessment);
+
+      const mockDoc = {
+        texts: [],
+        pages: {},
+        pictures: [],
+        tables: [],
+      } as unknown as DoclingDocument;
+
+      const result = await processor.assessHanjaQuality(
+        mockDoc,
+        '/output/path',
+      );
+
+      expect(result).toEqual(mockAssessment);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[DocumentProcessor] Starting Hanja quality assessment...',
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Hanja assessment: severity=none'),
+      );
+    });
+
+    test('should pass fallbackModel when enableFallbackRetry is true', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+        enableFallbackRetry: true,
+      });
+
+      mockAssess.mockResolvedValueOnce({
+        needsVlmReparse: false,
+        severity: 'none' as const,
+        kcjPageCount: 0,
+        sampledPageCount: 0,
+        corruptedRatio: 0,
+        reason: 'No KCJ characters found in document',
+      });
+
+      const mockDoc = {
+        texts: [],
+        pages: {},
+        pictures: [],
+        tables: [],
+      } as unknown as DoclingDocument;
+
+      await processor.assessHanjaQuality(mockDoc, '/output/path');
+
+      expect(mockAssess).toHaveBeenCalled();
+    });
+
+    test('should pass hanjaQualitySamplerModel to sampler', async () => {
+      const hanjaModel = { modelId: 'hanja-model' } as LanguageModel;
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        hanjaQualitySamplerModel: hanjaModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockAssessment = {
+        needsVlmReparse: true,
+        severity: 'severe' as const,
+        kcjPageCount: 5,
+        sampledPageCount: 3,
+        corruptedRatio: 0.67,
+        reason: '2/3 sampled pages have corrupted KCJ characters',
+      };
+
+      mockAssess.mockResolvedValueOnce(mockAssessment);
+
+      const mockDoc = {
+        texts: [],
+        pages: {},
+        pictures: [],
+        tables: [],
+      } as unknown as DoclingDocument;
+
+      const result = await processor.assessHanjaQuality(
+        mockDoc,
+        '/output/path',
+      );
+
+      expect(result.needsVlmReparse).toBe(true);
+      expect(result.severity).toBe('severe');
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('needsVlmReparse=true'),
+      );
     });
   });
 });

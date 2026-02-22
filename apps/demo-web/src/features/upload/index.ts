@@ -24,14 +24,17 @@ export type {
   ChunkedUploadState,
   ChunkedUploadStatus,
 } from './hooks/use-chunked-upload';
-export { useBrowserLanguage } from './hooks/use-browser-language';
-export type { SupportedLanguage } from './hooks/use-browser-language';
-
 // Constants
 export { LLM_MODELS, VISION_MODELS } from './constants/llm-models';
 export type { LLMModel } from './constants/llm-models';
 export { KNOWN_LIMITATIONS } from './constants/known-limitations';
 export type { KnownLimitation } from './constants/known-limitations';
+export {
+  VLM_MODEL_OPTIONS,
+  VLM_MODEL_KEYS,
+  DEFAULT_VLM_MODEL_KEY,
+} from './constants/vlm-models';
+export type { VlmModelOption } from './constants/vlm-models';
 
 // Types
 export type {

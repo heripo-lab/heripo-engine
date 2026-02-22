@@ -27,6 +27,7 @@ export interface TaskStreamState {
   error?: { code: string; message: string };
   resultUrl?: string;
   isConnected: boolean;
+  vlmFallbackTriggered: boolean;
 }
 
 const INITIAL_STATE: TaskStreamState = {
@@ -35,6 +36,7 @@ const INITIAL_STATE: TaskStreamState = {
   currentStep: '',
   logs: [],
   isConnected: false,
+  vlmFallbackTriggered: false,
 };
 
 export function useTaskStream(taskId: string | null): TaskStreamState {
@@ -102,6 +104,11 @@ export function useTaskStream(taskId: string | null): TaskStreamState {
           logs: [...prev.logs, data],
         };
       });
+    });
+
+    eventSource.addEventListener('vlm-fallback', () => {
+      if (isCleanedUp) return;
+      setState((prev) => ({ ...prev, vlmFallbackTriggered: true }));
     });
 
     eventSource.addEventListener('complete', (e: MessageEvent) => {

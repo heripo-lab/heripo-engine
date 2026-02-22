@@ -1,19 +1,24 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { use, useState } from 'react';
+import { use, useEffect, useState } from 'react';
+
+import { featureFlags } from '~/lib/config/feature-flags';
+
+// TEMP:vlm-flag
 
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
 import { ConfirmDialog } from '~/components/ui/confirm-dialog';
-import { Progress } from '~/components/ui/progress';
 import {
   LogViewer,
   ProcessErrorAlert,
   ProcessErrorDialog,
+  ProcessGuideDialog,
   ProcessHeader,
   ProcessInfoCard,
   ProcessTimeline,
+  VlmFallbackDialog,
   useAutoNavigate,
   useTask,
   useTaskStream,
@@ -31,12 +36,31 @@ export default function ProcessPage({ params }: PageProps) {
   const deleteTaskMutation = useDeleteTask();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [errorDialogDismissed, setErrorDialogDismissed] = useState(false);
+  const [showEntryGuide, setShowEntryGuide] = useState(true);
+  const [showVlmFallback, setShowVlmFallback] = useState(false);
   const disableAutoNavigate = searchParams.get('stay') === 'true';
 
   const { data: task } = useTask(taskId);
-  const { status, progress, currentStep, logs, error, resultUrl } =
-    useTaskStream(taskId);
+  const {
+    status,
+    progress,
+    currentStep,
+    logs,
+    error,
+    resultUrl,
+    vlmFallbackTriggered,
+  } = useTaskStream(taskId);
   const isProcessing = status === 'queued' || status === 'running';
+  const pipeline = task?.options?.pipeline ?? 'standard';
+  // TEMP:vlm-flag — delete line, unwrap enableVlm guards
+  const enableVlm = featureFlags.enableVlm || (task?.isOtpBypass ?? false);
+
+  useEffect(() => {
+    if (enableVlm && vlmFallbackTriggered) {
+      // TEMP:vlm-flag — remove enableVlm guard
+      setShowVlmFallback(true);
+    }
+  }, [enableVlm, vlmFallbackTriggered]);
 
   useAutoNavigate({ status, resultUrl, taskId, disabled: disableAutoNavigate });
 
@@ -66,7 +90,7 @@ export default function ProcessPage({ params }: PageProps) {
           onCancel={handleCancelClick}
           isCancelling={deleteTaskMutation.isPending}
         />
-        {isProcessing && <Progress value={progress} indeterminate />}
+        {/*{isProcessing && <Progress value={progress} indeterminate />}*/}
         <ProcessErrorAlert error={error} />
         <div className="flex flex-col gap-6 lg:flex-row">
           <div className="w-full lg:w-2/5">
@@ -101,6 +125,20 @@ export default function ProcessPage({ params }: PageProps) {
           variant="destructive"
           isPending={deleteTaskMutation.isPending}
         />
+
+        <ProcessGuideDialog
+          open={isProcessing && showEntryGuide}
+          onOpenChange={setShowEntryGuide}
+          pipeline={pipeline}
+        />
+
+        {/* TEMP:vlm-flag — unwrap this conditional */}
+        {enableVlm && (
+          <VlmFallbackDialog
+            open={showVlmFallback}
+            onOpenChange={setShowVlmFallback}
+          />
+        )}
       </div>
     </div>
   );

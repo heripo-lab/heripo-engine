@@ -36,6 +36,11 @@ export const PDF_CONVERTER = {
    * Interval for progress polling in milliseconds
    */
   POLL_INTERVAL_MS: 1000,
+
+  /**
+   * Default timeout for task completion in milliseconds (30 minutes)
+   */
+  DEFAULT_TIMEOUT_MS: 1_800_000,
 } as const;
 
 /**
@@ -61,4 +66,22 @@ export const IMAGE_PDF_CONVERTER = {
    * ImageMagick quality option (1-100)
    */
   QUALITY: 100,
+} as const;
+
+/**
+ * Configuration constants for VLM environment
+ */
+export const VLM_ENVIRONMENT = {
+  /**
+   * Timeout for VLM dependency installation (pip install) in milliseconds (3 hours).
+   * VLM packages can be very large and may require extended download times
+   * depending on network conditions.
+   */
+  SETUP_TIMEOUT_MS: 10_800_000,
+
+  /**
+   * Timeout for VLM model download in milliseconds (3 hours).
+   * Large VLM models (e.g., multi-GB weights) need sufficient time to download.
+   */
+  MODEL_DOWNLOAD_TIMEOUT_MS: 10_800_000,
 } as const;

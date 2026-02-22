@@ -3,6 +3,8 @@
 import { AlertTriangle, Construction, ExternalLink, Info } from 'lucide-react';
 import Link from 'next/link';
 
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
+
 import { Button } from '~/components/ui/button';
 import {
   Dialog,
@@ -13,7 +15,6 @@ import {
   DialogTitle,
 } from '~/components/ui/dialog';
 import { KNOWN_LIMITATIONS } from '~/features/upload/constants/known-limitations';
-import { useBrowserLanguage } from '~/features/upload/hooks/use-browser-language';
 
 const GITHUB_ISSUES_URL = 'https://github.com/heripo-lab/heripo-engine/issues';
 

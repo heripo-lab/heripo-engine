@@ -35,12 +35,20 @@ interface StringFieldApi {
   handleChange: (value: string) => void;
 }
 
+interface OptionalStringFieldApi {
+  state: { value: string | undefined };
+  handleChange: (value: string | undefined) => void;
+}
+
+const NONE_VALUE = '__none__';
+
 interface ModelSelectProps {
   label: string;
   description: string;
   value: string;
   onChange: (value: string) => void;
   requiresVision?: boolean;
+  optional?: boolean;
   disabled?: boolean;
 }
 
@@ -50,6 +58,7 @@ function ModelSelect({
   value,
   onChange,
   requiresVision = false,
+  optional = false,
   disabled = false,
 }: ModelSelectProps) {
   const models = requiresVision ? VISION_MODELS : LLM_MODELS;
@@ -69,11 +78,18 @@ function ModelSelect({
   const providers = Object.keys(modelsByProvider);
 
   const selectElement = (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
+    <Select
+      value={value || NONE_VALUE}
+      onValueChange={(v) => onChange(v === NONE_VALUE ? '' : v)}
+      disabled={disabled}
+    >
       <SelectTrigger>
         <SelectValue placeholder="Select model" />
       </SelectTrigger>
       <SelectContent>
+        {optional && (
+          <SelectItem value={NONE_VALUE}>None (use fallback model)</SelectItem>
+        )}
         {providers.map((provider) => (
           <SelectGroup key={provider}>
             <SelectLabel>{provider}</SelectLabel>
@@ -97,6 +113,9 @@ function ModelSelect({
             <Eye className="h-3 w-3" />
             Vision
           </span>
+        )}
+        {optional && (
+          <span className="text-muted-foreground text-xs">(Optional)</span>
         )}
       </div>
       <p className="text-muted-foreground text-xs">{description}</p>
@@ -129,6 +148,7 @@ type ModelFieldName = Extract<
   | 'visionTocExtractorModel'
   | 'validatorModel'
   | 'captionParserModel'
+  | 'hanjaQualitySamplerModel'
 >;
 
 interface ModelFieldConfig {
@@ -136,6 +156,7 @@ interface ModelFieldConfig {
   label: string;
   description: string;
   requiresVision?: boolean;
+  optional?: boolean;
 }
 
 const MODEL_FIELDS: ModelFieldConfig[] = [
@@ -165,6 +186,13 @@ const MODEL_FIELDS: ModelFieldConfig[] = [
     name: 'captionParserModel',
     label: 'Caption Parser',
     description: 'Parses captions to extract numbers',
+  },
+  {
+    name: 'hanjaQualitySamplerModel',
+    label: 'Hanja Quality Sampler',
+    description: 'Assesses KCJ character quality for auto VLM fallback',
+    requiresVision: true,
+    optional: true,
   },
 ];
 
@@ -222,22 +250,40 @@ export function LLMModelSettingsCard({
         {/* Separator */}
         <div className="bg-border h-px" />
 
-        {/* Optional Models - 2 column grid */}
+        {/* Stage-specific Models - 2 column grid */}
         <div className="grid gap-4 sm:grid-cols-2">
-          {MODEL_FIELDS.map((config) => (
-            <form.Field key={config.name} name={config.name}>
-              {(field: StringFieldApi) => (
-                <ModelSelect
-                  label={config.label}
-                  description={config.description}
-                  value={field.state.value}
-                  onChange={field.handleChange}
-                  requiresVision={config.requiresVision}
-                  disabled={disabled}
-                />
-              )}
-            </form.Field>
-          ))}
+          {MODEL_FIELDS.map((config) =>
+            config.optional ? (
+              <form.Field key={config.name} name={config.name}>
+                {(field: OptionalStringFieldApi) => (
+                  <ModelSelect
+                    label={config.label}
+                    description={config.description}
+                    value={field.state.value ?? ''}
+                    onChange={(v) =>
+                      field.handleChange(v === '' ? undefined : v)
+                    }
+                    requiresVision={config.requiresVision}
+                    optional={config.optional}
+                    disabled={disabled}
+                  />
+                )}
+              </form.Field>
+            ) : (
+              <form.Field key={config.name} name={config.name}>
+                {(field: StringFieldApi) => (
+                  <ModelSelect
+                    label={config.label}
+                    description={config.description}
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    requiresVision={config.requiresVision}
+                    disabled={disabled}
+                  />
+                )}
+              </form.Field>
+            ),
+          )}
         </div>
       </CardContent>
     </Card>

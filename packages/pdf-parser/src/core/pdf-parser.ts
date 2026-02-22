@@ -1,5 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { ConversionOptions, DoclingAPIClient } from 'docling-sdk';
+import type { DoclingAPIClient } from 'docling-sdk';
 
 import { Docling } from 'docling-sdk';
 import { execSync } from 'node:child_process';
@@ -8,7 +8,11 @@ import { join } from 'node:path';
 
 import { PDF_PARSER } from '../config/constants';
 import { DoclingEnvironment } from '../environment/docling-environment';
-import { type ConversionCompleteCallback, PDFConverter } from './pdf-converter';
+import {
+  type ConversionCompleteCallback,
+  type PDFConvertOptions,
+  PDFConverter,
+} from './pdf-converter';
 
 type Options = {
   logger: LoggerMethods;
@@ -82,6 +86,7 @@ export class PDFParser {
   private readonly killExistingProcess: boolean;
   private readonly enableImagePdfFallback: boolean;
   private client: DoclingAPIClient | null = null;
+  private environment?: DoclingEnvironment;
 
   constructor(options: Options) {
     const {
@@ -136,14 +141,14 @@ export class PDFParser {
 
     this.logger.info('[PDFParser] Setting up local server...');
     try {
-      const environment = new DoclingEnvironment({
+      this.environment = new DoclingEnvironment({
         logger: this.logger,
         venvPath: this.venvPath,
         port: this.port as number,
         killExistingProcess: this.killExistingProcess,
       });
 
-      await environment.setup();
+      await this.environment.setup();
 
       const clientUrl = `http://localhost:${this.port}`;
       this.client = new Docling({
@@ -312,25 +317,21 @@ export class PDFParser {
     reportId: string,
     onComplete: ConversionCompleteCallback,
     cleanupAfterCallback: boolean,
-    options: Omit<
-      ConversionOptions,
-      | 'to_formats'
-      | 'image_export_mode'
-      | 'ocr_engine'
-      | 'accelerator_options'
-      | 'ocr_options'
-      | 'generate_picture_images'
-      | 'images_scale'
-      | 'force_ocr'
-    > & {
-      num_threads?: number;
-    },
+    options: PDFConvertOptions,
     abortSignal?: AbortSignal,
   ) {
     if (!this.client) {
       throw new Error(
         'PDFParser is not initialized. Call init() before using parse()',
       );
+    }
+
+    // Auto-setup VLM dependencies if VLM pipeline is requested
+    if (options.pipeline === 'vlm' && this.environment && !this.baseUrl) {
+      this.logger.info(
+        '[PDFParser] VLM pipeline requested, ensuring VLM dependencies...',
+      );
+      await this.environment.setupVlmDependencies();
     }
 
     // Enable recovery only for local server mode
@@ -347,6 +348,7 @@ export class PDFParser {
           this.logger,
           this.client,
           effectiveFallbackEnabled,
+          this.timeout,
         );
         return await converter.convert(
           url,

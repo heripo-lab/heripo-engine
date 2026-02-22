@@ -3,18 +3,33 @@ import type {
   AsyncConversionTask,
   ConversionOptions,
   DoclingAPIClient,
+  VlmModelLocal,
 } from 'docling-sdk';
 
+import { ValidationUtils } from 'docling-sdk';
 import { omit } from 'es-toolkit';
 import { createWriteStream, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 import { PDF_CONVERTER } from '../config/constants';
+import { DEFAULT_VLM_MODEL, resolveVlmModel } from '../config/vlm-models';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { LocalFileServer } from '../utils/local-file-server';
 import { ImagePdfConverter } from './image-pdf-converter';
+
+// Workaround for docling-sdk@1.3.6 validation bug:
+// ValidationUtils.validateProcessingPipeline() uses a Zod enum ["default","fast","accurate"]
+// which doesn't include "vlm", even though the TypeScript ConversionOptions interface allows it.
+// This patch strips the `pipeline` field before validation to avoid the false rejection.
+// TODO: Remove this patch when docling-sdk fixes ProcessingPipelineSchema to include "vlm".
+const _origAssertValidConversionOptions =
+  ValidationUtils.assertValidConversionOptions.bind(ValidationUtils);
+ValidationUtils.assertValidConversionOptions = (options: unknown) => {
+  const { pipeline: _pipeline, ...rest } = options as Record<string, unknown>;
+  _origAssertValidConversionOptions(rest);
+};
 
 /**
  * Callback function invoked after PDF conversion completes
@@ -24,11 +39,40 @@ export type ConversionCompleteCallback = (
   outputPath: string,
 ) => Promise<void> | void;
 
+/**
+ * Pipeline type for PDF conversion
+ * - 'standard': Use OCR-based pipeline (default, uses ocrmac)
+ * - 'vlm': Use Vision Language Model pipeline for better KCJ/complex layout handling
+ */
+export type PipelineType = 'standard' | 'vlm';
+
+/**
+ * Extended options for PDF conversion including pipeline selection
+ */
+export type PDFConvertOptions = Omit<
+  ConversionOptions,
+  | 'to_formats'
+  | 'image_export_mode'
+  | 'ocr_engine'
+  | 'accelerator_options'
+  | 'ocr_options'
+  | 'generate_picture_images'
+  | 'images_scale'
+  | 'force_ocr'
+  | 'pipeline'
+  | 'vlm_pipeline_model_local'
+> & {
+  num_threads?: number;
+  pipeline?: PipelineType;
+  vlm_model?: string | VlmModelLocal;
+};
+
 export class PDFConverter {
   constructor(
     private readonly logger: LoggerMethods,
     private readonly client: DoclingAPIClient,
     private readonly enableImagePdfFallback: boolean = false,
+    private readonly timeout: number = PDF_CONVERTER.DEFAULT_TIMEOUT_MS,
   ) {}
 
   async convert(
@@ -36,19 +80,7 @@ export class PDFConverter {
     reportId: string,
     onComplete: ConversionCompleteCallback,
     cleanupAfterCallback: boolean,
-    options: Omit<
-      ConversionOptions,
-      | 'to_formats'
-      | 'image_export_mode'
-      | 'ocr_engine'
-      | 'accelerator_options'
-      | 'ocr_options'
-      | 'generate_picture_images'
-      | 'images_scale'
-      | 'force_ocr'
-    > & {
-      num_threads?: number;
-    },
+    options: PDFConvertOptions,
     abortSignal?: AbortSignal,
   ) {
     this.logger.info('[PDFConverter] Converting:', url);
@@ -120,27 +152,23 @@ export class PDFConverter {
     reportId: string,
     onComplete: ConversionCompleteCallback,
     cleanupAfterCallback: boolean,
-    options: Omit<
-      ConversionOptions,
-      | 'to_formats'
-      | 'image_export_mode'
-      | 'ocr_engine'
-      | 'accelerator_options'
-      | 'ocr_options'
-      | 'generate_picture_images'
-      | 'images_scale'
-      | 'force_ocr'
-    > & {
-      num_threads?: number;
-    },
+    options: PDFConvertOptions,
     abortSignal?: AbortSignal,
   ): Promise<void> {
     const startTime = Date.now();
-    const conversionOptions = this.buildConversionOptions(options);
+    const pipelineType = options.pipeline ?? 'standard';
+    const conversionOptions =
+      pipelineType === 'vlm'
+        ? this.buildVlmConversionOptions(options)
+        : this.buildConversionOptions(options);
 
-    this.logger.info(
-      `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
-    );
+    if (pipelineType === 'vlm') {
+      this.logger.info('[PDFConverter] Using VLM pipeline');
+    } else {
+      this.logger.info(
+        `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
+      );
+    }
     this.logger.info(
       '[PDFConverter] Converting document with Async Source API...',
     );
@@ -224,22 +252,10 @@ export class PDFConverter {
   }
 
   private buildConversionOptions(
-    options: Omit<
-      ConversionOptions,
-      | 'to_formats'
-      | 'image_export_mode'
-      | 'ocr_engine'
-      | 'accelerator_options'
-      | 'ocr_options'
-      | 'generate_picture_images'
-      | 'images_scale'
-      | 'force_ocr'
-    > & {
-      num_threads?: number;
-    },
+    options: PDFConvertOptions,
   ): ConversionOptions {
     return {
-      ...omit(options, ['num_threads']),
+      ...omit(options, ['num_threads', 'pipeline', 'vlm_model']),
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',
       ocr_engine: 'ocrmac',
@@ -259,6 +275,35 @@ export class PDFConverter {
        * to direct text extraction, the accuracy remains high since the source is digital, not scanned paper.
        */
       force_ocr: true,
+      accelerator_options: {
+        device: 'mps',
+        num_threads: options.num_threads,
+      },
+    };
+  }
+
+  /**
+   * Build conversion options for VLM pipeline.
+   *
+   * VLM pipeline uses a Vision Language Model instead of traditional OCR,
+   * providing better accuracy for KCJ characters and complex layouts.
+   */
+  private buildVlmConversionOptions(
+    options: PDFConvertOptions,
+  ): ConversionOptions {
+    const vlmModel = resolveVlmModel(options.vlm_model ?? DEFAULT_VLM_MODEL);
+    this.logger.info(
+      `[PDFConverter] VLM model: ${vlmModel.repo_id} (framework: ${vlmModel.inference_framework}, format: ${vlmModel.response_format})`,
+    );
+
+    return {
+      ...omit(options, ['num_threads', 'pipeline', 'vlm_model', 'ocr_lang']),
+      to_formats: ['json', 'html'],
+      image_export_mode: 'embedded',
+      pipeline: 'vlm',
+      vlm_pipeline_model_local: vlmModel,
+      generate_picture_images: true,
+      images_scale: 2.0,
       accelerator_options: {
         device: 'mps',
         num_threads: options.num_threads,
@@ -313,43 +358,59 @@ export class PDFConverter {
 
   private async trackTaskProgress(task: AsyncConversionTask): Promise<void> {
     const conversionStartTime = Date.now();
-    let lastStatus = '';
-    let isCompleted = false;
+    let lastProgressLine = '';
 
-    const pollInterval = setInterval(() => {
-      if (isCompleted) return;
-      const elapsed = Math.floor((Date.now() - conversionStartTime) / 1000);
-      process.stdout.write(
-        `\r[PDFConverter] Status: ${lastStatus || 'processing'} (${elapsed}s elapsed)`,
-      );
-    }, PDF_CONVERTER.POLL_INTERVAL_MS);
+    const logProgress = (status: {
+      task_status: string;
+      task_position?: number;
+      task_meta?: { total_documents?: number; processed_documents?: number };
+    }) => {
+      const parts: string[] = [`Status: ${status.task_status}`];
 
-    task.on('progress', (status) => {
-      lastStatus = status.task_status;
       if (status.task_position !== undefined) {
-        process.stdout.write(
-          `\r[PDFConverter] Status: ${status.task_status} (position: ${status.task_position})`,
-        );
+        parts.push(`position: ${status.task_position}`);
       }
-    });
 
-    task.on('complete', () => {
-      isCompleted = true;
-      clearInterval(pollInterval);
-      this.logger.info('\n[PDFConverter] Conversion completed!');
-    });
+      const meta = status.task_meta;
+      if (meta) {
+        if (
+          meta.processed_documents !== undefined &&
+          meta.total_documents !== undefined
+        ) {
+          parts.push(
+            `progress: ${meta.processed_documents}/${meta.total_documents}`,
+          );
+        }
+      }
 
-    task.on('error', (error) => {
-      isCompleted = true;
-      clearInterval(pollInterval);
-      this.logger.error('\n[PDFConverter] Conversion error:', error.message);
-    });
+      const progressLine = `\r[PDFConverter] ${parts.join(' | ')}`;
+      if (progressLine !== lastProgressLine) {
+        lastProgressLine = progressLine;
+        process.stdout.write(progressLine);
+      }
+    };
 
-    try {
-      await task.waitForCompletion();
-    } finally {
-      isCompleted = true;
-      clearInterval(pollInterval);
+    while (true) {
+      if (Date.now() - conversionStartTime > this.timeout) {
+        throw new Error('Task timeout');
+      }
+
+      const status = await task.poll();
+
+      logProgress(status);
+
+      if (status.task_status === 'success') {
+        this.logger.info('\n[PDFConverter] Conversion completed!');
+        return;
+      }
+
+      if (status.task_status === 'failure') {
+        throw new Error('Task failed with status: failure');
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
+      );
     }
   }
 

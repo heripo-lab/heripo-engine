@@ -1,13 +1,19 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
+import type {
+  AsyncConversionTask,
+  DoclingAPIClient,
+  VlmModelLocal,
+} from 'docling-sdk';
 import type { Readable } from 'node:stream';
 
+import { ValidationUtils } from 'docling-sdk';
 import { omit } from 'es-toolkit';
 import { createWriteStream, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { LocalFileServer } from '../utils/local-file-server';
@@ -68,10 +74,6 @@ describe('PDFConverter', () => {
 
     vi.spyOn(process, 'cwd').mockReturnValue('/test/cwd');
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    vi.spyOn(global, 'setInterval').mockImplementation(((_fn: () => void) => {
-      return 123 as unknown as NodeJS.Timeout;
-    }) as typeof setInterval);
-    vi.spyOn(global, 'clearInterval').mockImplementation(() => {});
     vi.spyOn(Date, 'now').mockReturnValue(1000000);
 
     vi.mocked(omit).mockImplementation((obj, keys) => {
@@ -94,6 +96,16 @@ describe('PDFConverter', () => {
   describe('constructor', () => {
     test('should create an instance with logger and client', () => {
       expect(converter).toBeInstanceOf(PDFConverter);
+    });
+
+    test('should accept custom timeout parameter', () => {
+      const customConverter = new PDFConverter(
+        logger,
+        client,
+        false,
+        5_000_000,
+      );
+      expect(customConverter).toBeInstanceOf(PDFConverter);
     });
   });
 
@@ -175,6 +187,122 @@ describe('PDFConverter', () => {
           num_threads: 8,
         },
       });
+    });
+  });
+
+  describe('buildVlmConversionOptions', () => {
+    test('should build VLM options with default model when pipeline is vlm', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', num_threads: 4, ocr_lang: ['ko', 'en'] },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options).toMatchObject({
+        to_formats: ['json', 'html'],
+        image_export_mode: 'embedded',
+        pipeline: 'vlm',
+        generate_picture_images: true,
+        images_scale: 2.0,
+        accelerator_options: {
+          device: 'mps',
+          num_threads: 4,
+        },
+      });
+      // VLM options should have vlm_pipeline_model_local
+      expect(callArgs.options).toHaveProperty('vlm_pipeline_model_local');
+      // VLM options should NOT have OCR-specific settings
+      expect(callArgs.options).not.toHaveProperty('ocr_engine');
+      expect(callArgs.options).not.toHaveProperty('ocr_options');
+      expect(callArgs.options).not.toHaveProperty('force_ocr');
+      expect(callArgs.options).not.toHaveProperty('ocr_lang');
+    });
+
+    test('should resolve VLM model preset from string key', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_model: 'granite-docling-258M' },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options!.vlm_pipeline_model_local).toMatchObject({
+        repo_id: 'ibm-granite/granite-docling-258M',
+        inference_framework: 'transformers',
+        response_format: 'doctags',
+        transformers_model_type: 'automodel-vision2seq',
+      });
+    });
+
+    test('should use custom VlmModelLocal object directly', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const customModel = {
+        repo_id: 'custom/model',
+        inference_framework: 'transformers',
+        response_format: 'markdown',
+        transformers_model_type: 'automodel',
+      } as unknown as VlmModelLocal;
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_model: customModel },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options!.vlm_pipeline_model_local).toEqual(customModel);
+    });
+
+    test('should log VLM pipeline usage', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm' },
+      );
+
+      expect(logger.info).toHaveBeenCalledWith(
+        '[PDFConverter] Using VLM pipeline',
+      );
     });
   });
 
@@ -320,10 +448,7 @@ describe('PDFConverter', () => {
     });
 
     test('should handle conversion task failure', async () => {
-      const mockTask = createMockTask();
-      mockTask.waitForCompletion = vi
-        .fn()
-        .mockRejectedValue(new Error('Task failed'));
+      const mockTask = createMockTask('failure');
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
 
@@ -335,7 +460,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Task failed');
+      ).rejects.toThrow('Task failed with status: failure');
 
       expect(logger.error).toHaveBeenCalledWith(
         '[PDFConverter] Conversion failed:',
@@ -459,32 +584,22 @@ describe('PDFConverter', () => {
   });
 
   describe('trackTaskProgress', () => {
-    test('should track progress events', async () => {
-      const mockTask = createMockTask();
-      const handlers: Record<string, any> = {};
-
-      mockTask.on = vi.fn((event, handler) => {
-        handlers[event] = handler;
-        return mockTask;
-      });
-
-      mockTask.waitForCompletion = vi.fn(async () => {
-        if (handlers['progress']) {
-          handlers['progress']({
-            task_id: 'task-123',
-            task_status: 'started' as const,
-          });
-          handlers['progress']({
-            task_id: 'task-123',
-            task_status: 'started' as const,
-            task_position: 50,
-          });
-        }
-        return {
+    test('should track progress via poll with status and position', async () => {
+      const mockTask = createMockTaskWithPollSequence([
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+        },
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+          task_position: 50,
+        },
+        {
           task_id: 'task-123',
           task_status: 'success' as const,
-        };
-      });
+        },
+      ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
       vi.mocked(client.getTaskResultFile).mockResolvedValue({
@@ -501,28 +616,138 @@ describe('PDFConverter', () => {
         {},
       );
 
-      expect(process.stdout.write).toHaveBeenCalled();
-      expect(clearInterval).toHaveBeenCalled();
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started',
+      );
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started | position: 50',
+      );
     });
 
-    test('should handle complete event', async () => {
-      const mockTask = createMockTask();
-      const handlers: Record<string, any> = {};
-
-      mockTask.on = vi.fn((event, handler) => {
-        handlers[event] = handler;
-        return mockTask;
-      });
-
-      mockTask.waitForCompletion = vi.fn(async () => {
-        if (handlers['complete']) {
-          handlers['complete']();
-        }
-        return {
+    test('should log document progress from task_meta', async () => {
+      const mockTask = createMockTaskWithPollSequence([
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+          task_meta: {
+            total_documents: 10,
+            processed_documents: 3,
+          },
+        },
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+          task_position: 1,
+          task_meta: {
+            total_documents: 10,
+            processed_documents: 7,
+          },
+        },
+        {
           task_id: 'task-123',
           task_status: 'success' as const,
-        };
+        },
+      ]);
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
       });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started | progress: 3/10',
+      );
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started | position: 1 | progress: 7/10',
+      );
+    });
+
+    test('should ignore task_meta without document counts', async () => {
+      const mockTask = createMockTaskWithPollSequence([
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+          task_meta: {},
+        },
+        {
+          task_id: 'task-123',
+          task_status: 'success' as const,
+        },
+      ]);
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      // Should only show status, not progress
+      expect(process.stdout.write).toHaveBeenCalledWith(
+        '\r[PDFConverter] Status: started',
+      );
+    });
+
+    test('should deduplicate identical progress lines', async () => {
+      const mockTask = createMockTaskWithPollSequence([
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+        },
+        // Same status again — should be deduplicated
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+        },
+        {
+          task_id: 'task-123',
+          task_status: 'success' as const,
+        },
+      ]);
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      const calls = vi
+        .mocked(process.stdout.write)
+        .mock.calls.filter(
+          (call) => call[0] === '\r[PDFConverter] Status: started',
+        );
+      expect(calls).toHaveLength(1);
+    });
+
+    test('should log completion message on success', async () => {
+      const mockTask = createMockTask();
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
       vi.mocked(client.getTaskResultFile).mockResolvedValue({
@@ -542,122 +767,72 @@ describe('PDFConverter', () => {
       expect(logger.info).toHaveBeenCalledWith(
         '\n[PDFConverter] Conversion completed!',
       );
-      expect(clearInterval).toHaveBeenCalled();
     });
 
-    test('should handle error event', async () => {
-      const mockTask = createMockTask();
-      const handlers: Record<string, any> = {};
-
-      mockTask.on = vi.fn((event, handler) => {
-        handlers[event] = handler;
-        return mockTask;
-      });
-
-      mockTask.waitForCompletion = vi.fn(async () => {
-        if (handlers['error']) {
-          handlers['error'](new Error('Task error'));
-        }
-        return {
-          task_id: 'task-123',
-          task_status: 'failure' as const,
-        };
-      });
+    test('should throw on task failure status', async () => {
+      const mockTask = createMockTask('failure');
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(existsSync).mockReturnValue(false);
 
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        {},
-      );
-
-      expect(logger.error).toHaveBeenCalledWith(
-        '\n[PDFConverter] Conversion error:',
-        'Task error',
-      );
-      expect(clearInterval).toHaveBeenCalled();
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report123',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow('Task failed with status: failure');
     });
 
-    test('should update progress with elapsed time', async () => {
-      const mockTask = createMockTask();
-      let intervalCallback: (() => void) | undefined;
-      const handlers: Record<string, any> = {};
+    test('should throw on task timeout', async () => {
+      // Create a converter with a very short timeout
+      const shortTimeoutConverter = new PDFConverter(
+        logger,
+        client,
+        false,
+        100,
+      );
 
-      mockTask.on = vi.fn((event, handler) => {
-        handlers[event] = handler;
-        return mockTask;
-      });
-
-      mockTask.waitForCompletion = vi.fn(async () => {
-        if (intervalCallback) {
-          intervalCallback();
-        }
-        return {
-          task_id: 'task-123',
-          task_status: 'success' as const,
-        };
-      });
-
-      vi.mocked(global.setInterval).mockImplementation(((fn: () => void) => {
-        intervalCallback = fn;
-        return 123 as unknown as NodeJS.Timeout;
-      }) as typeof setInterval);
-
+      // Make Date.now() advance past the timeout
       vi.spyOn(Date, 'now')
-        .mockReturnValueOnce(1000000)
-        .mockReturnValueOnce(1002000)
-        .mockReturnValue(1000000);
+        .mockReturnValueOnce(1000000) // performConversion startTime
+        .mockReturnValueOnce(1000000) // trackTaskProgress conversionStartTime
+        .mockReturnValueOnce(1000200); // timeout check (200ms > 100ms timeout)
+
+      const mockTask = createMockTaskWithPollSequence([
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+        },
+      ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(existsSync).mockReturnValue(false);
 
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        {},
-      );
-
-      expect(setInterval).toHaveBeenCalled();
-      expect(process.stdout.write).toHaveBeenCalled();
+      await expect(
+        shortTimeoutConverter.convert(
+          'http://test.com/doc.pdf',
+          'report-timeout',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow('Task timeout');
     });
 
-    test('should not update progress after completion', async () => {
-      const mockTask = createMockTask();
-      let intervalCallback: (() => void) | undefined;
-      const handlers: Record<string, (arg?: unknown) => void> = {};
+    test('should poll with configured interval between polls', async () => {
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
 
-      mockTask.on = vi.fn((event, handler) => {
-        handlers[event] = handler;
-        return mockTask;
-      });
-
-      mockTask.waitForCompletion = vi.fn(async () => {
-        return {
+      const mockTask = createMockTaskWithPollSequence([
+        {
+          task_id: 'task-123',
+          task_status: 'started' as const,
+        },
+        {
           task_id: 'task-123',
           task_status: 'success' as const,
-        };
-      });
-
-      vi.mocked(global.setInterval).mockImplementation(((fn: () => void) => {
-        intervalCallback = fn;
-        return 123 as unknown as NodeJS.Timeout;
-      }) as typeof setInterval);
-
-      vi.spyOn(Date, 'now').mockReturnValue(1000000);
+        },
+      ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
       vi.mocked(client.getTaskResultFile).mockResolvedValue({
@@ -674,15 +849,11 @@ describe('PDFConverter', () => {
         {},
       );
 
-      vi.mocked(process.stdout.write).mockClear();
-
-      // Simulate interval callback after completion (race condition scenario)
-      if (intervalCallback) {
-        intervalCallback();
-      }
-
-      // Should not write to stdout after completion due to isCompleted flag
-      expect(process.stdout.write).not.toHaveBeenCalled();
+      // setTimeout should have been called with POLL_INTERVAL_MS between polls
+      expect(setTimeoutSpy).toHaveBeenCalledWith(
+        expect.any(Function),
+        PDF_CONVERTER.POLL_INTERVAL_MS,
+      );
     });
   });
 
@@ -798,17 +969,19 @@ describe('PDFConverter', () => {
 
   describe('abort signal handling', () => {
     test('should throw AbortError when aborted after docling task completes', async () => {
-      const mockTask = createMockTask();
       const abortController = new AbortController();
 
-      // Abort after task waitForCompletion
-      mockTask.waitForCompletion = vi.fn(async () => {
-        abortController.abort();
-        return {
-          task_id: 'task-123',
-          task_status: 'success' as const,
-        };
-      });
+      // Abort during poll (after success)
+      const mockTask = {
+        taskId: 'task-123',
+        poll: vi.fn(async () => {
+          abortController.abort();
+          return {
+            task_id: 'task-123',
+            task_status: 'success' as const,
+          };
+        }),
+      } as unknown as AsyncConversionTask;
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
       vi.mocked(client.getTaskResultFile).mockResolvedValue({
@@ -870,13 +1043,15 @@ describe('PDFConverter', () => {
     });
 
     test('should not attempt fallback when aborted during initial conversion', async () => {
-      const mockTask = createMockTask();
       const abortController = new AbortController();
       abortController.abort();
 
-      mockTask.waitForCompletion = vi
-        .fn()
-        .mockRejectedValue(new Error('Conversion failed'));
+      const mockTask = createMockTaskWithPollSequence([
+        {
+          task_id: 'task-123',
+          task_status: 'failure' as const,
+        },
+      ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
 
@@ -891,7 +1066,7 @@ describe('PDFConverter', () => {
           {},
           abortController.signal,
         ),
-      ).rejects.toThrow('Conversion failed');
+      ).rejects.toThrow('Task failed with status: failure');
 
       // Should NOT attempt fallback when aborted
       expect(ImagePdfConverter).not.toHaveBeenCalled();
@@ -900,10 +1075,7 @@ describe('PDFConverter', () => {
 
   describe('image PDF fallback', () => {
     test('should not attempt fallback when enableImagePdfFallback is false', async () => {
-      const mockTask = createMockTask();
-      mockTask.waitForCompletion = vi
-        .fn()
-        .mockRejectedValue(new Error('Conversion failed'));
+      const mockTask = createMockTask('failure');
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
 
@@ -917,7 +1089,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Conversion failed');
+      ).rejects.toThrow('Task failed with status: failure');
 
       expect(ImagePdfConverter).not.toHaveBeenCalled();
     });
@@ -929,10 +1101,7 @@ describe('PDFConverter', () => {
       vi.mocked(client.convertSourceAsync).mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
-          const failTask = createMockTask();
-          failTask.waitForCompletion = vi
-            .fn()
-            .mockRejectedValue(new Error('Original conversion failed'));
+          const failTask = createMockTask('failure');
           return Promise.resolve(failTask);
         }
         return Promise.resolve(successTask);
@@ -986,10 +1155,7 @@ describe('PDFConverter', () => {
     });
 
     test('should throw ImagePdfFallbackError when both original and fallback fail', async () => {
-      const mockTask = createMockTask();
-      mockTask.waitForCompletion = vi
-        .fn()
-        .mockRejectedValue(new Error('Original conversion failed'));
+      const mockTask = createMockTask('failure');
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
 
@@ -1022,22 +1188,12 @@ describe('PDFConverter', () => {
     });
 
     test('should cleanup image PDF even when fallback conversion fails', async () => {
-      const fallbackTask = createMockTask();
       let callCount = 0;
 
       vi.mocked(client.convertSourceAsync).mockImplementation(() => {
         callCount++;
-        if (callCount === 1) {
-          const failTask = createMockTask();
-          failTask.waitForCompletion = vi
-            .fn()
-            .mockRejectedValue(new Error('Original failed'));
-          return Promise.resolve(failTask);
-        }
-        fallbackTask.waitForCompletion = vi
-          .fn()
-          .mockRejectedValue(new Error('Fallback failed'));
-        return Promise.resolve(fallbackTask);
+        const failTask = createMockTask('failure');
+        return Promise.resolve(failTask);
       });
 
       const mockImagePdfConverter = {
@@ -1073,10 +1229,7 @@ describe('PDFConverter', () => {
       vi.mocked(client.convertSourceAsync).mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
-          const failTask = createMockTask();
-          failTask.waitForCompletion = vi
-            .fn()
-            .mockRejectedValue(new Error('Original failed'));
+          const failTask = createMockTask('failure');
           return Promise.resolve(failTask);
         }
         return Promise.resolve(successTask);
@@ -1120,14 +1273,71 @@ describe('PDFConverter', () => {
   });
 });
 
-function createMockTask(): AsyncConversionTask {
+describe('ValidationUtils monkey-patch', () => {
+  test('should strip pipeline field before delegating to original validation', () => {
+    const options = {
+      pipeline: 'vlm',
+      to_formats: ['json'],
+    } as unknown as Parameters<
+      typeof ValidationUtils.assertValidConversionOptions
+    >[0];
+
+    // The patched assertValidConversionOptions should not throw
+    // even though "vlm" is not in the original ProcessingPipelineSchema
+    expect(() =>
+      ValidationUtils.assertValidConversionOptions(options),
+    ).not.toThrow();
+  });
+
+  test('should still validate other fields normally', () => {
+    const options = {
+      to_formats: ['json'],
+    } as unknown as Parameters<
+      typeof ValidationUtils.assertValidConversionOptions
+    >[0];
+
+    expect(() =>
+      ValidationUtils.assertValidConversionOptions(options),
+    ).not.toThrow();
+  });
+});
+
+/**
+ * Create a mock task that returns success (or specified status) on first poll.
+ */
+function createMockTask(
+  finalStatus: 'success' | 'failure' = 'success',
+): AsyncConversionTask {
   const task = {
     taskId: 'task-123',
-    on: vi.fn().mockReturnThis(),
-    waitForCompletion: vi.fn().mockResolvedValue({
+    poll: vi.fn().mockResolvedValue({
       task_id: 'task-123',
-      task_status: 'success' as const,
+      task_status: finalStatus,
     }),
+  };
+  return task as unknown as AsyncConversionTask;
+}
+
+/**
+ * Create a mock task with a sequence of poll responses.
+ * Each call to poll() returns the next response in the sequence.
+ */
+function createMockTaskWithPollSequence(
+  responses: Array<{
+    task_id: string;
+    task_status: 'pending' | 'started' | 'success' | 'failure';
+    task_position?: number;
+    task_meta?: { total_documents?: number; processed_documents?: number };
+  }>,
+): AsyncConversionTask {
+  const pollMock = vi.fn();
+  responses.forEach((response) => {
+    pollMock.mockResolvedValueOnce(response);
+  });
+
+  const task = {
+    taskId: 'task-123',
+    poll: pollMock,
   };
   return task as unknown as AsyncConversionTask;
 }
