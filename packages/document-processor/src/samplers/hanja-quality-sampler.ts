@@ -19,12 +19,19 @@ const MIN_KCJ_CHARS_THRESHOLD = 5;
 /**
  * Maximum number of pages to sample for quality assessment
  */
-const MAX_SAMPLE_PAGES = 5;
+const MAX_SAMPLE_PAGES = 10;
 
 /**
- * Minimum number of pages to sample for quality assessment
+ * Ratio of pages to trim from the front and back of the document.
+ * Archaeological reports typically have covers, TOC, appendices in these ranges.
  */
-const MIN_SAMPLE_PAGES = 3;
+const EDGE_TRIM_RATIO = 0.1;
+
+/**
+ * Maximum text length on a page with pictures to still consider it "image-only".
+ * Pages with pictures and fewer characters than this threshold are excluded from sampling.
+ */
+const IMAGE_PAGE_TEXT_THRESHOLD = 50;
 
 /**
  * Ratio threshold above which KCJ corruption is considered severe
@@ -117,10 +124,21 @@ export class HanjaQualitySampler extends VisionLLMComponent {
    * @returns Assessment result indicating whether VLM re-parse is needed
    */
   async assess(doclingDoc: DoclingDocument): Promise<HanjaAssessment> {
+    const totalPages = Object.keys(doclingDoc.pages).length;
     this.log('info', 'Starting KCJ quality assessment...');
 
-    // Step 1: Group texts by page and count KCJ characters
-    const kcjPages = this.findKcjPages(doclingDoc);
+    // Step 1: Compute eligible page range and image-only pages
+    const { frontCutoff, backCutoff } = this.getEligiblePageRange(totalPages);
+    const imageOnlyPages = this.getImageOnlyPages(doclingDoc);
+
+    this.log(
+      'info',
+      `Total pages: ${totalPages}, eligible range: (${frontCutoff}, ${backCutoff}], ` +
+        `image-only pages excluded: ${imageOnlyPages.size}`,
+    );
+
+    // Step 2: Group texts by page and count KCJ characters
+    const kcjPages = this.findKcjPages(doclingDoc, totalPages, imageOnlyPages);
 
     if (kcjPages.length === 0) {
       this.log('info', 'No KCJ characters found in document');
@@ -139,17 +157,17 @@ export class HanjaQualitySampler extends VisionLLMComponent {
       `Found ${kcjPages.length} pages with KCJ characters (threshold: ${MIN_KCJ_CHARS_THRESHOLD})`,
     );
 
-    // Step 2: Select pages to sample (highest KCJ density)
+    // Step 3: Select pages to sample (highest KCJ density)
     const sampled = this.selectSamplePages(kcjPages);
     this.log(
       'info',
       `Sampling ${sampled.length} pages: [${sampled.map((p) => p.pageNo).join(', ')}]`,
     );
 
-    // Step 3: Evaluate each sampled page with Vision LLM
+    // Step 4: Evaluate each sampled page with Vision LLM
     const results = await this.evaluatePages(sampled);
 
-    // Step 4: Aggregate results
+    // Step 5: Aggregate results
     const assessment = this.aggregateResults(
       kcjPages.length,
       sampled.length,
@@ -167,13 +185,81 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   /**
-   * Find all pages containing KCJ characters above the threshold
+   * Get the eligible page range after trimming front/back edges.
+   * Returns cutoff values where eligible pages satisfy: pageNo > frontCutoff && pageNo <= backCutoff
    */
-  private findKcjPages(doclingDoc: DoclingDocument): KcjPageData[] {
+  private getEligiblePageRange(totalPages: number): {
+    frontCutoff: number;
+    backCutoff: number;
+  } {
+    const trimCount = Math.ceil(totalPages * EDGE_TRIM_RATIO);
+    return {
+      frontCutoff: trimCount,
+      backCutoff: totalPages - trimCount,
+    };
+  }
+
+  /**
+   * Get page numbers that are "image-only" (contain pictures but minimal text).
+   * These pages (e.g., photo plates/도판) are unsuitable for KCJ quality assessment.
+   */
+  private getImageOnlyPages(doclingDoc: DoclingDocument): Set<number> {
+    const picturePages = new Set<number>();
+    for (const picture of doclingDoc.pictures) {
+      const pageNo = picture.prov?.[0]?.page_no;
+      if (pageNo != null) {
+        picturePages.add(pageNo);
+      }
+    }
+
+    if (picturePages.size === 0) return new Set();
+
+    // Compute total text length per page
+    const pageTextLength = new Map<number, number>();
+    for (const text of doclingDoc.texts) {
+      const pageNo = this.getPageNo(text);
+      if (picturePages.has(pageNo)) {
+        pageTextLength.set(
+          pageNo,
+          (pageTextLength.get(pageNo) ?? 0) + text.text.length,
+        );
+      }
+    }
+
+    const imageOnlyPages = new Set<number>();
+    for (const pageNo of picturePages) {
+      const textLength = pageTextLength.get(pageNo) ?? 0;
+      if (textLength < IMAGE_PAGE_TEXT_THRESHOLD) {
+        imageOnlyPages.add(pageNo);
+      }
+    }
+
+    return imageOnlyPages;
+  }
+
+  /**
+   * Find all pages containing KCJ characters above the threshold,
+   * excluding edge-trimmed pages and image-only pages.
+   */
+  private findKcjPages(
+    doclingDoc: DoclingDocument,
+    totalPages: number,
+    imageOnlyPages: Set<number>,
+  ): KcjPageData[] {
+    const { frontCutoff, backCutoff } = this.getEligiblePageRange(totalPages);
     const pageMap = new Map<number, { kcjCount: number; texts: string[] }>();
 
     for (const text of doclingDoc.texts) {
       const pageNo = this.getPageNo(text);
+
+      // Skip pages outside eligible range (only when totalPages > 0)
+      if (totalPages > 0 && (pageNo <= frontCutoff || pageNo > backCutoff)) {
+        continue;
+      }
+
+      // Skip image-only pages
+      if (imageOnlyPages.has(pageNo)) continue;
+
       const kcjChars = text.text.match(KCJ_CHAR_REGEX);
       if (!kcjChars || kcjChars.length === 0) continue;
 
@@ -199,11 +285,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
     const sorted = [...kcjPages].sort(
       (a, b) => b.kcjCharCount - a.kcjCharCount,
     );
-    const count = Math.min(
-      Math.max(MIN_SAMPLE_PAGES, Math.ceil(kcjPages.length * 0.3)),
-      MAX_SAMPLE_PAGES,
-      kcjPages.length,
-    );
+    const count = Math.min(MAX_SAMPLE_PAGES, kcjPages.length);
     return sorted.slice(0, count);
   }
 
