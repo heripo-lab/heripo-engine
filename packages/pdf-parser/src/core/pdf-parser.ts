@@ -348,6 +348,7 @@ export class PDFParser {
           this.logger,
           this.client,
           effectiveFallbackEnabled,
+          this.timeout,
         );
         return await converter.convert(
           url,

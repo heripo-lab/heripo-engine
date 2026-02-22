@@ -313,10 +313,12 @@ describe('PDFParser', () => {
     );
 
     // Third argument is false because baseUrl is used (external server)
+    // Fourth argument is the timeout value (defaults to PDF_PARSER.DEFAULT_TIMEOUT_MS)
     expect(PDFConverter).toHaveBeenCalledWith(
       logger,
       expect.any(Object),
       false,
+      expect.any(Number),
     );
     expect(convertMock).toHaveBeenCalledWith(
       'http://file.pdf',
@@ -413,7 +415,13 @@ describe('PDFParser', () => {
     });
 
     // Third argument is true because local server mode and fallback is enabled
-    expect(PDFConverter).toHaveBeenCalledWith(logger, expect.any(Object), true);
+    // Fourth argument is the timeout value
+    expect(PDFConverter).toHaveBeenCalledWith(
+      logger,
+      expect.any(Object),
+      true,
+      expect.any(Number),
+    );
   });
 
   test('parse passes enableImagePdfFallback=false when external server even if option enabled', async () => {
@@ -440,10 +448,12 @@ describe('PDFParser', () => {
     });
 
     // Third argument is false because external server mode disables fallback
+    // Fourth argument is the timeout value
     expect(PDFConverter).toHaveBeenCalledWith(
       logger,
       expect.any(Object),
       false,
+      expect.any(Number),
     );
     // Warning should have been logged during init
     expect(logger.warn).toHaveBeenCalledWith(

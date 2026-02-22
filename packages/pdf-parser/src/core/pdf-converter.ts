@@ -72,6 +72,7 @@ export class PDFConverter {
     private readonly logger: LoggerMethods,
     private readonly client: DoclingAPIClient,
     private readonly enableImagePdfFallback: boolean = false,
+    private readonly timeout: number = PDF_CONVERTER.DEFAULT_TIMEOUT_MS,
   ) {}
 
   async convert(
@@ -354,21 +355,13 @@ export class PDFConverter {
 
   private async trackTaskProgress(task: AsyncConversionTask): Promise<void> {
     const conversionStartTime = Date.now();
-    let lastStatus = '';
     let lastProgressLine = '';
-    let isCompleted = false;
 
-    const pollInterval = setInterval(() => {
-      if (isCompleted) return;
-      const elapsed = Math.floor((Date.now() - conversionStartTime) / 1000);
-      process.stdout.write(
-        `\r[PDFConverter] Status: ${lastStatus || 'processing'} (${elapsed}s elapsed)`,
-      );
-    }, PDF_CONVERTER.POLL_INTERVAL_MS);
-
-    task.on('progress', (status) => {
-      lastStatus = status.task_status;
-
+    const logProgress = (status: {
+      task_status: string;
+      task_position?: number;
+      task_meta?: { total_documents?: number; processed_documents?: number };
+    }) => {
       const parts: string[] = [`Status: ${status.task_status}`];
 
       if (status.task_position !== undefined) {
@@ -392,25 +385,29 @@ export class PDFConverter {
         lastProgressLine = progressLine;
         process.stdout.write(progressLine);
       }
-    });
+    };
 
-    task.on('complete', () => {
-      isCompleted = true;
-      clearInterval(pollInterval);
-      this.logger.info('\n[PDFConverter] Conversion completed!');
-    });
+    while (true) {
+      if (Date.now() - conversionStartTime > this.timeout) {
+        throw new Error('Task timeout');
+      }
 
-    task.on('error', (error) => {
-      isCompleted = true;
-      clearInterval(pollInterval);
-      this.logger.error('\n[PDFConverter] Conversion error:', error.message);
-    });
+      const status = await task.poll();
 
-    try {
-      await task.waitForCompletion();
-    } finally {
-      isCompleted = true;
-      clearInterval(pollInterval);
+      logProgress(status);
+
+      if (status.task_status === 'success') {
+        this.logger.info('\n[PDFConverter] Conversion completed!');
+        return;
+      }
+
+      if (status.task_status === 'failure') {
+        throw new Error('Task failed with status: failure');
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
+      );
     }
   }
 

@@ -36,6 +36,11 @@ export const PDF_CONVERTER = {
    * Interval for progress polling in milliseconds
    */
   POLL_INTERVAL_MS: 1000,
+
+  /**
+   * Default timeout for task completion in milliseconds (30 minutes)
+   */
+  DEFAULT_TIMEOUT_MS: 1_800_000,
 } as const;
 
 /**
