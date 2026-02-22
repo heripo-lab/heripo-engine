@@ -3,6 +3,7 @@ import type {
   AsyncConversionTask,
   ConversionOptions,
   DoclingAPIClient,
+  VlmModelLocal,
 } from 'docling-sdk';
 
 import { omit } from 'es-toolkit';
@@ -11,6 +12,7 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 import { PDF_CONVERTER } from '../config/constants';
+import { DEFAULT_VLM_MODEL, resolveVlmModel } from '../config/vlm-models';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { LocalFileServer } from '../utils/local-file-server';
@@ -24,6 +26,34 @@ export type ConversionCompleteCallback = (
   outputPath: string,
 ) => Promise<void> | void;
 
+/**
+ * Pipeline type for PDF conversion
+ * - 'standard': Use OCR-based pipeline (default, uses ocrmac)
+ * - 'vlm': Use Vision Language Model pipeline for better KCJ/complex layout handling
+ */
+export type PipelineType = 'standard' | 'vlm';
+
+/**
+ * Extended options for PDF conversion including pipeline selection
+ */
+export type PDFConvertOptions = Omit<
+  ConversionOptions,
+  | 'to_formats'
+  | 'image_export_mode'
+  | 'ocr_engine'
+  | 'accelerator_options'
+  | 'ocr_options'
+  | 'generate_picture_images'
+  | 'images_scale'
+  | 'force_ocr'
+  | 'pipeline'
+  | 'vlm_pipeline_model_local'
+> & {
+  num_threads?: number;
+  pipeline?: PipelineType;
+  vlm_model?: string | VlmModelLocal;
+};
+
 export class PDFConverter {
   constructor(
     private readonly logger: LoggerMethods,
@@ -36,19 +66,7 @@ export class PDFConverter {
     reportId: string,
     onComplete: ConversionCompleteCallback,
     cleanupAfterCallback: boolean,
-    options: Omit<
-      ConversionOptions,
-      | 'to_formats'
-      | 'image_export_mode'
-      | 'ocr_engine'
-      | 'accelerator_options'
-      | 'ocr_options'
-      | 'generate_picture_images'
-      | 'images_scale'
-      | 'force_ocr'
-    > & {
-      num_threads?: number;
-    },
+    options: PDFConvertOptions,
     abortSignal?: AbortSignal,
   ) {
     this.logger.info('[PDFConverter] Converting:', url);
@@ -120,27 +138,23 @@ export class PDFConverter {
     reportId: string,
     onComplete: ConversionCompleteCallback,
     cleanupAfterCallback: boolean,
-    options: Omit<
-      ConversionOptions,
-      | 'to_formats'
-      | 'image_export_mode'
-      | 'ocr_engine'
-      | 'accelerator_options'
-      | 'ocr_options'
-      | 'generate_picture_images'
-      | 'images_scale'
-      | 'force_ocr'
-    > & {
-      num_threads?: number;
-    },
+    options: PDFConvertOptions,
     abortSignal?: AbortSignal,
   ): Promise<void> {
     const startTime = Date.now();
-    const conversionOptions = this.buildConversionOptions(options);
+    const pipelineType = options.pipeline ?? 'standard';
+    const conversionOptions =
+      pipelineType === 'vlm'
+        ? this.buildVlmConversionOptions(options)
+        : this.buildConversionOptions(options);
 
-    this.logger.info(
-      `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
-    );
+    if (pipelineType === 'vlm') {
+      this.logger.info('[PDFConverter] Using VLM pipeline');
+    } else {
+      this.logger.info(
+        `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
+      );
+    }
     this.logger.info(
       '[PDFConverter] Converting document with Async Source API...',
     );
@@ -224,22 +238,10 @@ export class PDFConverter {
   }
 
   private buildConversionOptions(
-    options: Omit<
-      ConversionOptions,
-      | 'to_formats'
-      | 'image_export_mode'
-      | 'ocr_engine'
-      | 'accelerator_options'
-      | 'ocr_options'
-      | 'generate_picture_images'
-      | 'images_scale'
-      | 'force_ocr'
-    > & {
-      num_threads?: number;
-    },
+    options: PDFConvertOptions,
   ): ConversionOptions {
     return {
-      ...omit(options, ['num_threads']),
+      ...omit(options, ['num_threads', 'pipeline', 'vlm_model']),
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',
       ocr_engine: 'ocrmac',
@@ -259,6 +261,32 @@ export class PDFConverter {
        * to direct text extraction, the accuracy remains high since the source is digital, not scanned paper.
        */
       force_ocr: true,
+      accelerator_options: {
+        device: 'mps',
+        num_threads: options.num_threads,
+      },
+    };
+  }
+
+  /**
+   * Build conversion options for VLM pipeline.
+   *
+   * VLM pipeline uses a Vision Language Model instead of traditional OCR,
+   * providing better accuracy for KCJ characters and complex layouts.
+   */
+  private buildVlmConversionOptions(
+    options: PDFConvertOptions,
+  ): ConversionOptions {
+    const vlmModel = resolveVlmModel(options.vlm_model ?? DEFAULT_VLM_MODEL);
+
+    return {
+      ...omit(options, ['num_threads', 'pipeline', 'vlm_model']),
+      to_formats: ['json', 'html'],
+      image_export_mode: 'embedded',
+      pipeline: 'vlm',
+      vlm_pipeline_model_local: vlmModel,
+      generate_picture_images: true,
+      images_scale: 2.0,
       accelerator_options: {
         device: 'mps',
         num_threads: options.num_threads,

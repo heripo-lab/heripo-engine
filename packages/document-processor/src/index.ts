@@ -11,6 +11,7 @@
  * - Caption parsing (lightweight LLM)
  * - Chapter tree construction
  * - Image/table conversion
+ * - Hanja (KCJ) quality assessment (Vision LLM)
  *
  * @packageDocumentation
  */
@@ -67,3 +68,4 @@ export type {
   CaptionValidatorOptions,
 } from './validators';
 export { ChapterConverter } from './converters';
+export { HanjaQualitySampler } from './samplers';

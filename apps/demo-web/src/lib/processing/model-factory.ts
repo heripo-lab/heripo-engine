@@ -93,6 +93,9 @@ export function createProcessorOptions(
     validatorModel: createModel(options.validatorModel),
     visionTocExtractorModel: createModel(options.visionTocExtractorModel),
     captionParserModel: createModel(options.captionParserModel),
+    hanjaQualitySamplerModel: options.hanjaQualitySamplerModel
+      ? createModel(options.hanjaQualitySamplerModel)
+      : undefined,
     textCleanerBatchSize: options.textCleanerBatchSize,
     captionParserBatchSize: options.captionParserBatchSize,
     captionValidatorBatchSize: options.captionValidatorBatchSize,

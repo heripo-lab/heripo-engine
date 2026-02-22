@@ -329,6 +329,66 @@ describe('PDFParser', () => {
     expect(result).toBe('OK');
   });
 
+  test('parse auto-setups VLM dependencies when pipeline is vlm on local server', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which jq')) return '';
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+    convertMock.mockResolvedValueOnce('OK');
+
+    const setupVlmMock = vi.fn().mockResolvedValue(undefined);
+    (DoclingEnvironment as any).mockImplementation(function () {
+      return {
+        setup: envMocks.setupMock,
+        setupVlmDependencies: setupVlmMock,
+      };
+    });
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, port: 5001 });
+    await parser.init();
+
+    const onComplete = vi.fn();
+    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
+      num_threads: 4,
+      pipeline: 'vlm',
+    });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      '[PDFParser] VLM pipeline requested, ensuring VLM dependencies...',
+    );
+    expect(setupVlmMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('parse skips VLM auto-setup when using external server', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which jq')) return '';
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+    convertMock.mockResolvedValueOnce('OK');
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await parser.init();
+
+    const onComplete = vi.fn();
+    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
+      num_threads: 4,
+      pipeline: 'vlm',
+    });
+
+    // Should NOT log VLM setup message since baseUrl is used
+    expect(logger.info).not.toHaveBeenCalledWith(
+      '[PDFParser] VLM pipeline requested, ensuring VLM dependencies...',
+    );
+  });
+
   test('parse passes enableImagePdfFallback=true when local server and option enabled', async () => {
     vi.mocked(platform).mockReturnValue('darwin');
     vi.mocked(execSync as any).mockImplementation((cmd: string) => {

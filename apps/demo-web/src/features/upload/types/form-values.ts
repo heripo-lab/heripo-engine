@@ -20,6 +20,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
   ocrLanguages: ['ko-KR', 'zh-Hant', 'en-US'],
   threadCount: 4,
+  // Pipeline selection
+  pipeline: 'standard',
   // LLM Models
   fallbackModel: 'openai/gpt-5.2',
   validatorModel: 'openai/gpt-5.2',

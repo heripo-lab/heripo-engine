@@ -175,7 +175,8 @@ export async function runTaskWorker(
 
   try {
     // Step 1: PDF Parsing
-    logger.info('Starting PDF parsing...');
+    const pipelineType = options.pipeline ?? 'standard';
+    logger.info(`Starting PDF parsing (pipeline: ${pipelineType})...`);
     emitProgress('pdf-parse', calculateProgress(1, 0));
 
     // Register task logger to receive PDF parser logs
@@ -188,7 +189,7 @@ export async function runTaskWorker(
     let outputPath: string;
 
     try {
-      const result = await new Promise<{
+      const parseResult = await new Promise<{
         doclingDocument: DoclingDocument;
         outputPath: string;
       }>((resolve, reject) => {
@@ -212,14 +213,15 @@ export async function runTaskWorker(
             {
               ocr_lang: options.ocrLanguages,
               num_threads: options.threadCount,
+              pipeline: pipelineType,
             },
             abortSignal,
           )
           .catch(reject);
       });
 
-      doclingDocument = result.doclingDocument;
-      outputPath = result.outputPath;
+      doclingDocument = parseResult.doclingDocument;
+      outputPath = parseResult.outputPath;
     } finally {
       // Clear task logger after PDF parsing
       pdfParserManager.clearTaskLogger(taskId);
@@ -228,12 +230,71 @@ export async function runTaskWorker(
     logger.info('PDF parsing completed');
     emitProgress('pdf-parse', calculateProgress(1, 100));
 
-    // Step 2-5: Document Processing
-    logger.info('Starting document processing...');
-
+    // Create DocumentProcessor (used for both hanja assessment and document processing)
     const processor = new DocumentProcessor(
       createProcessorOptions(options, logger, abortSignal),
     );
+
+    // Hanja quality assessment: auto-fallback to VLM if KCJ corruption detected
+    if (pipelineType === 'standard') {
+      const assessment = await processor.assessHanjaQuality(
+        doclingDocument,
+        outputPath,
+      );
+
+      if (assessment.needsVlmReparse) {
+        logger.info(
+          `Hanja quality insufficient (severity: ${assessment.severity}, ratio: ${assessment.corruptedRatio}), re-parsing with VLM pipeline...`,
+        );
+
+        pdfParserManager.setTaskLogger(taskId, logger);
+        try {
+          const vlmResult = await new Promise<{
+            doclingDocument: DoclingDocument;
+            outputPath: string;
+          }>((resolve, reject) => {
+            pdfParser
+              .parse(
+                pdfUrl,
+                taskId,
+                (outPath) => {
+                  try {
+                    const resultPath = `${outPath}/result.json`;
+                    const json = readFileSync(resultPath, 'utf8');
+                    resolve({
+                      doclingDocument: JSON.parse(json) as DoclingDocument,
+                      outputPath: outPath,
+                    });
+                  } catch (err) {
+                    reject(err);
+                  }
+                },
+                false,
+                {
+                  ocr_lang: options.ocrLanguages,
+                  num_threads: options.threadCount,
+                  pipeline: 'vlm' as const,
+                },
+                abortSignal,
+              )
+              .catch(reject);
+          });
+
+          doclingDocument = vlmResult.doclingDocument;
+          outputPath = vlmResult.outputPath;
+          logger.info('VLM re-parsing completed');
+        } finally {
+          pdfParserManager.clearTaskLogger(taskId);
+        }
+      } else {
+        logger.info(
+          `Hanja quality acceptable (severity: ${assessment.severity}), continuing with OCR result`,
+        );
+      }
+    }
+
+    // Step 2-5: Document Processing
+    logger.info('Starting document processing...');
 
     const result = await processor.process(doclingDocument, taskId, outputPath);
 

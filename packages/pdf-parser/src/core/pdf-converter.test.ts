@@ -1,5 +1,9 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
+import type {
+  AsyncConversionTask,
+  DoclingAPIClient,
+  VlmModelLocal,
+} from 'docling-sdk';
 import type { Readable } from 'node:stream';
 
 import { omit } from 'es-toolkit';
@@ -175,6 +179,121 @@ describe('PDFConverter', () => {
           num_threads: 8,
         },
       });
+    });
+  });
+
+  describe('buildVlmConversionOptions', () => {
+    test('should build VLM options with default model when pipeline is vlm', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', num_threads: 4 },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options).toMatchObject({
+        to_formats: ['json', 'html'],
+        image_export_mode: 'embedded',
+        pipeline: 'vlm',
+        generate_picture_images: true,
+        images_scale: 2.0,
+        accelerator_options: {
+          device: 'mps',
+          num_threads: 4,
+        },
+      });
+      // VLM options should have vlm_pipeline_model_local
+      expect(callArgs.options).toHaveProperty('vlm_pipeline_model_local');
+      // VLM options should NOT have OCR-specific settings
+      expect(callArgs.options).not.toHaveProperty('ocr_engine');
+      expect(callArgs.options).not.toHaveProperty('ocr_options');
+      expect(callArgs.options).not.toHaveProperty('force_ocr');
+    });
+
+    test('should resolve VLM model preset from string key', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_model: 'granite-docling-258M' },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options!.vlm_pipeline_model_local).toMatchObject({
+        repo_id: 'ibm-granite/granite-docling-258M',
+        inference_framework: 'transformers',
+        response_format: 'doctags',
+        transformers_model_type: 'automodel-vision2seq',
+      });
+    });
+
+    test('should use custom VlmModelLocal object directly', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const customModel = {
+        repo_id: 'custom/model',
+        inference_framework: 'transformers',
+        response_format: 'markdown',
+        transformers_model_type: 'automodel',
+      } as unknown as VlmModelLocal;
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_model: customModel },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options!.vlm_pipeline_model_local).toEqual(customModel);
+    });
+
+    test('should log VLM pipeline usage', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm' },
+      );
+
+      expect(logger.info).toHaveBeenCalledWith(
+        '[PDFConverter] Using VLM pipeline',
+      );
     });
   });
 

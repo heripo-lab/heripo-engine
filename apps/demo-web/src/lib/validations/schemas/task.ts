@@ -42,6 +42,14 @@ export const processingOptionsSchema = z.object({
   ocrLanguages: z.array(z.string().min(1)).min(1).default(['ko-KR', 'en-US']),
   threadCount: z.number().int().positive().max(16).default(4),
 
+  // Pipeline selection
+  pipeline: z
+    .enum(['standard', 'vlm'])
+    .default('standard')
+    .describe(
+      'Processing pipeline: standard (OCR) or vlm (Vision Language Model)',
+    ),
+
   // LLM Models
   fallbackModel: llmModelSchema,
   pageRangeParserModel: visionModelSchema,
@@ -49,6 +57,7 @@ export const processingOptionsSchema = z.object({
   validatorModel: llmModelSchema,
   visionTocExtractorModel: visionModelSchema,
   captionParserModel: llmModelSchema,
+  hanjaQualitySamplerModel: visionModelSchema.optional(),
 
   // Batch & Retry
   textCleanerBatchSize: z.number().int().nonnegative().default(20),
