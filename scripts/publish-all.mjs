@@ -132,11 +132,25 @@ const findPackedTarball = (packOutput, tempDir) => {
   return resolve(tempDir, files[0].name);
 };
 
-const promptOtp = () =>
-  new Promise((resolve) => {
+const promptOtp = () => {
+  if (!process.stdin.isTTY) {
+    console.error(
+      'OTP is required but stdin is not a TTY. Run in an interactive terminal or use --dry-run.',
+    );
+    process.exit(1);
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
     const rl = createInterface({
       input: process.stdin,
       output: process.stdout,
+    });
+    rl.on('close', () => {
+      if (!settled) {
+        settled = true;
+        reject(new Error('OTP prompt closed unexpectedly (EOF or Ctrl-D).'));
+      }
     });
     const ask = () => {
       rl.question('Enter OTP code: ', (answer) => {
@@ -145,12 +159,14 @@ const promptOtp = () =>
           ask();
           return;
         }
+        settled = true;
         rl.close();
         resolve(trimmed);
       });
     };
     ask();
   });
+};
 
 const packAndPublish = async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'heripo-pack-'));
