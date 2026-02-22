@@ -97,6 +97,9 @@ const STEP_PREFIXES: Record<string, string> = {
   '[CaptionParser]': 'resource-process',
 };
 
+// VLM fallback detection - resets progress back to PDF parsing
+const VLM_FALLBACK_PREFIX = '[PDFParser] VLM pipeline requested';
+
 function getStepIndex(stepId: string): number {
   return PROCESSING_STEPS.findIndex((s) => s.id === stepId);
 }
@@ -156,6 +159,12 @@ function createTaskLogger(
         .join(' '),
     );
     const timestamp = new Date().toISOString();
+
+    // Detect VLM fallback - reset progress back to PDF parsing
+    if (message.startsWith(VLM_FALLBACK_PREFIX)) {
+      detectedSteps.clear();
+      emitProgress('pdf-parse', 0);
+    }
 
     // Detect step change from log prefix
     for (const [prefix, stepId] of Object.entries(STEP_PREFIXES)) {
