@@ -1066,6 +1066,9 @@ describe('DoclingEnvironment', () => {
 
   describe('setupVlmDependencies', () => {
     test('should install docling-serve[vlm] and mlx on macOS ARM64', async () => {
+      mockPlatformFn.mockReturnValue('darwin');
+      mockArchFn.mockReturnValue('arm64');
+
       mockSpawnAsync
         .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
         .mockResolvedValueOnce(createSpawnResult({})) // docling-serve[vlm]
@@ -1088,6 +1091,9 @@ describe('DoclingEnvironment', () => {
       expect(logger.info).toHaveBeenCalledWith(
         '[DoclingEnvironment] VLM dependencies installed successfully',
       );
+
+      mockPlatformFn.mockRestore();
+      mockArchFn.mockRestore();
     });
 
     test('should skip if VLM modules are already importable', async () => {
@@ -1114,6 +1120,9 @@ describe('DoclingEnvironment', () => {
     });
 
     test('should skip if already installed (idempotent)', async () => {
+      mockPlatformFn.mockReturnValue('darwin');
+      mockArchFn.mockReturnValue('arm64');
+
       mockSpawnAsync
         .mockResolvedValueOnce(createSpawnResult({ code: 1 })) // isVlmReady -> not ready
         .mockResolvedValueOnce(createSpawnResult({})) // docling-serve[vlm]
@@ -1136,6 +1145,9 @@ describe('DoclingEnvironment', () => {
       expect(logger.info).toHaveBeenCalledWith(
         '[DoclingEnvironment] VLM dependencies already installed, skipping',
       );
+
+      mockPlatformFn.mockRestore();
+      mockArchFn.mockRestore();
     });
 
     test('should throw on docling-serve[vlm] installation failure', async () => {
