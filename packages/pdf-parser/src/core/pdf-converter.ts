@@ -292,6 +292,9 @@ export class PDFConverter {
     options: PDFConvertOptions,
   ): ConversionOptions {
     const vlmModel = resolveVlmModel(options.vlm_model ?? DEFAULT_VLM_MODEL);
+    this.logger.info(
+      `[PDFConverter] VLM model: ${vlmModel.repo_id} (framework: ${vlmModel.inference_framework}, format: ${vlmModel.response_format})`,
+    );
 
     return {
       ...omit(options, ['num_threads', 'pipeline', 'vlm_model', 'ocr_lang']),
