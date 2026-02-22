@@ -2,7 +2,7 @@
   "name": "@heripo/pdf-parser",
   "private": false,
   "type": "module",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "PDF parsing library using Docling SDK with OCR support for macOS",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
