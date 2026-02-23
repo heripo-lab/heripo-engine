@@ -171,7 +171,11 @@ export class DoclingEnvironment {
 
   private async installDoclingServe(): Promise<void> {
     const pipPath = join(this.venvPath, 'bin', 'pip');
-    const result = await spawnAsync(pipPath, ['install', 'docling-serve']);
+    const result = await spawnAsync(pipPath, [
+      'install',
+      '--upgrade',
+      'docling-serve',
+    ]);
 
     if (result.code !== 0) {
       this.logger.error(
@@ -218,7 +222,7 @@ export class DoclingEnvironment {
     this.logger.info('[DoclingEnvironment] Installing docling[vlm]...');
     const vlmResult = await spawnAsync(
       pipPath,
-      ['install', 'docling-serve[vlm]'],
+      ['install', '--upgrade', 'docling-serve[vlm]'],
       { timeout: VLM_ENVIRONMENT.SETUP_TIMEOUT_MS },
     );
 
@@ -360,6 +364,11 @@ export class DoclingEnvironment {
       const doclingProcess = spawn(doclingServePath, args, {
         detached: true, // Detached from parent process
         stdio: 'ignore', // Remove stdio pipes to prevent event loop from hanging
+        env: {
+          ...process.env,
+          // Enable remote API calls for API VLM models
+          DOCLING_SERVE_ENABLE_REMOTE_SERVICES: 'true',
+        },
       });
 
       doclingProcess.unref(); // Parent doesn't wait for child process to exit

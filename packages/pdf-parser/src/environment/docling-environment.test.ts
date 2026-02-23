@@ -1039,7 +1039,13 @@ describe('DoclingEnvironment', () => {
       expect(mockSpawn).toHaveBeenCalledWith(
         '/test/venv/bin/docling-serve',
         ['run', '--port', '8080'],
-        { detached: true, stdio: 'ignore' },
+        {
+          detached: true,
+          stdio: 'ignore',
+          env: expect.objectContaining({
+            DOCLING_SERVE_ENABLE_REMOTE_SERVICES: 'true',
+          }),
+        },
       );
     });
 
@@ -1085,7 +1091,7 @@ describe('DoclingEnvironment', () => {
 
       expect(mockSpawnAsync).toHaveBeenCalledWith(
         '/test/venv/bin/pip',
-        ['install', 'docling-serve[vlm]'],
+        ['install', '--upgrade', 'docling-serve[vlm]'],
         expect.objectContaining({ timeout: expect.any(Number) }),
       );
       expect(logger.info).toHaveBeenCalledWith(
@@ -1194,7 +1200,7 @@ describe('DoclingEnvironment', () => {
       expect(mockSpawnAsync).toHaveBeenCalledTimes(2);
       expect(mockSpawnAsync).toHaveBeenCalledWith(
         '/test/venv/bin/pip',
-        ['install', 'docling-serve[vlm]'],
+        ['install', '--upgrade', 'docling-serve[vlm]'],
         expect.objectContaining({ timeout: expect.any(Number) }),
       );
       expect(logger.info).toHaveBeenCalledWith(

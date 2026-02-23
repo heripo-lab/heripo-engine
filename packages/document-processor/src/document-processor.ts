@@ -46,7 +46,7 @@ export interface DocumentProcessorOptions {
 
   /**
    * Fallback model - used as fallback when component-specific models are not provided or fail.
-   * This is the only required model. Should be set to a frontier model (e.g., Claude Opus 4.5, GPT-5.2)
+   * This is the only required model. Should be set to a frontier model (e.g., Claude Opus 4.6, GPT-5.2)
    * to ensure reliable fallback performance across all components.
    */
   fallbackModel: LanguageModel;
@@ -245,7 +245,7 @@ export class DocumentProcessor {
    *
    * @param doclingDoc - Original document extracted from Docling SDK
    * @param outputPath - Path containing pages subdirectory (pages/page_0.png, etc.)
-   * @returns Assessment result with severity and recommendation
+   * @returns Assessment result with Hanja role and VLM re-parse recommendation
    */
   async assessHanjaQuality(
     doclingDoc: DoclingDocument,
@@ -268,7 +268,7 @@ export class DocumentProcessor {
     const assessment = await sampler.assess(doclingDoc);
 
     this.logger.info(
-      `[DocumentProcessor] Hanja assessment: severity=${assessment.severity}, needsVlmReparse=${assessment.needsVlmReparse}`,
+      `[DocumentProcessor] Hanja assessment: hanjaRole=${assessment.hanjaRole}, needsVlmReparse=${assessment.needsVlmReparse}`,
     );
 
     return assessment;

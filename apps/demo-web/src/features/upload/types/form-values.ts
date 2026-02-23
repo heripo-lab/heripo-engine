@@ -20,6 +20,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
   ocrLanguages: ['ko-KR', 'zh-Hant', 'en-US'],
   threadCount: 4,
+  // Force image PDF pre-conversion
+  forceImagePdf: false,
   // Pipeline selection
   pipeline: 'standard',
   // LLM Models

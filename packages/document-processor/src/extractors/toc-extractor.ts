@@ -306,9 +306,9 @@ Re-extract the TOC structure from the original markdown above. Fix all validatio
 
 5. **IMPORTANT - Extract Main TOC Only**: Only extract the main document table of contents. EXCLUDE the following:
    - **Front matter with Roman numeral pages**: Entries whose page numbers are Roman numerals (i, ii, xxi, etc.) such as 일러두기, 발간사, 서문, 범례, Preface, Foreword, Editorial Notes. These use a separate page numbering system and are not part of the main content.
-   - Photo/image indices (사진 목차, 사진목차, 화보 목차, Photo Index, List of Photos, List of Figures)
-   - Drawing/diagram indices (도면 목차, 도면목차, 삽도 목차, Drawing Index, List of Drawings)
-   - Table indices (표 목차, 표목차, Table Index, List of Tables)
+   - Photo/image indices (사진 목차, 사진목차, 화보 목차, 寫眞 目次, 寫眞目次, Photo Index, List of Photos, List of Figures)
+   - Drawing/diagram indices (도면 목차, 도면목차, 삽도 목차, 圖面 目次, 圖面目次, Drawing Index, List of Drawings)
+   - Table indices (표 목차, 표목차, 表 目次, 表目次, Table Index, List of Tables)
    - Appendix indices (부록 목차, Appendix Index)
    - Any other supplementary material indices
 

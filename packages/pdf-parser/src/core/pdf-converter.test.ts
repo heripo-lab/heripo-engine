@@ -2,6 +2,7 @@ import type { LoggerMethods } from '@heripo/logger';
 import type {
   AsyncConversionTask,
   DoclingAPIClient,
+  VlmModelApi,
   VlmModelLocal,
 } from 'docling-sdk';
 import type { Readable } from 'node:stream';
@@ -17,6 +18,7 @@ import { PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { LocalFileServer } from '../utils/local-file-server';
+import { VlmProxyServer } from '../utils/vlm-proxy-server';
 import { ImagePdfConverter } from './image-pdf-converter';
 import { PDFConverter } from './pdf-converter';
 
@@ -30,6 +32,10 @@ vi.mock('./image-pdf-converter', () => ({
 
 vi.mock('../utils/local-file-server', () => ({
   LocalFileServer: vi.fn(),
+}));
+
+vi.mock('../utils/vlm-proxy-server', () => ({
+  VlmProxyServer: vi.fn(),
 }));
 
 vi.mock('node:fs', () => ({
@@ -90,6 +96,30 @@ describe('PDFConverter', () => {
         start: vi.fn().mockResolvedValue('http://127.0.0.1:12345/test.pdf'),
         stop: vi.fn().mockResolvedValue(undefined),
       } as unknown as LocalFileServer;
+    });
+
+    // Mock ImagePdfConverter (used by forceImagePdf and image PDF fallback)
+    vi.mocked(ImagePdfConverter).mockImplementation(function () {
+      return {
+        convert: vi.fn().mockResolvedValue('/tmp/image.pdf'),
+        cleanup: vi.fn(),
+      } as any;
+    });
+
+    // Mock VlmProxyServer (default for all VLM API tests)
+    vi.mocked(VlmProxyServer).mockImplementation(function () {
+      return {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          requestCount: 0,
+        }),
+      } as any;
     });
   });
 
@@ -304,6 +334,524 @@ describe('PDFConverter', () => {
         '[PDFConverter] Using VLM pipeline',
       );
     });
+
+    test('should build API VLM options when vlm_api_model preset key is specified', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {
+          pipeline: 'vlm',
+          vlm_api_model: 'openai/gpt-5.2',
+          vlm_api_options: { apiKey: 'test-api-key' },
+        },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options).toHaveProperty('vlm_pipeline_model_api');
+      expect(callArgs.options).not.toHaveProperty('vlm_pipeline_model_local');
+      // When proxy is active, the URL is the proxy URL and headers are empty
+      expect(callArgs.options!.vlm_pipeline_model_api).toMatchObject({
+        url: 'http://127.0.0.1:9999/v1/chat/completions',
+        headers: {},
+        params: { model: 'gpt-5.2' },
+        response_format: 'markdown',
+      });
+    });
+
+    test('should prefer vlm_api_model over vlm_model when both are specified', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {
+          pipeline: 'vlm',
+          vlm_model: 'granite-docling-258M',
+          vlm_api_model: 'openai/gpt-5.2',
+          vlm_api_options: { apiKey: 'key' },
+        },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options).toHaveProperty('vlm_pipeline_model_api');
+      expect(callArgs.options).not.toHaveProperty('vlm_pipeline_model_local');
+    });
+
+    test('should use custom VlmModelApi object through proxy', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const customApiModel: VlmModelApi = {
+        url: 'https://custom.api/v1',
+        headers: { Authorization: 'Bearer custom' },
+        timeout: 60,
+        concurrency: 2,
+        prompt: 'custom',
+        scale: 1.0,
+        response_format: 'markdown',
+      };
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_api_model: customApiModel },
+      );
+
+      // VlmProxyServer should be constructed with original URL and auth
+      expect(VlmProxyServer).toHaveBeenCalledWith(
+        logger,
+        'https://custom.api/v1',
+        'Bearer custom',
+      );
+      // Docling receives proxy URL with empty headers
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options!.vlm_pipeline_model_api!.url).toBe(
+        'http://127.0.0.1:9999/v1/chat/completions',
+      );
+      expect(callArgs.options!.vlm_pipeline_model_api!.headers).toEqual({});
+    });
+
+    test('should log API VLM model info', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {
+          pipeline: 'vlm',
+          vlm_api_model: 'openai/gpt-5.2',
+          vlm_api_options: { apiKey: 'key' },
+        },
+      );
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[PDFConverter] VLM API model:'),
+      );
+    });
+  });
+
+  describe('VLM proxy and TokenUsageReport', () => {
+    test('should return TokenUsageReport when VLM API model is used', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockProxyInstance = {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 500,
+          outputTokens: 200,
+          totalTokens: 700,
+          requestCount: 5,
+        }),
+      };
+      vi.mocked(VlmProxyServer).mockImplementation(function () {
+        return mockProxyInstance as any;
+      });
+
+      const result = await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-vlm',
+        vi.fn(),
+        false,
+        {
+          pipeline: 'vlm',
+          vlm_api_model: 'openai/gpt-5.2',
+          vlm_api_options: { apiKey: 'test-key' },
+        },
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.components).toHaveLength(1);
+      expect(result!.components[0].component).toBe('VlmPipeline');
+      expect(result!.components[0].phases[0].phase).toBe('page-conversion');
+      expect(result!.components[0].phases[0].primary).toEqual({
+        modelName: 'openai/gpt-5.2',
+        inputTokens: 500,
+        outputTokens: 200,
+        totalTokens: 700,
+      });
+      expect(result!.total).toEqual({
+        inputTokens: 500,
+        outputTokens: 200,
+        totalTokens: 700,
+      });
+    });
+
+    test('should return null for standard pipeline', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const result = await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-std',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      expect(result).toBeNull();
+    });
+
+    test('should return null for local VLM model', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const result = await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-local-vlm',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_model: 'granite-docling-258M-mlx' },
+      );
+
+      expect(result).toBeNull();
+      expect(VlmProxyServer).not.toHaveBeenCalled();
+    });
+
+    test('should start and stop proxy during VLM API conversion', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockProxyInstance = {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          requestCount: 0,
+        }),
+      };
+      vi.mocked(VlmProxyServer).mockImplementation(function () {
+        return mockProxyInstance as any;
+      });
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-proxy',
+        vi.fn(),
+        false,
+        {
+          pipeline: 'vlm',
+          vlm_api_model: 'openai/gpt-5.2',
+          vlm_api_options: { apiKey: 'test-key' },
+        },
+      );
+
+      expect(mockProxyInstance.start).toHaveBeenCalledTimes(1);
+      expect(mockProxyInstance.stop).toHaveBeenCalledTimes(1);
+    });
+
+    test('should stop proxy even when conversion fails', async () => {
+      const mockTask = createMockTask('failure');
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      const mockProxyInstance = {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          requestCount: 0,
+        }),
+      };
+      vi.mocked(VlmProxyServer).mockImplementation(function () {
+        return mockProxyInstance as any;
+      });
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-fail',
+          vi.fn(),
+          false,
+          {
+            pipeline: 'vlm',
+            vlm_api_model: 'openai/gpt-5.2',
+            vlm_api_options: { apiKey: 'test-key' },
+          },
+        ),
+      ).rejects.toThrow();
+
+      // Proxy should still be stopped in finally block
+      expect(mockProxyInstance.stop).toHaveBeenCalledTimes(1);
+    });
+
+    test('should propagate error when image PDF conversion fails with forceImagePdf', async () => {
+      vi.mocked(ImagePdfConverter).mockImplementation(function () {
+        return {
+          convert: vi.fn().mockRejectedValue(new Error('ImageMagick failed')),
+          cleanup: vi.fn(),
+        } as any;
+      });
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-img-fail',
+          vi.fn(),
+          false,
+          {
+            pipeline: 'vlm',
+            vlm_api_model: 'openai/gpt-5.2',
+            vlm_api_options: { apiKey: 'test-key' },
+            forceImagePdf: true,
+          },
+        ),
+      ).rejects.toThrow('ImageMagick failed');
+    });
+
+    test('should pass proxy URL to docling instead of real API URL', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockProxyInstance = {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          requestCount: 0,
+        }),
+      };
+      vi.mocked(VlmProxyServer).mockImplementation(function () {
+        return mockProxyInstance as any;
+      });
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-proxy-url',
+        vi.fn(),
+        false,
+        {
+          pipeline: 'vlm',
+          vlm_api_model: 'openai/gpt-5.2',
+          vlm_api_options: { apiKey: 'test-key' },
+        },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      const apiModel = callArgs.options!.vlm_pipeline_model_api!;
+      expect(apiModel.url).toBe('http://127.0.0.1:9999/v1/chat/completions');
+      expect(apiModel.headers).toEqual({});
+    });
+
+    test('should use custom VlmModelApi model name when not a preset key', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockProxyInstance = {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 10,
+          outputTokens: 20,
+          totalTokens: 30,
+          requestCount: 1,
+        }),
+      };
+      vi.mocked(VlmProxyServer).mockImplementation(function () {
+        return mockProxyInstance as any;
+      });
+
+      const customApiModel: VlmModelApi = {
+        url: 'https://custom.api/v1',
+        headers: { Authorization: 'Bearer custom' },
+        params: { model: 'custom-model-v1' },
+        timeout: 60,
+        concurrency: 1,
+        prompt: 'test',
+        scale: 1.0,
+        response_format: 'markdown',
+      };
+
+      const result = await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-custom',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_api_model: customApiModel },
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.components[0].phases[0].primary!.modelName).toBe(
+        'custom-model-v1',
+      );
+    });
+
+    test('should pass empty auth when custom VlmModelApi has no headers', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockProxyInstance = {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          requestCount: 0,
+        }),
+      };
+      vi.mocked(VlmProxyServer).mockImplementation(function () {
+        return mockProxyInstance as any;
+      });
+
+      const noHeaderModel: VlmModelApi = {
+        url: 'https://custom.api/v1',
+        timeout: 60,
+        concurrency: 1,
+        prompt: 'test',
+        scale: 1.0,
+        response_format: 'markdown',
+      };
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-no-header',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_api_model: noHeaderModel },
+      );
+
+      // Should pass empty string for auth when headers is undefined
+      expect(VlmProxyServer).toHaveBeenCalledWith(
+        logger,
+        'https://custom.api/v1',
+        '',
+      );
+    });
+
+    test('should use fallback model name when custom VlmModelApi has no params.model', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockProxyInstance = {
+        start: vi
+          .fn()
+          .mockResolvedValue('http://127.0.0.1:9999/v1/chat/completions'),
+        stop: vi.fn().mockResolvedValue(undefined),
+        getAccumulatedUsage: vi.fn().mockReturnValue({
+          inputTokens: 5,
+          outputTokens: 10,
+          totalTokens: 15,
+          requestCount: 1,
+        }),
+      };
+      vi.mocked(VlmProxyServer).mockImplementation(function () {
+        return mockProxyInstance as any;
+      });
+
+      const noParamsModel: VlmModelApi = {
+        url: 'https://custom.api/v1',
+        timeout: 60,
+        concurrency: 1,
+        prompt: 'test',
+        scale: 1.0,
+        response_format: 'markdown',
+      };
+
+      const result = await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-no-params',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', vlm_api_model: noParamsModel },
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.components[0].phases[0].primary!.modelName).toBe(
+        'custom-vlm-api',
+      );
+    });
   });
 
   describe('convert', () => {
@@ -460,7 +1008,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
 
       expect(logger.error).toHaveBeenCalledWith(
         '[PDFConverter] Conversion failed:',
@@ -782,7 +1330,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
     });
 
     test('should throw on task timeout', async () => {
@@ -1066,10 +1614,129 @@ describe('PDFConverter', () => {
           {},
           abortController.signal,
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
 
       // Should NOT attempt fallback when aborted
       expect(ImagePdfConverter).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getTaskFailureDetails', () => {
+    test('should include error messages from task result', async () => {
+      const mockTask = {
+        taskId: 'task-123',
+        poll: vi.fn().mockResolvedValue({
+          task_id: 'task-123',
+          task_status: 'failure',
+        }),
+        getResult: vi.fn().mockResolvedValue({
+          document: {},
+          status: 'failure',
+          processing_time: 0,
+          errors: [
+            { message: 'Page 3: OCR engine timeout' },
+            { message: 'Page 7: Image extraction failed' },
+          ],
+        }),
+      } as unknown as AsyncConversionTask;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-errors',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow(
+        'Task failed: Page 3: OCR engine timeout; Page 7: Image extraction failed',
+      );
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Page 3: OCR engine timeout'),
+      );
+    });
+
+    test('should return status when result has no errors', async () => {
+      const mockTask = {
+        taskId: 'task-123',
+        poll: vi.fn().mockResolvedValue({
+          task_id: 'task-123',
+          task_status: 'failure',
+        }),
+        getResult: vi.fn().mockResolvedValue({
+          document: {},
+          status: 'failure',
+          processing_time: 0,
+        }),
+      } as unknown as AsyncConversionTask;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-no-errors',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow('Task failed: status: failure');
+    });
+
+    test('should return fallback message when getResult throws', async () => {
+      const mockTask = {
+        taskId: 'task-123',
+        poll: vi.fn().mockResolvedValue({
+          task_id: 'task-123',
+          task_status: 'failure',
+        }),
+        getResult: vi.fn().mockRejectedValue(new Error('Network error')),
+      } as unknown as AsyncConversionTask;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-getresult-fail',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow('Task failed: unable to retrieve error details');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        '[PDFConverter] Failed to retrieve task result:',
+        expect.any(Error),
+      );
+    });
+
+    test('should log elapsed time in failure message', async () => {
+      vi.spyOn(Date, 'now')
+        .mockReturnValueOnce(1000000) // performConversion startTime
+        .mockReturnValueOnce(1000000) // trackTaskProgress conversionStartTime
+        .mockReturnValueOnce(1000000) // timeout check
+        .mockReturnValueOnce(1060000); // elapsed calculation (60s later)
+
+      const mockTask = createMockTask('failure');
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-elapsed',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow();
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Task failed after 60s'),
+      );
     });
   });
 
@@ -1089,7 +1756,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
 
       expect(ImagePdfConverter).not.toHaveBeenCalled();
     });
@@ -1188,10 +1855,7 @@ describe('PDFConverter', () => {
     });
 
     test('should cleanup image PDF even when fallback conversion fails', async () => {
-      let callCount = 0;
-
       vi.mocked(client.convertSourceAsync).mockImplementation(() => {
-        callCount++;
         const failTask = createMockTask('failure');
         return Promise.resolve(failTask);
       });
@@ -1271,6 +1935,78 @@ describe('PDFConverter', () => {
       );
     });
   });
+
+  describe('forceImagePdf', () => {
+    test('should convert via image PDF when forceImagePdf is true', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-force-img',
+        vi.fn(),
+        false,
+        { forceImagePdf: true },
+      );
+
+      expect(logger.info).toHaveBeenCalledWith(
+        '[PDFConverter] Force image PDF mode: converting to image PDF first...',
+      );
+      expect(ImagePdfConverter).toHaveBeenCalled();
+    });
+
+    test('should not convert via image PDF when forceImagePdf is false with VLM pipeline', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      vi.mocked(ImagePdfConverter).mockClear();
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-vlm-no-force',
+        vi.fn(),
+        false,
+        { pipeline: 'vlm', forceImagePdf: false },
+      );
+
+      expect(ImagePdfConverter).not.toHaveBeenCalled();
+      expect(logger.info).not.toHaveBeenCalledWith(
+        '[PDFConverter] Force image PDF mode: converting to image PDF first...',
+      );
+    });
+
+    test('should not convert via image PDF when forceImagePdf is false with standard pipeline', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      vi.mocked(ImagePdfConverter).mockClear();
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-std-no-force',
+        vi.fn(),
+        false,
+        { forceImagePdf: false },
+      );
+
+      expect(ImagePdfConverter).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('ValidationUtils monkey-patch', () => {
@@ -1314,6 +2050,15 @@ function createMockTask(
       task_id: 'task-123',
       task_status: finalStatus,
     }),
+    getResult: vi.fn().mockResolvedValue({
+      document: {},
+      status: finalStatus,
+      processing_time: 0,
+      errors:
+        finalStatus === 'failure'
+          ? [{ message: 'Processing failed' }]
+          : undefined,
+    }),
   };
   return task as unknown as AsyncConversionTask;
 }
@@ -1335,9 +2080,20 @@ function createMockTaskWithPollSequence(
     pollMock.mockResolvedValueOnce(response);
   });
 
+  const lastStatus = responses[responses.length - 1]?.task_status ?? 'success';
+
   const task = {
     taskId: 'task-123',
     poll: pollMock,
+    getResult: vi.fn().mockResolvedValue({
+      document: {},
+      status: lastStatus,
+      processing_time: 0,
+      errors:
+        lastStatus === 'failure'
+          ? [{ message: 'Processing failed' }]
+          : undefined,
+    }),
   };
   return task as unknown as AsyncConversionTask;
 }

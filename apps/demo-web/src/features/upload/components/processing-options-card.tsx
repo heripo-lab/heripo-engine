@@ -1,8 +1,11 @@
 'use client';
 
+import type { VlmApiModelOption } from '../constants/vlm-models';
+
 import { Cpu, Info } from 'lucide-react';
 
 import { featureFlags } from '~/lib/config/feature-flags';
+import { cn } from '~/lib/utils';
 
 import { Badge } from '~/components/ui/badge';
 import {
@@ -31,6 +34,7 @@ import {
 
 import {
   DEFAULT_VLM_MODEL_KEY,
+  VLM_API_MODEL_OPTIONS,
   VLM_MODEL_OPTIONS,
 } from '../constants/vlm-models';
 import { useProcessingForm } from '../contexts/processing-form-context';
@@ -48,6 +52,11 @@ interface NumberFieldApi {
 interface StringFieldApi {
   state: { value: string };
   handleChange: (value: string) => void;
+}
+
+interface BooleanFieldApi {
+  state: { value: boolean };
+  handleChange: (value: boolean) => void;
 }
 
 interface OptionalStringFieldApi {
@@ -77,6 +86,15 @@ const VLM_MARKDOWN_MODELS = VLM_MODEL_OPTIONS.filter(
   (m) => m.responseFormat === 'markdown',
 );
 
+const VLM_API_MODELS_BY_PROVIDER: Record<string, VlmApiModelOption[]> =
+  VLM_API_MODEL_OPTIONS.reduce<Record<string, VlmApiModelOption[]>>(
+    (acc, m) => {
+      (acc[m.provider] ??= []).push(m);
+      return acc;
+    },
+    {},
+  );
+
 /**
  * Wraps a select element with a disabled tooltip when in public mode.
  */
@@ -93,6 +111,58 @@ function DisabledWrapper({
       <Tooltip>
         <TooltipTrigger asChild>
           <div>{children}</div>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>
+            Online demo has limited options. Run locally for full customization.
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/**
+ * Toggle switch button with tooltip for disabled state.
+ */
+function ToggleSwitch({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  disabled: boolean;
+}) {
+  const toggle = (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      disabled={disabled}
+      className={cn(
+        'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
+        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50',
+        checked ? 'bg-primary' : 'bg-input',
+      )}
+    >
+      <span
+        className={cn(
+          'pointer-events-none block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform',
+          checked ? 'translate-x-5' : 'translate-x-0',
+        )}
+      />
+    </button>
+  );
+
+  if (!disabled) return toggle;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span>{toggle}</span>
         </TooltipTrigger>
         <TooltipContent>
           <p>
@@ -208,12 +278,15 @@ export function ProcessingOptionsCard({
                         <SelectLabel>DocTags</SelectLabel>
                         {VLM_DOCTAGS_MODELS.map((model) => (
                           <SelectItem key={model.key} value={model.key}>
-                            {model.label}
+                            <span>{model.label}</span>
+                            <span className="text-muted-foreground ml-2 text-xs">
+                              {model.description}
+                            </span>
                           </SelectItem>
                         ))}
                       </SelectGroup>
                       <SelectGroup>
-                        <SelectLabel>Markdown</SelectLabel>
+                        <SelectLabel>Markdown (Local)</SelectLabel>
                         {VLM_MARKDOWN_MODELS.map((model) => (
                           <SelectItem key={model.key} value={model.key}>
                             <span>{model.label}</span>
@@ -223,6 +296,21 @@ export function ProcessingOptionsCard({
                           </SelectItem>
                         ))}
                       </SelectGroup>
+                      {Object.entries(VLM_API_MODELS_BY_PROVIDER).map(
+                        ([provider, models]) => (
+                          <SelectGroup key={provider}>
+                            <SelectLabel>{provider} (API)</SelectLabel>
+                            {models.map((model: VlmApiModelOption) => (
+                              <SelectItem key={model.key} value={model.key}>
+                                <span>{model.label}</span>
+                                <span className="text-muted-foreground ml-2 text-xs">
+                                  {model.description}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        ),
+                      )}
                     </SelectContent>
                   </Select>
                 </DisabledWrapper>
@@ -230,6 +318,29 @@ export function ProcessingOptionsCard({
             )}
           </form.Field>
         )}
+
+        {/* Force Image PDF */}
+        <form.Field name="forceImagePdf">
+          {(field: BooleanFieldApi) => (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium">Force Image PDF</label>
+                  <p className="text-muted-foreground text-xs">
+                    Pre-convert PDF to image-based PDF before processing
+                  </p>
+                </div>
+                <DisabledWrapper disabled={disabled}>
+                  <ToggleSwitch
+                    checked={field.state.value}
+                    onChange={() => field.handleChange(!field.state.value)}
+                    disabled={disabled}
+                  />
+                </DisabledWrapper>
+              </div>
+            </div>
+          )}
+        </form.Field>
 
         {/* OCR Languages */}
         <form.Field name="ocrLanguages">

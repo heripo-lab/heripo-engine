@@ -55,7 +55,7 @@ function getTogether() {
  * Model ID format: "provider/model-name"
  * Examples:
  *   - "openai/gpt-5.2"
- *   - "anthropic/claude-opus-4.5"
+ *   - "anthropic/claude-opus-4.6"
  *   - "google/gemini-3-flash-preview"
  *   - "together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput"
  */

@@ -4,7 +4,7 @@ import {
   LLM_MODELS,
   VISION_MODELS,
 } from '~/features/upload/constants/llm-models';
-import { VLM_MODEL_KEYS } from '~/features/upload/constants/vlm-models';
+import { ALL_VLM_MODEL_KEYS } from '~/features/upload/constants/vlm-models';
 
 import {
   imageIdSchema,
@@ -35,11 +35,11 @@ const visionModelSchema = z
   });
 
 /**
- * VLM model key validator (local vision model presets)
+ * VLM model key validator (local and API vision model presets)
  */
 const vlmModelKeySchema = z
   .string()
-  .refine((val) => VLM_MODEL_KEYS.includes(val), {
+  .refine((val) => ALL_VLM_MODEL_KEYS.includes(val), {
     message: 'Invalid VLM model key',
   });
 
@@ -51,6 +51,9 @@ export const processingOptionsSchema = z.object({
   // Processing options
   ocrLanguages: z.array(z.string().min(1)).min(1).default(['ko-KR', 'en-US']),
   threadCount: z.number().int().positive().max(16).default(4),
+
+  // Force image PDF pre-conversion
+  forceImagePdf: z.boolean().default(false),
 
   // Pipeline selection
   pipeline: z

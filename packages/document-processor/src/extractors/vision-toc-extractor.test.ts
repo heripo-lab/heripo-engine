@@ -880,9 +880,25 @@ describe('VisionTocExtractor', () => {
         }
       ).buildUserPrompt(1, 10);
 
+      // Basic structure
       expect(result).toContain('10 document page images');
       expect(result).toContain('pages 1-10');
       expect(result).toContain('Table of Contents');
+
+      // Hanja TOC heading recognition
+      expect(result).toContain('目次');
+      expect(result).toContain('目 次');
+
+      // Hanja supplementary index exclusion
+      expect(result).toContain('寫眞 目次');
+      expect(result).toContain('圖面 目次');
+      expect(result).toContain('表 目次');
+
+      // High page number guidance for compiled volumes
+      expect(result).toContain('compiled volumes');
+
+      // Non-text page guidance
+      expect(result).toContain('photographs');
     });
   });
 });

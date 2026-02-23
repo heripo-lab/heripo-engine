@@ -1,4 +1,6 @@
-import type { VlmModelLocal } from 'docling-sdk';
+import type { VlmModelApi, VlmModelLocal } from 'docling-sdk';
+
+// ── Local VLM Model Types & Presets ─────────────────────────────────────
 
 /**
  * VLM model preset with description
@@ -146,4 +148,237 @@ export function resolveVlmModel(model: string | VlmModelLocal): VlmModelLocal {
     } as VlmModelLocal;
   }
   return model;
+}
+
+// ── API VLM Model Types & Presets ───────────────────────────────────────
+
+/**
+ * Supported API VLM provider identifiers
+ */
+export type VlmApiProvider = 'openai' | 'anthropic' | 'google' | 'together';
+
+/**
+ * API VLM provider configuration
+ */
+export interface VlmApiProviderConfig {
+  /** OpenAI-compatible chat completions endpoint URL */
+  url: string;
+  /** Environment variable name for the API key */
+  apiKeyEnvVar: string;
+  /** Display name of the provider */
+  displayName: string;
+}
+
+/**
+ * API VLM model preset for remote vision-capable models accessed via HTTP API.
+ */
+export interface VlmApiModelPreset {
+  /** Model identifier passed to the API (e.g., 'gpt-5.2') */
+  model_id: string;
+  /** Provider key for endpoint/auth lookup */
+  provider: VlmApiProvider;
+  /** Response format the model should return */
+  response_format: 'doctags' | 'markdown';
+  /** Human-readable description */
+  description: string;
+}
+
+/**
+ * API VLM provider endpoint configurations.
+ * All providers use OpenAI-compatible chat completions API with Bearer token auth.
+ */
+export const VLM_API_PROVIDERS: Record<VlmApiProvider, VlmApiProviderConfig> = {
+  openai: {
+    url: 'https://api.openai.com/v1/chat/completions',
+    apiKeyEnvVar: 'OPENAI_API_KEY',
+    displayName: 'OpenAI',
+  },
+  anthropic: {
+    url: 'https://api.anthropic.com/v1/chat/completions',
+    apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+    displayName: 'Anthropic',
+  },
+  google: {
+    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    apiKeyEnvVar: 'GOOGLE_GENERATIVE_AI_API_KEY',
+    displayName: 'Google',
+  },
+  together: {
+    url: 'https://api.together.xyz/v1/chat/completions',
+    apiKeyEnvVar: 'TOGETHER_AI_API_KEY',
+    displayName: 'Together AI',
+  },
+};
+
+/**
+ * Available API VLM model presets.
+ *
+ * These models are accessed via OpenAI-compatible HTTP API endpoints.
+ * Users can select a preset key or provide a custom VlmModelApi object.
+ *
+ * @see https://docling-project.github.io/docling/examples/vlm_pipeline_api_model/
+ */
+export const VLM_API_MODELS: Record<string, VlmApiModelPreset> = {
+  // ── OpenAI ────────────────────────────────────────────────────────────
+
+  'openai/gpt-5.2': {
+    model_id: 'gpt-5.2',
+    provider: 'openai',
+    response_format: 'markdown',
+    description: 'GPT-5.2 (OpenAI, highest accuracy)',
+  },
+  'openai/gpt-5.1': {
+    model_id: 'gpt-5.1',
+    provider: 'openai',
+    response_format: 'markdown',
+    description: 'GPT-5.1 (OpenAI, balanced)',
+  },
+  'openai/gpt-5-mini': {
+    model_id: 'gpt-5-mini',
+    provider: 'openai',
+    response_format: 'markdown',
+    description: 'GPT-5 Mini (OpenAI, fast & cost-effective)',
+  },
+
+  // ── Anthropic ─────────────────────────────────────────────────────────
+
+  'anthropic/claude-opus-4.6': {
+    model_id: 'claude-opus-4.6',
+    provider: 'anthropic',
+    response_format: 'markdown',
+    description: 'Claude Opus 4.6 (Anthropic, highest accuracy)',
+  },
+  'anthropic/claude-sonnet-4.6': {
+    model_id: 'claude-sonnet-4.6',
+    provider: 'anthropic',
+    response_format: 'markdown',
+    description: 'Claude Sonnet 4.6 (Anthropic, balanced)',
+  },
+  'anthropic/claude-haiku-4.6': {
+    model_id: 'claude-haiku-4.6',
+    provider: 'anthropic',
+    response_format: 'markdown',
+    description: 'Claude Haiku 4.6 (Anthropic, fast & cost-effective)',
+  },
+
+  // ── Google ────────────────────────────────────────────────────────────
+
+  'google/gemini-3.1-pro-preview': {
+    model_id: 'gemini-3.1-pro-preview',
+    provider: 'google',
+    response_format: 'markdown',
+    description: 'Gemini 3.1 Pro Preview (Google, high accuracy)',
+  },
+  'google/gemini-3-flash-preview': {
+    model_id: 'gemini-3-flash-preview',
+    provider: 'google',
+    response_format: 'markdown',
+    description: 'Gemini 3 Flash Preview (Google, fast & cost-effective)',
+  },
+
+  // Together AI vision models will be added here
+} as const;
+
+/**
+ * Default prompt templates for API VLM models.
+ * These instruct the VLM on how to convert the document page image.
+ */
+export const VLM_API_PROMPTS = {
+  markdown:
+    'Convert the provided document page image into clean Markdown format. ' +
+    'Extract all text content preserving the document structure including headings, ' +
+    'tables, lists, and paragraphs. For tables, use proper Markdown table syntax. ' +
+    'Do not include any explanations, only output the Markdown content.',
+  doctags:
+    'Convert the provided document page image into DocTags XML format. ' +
+    'Extract all text content preserving the document structure using DocTags elements. ' +
+    'Do not include any explanations, only output the DocTags content.',
+} as const;
+
+/**
+ * Default configuration values for API VLM
+ */
+export const VLM_API_DEFAULTS = {
+  timeout: 120,
+  concurrency: 1,
+  scale: 2.0,
+} as const;
+
+/**
+ * Default API VLM model preset key (null = no default, must be explicitly selected)
+ */
+export const DEFAULT_VLM_API_MODEL: string | null = null;
+
+/**
+ * Options for resolving an API VLM model.
+ * API key can be provided directly or read from environment variables.
+ */
+export interface ResolveVlmApiOptions {
+  /** API key for authentication. Falls back to provider's env var if not provided. */
+  apiKey?: string;
+  /** Override the default timeout (seconds) */
+  timeout?: number;
+  /** Override the default concurrency */
+  concurrency?: number;
+  /** Override the default prompt template */
+  prompt?: string;
+  /** Override the default image scale */
+  scale?: number;
+}
+
+/**
+ * Resolve an API VLM model from a preset key or custom VlmModelApi object.
+ *
+ * When using a preset key:
+ * - Looks up the provider endpoint and model configuration
+ * - Resolves API key from options or environment variable
+ * - Applies default prompt, timeout, concurrency, and scale values
+ *
+ * When using a custom VlmModelApi object:
+ * - Returns the object as-is
+ *
+ * @throws Error if preset key is unknown
+ * @throws Error if API key is not provided and env var is not set
+ */
+export function resolveVlmApiModel(
+  model: string | VlmModelApi,
+  options: ResolveVlmApiOptions = {},
+): VlmModelApi {
+  if (typeof model !== 'string') {
+    return model;
+  }
+
+  const preset = VLM_API_MODELS[model];
+  if (!preset) {
+    throw new Error(
+      `Unknown API VLM model preset: "${model}". Available presets: ${Object.keys(VLM_API_MODELS).join(', ')}`,
+    );
+  }
+
+  const provider = VLM_API_PROVIDERS[preset.provider];
+
+  const apiKey = options.apiKey ?? process.env[provider.apiKeyEnvVar];
+  if (!apiKey) {
+    throw new Error(
+      `API key not found for provider "${provider.displayName}". ` +
+        `Provide it via options.apiKey or set the ${provider.apiKeyEnvVar} environment variable.`,
+    );
+  }
+
+  const responseFormat = preset.response_format;
+
+  return {
+    url: provider.url,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    params: {
+      model: preset.model_id,
+    },
+    timeout: options.timeout ?? VLM_API_DEFAULTS.timeout,
+    concurrency: options.concurrency ?? VLM_API_DEFAULTS.concurrency,
+    prompt: options.prompt ?? VLM_API_PROMPTS[responseFormat],
+    scale: options.scale ?? VLM_API_DEFAULTS.scale,
+    response_format: responseFormat,
+  };
 }

@@ -191,9 +191,9 @@ When classifying as "mixed", you MUST extract ONLY the main TOC portion and retu
 
 ### 3. resource_only
 The content contains ONLY resource indices such as:
-- Photo/image indices (사진 목차, 사진목차, Photo Index, List of Figures, List of Photos)
-- Table indices (표 목차, 표목차, Table Index, List of Tables)
-- Drawing/diagram indices (도면 목차, 도면목차, Drawing Index, List of Drawings)
+- Photo/image indices (사진 목차, 사진목차, 寫眞 目次, 寫眞目次, Photo Index, List of Figures, List of Photos)
+- Table indices (표 목차, 표목차, 表 目次, 表目次, Table Index, List of Tables)
+- Drawing/diagram indices (도면 목차, 도면목차, 圖面 目次, 圖面目次, Drawing Index, List of Drawings)
 - Appendix indices (부록 목차, Appendix Index)
 
 ### 4. invalid

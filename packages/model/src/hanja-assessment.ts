@@ -1,38 +1,34 @@
 /**
- * Result of Hanja (KCJ) quality assessment
+ * Result of Hanja role assessment in the document.
  *
- * Evaluates OCR quality of Korean-Chinese-Japanese (KCJ/KCJ) characters
- * in the document by sampling pages and comparing with Vision LLM.
+ * Determines whether Hanja characters play an essential role (mixed Korean-Hanja text)
+ * or merely a supplementary role (parenthetical annotations), which decides
+ * whether VLM re-parsing is needed for accurate text extraction.
  */
 export interface HanjaAssessment {
   /**
-   * Whether the document should be re-parsed using VLM pipeline
-   * due to significant KCJ character corruption
+   * Whether the document should be re-parsed using VLM pipeline.
+   * True when Hanja plays an essential role in the document content.
    */
   needsVlmReparse: boolean;
 
   /**
-   * Severity of KCJ character corruption
-   * - 'none': No KCJ characters found or no corruption detected
-   * - 'minor': Some corruption but still usable
-   * - 'severe': Significant corruption requiring VLM re-parse
+   * Role of Hanja characters in the document:
+   * - 'none': No Hanja characters found in sampled pages
+   * - 'supplementary': Hanja appears as parenthetical annotations after Korean text (e.g., "한글(漢字)")
+   * - 'essential': Document uses mixed Korean-Hanja text where Hanja is integral to meaning
    */
-  severity: 'none' | 'minor' | 'severe';
+  hanjaRole: 'none' | 'supplementary' | 'essential';
 
   /**
-   * Total number of text pages considered as candidates for assessment
+   * Total number of text pages containing Hanja, considered as candidates for assessment
    */
-  kcjPageCount: number;
+  hanjaPageCount: number;
 
   /**
-   * Number of pages actually sampled for quality assessment
+   * Number of pages actually sampled for role assessment
    */
   sampledPageCount: number;
-
-  /**
-   * Ratio of corrupted characters (0.0 ~ 1.0)
-   */
-  corruptedRatio: number;
 
   /**
    * Human-readable reason for the assessment result

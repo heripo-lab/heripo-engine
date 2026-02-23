@@ -2605,11 +2605,10 @@ describe('DocumentProcessor', () => {
 
       const mockAssessment = {
         needsVlmReparse: false,
-        severity: 'none' as const,
-        kcjPageCount: 0,
+        hanjaRole: 'none' as const,
+        hanjaPageCount: 0,
         sampledPageCount: 0,
-        corruptedRatio: 0,
-        reason: 'No KCJ characters found in document',
+        reason: 'No Hanja characters found in sampled pages',
       };
 
       mockAssess.mockResolvedValueOnce(mockAssessment);
@@ -2631,7 +2630,7 @@ describe('DocumentProcessor', () => {
         '[DocumentProcessor] Starting Hanja quality assessment...',
       );
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Hanja assessment: severity=none'),
+        expect.stringContaining('Hanja assessment: hanjaRole=none'),
       );
     });
 
@@ -2647,11 +2646,10 @@ describe('DocumentProcessor', () => {
 
       mockAssess.mockResolvedValueOnce({
         needsVlmReparse: false,
-        severity: 'none' as const,
-        kcjPageCount: 0,
+        hanjaRole: 'none' as const,
+        hanjaPageCount: 0,
         sampledPageCount: 0,
-        corruptedRatio: 0,
-        reason: 'No KCJ characters found in document',
+        reason: 'No Hanja characters found in sampled pages',
       });
 
       const mockDoc = {
@@ -2679,11 +2677,11 @@ describe('DocumentProcessor', () => {
 
       const mockAssessment = {
         needsVlmReparse: true,
-        severity: 'severe' as const,
-        kcjPageCount: 5,
+        hanjaRole: 'essential' as const,
+        hanjaPageCount: 5,
         sampledPageCount: 3,
-        corruptedRatio: 0.67,
-        reason: '2/3 sampled pages have corrupted KCJ characters',
+        reason:
+          '1/1 sampled pages contain essential Hanja (mixed Korean-Hanja text)',
       };
 
       mockAssess.mockResolvedValueOnce(mockAssessment);
@@ -2701,7 +2699,7 @@ describe('DocumentProcessor', () => {
       );
 
       expect(result.needsVlmReparse).toBe(true);
-      expect(result.severity).toBe('severe');
+      expect(result.hanjaRole).toBe('essential');
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('needsVlmReparse=true'),
       );

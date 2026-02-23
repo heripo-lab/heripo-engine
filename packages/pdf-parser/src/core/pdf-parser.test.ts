@@ -331,6 +331,79 @@ describe('PDFParser', () => {
     expect(result).toBe('OK');
   });
 
+  test('parse returns TokenUsageReport from converter', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which jq')) return '';
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+
+    const mockReport = {
+      components: [
+        {
+          component: 'VlmPipeline',
+          phases: [
+            {
+              phase: 'page-conversion',
+              primary: {
+                modelName: 'openai/gpt-5.2',
+                inputTokens: 100,
+                outputTokens: 50,
+                totalTokens: 150,
+              },
+              total: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+            },
+          ],
+          total: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        },
+      ],
+      total: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+    };
+    convertMock.mockResolvedValueOnce(mockReport);
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await parser.init();
+
+    const result = await parser.parse(
+      'http://file.pdf',
+      'report-vlm',
+      vi.fn(),
+      false,
+      { pipeline: 'vlm', vlm_api_model: 'openai/gpt-5.2' },
+    );
+
+    expect(result).toBe(mockReport);
+    expect(result!.components[0].component).toBe('VlmPipeline');
+  });
+
+  test('parse returns null when converter returns null', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which jq')) return '';
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+    convertMock.mockResolvedValueOnce(null);
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await parser.init();
+
+    const result = await parser.parse(
+      'http://file.pdf',
+      'report-std',
+      vi.fn(),
+      false,
+      { num_threads: 4 },
+    );
+
+    expect(result).toBeNull();
+  });
+
   test('parse auto-setups VLM dependencies when pipeline is vlm on local server', async () => {
     vi.mocked(platform).mockReturnValue('darwin');
     vi.mocked(execSync as any).mockImplementation((cmd: string) => {
@@ -360,9 +433,125 @@ describe('PDFParser', () => {
     });
 
     expect(logger.info).toHaveBeenCalledWith(
-      '[PDFParser] VLM pipeline requested, ensuring VLM dependencies...',
+      '[PDFParser] VLM pipeline requested (local), ensuring VLM dependencies...',
     );
     expect(setupVlmMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('parse logs API variant when vlm_api_model is provided', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which jq')) return '';
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+    convertMock.mockResolvedValueOnce('OK');
+
+    const setupVlmMock = vi.fn().mockResolvedValue(undefined);
+    (DoclingEnvironment as any).mockImplementation(function () {
+      return {
+        setup: envMocks.setupMock,
+        setupVlmDependencies: setupVlmMock,
+      };
+    });
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, port: 5001 });
+    await parser.init();
+
+    const onComplete = vi.fn();
+    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
+      num_threads: 4,
+      pipeline: 'vlm',
+      vlm_api_model: 'anthropic/claude-sonnet-4.6',
+    });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      '[PDFParser] VLM pipeline requested (API), ensuring VLM dependencies...',
+    );
+    expect(setupVlmMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('parse checks ImageMagick and Ghostscript when forceImagePdf is true on local server', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    const whichCalls: string[] = [];
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which')) {
+        whichCalls.push(cmd);
+        return '';
+      }
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+    convertMock.mockResolvedValueOnce('OK');
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, port: 5001 });
+    await parser.init();
+
+    await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
+      num_threads: 4,
+      forceImagePdf: true,
+    });
+
+    // Should check for ImageMagick and Ghostscript during parse
+    expect(whichCalls).toContain('which magick');
+    expect(whichCalls).toContain('which gs');
+  });
+
+  test('parse throws when ImageMagick is missing with forceImagePdf on local server', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which jq')) return '';
+      if (cmd.startsWith('which magick')) throw new Error('not found');
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, port: 5001 });
+    await parser.init();
+
+    await expect(
+      parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
+        num_threads: 4,
+        forceImagePdf: true,
+      }),
+    ).rejects.toThrow('ImageMagick is not installed');
+  });
+
+  test('parse skips forceImagePdf dependency check when using external server', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    const whichCalls: string[] = [];
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('sw_vers')) return '12.6.0';
+      if (cmd.startsWith('which')) {
+        whichCalls.push(cmd);
+        return '';
+      }
+      return '';
+    });
+    doclingClient.health.mockResolvedValueOnce();
+    convertMock.mockResolvedValueOnce('OK');
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await parser.init();
+
+    // Reset whichCalls after init
+    whichCalls.length = 0;
+
+    await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
+      num_threads: 4,
+      forceImagePdf: true,
+    });
+
+    // Should NOT check for magick/gs since external server is used
+    expect(whichCalls).not.toContain('which magick');
+    expect(whichCalls).not.toContain('which gs');
   });
 
   test('parse skips VLM auto-setup when using external server', async () => {
@@ -387,7 +576,7 @@ describe('PDFParser', () => {
 
     // Should NOT log VLM setup message since baseUrl is used
     expect(logger.info).not.toHaveBeenCalledWith(
-      '[PDFParser] VLM pipeline requested, ensuring VLM dependencies...',
+      expect.stringContaining('VLM pipeline requested'),
     );
   });
 

@@ -273,19 +273,34 @@ export class VisionTocExtractor extends VisionLLMComponent {
 
 I am providing ${pageCount} document page images (pages ${startPage}-${endPage}).
 
-## Where to Look for TOC:
+## How to Identify TOC Pages:
 - TOC typically appears in the first 10-20 pages of a document
-- Look for pages with headings like "목차", "차례", "Contents", "Table of Contents"
-- Look for structured lists with chapter titles and page numbers
+- Look for pages with a heading that indicates "Table of Contents":
+  - Korean: "목차", "차례", "목 차"
+  - Hanja (Chinese characters used in Korean documents): "目次", "目 次"
+  - English: "Contents", "Table of Contents"
+- The heading may appear in decorative or stylized fonts on a textured background
+- Below the heading, look for structured lists with chapter/section titles and page numbers connected by dots or leaders
+
+## How to Distinguish Main TOC from Supplementary Indices:
+- **Main TOC** (EXTRACT THIS): The heading is simply "목차", "目次", "Contents" with NO prefix qualifier. It lists chapters/sections of the document body.
+- **Supplementary indices** (DO NOT EXTRACT): The heading has a prefix qualifier specifying a resource type:
+  - Photo indices: "사진 목차", "사진목차", "寫眞 目次", "寫眞目次"
+  - Drawing/figure indices: "도면 목차", "도면목차", "圖面 目次", "圖面目次"
+  - Table indices: "표 목차", "표목차", "表 目次", "表目次"
+- Key rule: If the heading contains a qualifier word BEFORE "목차"/"目次"/"Contents", it is a supplementary index. Only extract content from pages whose heading is the unqualified "목차"/"目次"/"Contents".
 
 ## What to Extract:
-Extract the TOC content as markdown format that matches this exact structure:
+Extract the TOC content as markdown format with this exact structure:
 - Use "- " prefix for each list item
 - Use 2-space indentation for hierarchy levels
 - Include "..... " followed by page number at the end of each entry
 - Preserve original chapter/section numbering from the document
+- Preserve the original language of titles (Korean, Hanja, English, or mixed)
 
-## Output Format Example:
+## Output Format Examples:
+
+### Example 1: Standard Korean TOC
 \`\`\`
 - 제1장 서론 ..... 1
   - 1. 연구 배경 ..... 3
@@ -296,20 +311,29 @@ Extract the TOC content as markdown format that matches this exact structure:
 - 제3장 연구 결과 ..... 25
 \`\`\`
 
+### Example 2: Mixed Hanja-Korean TOC (common in archaeological reports)
+\`\`\`
+- Ⅰ. 調査概要 ..... 175
+- Ⅱ. 調査地域의 環境 ..... 177
+- Ⅲ. 調査内容 ..... 199
+  - 1. 조사지역 퇴적양상 ..... 199
+  - 2. 유적 조사내용 ..... 200
+- Ⅳ. 調査結果 ..... 228
+\`\`\`
+
 ## Important Rules:
-1. Extract ONLY the main document TOC
-2. DO NOT include supplementary indices:
-   - Photo indices (사진 목차, 사진목차)
-   - Table indices (표 목차, 표목차)
-   - Figure indices (도면 목차, 도면목차)
-3. If no TOC is found, set hasToc to false and tocMarkdown to null
-4. Set continuesOnNextPage to true if the TOC appears to continue beyond the visible pages
+1. Extract ONLY the main document TOC (the one with unqualified heading "목차"/"目次"/"Contents")
+2. DO NOT include supplementary indices (those with prefixed headings like "사진 목차", "寫眞 目次", "圖面 目次", "表 目次", etc.)
+3. Page numbers can be any valid positive integer - documents in compiled volumes may have high page numbers (e.g., 175, 228, 500+). This is normal and expected.
+4. Some pages in the batch may be photographs, illustrations, blank pages, or other non-text content with no TOC. Skip these pages.
+5. If no TOC is found, set hasToc to false and tocMarkdown to null
+6. Set continuesOnNextPage to true if the TOC appears to continue beyond the visible pages
 
 Please examine these pages and:
-1. Determine if any page contains a Table of Contents (TOC)
+1. Determine if any page contains a main document Table of Contents
 2. If found, extract the complete TOC in markdown format
 3. Indicate if the TOC continues beyond these pages
 
-Remember: Extract the main document TOC only. Ignore photo/table/figure indices.`;
+Remember: Extract the main document TOC only. Ignore photo/table/figure/drawing indices.`;
   }
 }

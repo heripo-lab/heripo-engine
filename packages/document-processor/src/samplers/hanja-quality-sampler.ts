@@ -35,45 +35,25 @@ const EDGE_TRIM_RATIO = 0.1;
 const IMAGE_PAGE_TEXT_THRESHOLD = 50;
 
 /**
- * Ratio threshold above which KCJ corruption is considered severe
- * (0.5 = 50% of sampled pages have severe corruption)
+ * Schema for Vision LLM response evaluating the role of Hanja characters on a page
  */
-const CORRUPTION_THRESHOLD = 0.5;
-
-/**
- * Minimum number of corrupted pages to trigger severe assessment,
- * regardless of the corruption ratio.
- * Even a low ratio can indicate systemic OCR issues when multiple pages are affected.
- */
-const MIN_SEVERE_CORRUPTED_COUNT = 3;
-
-/**
- * Schema for Vision LLM response evaluating KCJ character quality
- */
-const HanjaQualityResponseSchema = z.object({
-  isCorrupted: z
+const HanjaRoleResponseSchema = z.object({
+  hasHanja: z
     .boolean()
     .describe(
-      'Whether the KCJ (Hanja) characters in the OCR text are significantly corrupted compared to the page image',
+      'Whether the page contains any Hanja (Chinese/漢字) characters in the original image',
     ),
-  corruptedCharCount: z
-    .number()
-    .int()
-    .nonnegative()
+  hanjaRole: z
+    .enum(['none', 'supplementary', 'essential'])
     .describe(
-      'Approximate number of corrupted or incorrectly recognized KCJ characters',
+      'The role of Hanja: "none" if no Hanja found, "supplementary" if Hanja only appears as parenthetical annotations after Korean text, "essential" if the document uses mixed Korean-Hanja text where Hanja is integral to understanding',
     ),
-  totalKcjCharCount: z
-    .number()
-    .int()
-    .nonnegative()
-    .describe('Total number of KCJ characters found in the OCR text'),
   explanation: z
     .string()
-    .describe('Brief explanation of the assessment result'),
+    .describe('Brief explanation of how Hanja is used on this page'),
 });
 
-type HanjaQualityResponse = z.infer<typeof HanjaQualityResponseSchema>;
+type HanjaRoleResponse = z.infer<typeof HanjaRoleResponseSchema>;
 
 /**
  * Page data with text density information
@@ -87,12 +67,13 @@ interface PageData {
 /**
  * HanjaQualitySampler
  *
- * Evaluates the quality of KCJ (Chinese/Japanese/Korean) character recognition
- * in OCR-processed documents. Samples a subset of pages containing KCJ text and
- * uses Vision LLM to compare the OCR output against the original page images.
+ * Determines the role of Hanja (漢字) characters in OCR-processed Korean documents.
+ * Samples a subset of pages and uses Vision LLM to classify whether Hanja is used
+ * as supplementary annotations (parenthetical, e.g., "한글(漢字)") or as essential
+ * text in mixed Korean-Hanja (국한문 혼용) documents.
  *
  * This is used to determine whether a document should be re-parsed using the
- * VLM pipeline for better KCJ character accuracy.
+ * VLM pipeline when OCR corrupts Hanja characters.
  */
 export class HanjaQualitySampler extends VisionLLMComponent {
   constructor(
@@ -116,14 +97,14 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   /**
-   * Assess the quality of KCJ character recognition in the document
+   * Assess the role of Hanja characters in the document
    *
    * @param doclingDoc - DoclingDocument to assess
    * @returns Assessment result indicating whether VLM re-parse is needed
    */
   async assess(doclingDoc: DoclingDocument): Promise<HanjaAssessment> {
     const totalPages = Object.keys(doclingDoc.pages).length;
-    this.log('info', 'Starting KCJ quality assessment...');
+    this.log('info', 'Starting Hanja role assessment...');
 
     // Step 1: Compute filtering metadata for sampling
     const { frontCutoff, backCutoff } = this.getEligiblePageRange(totalPages);
@@ -142,10 +123,9 @@ export class HanjaQualitySampler extends VisionLLMComponent {
       this.log('info', 'No text pages found for assessment');
       return {
         needsVlmReparse: false,
-        severity: 'none',
-        kcjPageCount: 0,
+        hanjaRole: 'none',
+        hanjaPageCount: 0,
         sampledPageCount: 0,
-        corruptedRatio: 0,
         reason: 'No text pages found for assessment',
       };
     }
@@ -166,7 +146,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
       `Sampling ${sampled.length} pages: [${sampled.map((p) => p.pageNo).join(', ')}]`,
     );
 
-    // Step 4: Evaluate each sampled page with Vision LLM
+    // Step 4: Evaluate each sampled page with Vision LLM (early break on essential)
     const results = await this.evaluatePages(sampled);
 
     // Step 5: Aggregate results
@@ -178,8 +158,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
 
     this.log(
       'info',
-      `Assessment complete: severity=${assessment.severity}, ` +
-        `corrupted=${assessment.corruptedRatio.toFixed(2)}, ` +
+      `Assessment complete: hanjaRole=${assessment.hanjaRole}, ` +
         `needsVlmReparse=${assessment.needsVlmReparse}`,
     );
 
@@ -203,7 +182,7 @@ export class HanjaQualitySampler extends VisionLLMComponent {
 
   /**
    * Get page numbers that are "image-only" (contain pictures but minimal text).
-   * These pages (e.g., photo plates/도판) are unsuitable for KCJ quality assessment.
+   * These pages (e.g., photo plates/도판) are unsuitable for Hanja role assessment.
    */
   private getImageOnlyPages(doclingDoc: DoclingDocument): Set<number> {
     const picturePages = new Set<number>();
@@ -302,27 +281,32 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   /**
-   * Evaluate sampled pages using Vision LLM
+   * Evaluate sampled pages using Vision LLM.
+   * Stops early when essential Hanja is detected to save VLM calls.
    */
-  private async evaluatePages(
-    pages: PageData[],
-  ): Promise<HanjaQualityResponse[]> {
-    const results: HanjaQualityResponse[] = [];
+  private async evaluatePages(pages: PageData[]): Promise<HanjaRoleResponse[]> {
+    const results: HanjaRoleResponse[] = [];
 
     for (const page of pages) {
       const result = await this.evaluateSinglePage(page);
       results.push(result);
+
+      if (result.hanjaRole === 'essential') {
+        this.log(
+          'info',
+          `Essential Hanja detected on page ${page.pageNo}, skipping remaining pages`,
+        );
+        break;
+      }
     }
 
     return results;
   }
 
   /**
-   * Evaluate a single page by comparing OCR text against the page image
+   * Evaluate a single page to determine the role of Hanja characters
    */
-  private async evaluateSinglePage(
-    page: PageData,
-  ): Promise<HanjaQualityResponse> {
+  private async evaluateSinglePage(page: PageData): Promise<HanjaRoleResponse> {
     // Page images use 0-based indexing (page_1 -> page_0.png)
     const imagePath = `pages/page_${page.pageNo - 1}.png`;
 
@@ -332,12 +316,11 @@ export class HanjaQualitySampler extends VisionLLMComponent {
     } catch {
       this.log(
         'warn',
-        `Failed to load page image for page ${page.pageNo}, marking as not corrupted`,
+        `Failed to load page image for page ${page.pageNo}, marking as no Hanja`,
       );
       return {
-        isCorrupted: false,
-        corruptedCharCount: 0,
-        totalKcjCharCount: 0,
+        hasHanja: false,
+        hanjaRole: 'none',
         explanation: `Page image not available for page ${page.pageNo}`,
       };
     }
@@ -358,15 +341,14 @@ export class HanjaQualitySampler extends VisionLLMComponent {
     ];
 
     const { output } = await this.callVisionLLM(
-      HanjaQualityResponseSchema,
+      HanjaRoleResponseSchema,
       messages,
       `page-${page.pageNo}`,
     );
 
     this.log(
       'info',
-      `Page ${page.pageNo}: corrupted=${output.isCorrupted}, ` +
-        `${output.corruptedCharCount}/${output.totalKcjCharCount} KCJ chars corrupted`,
+      `Page ${page.pageNo}: hasHanja=${output.hasHanja}, role=${output.hanjaRole}`,
     );
 
     return output;
@@ -378,39 +360,38 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   private aggregateResults(
     totalTextPages: number,
     sampledCount: number,
-    results: HanjaQualityResponse[],
+    results: HanjaRoleResponse[],
   ): HanjaAssessment {
-    const corruptedCount = results.filter((r) => r.isCorrupted).length;
-    const corruptedRatio = sampledCount > 0 ? corruptedCount / sampledCount : 0;
+    const essentialCount = results.filter(
+      (r) => r.hanjaRole === 'essential',
+    ).length;
+    const supplementaryCount = results.filter(
+      (r) => r.hanjaRole === 'supplementary',
+    ).length;
 
-    let severity: HanjaAssessment['severity'];
+    let hanjaRole: HanjaAssessment['hanjaRole'];
     let needsVlmReparse: boolean;
+    let reason: string;
 
-    if (
-      corruptedRatio >= CORRUPTION_THRESHOLD ||
-      corruptedCount >= MIN_SEVERE_CORRUPTED_COUNT
-    ) {
-      severity = 'severe';
+    if (essentialCount > 0) {
+      hanjaRole = 'essential';
       needsVlmReparse = true;
-    } else if (corruptedCount > 0) {
-      severity = 'minor';
+      reason = `${essentialCount}/${results.length} sampled pages contain essential Hanja (mixed Korean-Hanja text)`;
+    } else if (supplementaryCount > 0) {
+      hanjaRole = 'supplementary';
       needsVlmReparse = false;
+      reason = `Hanja appears only as parenthetical annotations in ${supplementaryCount}/${results.length} sampled pages`;
     } else {
-      severity = 'none';
+      hanjaRole = 'none';
       needsVlmReparse = false;
+      reason = 'No Hanja characters found in sampled pages';
     }
-
-    const reason =
-      corruptedCount === 0
-        ? 'No Hanja character corruption detected'
-        : `${corruptedCount}/${sampledCount} sampled pages have corrupted Hanja characters (ratio: ${corruptedRatio.toFixed(2)})`;
 
     return {
       needsVlmReparse,
-      severity,
-      kcjPageCount: totalTextPages,
+      hanjaRole,
+      hanjaPageCount: totalTextPages,
       sampledPageCount: sampledCount,
-      corruptedRatio,
       reason,
     };
   }
@@ -427,21 +408,34 @@ export class HanjaQualitySampler extends VisionLLMComponent {
   }
 
   protected buildUserPrompt(ocrText: string): string {
-    return `You are evaluating the quality of OCR text extraction for Hanja (漢字) characters used in Korean archaeological reports.
+    return `You are analyzing how Hanja (漢字/Chinese characters) is used in a Korean archaeological report page.
 
-Look at the page image and find any Hanja (漢字) characters visible in the original document. Then compare them against the OCR text below.
+Look at the page image carefully and determine the ROLE of Hanja characters in the document.
 
-## Evaluation Criteria
-- Find Hanja (漢字) characters in the page image first
-- Check if each Hanja character is correctly recognized in the OCR text
-- A character is "corrupted" if a Hanja character in the image was replaced by Korean hangul, garbled text, symbols, or a completely different character in the OCR text
-- Common corruption patterns: Hanja replaced by similar-looking hangul (e.g., 粘土 → 그으), wrong character substitution, partial recognition, question marks or boxes
-- Minor font rendering differences are NOT corruption
-- If no Hanja characters are visible in the page image, report as not corrupted with 0 total characters
+## Classification
 
-## OCR Text to Evaluate
+1. **none**: No Hanja characters appear in the page image.
+
+2. **supplementary**: Hanja appears only in non-essential areas where the Korean text alone is sufficient.
+   - Parenthetical annotations: Korean word followed by Hanja in parentheses, e.g., "토기(土器)", "유구(遺構)"
+   - Footnotes/endnotes: Hanja appearing only in footnote or endnote sections at the bottom of the page
+   - Even if the OCR text shows corrupted Hanja, the main content is understandable without it
+
+3. **essential**: The document uses mixed Korean-Hanja text (국한문 혼용체) where Hanja is integral to the BODY text.
+   - Hanja characters appear directly in the body text, not just in parentheses or footnotes
+   - Removing Hanja would make sentences incomplete or incomprehensible
+   - Example: sentences where Hanja replaces Korean words entirely in the main body
+
+## Important Notes
+- Focus on the ORIGINAL page image, not the OCR text (OCR may have corrupted the Hanja)
+- A single page with parenthetical Hanja like "유물(遺物)" is "supplementary"
+- Hanja appearing ONLY in footnotes/endnotes is "supplementary", not "essential"
+- If Hanja appears in the body text (not just parentheses or footnotes), classify as "essential"
+- Look at the actual image to determine character usage patterns
+
+## OCR Text (for reference only - may contain corrupted Hanja)
 ${ocrText}
 
-Compare the Hanja characters visible in the page image against the OCR text above and assess whether they were correctly recognized.`;
+Examine the page image and classify the role of Hanja characters.`;
   }
 }

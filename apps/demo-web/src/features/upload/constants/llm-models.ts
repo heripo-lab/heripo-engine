@@ -32,28 +32,28 @@ export const LLM_MODELS: LLMModel[] = [
 
   // Anthropic
   {
-    id: 'anthropic/claude-opus-4.5',
-    label: 'Claude Opus 4.5',
+    id: 'anthropic/claude-opus-4.6',
+    label: 'Claude Opus 4.6',
     provider: 'Anthropic',
     hasVision: true,
   },
   {
-    id: 'anthropic/claude-sonnet-4.5',
-    label: 'Claude Sonnet 4.5',
+    id: 'anthropic/claude-sonnet-4.6',
+    label: 'Claude Sonnet 4.6',
     provider: 'Anthropic',
     hasVision: true,
   },
   {
-    id: 'anthropic/claude-haiku-4.5',
-    label: 'Claude Haiku 4.5',
+    id: 'anthropic/claude-haiku-4.6',
+    label: 'Claude Haiku 4.6',
     provider: 'Anthropic',
     hasVision: true,
   },
 
   // Google
   {
-    id: 'google/gemini-3-pro-preview',
-    label: 'Gemini 3 Pro Preview',
+    id: 'google/gemini-3.1-pro-preview',
+    label: 'Gemini 3.1 Pro Preview',
     provider: 'Google',
     hasVision: true,
   },

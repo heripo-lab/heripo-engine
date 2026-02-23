@@ -104,20 +104,18 @@ function createDoclingDoc(
 }
 
 /**
- * Helper to create a mock callVision response
+ * Helper to create a mock callVision response for Hanja role assessment
  */
-function createVisionResponse(
-  isCorrupted: boolean,
-  corruptedCharCount: number,
-  totalKcjCharCount: number,
+function createRoleResponse(
+  hasHanja: boolean,
+  hanjaRole: 'none' | 'supplementary' | 'essential',
   explanation: string,
   phase: string,
 ) {
   return {
     output: {
-      isCorrupted,
-      corruptedCharCount,
-      totalKcjCharCount,
+      hasHanja,
+      hanjaRole,
       explanation,
     },
     usage: {
@@ -190,7 +188,7 @@ describe('HanjaQualitySampler', () => {
   });
 
   describe('assess', () => {
-    test('returns severity=none when no text pages found (short texts only)', async () => {
+    test('returns hanjaRole=none when no text pages found (short texts only)', async () => {
       const doc = createDoclingDoc(
         [createTextItem('Short text', 5), createTextItem('Another short', 6)],
         { totalPages: 20 },
@@ -200,10 +198,9 @@ describe('HanjaQualitySampler', () => {
 
       expect(result).toEqual({
         needsVlmReparse: false,
-        severity: 'none',
-        kcjPageCount: 0,
+        hanjaRole: 'none',
+        hanjaPageCount: 0,
         sampledPageCount: 0,
-        corruptedRatio: 0,
         reason: 'No text pages found for assessment',
       });
       expect(mockCallVision).not.toHaveBeenCalled();
@@ -212,7 +209,7 @@ describe('HanjaQualitySampler', () => {
       );
     });
 
-    test('returns severity=none when pages have text below MIN_TEXT_LENGTH threshold', async () => {
+    test('returns hanjaRole=none when pages have text below MIN_TEXT_LENGTH threshold', async () => {
       const doc = createDoclingDoc(
         [
           createTextItem(generateText(50), 5),
@@ -225,16 +222,15 @@ describe('HanjaQualitySampler', () => {
 
       expect(result).toEqual({
         needsVlmReparse: false,
-        severity: 'none',
-        kcjPageCount: 0,
+        hanjaRole: 'none',
+        hanjaPageCount: 0,
         sampledPageCount: 0,
-        corruptedRatio: 0,
         reason: 'No text pages found for assessment',
       });
       expect(mockCallVision).not.toHaveBeenCalled();
     });
 
-    test('returns severity=severe when majority of sampled pages are corrupted', async () => {
+    test('returns hanjaRole=essential when any sampled page has essential Hanja', async () => {
       const doc = createDoclingDoc(
         [
           createTextItem(generateText(300), 5),
@@ -244,41 +240,27 @@ describe('HanjaQualitySampler', () => {
         { totalPages: 20 },
       );
 
-      mockCallVision
-        .mockResolvedValueOnce(
-          createVisionResponse(
-            true,
-            8,
-            10,
-            'Severe corruption on page 5',
-            'page-5',
-          ),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(
-            true,
-            6,
-            8,
-            'Severe corruption on page 6',
-            'page-6',
-          ),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 4, 6, 'Corruption on page 7', 'page-7'),
-        );
+      mockCallVision.mockResolvedValueOnce(
+        createRoleResponse(
+          true,
+          'essential',
+          'Mixed Korean-Hanja text on page 5',
+          'page-5',
+        ),
+      );
 
       const result = await sampler.assess(doc);
 
       expect(result.needsVlmReparse).toBe(true);
-      expect(result.severity).toBe('severe');
-      expect(result.kcjPageCount).toBe(3);
+      expect(result.hanjaRole).toBe('essential');
+      expect(result.hanjaPageCount).toBe(3);
       expect(result.sampledPageCount).toBe(3);
-      expect(result.corruptedRatio).toBe(1);
-      expect(result.reason).toContain('3/3');
-      expect(mockCallVision).toHaveBeenCalledTimes(3);
+      expect(result.reason).toContain('essential Hanja');
+      // Early break: only 1 call since essential was found on first page
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
 
-    test('returns severity=minor when some pages corrupted but below 50% threshold', async () => {
+    test('returns hanjaRole=supplementary when Hanja appears only as annotations', async () => {
       const doc = createDoclingDoc(
         [
           createTextItem(generateText(400), 5),
@@ -289,32 +271,41 @@ describe('HanjaQualitySampler', () => {
         { totalPages: 20 },
       );
 
-      // 1 out of 4 corrupted -> ratio = 0.25 < 0.5 -> minor
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(true, 5, 20, 'Some corruption', 'page-5'),
+          createRoleResponse(
+            true,
+            'supplementary',
+            'Parenthetical Hanja annotations',
+            'page-5',
+          ),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 15, 'Clean page', 'page-6'),
+          createRoleResponse(
+            true,
+            'supplementary',
+            'Parenthetical Hanja annotations',
+            'page-6',
+          ),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean page', 'page-7'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-7'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 6, 'Clean page', 'page-8'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-8'),
         );
 
       const result = await sampler.assess(doc);
 
       expect(result.needsVlmReparse).toBe(false);
-      expect(result.severity).toBe('minor');
-      expect(result.kcjPageCount).toBe(4);
+      expect(result.hanjaRole).toBe('supplementary');
+      expect(result.hanjaPageCount).toBe(4);
       expect(result.sampledPageCount).toBe(4);
-      expect(result.corruptedRatio).toBe(0.25);
-      expect(result.reason).toContain('1/4');
+      expect(result.reason).toContain('parenthetical annotations');
+      expect(result.reason).toContain('2/4');
     });
 
-    test('returns severity=none when text pages present but no corruption detected', async () => {
+    test('returns hanjaRole=none when text pages present but no Hanja found', async () => {
       const doc = createDoclingDoc(
         [
           createTextItem(generateText(300), 5),
@@ -326,26 +317,97 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'All clean', 'page-5'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 8, 'All clean', 'page-6'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 6, 'All clean', 'page-7'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-7'),
         );
 
       const result = await sampler.assess(doc);
 
       expect(result.needsVlmReparse).toBe(false);
-      expect(result.severity).toBe('none');
-      expect(result.kcjPageCount).toBe(3);
+      expect(result.hanjaRole).toBe('none');
+      expect(result.hanjaPageCount).toBe(3);
       expect(result.sampledPageCount).toBe(3);
-      expect(result.corruptedRatio).toBe(0);
-      expect(result.reason).toBe('No Hanja character corruption detected');
+      expect(result.reason).toBe('No Hanja characters found in sampled pages');
     });
 
-    test('handles image load failure by marking page as not corrupted', async () => {
+    test('early breaks when essential Hanja detected mid-evaluation', async () => {
+      const doc = createDoclingDoc(
+        [
+          createTextItem(generateText(400), 5),
+          createTextItem(generateText(300), 6),
+          createTextItem(generateText(200), 7),
+          createTextItem(generateText(150), 8),
+        ],
+        { totalPages: 20 },
+      );
+
+      mockCallVision
+        .mockResolvedValueOnce(
+          createRoleResponse(
+            true,
+            'supplementary',
+            'Parenthetical annotations',
+            'page-5',
+          ),
+        )
+        .mockResolvedValueOnce(
+          createRoleResponse(
+            true,
+            'essential',
+            'Mixed Korean-Hanja text',
+            'page-6',
+          ),
+        );
+
+      const result = await sampler.assess(doc);
+
+      expect(result.needsVlmReparse).toBe(true);
+      expect(result.hanjaRole).toBe('essential');
+      // Only 2 VLM calls: stopped after essential found on page 6
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Essential Hanja detected on page 6'),
+      );
+    });
+
+    test('evaluates all pages when no essential Hanja is found', async () => {
+      const doc = createDoclingDoc(
+        [
+          createTextItem(generateText(300), 5),
+          createTextItem(generateText(200), 6),
+          createTextItem(generateText(150), 7),
+        ],
+        { totalPages: 20 },
+      );
+
+      mockCallVision
+        .mockResolvedValueOnce(
+          createRoleResponse(
+            true,
+            'supplementary',
+            'Parenthetical annotations',
+            'page-5',
+          ),
+        )
+        .mockResolvedValueOnce(
+          createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
+        )
+        .mockResolvedValueOnce(
+          createRoleResponse(false, 'none', 'No Hanja', 'page-7'),
+        );
+
+      await sampler.assess(doc);
+
+      // All 3 pages evaluated since no essential was found
+      expect(mockCallVision).toHaveBeenCalledTimes(3);
+    });
+
+    test('handles image load failure by marking page as no Hanja', async () => {
       const doc = createDoclingDoc(
         [
           createTextItem(generateText(300), 5),
@@ -364,15 +426,15 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 8, 'Clean page', 'page-6'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 6, 'Clean page', 'page-7'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-7'),
         );
 
       const result = await sampler.assess(doc);
 
-      expect(result.severity).toBe('none');
+      expect(result.hanjaRole).toBe('none');
       expect(result.needsVlmReparse).toBe(false);
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('Failed to load page image for page'),
@@ -386,7 +448,7 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       await sampler.assess(doc);
@@ -407,7 +469,7 @@ describe('HanjaQualitySampler', () => {
       const doc = createDoclingDoc([textWithoutProv], { totalPages: 0 });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-1'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-1'),
       );
 
       await sampler.assess(doc);
@@ -429,7 +491,7 @@ describe('HanjaQualitySampler', () => {
       const doc = createDoclingDoc([textWithEmptyProv], { totalPages: 0 });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-1'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-1'),
       );
 
       await sampler.assess(doc);
@@ -452,18 +514,42 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 8, 'Clean', 'page-6'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 6, 'Clean', 'page-7'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-7'),
         );
 
       await sampler.assess(doc);
 
       expect(mockAggregator.track).toHaveBeenCalledTimes(3);
+    });
+
+    test('tracks fewer token usages when early break occurs', async () => {
+      const doc = createDoclingDoc(
+        [
+          createTextItem(generateText(300), 5),
+          createTextItem(generateText(200), 6),
+          createTextItem(generateText(150), 7),
+        ],
+        { totalPages: 20 },
+      );
+
+      mockCallVision.mockResolvedValueOnce(
+        createRoleResponse(
+          true,
+          'essential',
+          'Mixed Korean-Hanja text',
+          'page-5',
+        ),
+      );
+
+      await sampler.assess(doc);
+
+      expect(mockAggregator.track).toHaveBeenCalledTimes(1);
     });
 
     test('logs assessment start, page info, and completion', async () => {
@@ -472,13 +558,13 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       await sampler.assess(doc);
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        '[HanjaQualitySampler] Starting KCJ quality assessment...',
+        '[HanjaQualitySampler] Starting Hanja role assessment...',
       );
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Total pages: 20, eligible range: (2, 18]'),
@@ -488,134 +574,14 @@ describe('HanjaQualitySampler', () => {
       );
     });
 
-    test('returns severity=severe when corrupted count reaches MIN_SEVERE_CORRUPTED_COUNT even with low ratio', async () => {
-      // 9 eligible pages (page 3 trimmed by edge), 3 corrupted
-      // ratio = 3/9 ≈ 0.33 < 0.5, but count = 3 >= MIN_SEVERE_CORRUPTED_COUNT -> severe
-      const texts: DoclingTextItem[] = [];
-      for (let i = 3; i <= 12; i++) {
-        texts.push(createTextItem(generateText(100 + i * 10), i));
-      }
-      const doc = createDoclingDoc(texts, { totalPages: 30 });
-
-      mockCallVision
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 8, 22, 'Corrupted', 'page-12'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 6, 21, 'Corrupted', 'page-11'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 4, 20, 'Corrupted', 'page-10'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 19, 'Clean', 'page-9'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 18, 'Clean', 'page-8'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 17, 'Clean', 'page-7'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 16, 'Clean', 'page-6'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 15, 'Clean', 'page-5'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 14, 'Clean', 'page-4'),
-        );
-
-      const result = await sampler.assess(doc);
-
-      expect(result.severity).toBe('severe');
-      expect(result.needsVlmReparse).toBe(true);
-      expect(result.sampledPageCount).toBe(9);
-      expect(result.corruptedRatio).toBeCloseTo(3 / 9);
-    });
-
-    test('returns severity=minor when corrupted count is below MIN_SEVERE_CORRUPTED_COUNT with low ratio', async () => {
-      // 9 eligible pages (page 3 trimmed by edge), 2 corrupted
-      // ratio = 2/9 ≈ 0.22 < 0.5, count = 2 < MIN_SEVERE_CORRUPTED_COUNT -> minor
-      const texts: DoclingTextItem[] = [];
-      for (let i = 3; i <= 12; i++) {
-        texts.push(createTextItem(generateText(100 + i * 10), i));
-      }
-      const doc = createDoclingDoc(texts, { totalPages: 30 });
-
-      mockCallVision
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 8, 22, 'Corrupted', 'page-12'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 6, 21, 'Corrupted', 'page-11'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 20, 'Clean', 'page-10'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 19, 'Clean', 'page-9'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 18, 'Clean', 'page-8'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 17, 'Clean', 'page-7'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 16, 'Clean', 'page-6'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 15, 'Clean', 'page-5'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 14, 'Clean', 'page-4'),
-        );
-
-      const result = await sampler.assess(doc);
-
-      expect(result.severity).toBe('minor');
-      expect(result.needsVlmReparse).toBe(false);
-      expect(result.sampledPageCount).toBe(9);
-      expect(result.corruptedRatio).toBeCloseTo(2 / 9);
-    });
-
-    test('handles exact corruption threshold boundary (corruptedRatio = 0.5 -> severe)', async () => {
-      const texts: DoclingTextItem[] = [];
-      for (let i = 5; i <= 8; i++) {
-        texts.push(createTextItem(generateText(100 + i * 10), i));
-      }
-      const doc = createDoclingDoc(texts, { totalPages: 20 });
-
-      mockCallVision
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 5, 13, 'Corrupted', 'page-8'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 4, 12, 'Corrupted', 'page-7'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 11, 'Clean', 'page-6'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
-        );
-
-      const result = await sampler.assess(doc);
-
-      expect(result.severity).toBe('severe');
-      expect(result.needsVlmReparse).toBe(true);
-      expect(result.corruptedRatio).toBe(0.5);
-    });
-
     test('handles empty document with no texts', async () => {
       const doc = createDoclingDoc([], { totalPages: 0 });
 
       const result = await sampler.assess(doc);
 
-      expect(result.severity).toBe('none');
+      expect(result.hanjaRole).toBe('none');
       expect(result.needsVlmReparse).toBe(false);
-      expect(result.kcjPageCount).toBe(0);
+      expect(result.hanjaPageCount).toBe(0);
     });
 
     test('aggregates texts from multiple items on the same page for text length', async () => {
@@ -629,12 +595,12 @@ describe('HanjaQualitySampler', () => {
       );
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 6, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
       expect(result.sampledPageCount).toBe(1);
       expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
@@ -652,12 +618,12 @@ describe('HanjaQualitySampler', () => {
       );
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-6'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
       expect(result.sampledPageCount).toBe(1);
     });
   });
@@ -672,7 +638,7 @@ describe('HanjaQualitySampler', () => {
 
       for (let i = 0; i < 10; i++) {
         mockCallVision.mockResolvedValueOnce(
-          createVisionResponse(false, 0, 20, 'Clean', `page-${25 - i}`),
+          createRoleResponse(false, 'none', 'No Hanja', `page-${25 - i}`),
         );
       }
 
@@ -693,10 +659,10 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 8, 'Clean', 'page-6'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
         );
 
       const result = await sampler.assess(doc);
@@ -711,7 +677,7 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
@@ -734,7 +700,7 @@ describe('HanjaQualitySampler', () => {
       mockCallVision.mockImplementation(async (args: unknown) => {
         const typedArgs = args as { phase: string };
         callOrder.push(typedArgs.phase);
-        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+        return createRoleResponse(false, 'none', 'No Hanja', typedArgs.phase);
       });
 
       await sampler.assess(doc);
@@ -751,7 +717,7 @@ describe('HanjaQualitySampler', () => {
 
       for (let i = 0; i < 7; i++) {
         mockCallVision.mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', `page-${11 - i}`),
+          createRoleResponse(false, 'none', 'No Hanja', `page-${11 - i}`),
         );
       }
 
@@ -779,13 +745,13 @@ describe('HanjaQualitySampler', () => {
       mockCallVision.mockImplementation(async (args: unknown) => {
         const typedArgs = args as { phase: string };
         callOrder.push(typedArgs.phase);
-        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+        return createRoleResponse(false, 'none', 'No Hanja', typedArgs.phase);
       });
 
       const result = await sampler.assess(doc);
 
       // Both pages found as text pages
-      expect(result.kcjPageCount).toBe(2);
+      expect(result.hanjaPageCount).toBe(2);
       // Only middle page sampled (edge page filtered from sampling)
       expect(result.sampledPageCount).toBe(1);
       expect(callOrder).toEqual(['page-50']);
@@ -808,13 +774,13 @@ describe('HanjaQualitySampler', () => {
         const typedArgs = args as { phase: string };
         const pageNo = parseInt(typedArgs.phase.replace('page-', ''));
         calledPages.push(pageNo);
-        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+        return createRoleResponse(false, 'none', 'No Hanja', typedArgs.phase);
       });
 
       const result = await sampler.assess(doc);
 
       // All 12 pages have text
-      expect(result.kcjPageCount).toBe(12);
+      expect(result.hanjaPageCount).toBe(12);
       // Only 10 sampled (the middle ones)
       expect(result.sampledPageCount).toBe(10);
       // Edge pages (5, 95) should NOT be in sampled pages
@@ -834,16 +800,16 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-2'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-2'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-99'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-99'),
         );
 
       const result = await sampler.assess(doc);
 
       // Should still find and sample both pages (fallback)
-      expect(result.kcjPageCount).toBe(2);
+      expect(result.hanjaPageCount).toBe(2);
       expect(result.sampledPageCount).toBe(2);
       expect(mockCallVision).toHaveBeenCalledTimes(2);
       // Should log the fallback warning
@@ -863,15 +829,15 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-1'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-1'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-2'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-2'),
         );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(2);
+      expect(result.hanjaPageCount).toBe(2);
       expect(mockCallVision).toHaveBeenCalledTimes(2);
     });
 
@@ -893,13 +859,13 @@ describe('HanjaQualitySampler', () => {
       mockCallVision.mockImplementation(async (args: unknown) => {
         const typedArgs = args as { phase: string };
         calledPages.push(parseInt(typedArgs.phase.replace('page-', '')));
-        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+        return createRoleResponse(false, 'none', 'No Hanja', typedArgs.phase);
       });
 
       const result = await sampler.assess(doc);
 
       // All 5 pages have text
-      expect(result.kcjPageCount).toBe(5);
+      expect(result.hanjaPageCount).toBe(5);
       // Only 3 middle pages sampled (2,3,4)
       expect(result.sampledPageCount).toBe(3);
       expect(calledPages).not.toContain(1);
@@ -925,15 +891,15 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-6'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
         );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(2);
+      expect(result.hanjaPageCount).toBe(2);
       expect(result.sampledPageCount).toBe(2);
       expect(mockCallVision).toHaveBeenCalledTimes(2);
     });
@@ -953,13 +919,13 @@ describe('HanjaQualitySampler', () => {
       );
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-6'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
       );
 
       const result = await sampler.assess(doc);
 
       // Only page 6 qualifies as a text page (page 5 has only 30 chars < MIN_TEXT_LENGTH)
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
       expect(result.sampledPageCount).toBe(1);
     });
 
@@ -970,12 +936,12 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
       expect(result.sampledPageCount).toBe(1);
       expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
@@ -987,12 +953,12 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-6'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
     });
 
     test('does not exclude pages without pictures', async () => {
@@ -1002,12 +968,12 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
     });
 
     test('handles picture items without prov', async () => {
@@ -1028,12 +994,12 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
     });
 
     test('logs the number of excluded image-only pages', async () => {
@@ -1043,7 +1009,7 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-6'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
       );
 
       await sampler.assess(doc);
@@ -1067,16 +1033,16 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 10, 'Clean', 'page-2'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-2'),
         )
         .mockResolvedValueOnce(
-          createVisionResponse(false, 0, 8, 'Clean', 'page-99'),
+          createRoleResponse(false, 'none', 'No Hanja', 'page-99'),
         );
 
       const result = await sampler.assess(doc);
 
       // Both pages found
-      expect(result.kcjPageCount).toBe(2);
+      expect(result.hanjaPageCount).toBe(2);
       // Both sampled via fallback
       expect(result.sampledPageCount).toBe(2);
       expect(mockCallVision).toHaveBeenCalledTimes(2);
@@ -1095,7 +1061,7 @@ describe('HanjaQualitySampler', () => {
       expect(result).toBe('');
     });
 
-    test('buildUserPrompt returns evaluation prompt containing OCR text and criteria', () => {
+    test('buildUserPrompt contains role classification criteria', () => {
       const ocrText = '매우 고운 그으로 류한 test text';
       const result = (
         sampler as unknown as {
@@ -1104,13 +1070,13 @@ describe('HanjaQualitySampler', () => {
       ).buildUserPrompt(ocrText);
 
       expect(result).toContain(ocrText);
-      expect(result).toContain('Evaluation Criteria');
+      expect(result).toContain('Classification');
       expect(result).toContain('Hanja');
-      expect(result).toContain('corrupted');
-      expect(result).toContain('OCR Text to Evaluate');
+      expect(result).toContain('supplementary');
+      expect(result).toContain('essential');
     });
 
-    test('buildUserPrompt mentions image-first comparison approach', () => {
+    test('buildUserPrompt mentions parenthetical pattern, footnotes, and mixed Korean-Hanja text', () => {
       const result = (
         sampler as unknown as {
           buildUserPrompt: (text: string) => string;
@@ -1118,7 +1084,9 @@ describe('HanjaQualitySampler', () => {
       ).buildUserPrompt('sample text');
 
       expect(result).toContain('page image');
-      expect(result).toContain('Korean hangul');
+      expect(result).toContain('Parenthetical annotations');
+      expect(result).toContain('Footnotes');
+      expect(result).toContain('국한문 혼용체');
     });
   });
 
@@ -1139,7 +1107,7 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       await customSampler.assess(doc);
@@ -1170,7 +1138,7 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       await customSampler.assess(doc);
@@ -1193,7 +1161,7 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       await sampler.assess(doc);
@@ -1217,7 +1185,7 @@ describe('HanjaQualitySampler', () => {
       expect(content[0].image).toBe(`data:image/png;base64,${expectedBase64}`);
 
       expect(content[1].type).toBe('text');
-      expect(content[1].text).toContain('OCR Text to Evaluate');
+      expect(content[1].text).toContain('OCR Text');
     });
 
     test('passes correct phase identifier to callVisionLLM', async () => {
@@ -1226,7 +1194,7 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-7'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-7'),
       );
 
       await sampler.assess(doc);
@@ -1249,7 +1217,7 @@ describe('HanjaQualitySampler', () => {
       );
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 6, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       await sampler.assess(doc);
@@ -1271,16 +1239,18 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(true, 3, 10, 'Some corruption', 'page-5'),
+        createRoleResponse(
+          true,
+          'supplementary',
+          'Parenthetical annotations',
+          'page-5',
+        ),
       );
 
       await sampler.assess(doc);
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Page 5: corrupted=true'),
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('3/10 KCJ chars corrupted'),
+        expect.stringContaining('Page 5: hasHanja=true, role=supplementary'),
       );
     });
   });
@@ -1292,12 +1262,12 @@ describe('HanjaQualitySampler', () => {
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 5, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
     });
 
     test('excludes pages with text length < 100', async () => {
@@ -1310,12 +1280,12 @@ describe('HanjaQualitySampler', () => {
       );
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-6'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-6'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
     });
 
     test('finds text pages regardless of edge position (discovery is unfiltered)', async () => {
@@ -1331,13 +1301,13 @@ describe('HanjaQualitySampler', () => {
 
       mockCallVision.mockImplementation(async (args: unknown) => {
         const typedArgs = args as { phase: string };
-        return createVisionResponse(false, 0, 10, 'Clean', typedArgs.phase);
+        return createRoleResponse(false, 'none', 'No Hanja', typedArgs.phase);
       });
 
       const result = await sampler.assess(doc);
 
       // All 3 pages should be found as text pages
-      expect(result.kcjPageCount).toBe(3);
+      expect(result.hanjaPageCount).toBe(3);
     });
 
     test('aggregates text from multiple items on the same page', async () => {
@@ -1351,18 +1321,18 @@ describe('HanjaQualitySampler', () => {
       );
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.kcjPageCount).toBe(1);
+      expect(result.hanjaPageCount).toBe(1);
       expect(mockCallVision).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('aggregateResults edge cases', () => {
-    test('severe assessment includes correct reason string', async () => {
+    test('essential assessment includes correct reason string', async () => {
       const doc = createDoclingDoc(
         [
           createTextItem(generateText(300), 5),
@@ -1371,33 +1341,33 @@ describe('HanjaQualitySampler', () => {
         { totalPages: 20 },
       );
 
-      mockCallVision
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 8, 10, 'Corrupted', 'page-5'),
-        )
-        .mockResolvedValueOnce(
-          createVisionResponse(true, 6, 8, 'Corrupted', 'page-6'),
-        );
+      mockCallVision.mockResolvedValueOnce(
+        createRoleResponse(
+          true,
+          'essential',
+          'Mixed Korean-Hanja text',
+          'page-5',
+        ),
+      );
 
       const result = await sampler.assess(doc);
 
-      expect(result.reason).toContain('2/2');
-      expect(result.reason).toContain('corrupted Hanja characters');
-      expect(result.reason).toContain('ratio: 1.00');
+      expect(result.reason).toContain('1/1');
+      expect(result.reason).toContain('essential Hanja');
     });
 
-    test('clean assessment uses correct reason string', async () => {
+    test('none assessment uses correct reason string', async () => {
       const doc = createDoclingDoc([createTextItem(generateText(200), 5)], {
         totalPages: 20,
       });
 
       mockCallVision.mockResolvedValueOnce(
-        createVisionResponse(false, 0, 10, 'Clean', 'page-5'),
+        createRoleResponse(false, 'none', 'No Hanja', 'page-5'),
       );
 
       const result = await sampler.assess(doc);
 
-      expect(result.reason).toBe('No Hanja character corruption detected');
+      expect(result.reason).toBe('No Hanja characters found in sampled pages');
     });
   });
 
@@ -1414,13 +1384,12 @@ describe('HanjaQualitySampler', () => {
   });
 
   describe('aggregateResults with zero sampled pages', () => {
-    test('returns corruptedRatio 0 when sampledCount is 0', () => {
+    test('returns hanjaRole none when sampledCount is 0', () => {
       const result = (sampler as any).aggregateResults(0, 0, []);
 
-      expect(result.corruptedRatio).toBe(0);
-      expect(result.severity).toBe('none');
+      expect(result.hanjaRole).toBe('none');
       expect(result.needsVlmReparse).toBe(false);
-      expect(result.reason).toBe('No Hanja character corruption detected');
+      expect(result.reason).toBe('No Hanja characters found in sampled pages');
     });
   });
 });

@@ -1,4 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
+import type { TokenUsageReport } from '@heripo/model';
 import type { DoclingAPIClient } from 'docling-sdk';
 
 import { Docling } from 'docling-sdk';
@@ -319,17 +320,24 @@ export class PDFParser {
     cleanupAfterCallback: boolean,
     options: PDFConvertOptions,
     abortSignal?: AbortSignal,
-  ) {
+  ): Promise<TokenUsageReport | null> {
     if (!this.client) {
       throw new Error(
         'PDFParser is not initialized. Call init() before using parse()',
       );
     }
 
+    // Check ImageMagick/Ghostscript for forceImagePdf (lazy check at parse time)
+    if (options.forceImagePdf && !this.baseUrl) {
+      this.checkImageMagickInstalled();
+      this.checkGhostscriptInstalled();
+    }
+
     // Auto-setup VLM dependencies if VLM pipeline is requested
     if (options.pipeline === 'vlm' && this.environment && !this.baseUrl) {
+      const isApiVlm = options.vlm_api_model !== undefined;
       this.logger.info(
-        '[PDFParser] VLM pipeline requested, ensuring VLM dependencies...',
+        `[PDFParser] VLM pipeline requested (${isApiVlm ? 'API' : 'local'}), ensuring VLM dependencies...`,
       );
       await this.environment.setupVlmDependencies();
     }
@@ -380,6 +388,10 @@ export class PDFParser {
         throw error;
       }
     }
+
+    /* v8 ignore start */
+    return null;
+    /* v8 ignore stop */
   }
 
   /**

@@ -7,6 +7,8 @@ import type { QueuedTask, SSEEvent } from './task-queue-manager';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { readFileSync, writeFileSync } from 'fs';
 
+import { VLM_API_MODEL_KEYS } from '~/features/upload/constants/vlm-models';
+
 import { featureFlags } from '../config/feature-flags';
 import { publicModeConfig } from '../config/public-mode';
 import { calculateCost } from '../cost/model-pricing';
@@ -34,30 +36,51 @@ function parsePdf(
   taskId: string,
   options: PDFConvertOptions,
   abortSignal?: AbortSignal,
-): Promise<{ doclingDocument: DoclingDocument; outputPath: string }> {
+): Promise<{
+  doclingDocument: DoclingDocument;
+  outputPath: string;
+  vlmTokenUsage: TokenUsageReport | null;
+}> {
   return new Promise((resolve, reject) => {
+    let capturedDoc: DoclingDocument;
+    let capturedPath: string;
     pdfParser
       .parse(
         pdfUrl,
         taskId,
         (outPath) => {
-          try {
-            const resultPath = `${outPath}/result.json`;
-            const json = readFileSync(resultPath, 'utf8');
-            resolve({
-              doclingDocument: JSON.parse(json) as DoclingDocument,
-              outputPath: outPath,
-            });
-          } catch (err) {
-            reject(err);
-          }
+          const resultPath = `${outPath}/result.json`;
+          const json = readFileSync(resultPath, 'utf8');
+          capturedDoc = JSON.parse(json) as DoclingDocument;
+          capturedPath = outPath;
         },
         false,
         options,
         abortSignal,
       )
+      .then((vlmTokenUsage) => {
+        resolve({
+          doclingDocument: capturedDoc,
+          outputPath: capturedPath,
+          vlmTokenUsage: vlmTokenUsage ?? null,
+        });
+      })
       .catch(reject);
   });
+}
+
+/**
+ * Merge VLM token usage into an existing TokenUsageReport.
+ * VlmPipeline components are prepended (pipeline order: VLM -> document processing).
+ */
+function mergeVlmUsage(
+  target: TokenUsageReport,
+  vlmUsage: TokenUsageReport,
+): void {
+  target.components.unshift(...vlmUsage.components);
+  target.total.inputTokens += vlmUsage.total.inputTokens;
+  target.total.outputTokens += vlmUsage.total.outputTokens;
+  target.total.totalTokens += vlmUsage.total.totalTokens;
 }
 
 function calculateTotalCost(usage: TokenUsageReport): number {
@@ -239,6 +262,7 @@ export async function runTaskWorker(
 
     let doclingDocument: DoclingDocument;
     let outputPath: string;
+    let vlmTokenUsage: TokenUsageReport | null = null;
 
     try {
       const parseResult = await parsePdf(
@@ -249,13 +273,17 @@ export async function runTaskWorker(
           ocr_lang: options.ocrLanguages,
           num_threads: options.threadCount,
           pipeline: pipelineType,
-          vlm_model: options.vlmModel,
+          forceImagePdf: options.forceImagePdf,
+          ...(options.vlmModel && VLM_API_MODEL_KEYS.includes(options.vlmModel)
+            ? { vlm_api_model: options.vlmModel }
+            : { vlm_model: options.vlmModel }),
         },
         abortSignal,
       );
 
       doclingDocument = parseResult.doclingDocument;
       outputPath = parseResult.outputPath;
+      vlmTokenUsage = parseResult.vlmTokenUsage;
     } finally {
       // Clear task logger after PDF parsing
       pdfParserManager.clearTaskLogger(taskId);
@@ -278,14 +306,14 @@ export async function runTaskWorker(
 
       if (assessment.needsVlmReparse) {
         logger.info(
-          `Hanja quality insufficient (severity: ${assessment.severity}, ratio: ${assessment.corruptedRatio}), re-parsing with VLM pipeline...`,
+          `Hanja role is essential (${assessment.hanjaRole}), re-parsing with VLM pipeline...`,
         );
 
         // Notify client about VLM fallback
         const vlmFallbackEvent: SSEEvent = {
           type: 'vlm-fallback',
           data: {
-            reason: `Hanja quality insufficient (severity: ${assessment.severity})`,
+            reason: `Hanja role is essential - document uses mixed Korean-Hanja text`,
           },
         };
         emitter.emit(`task:${taskId}`, vlmFallbackEvent);
@@ -300,20 +328,25 @@ export async function runTaskWorker(
               ocr_lang: options.ocrLanguages,
               num_threads: options.threadCount,
               pipeline: 'vlm',
-              vlm_model: options.vlmModel,
+              forceImagePdf: options.forceImagePdf,
+              ...(options.vlmModel &&
+              VLM_API_MODEL_KEYS.includes(options.vlmModel)
+                ? { vlm_api_model: options.vlmModel }
+                : { vlm_model: options.vlmModel }),
             },
             abortSignal,
           );
 
           doclingDocument = vlmResult.doclingDocument;
           outputPath = vlmResult.outputPath;
+          vlmTokenUsage = vlmResult.vlmTokenUsage;
           logger.info('VLM re-parsing completed');
         } finally {
           pdfParserManager.clearTaskLogger(taskId);
         }
       } else {
         logger.info(
-          `Hanja quality acceptable (severity: ${assessment.severity}), continuing with OCR result`,
+          `Hanja role is ${assessment.hanjaRole}, continuing with OCR result`,
         );
       }
     }
@@ -322,6 +355,11 @@ export async function runTaskWorker(
     logger.info('Starting document processing...');
 
     const result = await processor.process(doclingDocument, taskId, outputPath);
+
+    // Merge VLM token usage into document-processor report
+    if (vlmTokenUsage) {
+      mergeVlmUsage(result.usage, vlmTokenUsage);
+    }
 
     logger.info('Document processing completed');
 
