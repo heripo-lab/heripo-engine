@@ -16,6 +16,7 @@ import {
   createImageLookupMap,
   createTableLookupMap,
   findChapterById,
+  findContentRedirectTarget,
 } from '~/features/result/utils/chapter-lookup';
 import {
   filterFootnoteIdsByPage,
@@ -75,6 +76,17 @@ export function ChapterContentCard({
     [chapters, selectedChapterId],
   );
 
+  // When the selected chapter is empty, resolve content from
+  // the first sibling/descendant with content on the same page (alias).
+  const contentChapter = useMemo(
+    () =>
+      selectedChapterId
+        ? (findContentRedirectTarget(chapters, selectedChapterId) ??
+          selectedChapter)
+        : selectedChapter,
+    [chapters, selectedChapterId, selectedChapter],
+  );
+
   const imageMap = useMemo(() => createImageLookupMap(images), [images]);
   const tableMap = useMemo(() => createTableLookupMap(tables), [tables]);
   const footnoteMap = useMemo(
@@ -82,41 +94,41 @@ export function ChapterContentCard({
     [footnotes],
   );
 
-  // Filter content by current page
+  // Filter content by current page (uses contentChapter which may alias to a sibling)
   const pageTextBlocks = useMemo(
     () =>
-      selectedChapter
-        ? filterTextBlocksByPage(selectedChapter.textBlocks, currentPage)
+      contentChapter
+        ? filterTextBlocksByPage(contentChapter.textBlocks, currentPage)
         : [],
-    [selectedChapter, currentPage],
+    [contentChapter, currentPage],
   );
 
   const pageImageIds = useMemo(
     () =>
-      selectedChapter
-        ? filterImageIdsByPage(selectedChapter.imageIds, imageMap, currentPage)
+      contentChapter
+        ? filterImageIdsByPage(contentChapter.imageIds, imageMap, currentPage)
         : [],
-    [selectedChapter, imageMap, currentPage],
+    [contentChapter, imageMap, currentPage],
   );
 
   const pageTableIds = useMemo(
     () =>
-      selectedChapter
-        ? filterTableIdsByPage(selectedChapter.tableIds, tableMap, currentPage)
+      contentChapter
+        ? filterTableIdsByPage(contentChapter.tableIds, tableMap, currentPage)
         : [],
-    [selectedChapter, tableMap, currentPage],
+    [contentChapter, tableMap, currentPage],
   );
 
   const pageFootnoteIds = useMemo(
     () =>
-      selectedChapter
+      contentChapter
         ? filterFootnoteIdsByPage(
-            selectedChapter.footnoteIds,
+            contentChapter.footnoteIds,
             footnoteMap,
             currentPage,
           )
         : [],
-    [selectedChapter, footnoteMap, currentPage],
+    [contentChapter, footnoteMap, currentPage],
   );
 
   const isPageEmpty =
