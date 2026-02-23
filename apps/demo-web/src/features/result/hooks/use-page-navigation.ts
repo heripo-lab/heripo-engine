@@ -10,7 +10,10 @@ import type {
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
 
-import { findChapterById } from '../utils/chapter-lookup';
+import {
+  findChapterById,
+  findContentRedirectTarget,
+} from '../utils/chapter-lookup';
 import {
   findChapterForPage,
   getAllPdfPages,
@@ -79,7 +82,19 @@ export function usePageNavigation({
     if (currentChapterId) {
       const chapter = findChapterById(chapters, currentChapterId);
       if (chapter) {
-        const chapterPages = getChapterPdfPages(chapter);
+        let chapterPages = getChapterPdfPages(chapter);
+
+        // Empty chapter: use content redirect target's pages
+        if (chapterPages.length === 0) {
+          const redirectTarget = findContentRedirectTarget(
+            chapters,
+            currentChapterId,
+          );
+          if (redirectTarget) {
+            chapterPages = getChapterPdfPages(redirectTarget);
+          }
+        }
+
         if (chapterPages.length > 0) {
           return chapterPages[0];
         }

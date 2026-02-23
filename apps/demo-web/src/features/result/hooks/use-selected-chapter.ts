@@ -5,7 +5,10 @@ import type { Chapter } from '@heripo/model';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback } from 'react';
 
-import { findChapterById } from '../utils/chapter-lookup';
+import {
+  findChapterById,
+  findContentRedirectTarget,
+} from '../utils/chapter-lookup';
 import { getChapterPdfPages } from '../utils/page-navigation-utils';
 
 const CHAPTER_PARAM_KEY = 'chapterId';
@@ -44,7 +47,16 @@ export function useSelectedChapter(
         if (chapters) {
           const chapter = findChapterById(chapters, id);
           if (chapter) {
-            const chapterPages = getChapterPdfPages(chapter);
+            let chapterPages = getChapterPdfPages(chapter);
+
+            // Empty chapter: use content redirect target's pages
+            if (chapterPages.length === 0) {
+              const redirectTarget = findContentRedirectTarget(chapters, id);
+              if (redirectTarget) {
+                chapterPages = getChapterPdfPages(redirectTarget);
+              }
+            }
+
             if (chapterPages.length > 0) {
               params.set(PAGE_PARAM_KEY, String(chapterPages[0]));
             } else {
