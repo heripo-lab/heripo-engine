@@ -2,7 +2,7 @@
   "name": "@heripo/model",
   "private": false,
   "type": "module",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Document models and type definitions for heripo engine",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
