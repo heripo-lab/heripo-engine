@@ -706,8 +706,16 @@ export class DocumentProcessor {
 
     // Stage 5: Extract structure with LLM (with fallback retry)
     const totalPages = Object.keys(doclingDoc.pages).length;
+
+    // Detect compiled volume: if TOC page numbers exceed document page count,
+    // the document is part of a larger volume with absolute page numbers.
+    // Skip page range upper bound validation to avoid false V002/V007 errors.
+    const maxTocPageNo = this.extractMaxPageNumber(markdown);
+    const effectiveTotalPages =
+      maxTocPageNo > totalPages ? undefined : totalPages;
+
     const tocResult = await this.tocExtractor!.extract(markdown, {
-      totalPages,
+      totalPages: effectiveTotalPages,
     });
 
     // Track token usage (initial extraction + any correction retries)
@@ -727,6 +735,21 @@ export class DocumentProcessor {
     );
 
     return tocResult.entries;
+  }
+
+  /**
+   * Extract the maximum page number from TOC markdown
+   *
+   * Parses page numbers from dot-leader patterns (e.g., "..... 175")
+   * to detect compiled volume scenarios where TOC page numbers exceed
+   * the sub-document's page count.
+   */
+  private extractMaxPageNumber(markdown: string): number {
+    const matches = [...markdown.matchAll(/\.{2,}\s*(\d+)/g)];
+    if (matches.length === 0) {
+      return 0;
+    }
+    return Math.max(...matches.map((m) => parseInt(m[1], 10)));
   }
 
   /**
