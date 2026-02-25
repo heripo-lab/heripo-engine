@@ -894,11 +894,14 @@ describe('LLMCaller', () => {
       expect(result.output).toEqual({ result: 'unknown-output' });
     });
 
-    test('should throw NoObjectGeneratedError when tool call not produced', async () => {
+    test('should throw NoObjectGeneratedError after exhausting all tool call retries', async () => {
       vi.mocked(detectProvider).mockReturnValue('togetherai');
-      vi.mocked(generateText).mockResolvedValueOnce(
-        createMockEmptyToolCallResult(),
-      );
+      // 5 attempts (1 initial + 4 retries) all return empty tool calls
+      for (let i = 0; i < 5; i++) {
+        vi.mocked(generateText).mockResolvedValueOnce(
+          createMockEmptyToolCallResult(),
+        );
+      }
 
       await expect(
         LLMCaller.call({
@@ -913,17 +916,53 @@ describe('LLMCaller', () => {
       ).rejects.toThrow(
         'Model did not produce a tool call for structured output',
       );
+
+      // Should have attempted 5 times total
+      expect(generateText).toHaveBeenCalledTimes(5);
+    });
+
+    test('should succeed on retry when tool call eventually produced', async () => {
+      vi.mocked(detectProvider).mockReturnValue('togetherai');
+      // First 2 attempts: no tool call, 3rd attempt: success
+      vi.mocked(generateText).mockResolvedValueOnce(
+        createMockEmptyToolCallResult(),
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(
+        createMockEmptyToolCallResult(),
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(
+        createMockToolCallResult(
+          { result: 'recovered' },
+          { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        ),
+      );
+
+      const result = await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      expect(result.output).toEqual({ result: 'recovered' });
+      expect(generateText).toHaveBeenCalledTimes(3);
     });
 
     test('should use empty string when result.text is undefined in tool call error', async () => {
       vi.mocked(detectProvider).mockReturnValue('togetherai');
-      vi.mocked(generateText).mockResolvedValueOnce({
-        toolCalls: [],
-        text: undefined,
-        response: { id: '', modelId: '', timestamp: new Date() },
-        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-        finishReason: 'stop',
-      } as any);
+      // All 5 attempts return undefined text
+      for (let i = 0; i < 5; i++) {
+        vi.mocked(generateText).mockResolvedValueOnce({
+          toolCalls: [],
+          text: undefined,
+          response: { id: '', modelId: '', timestamp: new Date() },
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          finishReason: 'stop',
+        } as any);
+      }
 
       await expect(
         LLMCaller.call({

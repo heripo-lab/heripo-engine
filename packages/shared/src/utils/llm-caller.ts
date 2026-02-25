@@ -236,13 +236,22 @@ export class LLMCaller {
   }
 
   /**
+   * Maximum number of retries when the model fails to produce a tool call.
+   * Total attempts = MAX_TOOL_CALL_RETRIES + 1.
+   */
+  private static readonly MAX_TOOL_CALL_RETRIES = 4;
+
+  /**
    * Generate structured output via forced tool call.
    *
    * Used for providers (Together AI, unknown) that do not reliably support
    * `Output.object()`. Forces the model to call a tool whose inputSchema
    * is the target Zod schema, then extracts the parsed input.
    *
-   * @throws NoObjectGeneratedError when the model does not produce a tool call
+   * Retries up to MAX_TOOL_CALL_RETRIES times when the model does not
+   * produce a tool call, for a total of MAX_TOOL_CALL_RETRIES + 1 attempts.
+   *
+   * @throws NoObjectGeneratedError when all attempts fail to produce a tool call
    */
   private static async generateViaToolCall<TOutput>(
     model: LanguageModel,
@@ -261,29 +270,35 @@ export class LLMCaller {
       inputSchema: schema,
     });
 
-    const result = await (generateText as any)({
-      ...promptParams,
-      model,
-      tools: { submitResult: submitTool },
-      toolChoice: { type: 'tool', toolName: 'submitResult' },
-      stopWhen: hasToolCall('submitResult'),
-    });
+    let lastResult: any;
 
-    const toolCall = result.toolCalls?.[0] as { input: unknown } | undefined;
-    if (!toolCall) {
-      throw new NoObjectGeneratedError({
-        message: 'Model did not produce a tool call for structured output',
-        text: result.text ?? '',
-        response: result.response,
-        usage: result.usage,
-        finishReason: result.finishReason,
+    for (let attempt = 0; attempt <= this.MAX_TOOL_CALL_RETRIES; attempt++) {
+      lastResult = await (generateText as any)({
+        ...promptParams,
+        model,
+        tools: { submitResult: submitTool },
+        toolChoice: { type: 'tool', toolName: 'submitResult' },
+        stopWhen: hasToolCall('submitResult'),
       });
+
+      const toolCall = lastResult.toolCalls?.[0] as
+        | { input: unknown }
+        | undefined;
+      if (toolCall) {
+        return {
+          output: toolCall.input as TOutput,
+          usage: lastResult.usage,
+        };
+      }
     }
 
-    return {
-      output: toolCall.input as TOutput,
-      usage: result.usage,
-    };
+    throw new NoObjectGeneratedError({
+      message: 'Model did not produce a tool call for structured output',
+      text: lastResult.text ?? '',
+      response: lastResult.response,
+      usage: lastResult.usage,
+      finishReason: lastResult.finishReason,
+    });
   }
 
   /**
