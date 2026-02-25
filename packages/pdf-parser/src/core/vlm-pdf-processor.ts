@@ -33,6 +33,8 @@ export interface VlmPdfProcessorOptions {
   aggregator?: LLMTokenUsageAggregator;
   /** Callback fired after each batch of pages completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
+  /** Primary document language for quality validation (ISO 639-1, e.g., 'ko') */
+  documentLanguage?: string;
 }
 
 /** Result of VLM-based PDF processing */
@@ -119,6 +121,7 @@ export class VlmPdfProcessor {
         fallbackModel: options?.fallbackModel,
         aggregator: options?.aggregator,
         onTokenUsage: options?.onTokenUsage,
+        documentLanguage: options?.documentLanguage,
       },
     );
 

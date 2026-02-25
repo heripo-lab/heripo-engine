@@ -644,6 +644,389 @@ describe('VlmPageProcessor', () => {
     });
   });
 
+  describe('quality validation retry', () => {
+    test('performs quality retry when placeholder text detected', async () => {
+      // First call returns Lorem ipsum → triggers validation failure → retry
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: '정상적인 한국어 텍스트입니다.', o: 0 },
+          ]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      expect(results[0].quality).toEqual({
+        isValid: true,
+        retried: true,
+        issueTypes: [],
+      });
+    });
+
+    test('performs quality retry when script anomaly detected with documentLanguage ko', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'At the outset of the proceedings, the claimant presented evidence.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: '아산 지산공원 수목식재사업부지내 문화유적', o: 0 },
+          ]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+        { documentLanguage: 'ko' },
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      expect(results[0].quality).toEqual({
+        isValid: true,
+        retried: true,
+        issueTypes: [],
+      });
+    });
+
+    test('does not perform quality retry when validation passes', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+      );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+        { documentLanguage: 'ko' },
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
+      expect(results[0].quality).toBeUndefined();
+    });
+
+    test('does not perform quality retry when documentLanguage is not set and text is Latin', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([
+          {
+            t: 'tx',
+            c: 'Normal English text that is not placeholder content at all.',
+            o: 0,
+          },
+        ]),
+      );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
+      expect(results[0].quality).toBeUndefined();
+    });
+
+    test('uses temperature 0.5 on quality retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ temperature: 0.5 }),
+      );
+    });
+
+    test('uses phase "page-analysis-quality-retry" on quality retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ phase: 'page-analysis-quality-retry' }),
+      );
+    });
+
+    test('returns quality isValid=false retried=true when retry does not fix issue', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Sed do eiusmod tempor incididunt.', o: 0 },
+          ]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(results[0].quality).toEqual({
+        isValid: false,
+        retried: true,
+        issueTypes: ['placeholder_text'],
+      });
+    });
+
+    test('tracks token usage for quality retry attempt', async () => {
+      const mockAggregator = { track: vi.fn() };
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        aggregator: mockAggregator as any,
+      });
+
+      // Original call + quality retry = 2 track calls
+      expect(mockAggregator.track).toHaveBeenCalledTimes(2);
+    });
+
+    test('logs warning when quality issues detected', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('quality issues detected: placeholder_text'),
+      );
+    });
+
+    test('logs debug when quality issues resolved after retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('quality issues resolved after retry'),
+      );
+    });
+
+    test('logs warning when quality issues persist after retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Sed do eiusmod tempor incididunt.', o: 0 },
+          ]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('quality issues persist after retry'),
+      );
+    });
+
+    test('quality retry runs after empty-page retry when both conditions met', async () => {
+      // First: 0 elements → empty retry → Lorem ipsum → quality retry → ok
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(3);
+      expect(results[0].quality?.retried).toBe(true);
+    });
+
+    test('uses enhanced prompt with quality warnings on retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const retryCall = mockCallVision.mock.calls[1][0];
+      const retryPromptText = retryCall.messages[0].content[0].text;
+      expect(retryPromptText).toContain('quality issues');
+      expect(retryPromptText).toContain('placeholder text');
+      expect(retryPromptText).toContain('Analyze the page image');
+    });
+  });
+
+  describe('document language prompt', () => {
+    test('prepends language context to prompt when documentLanguage is set', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguage: 'ko',
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('LANGUAGE CONTEXT');
+      expect(promptText).toContain('Korean');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('uses default prompt when documentLanguage is not set', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('LANGUAGE CONTEXT');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('includes both placeholder and script anomaly warnings when both detected', async () => {
+      // Lorem ipsum with documentLanguage 'ko' triggers both placeholder_text and script_anomaly
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguage: 'ko',
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('placeholder text');
+      expect(retryPromptText).toContain('wrong language/script');
+    });
+
+    test('includes script anomaly warning in quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'At the outset of the proceedings, the claimant presented evidence.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguage: 'ko',
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('wrong language/script');
+      expect(retryPromptText).toContain('Korean');
+    });
+
+    test('includes language context in quality retry prompt when documentLanguage set', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'At the outset of the proceedings, the claimant presented evidence.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguage: 'ko',
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('LANGUAGE CONTEXT');
+      expect(retryPromptText).toContain('Korean');
+    });
+  });
+
   describe('onTokenUsage callback', () => {
     test('calls onTokenUsage after each batch completes', async () => {
       const mockAggregator = {

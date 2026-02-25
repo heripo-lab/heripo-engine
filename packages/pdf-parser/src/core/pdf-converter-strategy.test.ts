@@ -368,6 +368,53 @@ describe('PDFConverter.convertWithStrategy', () => {
       );
     });
 
+    test('passes detectedLanguage from strategy to VlmPdfProcessor as documentLanguage', async () => {
+      mockSamplerInstance.sample.mockResolvedValue({
+        method: 'vlm',
+        reason: 'Korean-Hanja mix detected',
+        sampledPages: 2,
+        totalPages: 10,
+        detectedLanguage: 'ko',
+      });
+
+      await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          strategySamplerModel: mockModel,
+          vlmProcessorModel: mockFallbackModel,
+        },
+      );
+
+      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+        mockFallbackModel,
+        expect.objectContaining({ documentLanguage: 'ko' }),
+      );
+    });
+
+    test('passes undefined documentLanguage when strategy has no detectedLanguage', async () => {
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
+      );
+
+      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+        mockModel,
+        expect.objectContaining({ documentLanguage: undefined }),
+      );
+    });
+
     test('passes aggregator and abortSignal to VlmPdfProcessor', async () => {
       const aggregator = new LLMTokenUsageAggregator();
       const abortController = new AbortController();

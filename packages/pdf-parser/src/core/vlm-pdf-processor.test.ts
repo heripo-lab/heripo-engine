@@ -487,6 +487,37 @@ describe('VlmPdfProcessor', () => {
       );
     });
 
+    test('passes documentLanguage to VlmPageProcessor', async () => {
+      await processor.process(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        'test.pdf',
+        mockModel,
+        { documentLanguage: 'ko' },
+      );
+
+      expect(mockVlmPageProcessor.processPages).toHaveBeenCalledWith(
+        expect.any(Array),
+        mockModel,
+        expect.objectContaining({ documentLanguage: 'ko' }),
+      );
+    });
+
+    test('passes undefined documentLanguage when not provided', async () => {
+      await processor.process(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        'test.pdf',
+        mockModel,
+      );
+
+      expect(mockVlmPageProcessor.processPages).toHaveBeenCalledWith(
+        expect.any(Array),
+        mockModel,
+        expect.objectContaining({ documentLanguage: undefined }),
+      );
+    });
+
     test('propagates PageRenderer errors', async () => {
       mockPageRenderer.renderPages.mockRejectedValue(
         new Error('Render failed'),

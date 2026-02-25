@@ -43,9 +43,12 @@ function createMockPageRenderer(pageCount: number = 3) {
 }
 
 /** Helper to create a mock VLM Korean-Hanja mix detection result */
-function createMockKoreanHanjaMixResult(hasKoreanHanjaMix: boolean) {
+function createMockKoreanHanjaMixResult(
+  hasKoreanHanjaMix: boolean,
+  primaryLanguage: string = 'ko',
+) {
   return {
-    output: { hasKoreanHanjaMix },
+    output: { hasKoreanHanjaMix, primaryLanguage },
     usage: {
       component: 'OcrStrategySampler',
       phase: 'korean-hanja-mix-detection',
@@ -300,7 +303,7 @@ describe('OcrStrategySampler', () => {
       );
     });
 
-    test('logs debug for each page check', async () => {
+    test('logs debug for each page analysis', async () => {
       mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
@@ -308,10 +311,10 @@ describe('OcrStrategySampler', () => {
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
       expect(mockLogger.debug).toHaveBeenCalledWith(
-        '[OcrStrategySampler] Checking page 1 for Korean-Hanja mix...',
+        '[OcrStrategySampler] Analyzing page 1 for Korean-Hanja mix and language...',
       );
       expect(mockLogger.debug).toHaveBeenCalledWith(
-        '[OcrStrategySampler] Page 1: hasKoreanHanjaMix=false',
+        '[OcrStrategySampler] Page 1: hasKoreanHanjaMix=false, primaryLanguage=ko',
       );
     });
 
@@ -331,6 +334,69 @@ describe('OcrStrategySampler', () => {
       await expect(
         sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel),
       ).rejects.toThrow('Render failed');
+    });
+
+    test('includes detectedLanguage in result on early exit', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockKoreanHanjaMixResult(true, 'ko'),
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('vlm');
+      expect(result.detectedLanguage).toBe('ko');
+    });
+
+    test('includes detectedLanguage in result when no Korean-Hanja mix', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockKoreanHanjaMixResult(false, 'en'),
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('ocrmac');
+      expect(result.detectedLanguage).toBe('en');
+    });
+
+    test('uses last sampled page language when no Korean-Hanja mix', async () => {
+      mockPageRenderer = createMockPageRenderer(20);
+      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+
+      mockCallVision
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'en'));
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.detectedLanguage).toBe('en');
+    });
+
+    test('detectedLanguage is undefined when no pages found', async () => {
+      mockPageRenderer = createMockPageRenderer(0);
+      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.detectedLanguage).toBeUndefined();
     });
   });
 

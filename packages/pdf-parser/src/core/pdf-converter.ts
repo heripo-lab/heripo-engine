@@ -179,6 +179,7 @@ export class PDFConverter {
         cleanupAfterCallback,
         trackedOptions,
         abortSignal,
+        strategy.detectedLanguage,
       );
       return {
         strategy,
@@ -283,6 +284,7 @@ export class PDFConverter {
     cleanupAfterCallback: boolean,
     options: PDFConvertOptions,
     abortSignal?: AbortSignal,
+    detectedLanguage?: string,
   ): Promise<void> {
     if (!options.vlmProcessorModel) {
       throw new Error('vlmProcessorModel is required when OCR strategy is VLM');
@@ -306,6 +308,7 @@ export class PDFConverter {
           aggregator: options.aggregator,
           abortSignal,
           onTokenUsage: options.onTokenUsage,
+          documentLanguage: detectedLanguage,
         },
       );
 

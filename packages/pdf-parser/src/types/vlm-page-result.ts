@@ -56,6 +56,19 @@ export interface VlmPageElement {
   bbox?: VlmBBox;
 }
 
+/** Types of quality issues detected in VLM responses */
+export type VlmQualityIssueType = 'placeholder_text' | 'script_anomaly';
+
+/** Quality metadata for a processed page */
+export interface VlmPageQuality {
+  /** Whether the page passed quality validation (after possible retry) */
+  isValid: boolean;
+  /** Whether a quality retry was performed for this page */
+  retried: boolean;
+  /** Issue types detected (may persist even after retry) */
+  issueTypes: VlmQualityIssueType[];
+}
+
 /** VLM output for a single page */
 export interface VlmPageResult {
   /** 1-based page number */
@@ -63,4 +76,7 @@ export interface VlmPageResult {
 
   /** All content elements detected on this page */
   elements: VlmPageElement[];
+
+  /** Quality validation metadata (present only when validation was triggered) */
+  quality?: VlmPageQuality;
 }

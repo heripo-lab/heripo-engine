@@ -5,11 +5,13 @@ import type { LanguageModel } from 'ai';
 
 import type { VlmPageResult } from '../types/vlm-page-result';
 import type { VlmPageOutput } from '../types/vlm-page-schema';
+import type { VlmQualityIssue } from '../validators/vlm-response-validator';
 
 import { BatchProcessor, LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 
 import { toVlmPageResult, vlmPageOutputSchema } from '../types/vlm-page-schema';
+import { VlmResponseValidator } from '../validators/vlm-response-validator';
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -22,6 +24,17 @@ const DEFAULT_TEMPERATURE = 0;
 
 /** Temperature for retrying pages that returned 0 elements */
 const EMPTY_PAGE_RETRY_TEMPERATURE = 0.3;
+
+/** Temperature for retrying pages that failed quality validation */
+const QUALITY_RETRY_TEMPERATURE = 0.5;
+
+/** Language display names for VLM prompt context */
+const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
+  ko: 'Korean (한국어)',
+  ja: 'Japanese (日本語)',
+  zh: 'Chinese (中文)',
+  en: 'English',
+};
 
 /**
  * System prompt for VLM page analysis.
@@ -76,6 +89,8 @@ export interface VlmPageProcessorOptions {
   aggregator?: LLMTokenUsageAggregator;
   /** Callback fired after each batch of pages completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
+  /** Expected document language for quality validation (ISO 639-1, e.g., 'ko') */
+  documentLanguage?: string;
 }
 
 /**
@@ -158,6 +173,7 @@ export class VlmPageProcessor {
    *
    * Reads the image file, sends it to the VLM with the analysis prompt,
    * and converts the short-field response to a full VlmPageResult.
+   * Validates response quality and retries once if issues are detected.
    */
   private async processPage(
     pageNo: number,
@@ -169,11 +185,15 @@ export class VlmPageProcessor {
 
     const base64Image = readFileSync(filePath).toString('base64');
 
+    const initialPrompt = options?.documentLanguage
+      ? this.buildLanguageAwarePrompt(options.documentLanguage)
+      : PAGE_ANALYSIS_PROMPT;
+
     const messages = [
       {
         role: 'user' as const,
         content: [
-          { type: 'text' as const, text: PAGE_ANALYSIS_PROMPT },
+          { type: 'text' as const, text: initialPrompt },
           {
             type: 'image' as const,
             image: `data:image/png;base64,${base64Image}`,
@@ -200,7 +220,7 @@ export class VlmPageProcessor {
       options.aggregator.track(result.usage);
     }
 
-    const pageResult = toVlmPageResult(pageNo, result.output as VlmPageOutput);
+    let pageResult = toVlmPageResult(pageNo, result.output as VlmPageOutput);
 
     // Retry once with higher temperature if VLM returned no elements
     if (pageResult.elements.length === 0) {
@@ -224,22 +244,34 @@ export class VlmPageProcessor {
         options.aggregator.track(retryResult.usage);
       }
 
-      const retryPageResult = toVlmPageResult(
-        pageNo,
-        retryResult.output as VlmPageOutput,
-      );
+      pageResult = toVlmPageResult(pageNo, retryResult.output as VlmPageOutput);
 
-      if (retryPageResult.elements.length > 0) {
+      if (pageResult.elements.length > 0) {
         this.logger.debug(
-          `[VlmPageProcessor] Page ${pageNo}: ${retryPageResult.elements.length} elements extracted on retry`,
+          `[VlmPageProcessor] Page ${pageNo}: ${pageResult.elements.length} elements extracted on retry`,
         );
-        return retryPageResult;
+      } else {
+        this.logger.warn(
+          `[VlmPageProcessor] Page ${pageNo}: still 0 elements after retry`,
+        );
+        return pageResult;
       }
+    }
 
-      this.logger.warn(
-        `[VlmPageProcessor] Page ${pageNo}: still 0 elements after retry`,
+    // Quality validation: detect hallucination and script anomalies
+    const validation = VlmResponseValidator.validate(
+      pageResult.elements,
+      options?.documentLanguage,
+    );
+
+    if (!validation.isValid) {
+      return this.retryForQuality(
+        pageNo,
+        base64Image,
+        model,
+        validation,
+        options,
       );
-      return retryPageResult;
     }
 
     this.logger.debug(
@@ -248,4 +280,146 @@ export class VlmPageProcessor {
 
     return pageResult;
   }
+
+  /**
+   * Retry a page with an enhanced prompt after quality validation failure.
+   */
+  private async retryForQuality(
+    pageNo: number,
+    base64Image: string,
+    model: LanguageModel,
+    validation: { issues: VlmQualityIssue[] },
+    options?: VlmPageProcessorOptions,
+  ): Promise<VlmPageResult> {
+    const issueTypes = validation.issues.map((i) => i.type);
+
+    this.logger.warn(
+      `[VlmPageProcessor] Page ${pageNo}: quality issues detected: ${issueTypes.join(', ')}`,
+    );
+
+    const retryPrompt = this.buildQualityRetryPrompt(
+      validation.issues,
+      options?.documentLanguage,
+    );
+
+    const retryMessages = [
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: retryPrompt },
+          {
+            type: 'image' as const,
+            image: `data:image/png;base64,${base64Image}`,
+          },
+        ],
+      },
+    ];
+
+    const retryResult = await LLMCaller.callVision({
+      schema: vlmPageOutputSchema as any,
+      messages: retryMessages,
+      primaryModel: model,
+      fallbackModel: options?.fallbackModel,
+      maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
+      temperature: QUALITY_RETRY_TEMPERATURE,
+      abortSignal: options?.abortSignal,
+      component: 'VlmPageProcessor',
+      phase: 'page-analysis-quality-retry',
+    });
+
+    if (options?.aggregator) {
+      options.aggregator.track(retryResult.usage);
+    }
+
+    const retryPageResult = toVlmPageResult(
+      pageNo,
+      retryResult.output as VlmPageOutput,
+    );
+
+    const retryValidation = VlmResponseValidator.validate(
+      retryPageResult.elements,
+      options?.documentLanguage,
+    );
+
+    if (retryValidation.isValid) {
+      this.logger.debug(
+        `[VlmPageProcessor] Page ${pageNo}: quality issues resolved after retry (${retryPageResult.elements.length} elements)`,
+      );
+      return {
+        ...retryPageResult,
+        quality: { isValid: true, retried: true, issueTypes: [] },
+      };
+    }
+
+    this.logger.warn(
+      `[VlmPageProcessor] Page ${pageNo}: quality issues persist after retry: ${retryValidation.issues.map((i) => i.type).join(', ')}`,
+    );
+    return {
+      ...retryPageResult,
+      quality: {
+        isValid: false,
+        retried: true,
+        issueTypes: retryValidation.issues.map((i) => i.type),
+      },
+    };
+  }
+
+  /**
+   * Build the initial prompt with language context prepended.
+   */
+  private buildLanguageAwarePrompt(documentLanguage: string): string {
+    const languageName = this.getLanguageDisplayName(documentLanguage);
+    const prefix =
+      `LANGUAGE CONTEXT: This document is written in ${languageName}. ` +
+      'The extracted text MUST be in this language. ' +
+      'Do not output text in other languages unless it is actually visible on the page.\n\n';
+    return prefix + PAGE_ANALYSIS_PROMPT;
+  }
+
+  /**
+   * Build an enhanced prompt with quality warnings for retry.
+   */
+  private buildQualityRetryPrompt(
+    issues: VlmQualityIssue[],
+    documentLanguage?: string,
+  ): string {
+    const warnings: string[] = [
+      'IMPORTANT: Your previous response had quality issues. Please re-analyze this page carefully.',
+    ];
+
+    /* v8 ignore start -- all branches tested; V8 undercounts if/else-if per call site */
+    for (const issue of issues) {
+      if (issue.type === 'placeholder_text') {
+        warnings.push(
+          '- WARNING: Your previous response contained placeholder text (Lorem ipsum). ' +
+            'This is NOT acceptable. You must transcribe the ACTUAL text visible on the page.',
+        );
+      } else if (issue.type === 'script_anomaly') {
+        warnings.push(
+          '- WARNING: Your previous response contained text in the wrong language/script. ' +
+            `This document is in ${this.getLanguageDisplayName(documentLanguage)}. ` +
+            'Transcribe the actual characters visible on the page, not translated or fabricated text.',
+        );
+      }
+    }
+    /* v8 ignore stop */
+
+    if (documentLanguage) {
+      warnings.push(
+        `- LANGUAGE CONTEXT: This document is written in ${this.getLanguageDisplayName(documentLanguage)}. ` +
+          'The extracted text MUST be in this language. Do not output text in other languages unless it is actually visible on the page.',
+      );
+    }
+
+    return warnings.join('\n') + '\n\n' + PAGE_ANALYSIS_PROMPT;
+  }
+
+  /**
+   * Get human-readable display name for a language code.
+   */
+  /* v8 ignore start -- defensive fallback; script_anomaly always implies documentLanguage is set */
+  private getLanguageDisplayName(code?: string): string {
+    return code ? (LANGUAGE_DISPLAY_NAMES[code] ?? code) : 'unknown';
+  }
+  /* v8 ignore stop */
 }

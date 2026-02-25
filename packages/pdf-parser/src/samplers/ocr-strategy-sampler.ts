@@ -28,6 +28,11 @@ const koreanHanjaMixSchema = z.object({
     .describe(
       'Whether the page contains any Hanja (漢字/Chinese characters) mixed with Korean text',
     ),
+  primaryLanguage: z
+    .string()
+    .describe(
+      'ISO 639-1 code of the primary text language on this page (e.g., "ko", "en", "ja", "zh")',
+    ),
 });
 
 /** System prompt for Korean-Hanja mix detection */
@@ -36,7 +41,9 @@ const KOREAN_HANJA_MIX_PROMPT = `Look at this page image carefully. Does it cont
 Hanja examples: 遺蹟, 發掘, 調査, 報告書, 文化財
 Note: Hanja are Chinese characters used in Korean documents, different from modern Korean (한글).
 
-Answer whether any Hanja characters are present on this page.`;
+Answer whether any Hanja characters are present on this page.
+
+Also identify the primary language of the text on this page. Return the ISO 639-1 language code (e.g., "ko" for Korean, "en" for English, "ja" for Japanese, "zh" for Chinese).`;
 
 /** Options for OcrStrategySampler */
 export interface OcrStrategySamplerOptions {
@@ -124,22 +131,26 @@ export class OcrStrategySampler {
 
     // Step 3: Check each sample page for Korean-Hanja mix (early exit on detection)
     let sampledCount = 0;
+    let detectedLanguage: string | undefined;
     for (const idx of sampleIndices) {
       sampledCount++;
       const pageFile = renderResult.pageFiles[idx];
-      const hasKoreanHanjaMix = await this.checkKoreanHanjaMix(
+      const pageAnalysis = await this.analyzeSamplePage(
         pageFile,
         idx + 1,
         model,
         options,
       );
 
-      if (hasKoreanHanjaMix) {
+      detectedLanguage = pageAnalysis.primaryLanguage;
+
+      if (pageAnalysis.hasKoreanHanjaMix) {
         this.logger.info(
           `[OcrStrategySampler] Korean-Hanja mix detected on page ${idx + 1} → VLM strategy`,
         );
         return {
           method: 'vlm',
+          detectedLanguage,
           reason: `Korean-Hanja mix detected on page ${idx + 1}`,
           sampledPages: sampledCount,
           totalPages: renderResult.pageCount,
@@ -153,6 +164,7 @@ export class OcrStrategySampler {
     );
     return {
       method: 'ocrmac',
+      detectedLanguage,
       reason: `No Korean-Hanja mix detected in ${sampledCount} sampled pages`,
       sampledPages: sampledCount,
       totalPages: renderResult.pageCount,
@@ -201,18 +213,18 @@ export class OcrStrategySampler {
   }
 
   /**
-   * Check a single page for Korean-Hanja mixed script using VLM.
+   * Analyze a single sample page for Korean-Hanja mixed script and primary language.
    *
-   * @returns true if Korean-Hanja mix is detected, false otherwise
+   * @returns Object with Korean-Hanja detection result and detected primary language
    */
-  private async checkKoreanHanjaMix(
+  private async analyzeSamplePage(
     pageFile: string,
     pageNo: number,
     model: LanguageModel,
     options?: OcrStrategySamplerOptions,
-  ): Promise<boolean> {
+  ): Promise<{ hasKoreanHanjaMix: boolean; primaryLanguage: string }> {
     this.logger.debug(
-      `[OcrStrategySampler] Checking page ${pageNo} for Korean-Hanja mix...`,
+      `[OcrStrategySampler] Analyzing page ${pageNo} for Korean-Hanja mix and language...`,
     );
 
     const base64Image = readFileSync(pageFile).toString('base64');
@@ -246,13 +258,18 @@ export class OcrStrategySampler {
       options.aggregator.track(result.usage);
     }
 
-    const hasKoreanHanjaMix = (result.output as { hasKoreanHanjaMix: boolean })
-      .hasKoreanHanjaMix;
+    const output = result.output as {
+      hasKoreanHanjaMix: boolean;
+      primaryLanguage: string;
+    };
 
     this.logger.debug(
-      `[OcrStrategySampler] Page ${pageNo}: hasKoreanHanjaMix=${hasKoreanHanjaMix}`,
+      `[OcrStrategySampler] Page ${pageNo}: hasKoreanHanjaMix=${output.hasKoreanHanjaMix}, primaryLanguage=${output.primaryLanguage}`,
     );
 
-    return hasKoreanHanjaMix;
+    return {
+      hasKoreanHanjaMix: output.hasKoreanHanjaMix,
+      primaryLanguage: output.primaryLanguage,
+    };
   }
 }
