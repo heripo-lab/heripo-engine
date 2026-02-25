@@ -45,12 +45,14 @@ vi.mock('../environment/docling-environment', () => {
 
 vi.mock('./pdf-converter', () => {
   const convert = vi.fn();
+  const convertWithStrategy = vi.fn();
   const PDFConverter = vi.fn(function () {
-    return { convert };
+    return { convert, convertWithStrategy };
   });
   return {
     PDFConverter,
     __convertMock: convert,
+    __convertWithStrategyMock: convertWithStrategy,
   };
 });
 
@@ -68,6 +70,8 @@ const DoclingEnvironment = (EnvMod as any).DoclingEnvironment as any;
 const envMocks = (EnvMod as any).__envMocks as any;
 const PDFConverter = (ConvMod as any).PDFConverter as any;
 const convertMock = (ConvMod as any).__convertMock as any;
+const convertWithStrategyMock = (ConvMod as any)
+  .__convertWithStrategyMock as any;
 
 describe('PDFParser', () => {
   test('init with external server (baseUrl) succeeds and waits for health', async () => {
@@ -331,7 +335,7 @@ describe('PDFParser', () => {
     expect(result).toBe('OK');
   });
 
-  test('parse returns TokenUsageReport from converter', async () => {
+  test('parse returns TokenUsageReport from converter via strategy flow', async () => {
     vi.mocked(platform).mockReturnValue('darwin');
     vi.mocked(execSync as any).mockImplementation((cmd: string) => {
       if (cmd.startsWith('sw_vers')) return '12.6.0';
@@ -361,7 +365,15 @@ describe('PDFParser', () => {
       ],
       total: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
     };
-    convertMock.mockResolvedValueOnce(mockReport);
+    convertWithStrategyMock.mockResolvedValueOnce({
+      strategy: {
+        method: 'vlm',
+        reason: 'Forced: vlm',
+        sampledPages: 0,
+        totalPages: 0,
+      },
+      tokenUsageReport: mockReport,
+    });
 
     const logger = makeLogger();
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
@@ -372,7 +384,7 @@ describe('PDFParser', () => {
       'report-vlm',
       vi.fn(),
       false,
-      { pipeline: 'vlm', vlm_api_model: 'openai/gpt-5.2' },
+      { forcedMethod: 'vlm', vlmProcessorModel: {} as any },
     );
 
     expect(result).toBe(mockReport);
@@ -402,75 +414,6 @@ describe('PDFParser', () => {
     );
 
     expect(result).toBeNull();
-  });
-
-  test('parse auto-setups VLM dependencies when pipeline is vlm on local server', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
-    doclingClient.health.mockResolvedValueOnce();
-    convertMock.mockResolvedValueOnce('OK');
-
-    const setupVlmMock = vi.fn().mockResolvedValue(undefined);
-    (DoclingEnvironment as any).mockImplementation(function () {
-      return {
-        setup: envMocks.setupMock,
-        setupVlmDependencies: setupVlmMock,
-      };
-    });
-
-    const logger = makeLogger();
-    const parser = new PDFParser({ logger, port: 5001 });
-    await parser.init();
-
-    const onComplete = vi.fn();
-    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-      num_threads: 4,
-      pipeline: 'vlm',
-    });
-
-    expect(logger.info).toHaveBeenCalledWith(
-      '[PDFParser] VLM pipeline requested (local), ensuring VLM dependencies...',
-    );
-    expect(setupVlmMock).toHaveBeenCalledTimes(1);
-  });
-
-  test('parse logs API variant when vlm_api_model is provided', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
-    doclingClient.health.mockResolvedValueOnce();
-    convertMock.mockResolvedValueOnce('OK');
-
-    const setupVlmMock = vi.fn().mockResolvedValue(undefined);
-    (DoclingEnvironment as any).mockImplementation(function () {
-      return {
-        setup: envMocks.setupMock,
-        setupVlmDependencies: setupVlmMock,
-      };
-    });
-
-    const logger = makeLogger();
-    const parser = new PDFParser({ logger, port: 5001 });
-    await parser.init();
-
-    const onComplete = vi.fn();
-    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-      num_threads: 4,
-      pipeline: 'vlm',
-      vlm_api_model: 'anthropic/claude-sonnet-4.6',
-    });
-
-    expect(logger.info).toHaveBeenCalledWith(
-      '[PDFParser] VLM pipeline requested (API), ensuring VLM dependencies...',
-    );
-    expect(setupVlmMock).toHaveBeenCalledTimes(1);
   });
 
   test('parse checks ImageMagick and Ghostscript when forceImagePdf is true on local server', async () => {
@@ -552,32 +495,6 @@ describe('PDFParser', () => {
     // Should NOT check for magick/gs since external server is used
     expect(whichCalls).not.toContain('which magick');
     expect(whichCalls).not.toContain('which gs');
-  });
-
-  test('parse skips VLM auto-setup when using external server', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
-    doclingClient.health.mockResolvedValueOnce();
-    convertMock.mockResolvedValueOnce('OK');
-
-    const logger = makeLogger();
-    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-    await parser.init();
-
-    const onComplete = vi.fn();
-    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-      num_threads: 4,
-      pipeline: 'vlm',
-    });
-
-    // Should NOT log VLM setup message since baseUrl is used
-    expect(logger.info).not.toHaveBeenCalledWith(
-      expect.stringContaining('VLM pipeline requested'),
-    );
   });
 
   test('parse passes enableImagePdfFallback=true when local server and option enabled', async () => {
@@ -913,6 +830,342 @@ describe('PDFParser', () => {
 
       // Should NOT attempt recovery when aborted
       expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('strategy-based flow (parseWithStrategy)', () => {
+    test('parse routes to strategy flow when strategySamplerModel is provided', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValueOnce();
+
+      const mockReport = {
+        components: [],
+        total: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      };
+      convertWithStrategyMock.mockResolvedValueOnce({
+        strategy: {
+          method: 'ocrmac',
+          reason: 'Sampling skipped',
+          sampledPages: 0,
+          totalPages: 0,
+        },
+        tokenUsageReport: mockReport,
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      const fakeModel = {} as any;
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { strategySamplerModel: fakeModel },
+      );
+
+      expect(convertWithStrategyMock).toHaveBeenCalledWith(
+        'http://file.pdf',
+        'report-1',
+        expect.any(Function),
+        false,
+        { strategySamplerModel: fakeModel },
+        undefined,
+      );
+      expect(result).toBe(mockReport);
+      // Should NOT call legacy convert
+      expect(convertMock).not.toHaveBeenCalled();
+    });
+
+    test('parse routes to strategy flow when forcedMethod is provided', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValueOnce();
+
+      convertWithStrategyMock.mockResolvedValueOnce({
+        strategy: {
+          method: 'vlm',
+          reason: 'Forced: vlm',
+          sampledPages: 0,
+          totalPages: 0,
+        },
+        tokenUsageReport: null,
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        true,
+        { forcedMethod: 'vlm' },
+      );
+
+      expect(convertWithStrategyMock).toHaveBeenCalled();
+      expect(result).toBeNull();
+      expect(convertMock).not.toHaveBeenCalled();
+    });
+
+    test('parse returns null tokenUsageReport from strategy flow', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValueOnce();
+
+      convertWithStrategyMock.mockResolvedValueOnce({
+        strategy: {
+          method: 'vlm',
+          reason: 'Hanja detected',
+          sampledPages: 3,
+          totalPages: 50,
+        },
+        tokenUsageReport: null,
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      const result = await parser.parse(
+        'file:///tmp/doc.pdf',
+        'report-2',
+        vi.fn(),
+        false,
+        { forcedMethod: 'vlm', vlmProcessorModel: {} as any },
+      );
+
+      expect(result).toBeNull();
+    });
+
+    test('strategy flow recovers from ECONNREFUSED on local server', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValue(undefined);
+      const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
+      killSpy.mockResolvedValue(undefined);
+
+      // First call fails with ECONNREFUSED, second succeeds
+      const econnRefusedError = new Error('Connection refused');
+      (econnRefusedError as any).code = 'ECONNREFUSED';
+      convertWithStrategyMock
+        .mockRejectedValueOnce(econnRefusedError)
+        .mockResolvedValueOnce({
+          strategy: {
+            method: 'ocrmac',
+            reason: 'Sampling skipped',
+            sampledPages: 0,
+            totalPages: 0,
+          },
+          tokenUsageReport: null,
+        });
+
+      const startServerMock = vi.fn().mockResolvedValue(undefined);
+      (DoclingEnvironment as any).mockImplementation(function () {
+        return {
+          setup: envMocks.setupMock,
+          startServer: startServerMock,
+        };
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { forcedMethod: 'ocrmac' },
+      );
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFParser] Connection refused, attempting server recovery...',
+      );
+      expect(result).toBeNull();
+    });
+
+    test('strategy flow does not recover on external server', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValueOnce();
+
+      const econnRefusedError = new Error('Connection refused');
+      (econnRefusedError as any).code = 'ECONNREFUSED';
+      convertWithStrategyMock.mockRejectedValueOnce(econnRefusedError);
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      await expect(
+        parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
+          forcedMethod: 'ocrmac',
+        }),
+      ).rejects.toThrow('Connection refused');
+
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    test('strategy flow throws immediately when abortSignal is aborted', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValueOnce();
+
+      const abortError = new Error('Aborted');
+      abortError.name = 'AbortError';
+      convertWithStrategyMock.mockRejectedValueOnce(abortError);
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const abortController = new AbortController();
+      abortController.abort();
+
+      await expect(
+        parser.parse(
+          'http://file.pdf',
+          'report-1',
+          vi.fn(),
+          false,
+          { forcedMethod: 'ocrmac' },
+          abortController.signal,
+        ),
+      ).rejects.toThrow('Aborted');
+
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    test('strategy flow throws after recovery attempt exhausted', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValue(undefined);
+      const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
+      killSpy.mockResolvedValue(undefined);
+
+      const econnRefusedError = new Error('Connection refused');
+      (econnRefusedError as any).code = 'ECONNREFUSED';
+      convertWithStrategyMock
+        .mockRejectedValueOnce(econnRefusedError)
+        .mockRejectedValueOnce(econnRefusedError);
+
+      const startServerMock = vi.fn().mockResolvedValue(undefined);
+      (DoclingEnvironment as any).mockImplementation(function () {
+        return {
+          setup: envMocks.setupMock,
+          startServer: startServerMock,
+        };
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      await expect(
+        parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
+          forcedMethod: 'ocrmac',
+        }),
+      ).rejects.toThrow('Connection refused');
+    });
+
+    test('strategy flow passes enableImagePdfFallback=true for local server', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValueOnce();
+
+      convertWithStrategyMock.mockResolvedValueOnce({
+        strategy: {
+          method: 'ocrmac',
+          reason: 'Sampling skipped',
+          sampledPages: 0,
+          totalPages: 0,
+        },
+        tokenUsageReport: null,
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({
+        logger,
+        port: 5001,
+        enableImagePdfFallback: true,
+      });
+      await parser.init();
+
+      await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
+        forcedMethod: 'ocrmac',
+      });
+
+      // PDFConverter should be created with enableImagePdfFallback=true
+      expect(PDFConverter).toHaveBeenCalledWith(
+        logger,
+        expect.any(Object),
+        true,
+        expect.any(Number),
+      );
+    });
+
+    test('strategy flow uses legacy flow when neither strategySamplerModel nor forcedMethod set', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValueOnce();
+      convertMock.mockResolvedValueOnce('legacy-result');
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { num_threads: 4 },
+      );
+
+      expect(convertMock).toHaveBeenCalled();
+      expect(convertWithStrategyMock).not.toHaveBeenCalled();
+      expect(result).toBe('legacy-result');
     });
   });
 });

@@ -1,3 +1,5 @@
+import type { TokenUsageReport } from '@heripo/model';
+
 import { EventEmitter } from 'events';
 
 import type { ProcessingOptions } from '~/features/upload';
@@ -29,7 +31,8 @@ export type SSEEventType =
   | 'log'
   | 'complete'
   | 'error'
-  | 'vlm-fallback';
+  | 'vlm-fallback'
+  | 'token-usage';
 
 export interface SSEStatusEvent {
   type: 'status';
@@ -61,13 +64,19 @@ export interface SSEVlmFallbackEvent {
   data: { reason: string };
 }
 
+export interface SSETokenUsageEvent {
+  type: 'token-usage';
+  data: TokenUsageReport;
+}
+
 export type SSEEvent =
   | SSEStatusEvent
   | SSEProgressEvent
   | SSELogEvent
   | SSECompleteEvent
   | SSEErrorEvent
-  | SSEVlmFallbackEvent;
+  | SSEVlmFallbackEvent
+  | SSETokenUsageEvent;
 
 type WorkerFactory = (
   task: QueuedTask,

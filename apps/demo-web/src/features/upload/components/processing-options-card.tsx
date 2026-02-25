@@ -1,13 +1,9 @@
 'use client';
 
-import type { VlmApiModelOption } from '../constants/vlm-models';
+import { Eye, Info } from 'lucide-react';
 
-import { Cpu, Info } from 'lucide-react';
-
-import { featureFlags } from '~/lib/config/feature-flags';
 import { cn } from '~/lib/utils';
 
-import { Badge } from '~/components/ui/badge';
 import {
   Card,
   CardContent,
@@ -32,11 +28,7 @@ import {
   TooltipTrigger,
 } from '~/components/ui/tooltip';
 
-import {
-  DEFAULT_VLM_MODEL_KEY,
-  VLM_API_MODEL_OPTIONS,
-  VLM_MODEL_OPTIONS,
-} from '../constants/vlm-models';
+import { VISION_MODELS } from '../constants/llm-models';
 import { useProcessingForm } from '../contexts/processing-form-context';
 
 interface StringArrayFieldApi {
@@ -47,11 +39,6 @@ interface StringArrayFieldApi {
 interface NumberFieldApi {
   state: { value: number };
   handleChange: (value: number) => void;
-}
-
-interface StringFieldApi {
-  state: { value: string };
-  handleChange: (value: string) => void;
 }
 
 interface BooleanFieldApi {
@@ -79,21 +66,21 @@ export const OCR_LANGUAGES = [
   { label: 'Ukrainian', value: 'uk-UA' },
 ] as const;
 
-const VLM_DOCTAGS_MODELS = VLM_MODEL_OPTIONS.filter(
-  (m) => m.responseFormat === 'doctags',
-);
-const VLM_MARKDOWN_MODELS = VLM_MODEL_OPTIONS.filter(
-  (m) => m.responseFormat === 'markdown',
-);
+const NONE_VALUE = '__none__';
 
-const VLM_API_MODELS_BY_PROVIDER: Record<string, VlmApiModelOption[]> =
-  VLM_API_MODEL_OPTIONS.reduce<Record<string, VlmApiModelOption[]>>(
-    (acc, m) => {
-      (acc[m.provider] ??= []).push(m);
-      return acc;
-    },
-    {},
-  );
+/**
+ * Group vision models by provider for select dropdown
+ */
+const VISION_MODELS_BY_PROVIDER = VISION_MODELS.reduce(
+  (acc, model) => {
+    if (!acc[model.provider]) {
+      acc[model.provider] = [];
+    }
+    acc[model.provider].push(model);
+    return acc;
+  },
+  {} as Record<string, typeof VISION_MODELS>,
+);
 
 /**
  * Wraps a select element with a disabled tooltip when in public mode.
@@ -174,17 +161,70 @@ function ToggleSwitch({
   );
 }
 
+/**
+ * Vision model select dropdown for OCR strategy models
+ */
+function VisionModelSelect({
+  label,
+  description,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  description: string;
+  value: string | undefined;
+  onChange: (value: string | undefined) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <label className="text-sm font-medium">{label}</label>
+        <span className="bg-secondary text-secondary-foreground flex items-center gap-1 rounded px-1.5 py-0.5 text-xs">
+          <Eye className="h-3 w-3" />
+          Vision
+        </span>
+      </div>
+      <p className="text-muted-foreground text-xs">{description}</p>
+      <DisabledWrapper disabled={disabled}>
+        <Select
+          value={value ?? NONE_VALUE}
+          onValueChange={(v) => onChange(v === NONE_VALUE ? undefined : v)}
+          disabled={disabled}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select model" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE_VALUE}>None (disabled)</SelectItem>
+            {Object.entries(VISION_MODELS_BY_PROVIDER).map(
+              ([provider, models]) => (
+                <SelectGroup key={provider}>
+                  <SelectLabel>{provider}</SelectLabel>
+                  {models.map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      {model.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ),
+            )}
+          </SelectContent>
+        </Select>
+      </DisabledWrapper>
+    </div>
+  );
+}
+
 interface ProcessingOptionsCardProps {
   disabled?: boolean;
-  enableVlmOverride?: boolean;
 }
 
 export function ProcessingOptionsCard({
   disabled = false,
-  enableVlmOverride = false,
 }: ProcessingOptionsCardProps) {
   const form = useProcessingForm();
-  const showVlm = featureFlags.enableVlm || enableVlmOverride;
 
   return (
     <Card>
@@ -210,114 +250,95 @@ export function ProcessingOptionsCard({
         <CardDescription>Configure OCR and processing settings</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Pipeline Selection */}
-        {showVlm && (
-          <form.Field name="pipeline">
-            {(field: StringFieldApi) => (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Pipeline</label>
-                <p className="text-muted-foreground text-xs">
-                  Standard uses OCR; VLM uses a local vision model for parsing
-                </p>
-                <DisabledWrapper disabled={disabled}>
-                  <Select
-                    value={field.state.value}
-                    onValueChange={field.handleChange}
-                    disabled={disabled}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select pipeline" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="standard">Standard (OCR)</SelectItem>
-                      <SelectItem value="vlm">
-                        VLM (Vision Language Model)
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </DisabledWrapper>
-              </div>
-            )}
-          </form.Field>
-        )}
+        {/* OCR Strategy Section */}
 
-        {/* VLM Model Selection */}
-        {showVlm && (
-          <form.Field name="vlmModel">
-            {(field: OptionalStringFieldApi) => (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium">VLM Model</label>
-                  <Badge variant="secondary" className="gap-1 text-xs">
-                    <Cpu className="h-3 w-3" />
-                    Local
-                  </Badge>
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  Local vision model for VLM pipeline. Also used for hanja
-                  auto-fallback.
-                </p>
-                <DisabledWrapper disabled={disabled}>
-                  <Select
-                    value={field.state.value ?? '__default__'}
-                    onValueChange={(v) =>
-                      field.handleChange(v === '__default__' ? undefined : v)
-                    }
-                    disabled={disabled}
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={`Default: ${DEFAULT_VLM_MODEL_KEY}`}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default__">
-                        Default ({DEFAULT_VLM_MODEL_KEY})
-                      </SelectItem>
-                      <SelectGroup>
-                        <SelectLabel>DocTags</SelectLabel>
-                        {VLM_DOCTAGS_MODELS.map((model) => (
-                          <SelectItem key={model.key} value={model.key}>
-                            <span>{model.label}</span>
-                            <span className="text-muted-foreground ml-2 text-xs">
-                              {model.description}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                      <SelectGroup>
-                        <SelectLabel>Markdown (Local)</SelectLabel>
-                        {VLM_MARKDOWN_MODELS.map((model) => (
-                          <SelectItem key={model.key} value={model.key}>
-                            <span>{model.label}</span>
-                            <span className="text-muted-foreground ml-2 text-xs">
-                              {model.description}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                      {Object.entries(VLM_API_MODELS_BY_PROVIDER).map(
-                        ([provider, models]) => (
-                          <SelectGroup key={provider}>
-                            <SelectLabel>{provider} (API)</SelectLabel>
-                            {models.map((model: VlmApiModelOption) => (
-                              <SelectItem key={model.key} value={model.key}>
-                                <span>{model.label}</span>
-                                <span className="text-muted-foreground ml-2 text-xs">
-                                  {model.description}
-                                </span>
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ),
-                      )}
-                    </SelectContent>
-                  </Select>
-                </DisabledWrapper>
-              </div>
-            )}
-          </form.Field>
-        )}
+        {/* Forced Method */}
+        <form.Field name="forcedMethod">
+          {(field: OptionalStringFieldApi) => (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">OCR Strategy</label>
+              <p className="text-muted-foreground text-xs">
+                Auto uses VLM sampling to decide; manual forces a specific
+                method
+              </p>
+              <DisabledWrapper disabled={disabled}>
+                <Select
+                  value={field.state.value ?? 'auto'}
+                  onValueChange={(v) =>
+                    field.handleChange(v === 'auto' ? undefined : v)
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select strategy" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto (VLM Sampling)</SelectItem>
+                    <SelectItem value="ocrmac">Force ocrmac (OCR)</SelectItem>
+                    <SelectItem value="vlm">
+                      Force VLM (Vision Language Model)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </DisabledWrapper>
+            </div>
+          )}
+        </form.Field>
+
+        {/* Strategy Sampler Model */}
+        <form.Field name="strategySamplerModel">
+          {(field: OptionalStringFieldApi) => (
+            <VisionModelSelect
+              label="Strategy Sampler Model"
+              description="Frontier VLM for sampling pages to decide OCR strategy"
+              value={field.state.value}
+              onChange={field.handleChange}
+              disabled={disabled}
+            />
+          )}
+        </form.Field>
+
+        {/* VLM Processor Model */}
+        <form.Field name="vlmProcessorModel">
+          {(field: OptionalStringFieldApi) => (
+            <VisionModelSelect
+              label="VLM Processor Model"
+              description="VLM for page-by-page text extraction when VLM path is chosen"
+              value={field.state.value}
+              onChange={field.handleChange}
+              disabled={disabled}
+            />
+          )}
+        </form.Field>
+
+        {/* VLM Concurrency */}
+        <form.Field name="vlmConcurrency">
+          {(field: NumberFieldApi) => (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">VLM Concurrency</label>
+              <p className="text-muted-foreground text-xs">
+                Number of concurrent VLM page processing requests
+              </p>
+              <DisabledWrapper disabled={disabled}>
+                <Select
+                  value={String(field.state.value)}
+                  onValueChange={(v) => field.handleChange(parseInt(v, 10))}
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select concurrency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 (sequential)</SelectItem>
+                    <SelectItem value="2">2 concurrent</SelectItem>
+                    <SelectItem value="3">3 concurrent</SelectItem>
+                    <SelectItem value="5">5 concurrent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </DisabledWrapper>
+            </div>
+          )}
+        </form.Field>
 
         {/* Force Image PDF */}
         <form.Field name="forceImagePdf">

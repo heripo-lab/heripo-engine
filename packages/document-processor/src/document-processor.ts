@@ -4,13 +4,13 @@ import type {
   Chapter,
   DoclingDocument,
   DocumentProcessResult,
-  HanjaAssessment,
   PageRange,
   ProcessedDocument,
   ProcessedFootnote,
   ProcessedImage,
   ProcessedTable,
   ProcessedTableCell,
+  TokenUsageReport,
 } from '@heripo/model';
 import type { LanguageModel } from 'ai';
 
@@ -26,7 +26,6 @@ import {
   VisionTocExtractor,
 } from './extractors';
 import { CaptionParser, PageRangeParser } from './parsers';
-import { HanjaQualitySampler } from './samplers';
 import {
   IdGenerator,
   MarkdownConverter,
@@ -82,12 +81,6 @@ export interface DocumentProcessorOptions {
   captionParserModel?: LanguageModel;
 
   /**
-   * Model for HanjaQualitySampler - evaluates KCJ character quality in OCR output.
-   * Requires vision capabilities. Falls back to 'fallbackModel' if not provided.
-   */
-  hanjaQualitySamplerModel?: LanguageModel;
-
-  /**
    * Batch size for TextCleaner text normalization (synchronous processing)
    */
   textCleanerBatchSize: number;
@@ -118,6 +111,13 @@ export interface DocumentProcessorOptions {
    * When aborted, processing stops at the next checkpoint between stages.
    */
   abortSignal?: AbortSignal;
+
+  /**
+   * Callback fired after each major processing phase completes.
+   * Receives the current cumulative token usage report.
+   * Useful for real-time token usage monitoring during processing.
+   */
+  onTokenUsage?: (report: TokenUsageReport) => void;
 }
 
 /**
@@ -182,13 +182,13 @@ export class DocumentProcessor {
   private readonly validatorModel: LanguageModel;
   private readonly visionTocExtractorModel: LanguageModel;
   private readonly captionParserModel: LanguageModel;
-  private readonly hanjaQualitySamplerModel: LanguageModel;
   private readonly textCleanerBatchSize: number;
   private readonly captionParserBatchSize: number;
   private readonly captionValidatorBatchSize: number;
   private readonly maxRetries: number;
   private readonly enableFallbackRetry: boolean;
   private readonly abortSignal?: AbortSignal;
+  private readonly onTokenUsage?: (report: TokenUsageReport) => void;
   private idGenerator = new IdGenerator();
   private refResolver?: RefResolver;
   private pageRangeParser?: PageRangeParser;
@@ -213,14 +213,23 @@ export class DocumentProcessor {
       options.visionTocExtractorModel ?? options.fallbackModel;
     this.captionParserModel =
       options.captionParserModel ?? options.fallbackModel;
-    this.hanjaQualitySamplerModel =
-      options.hanjaQualitySamplerModel ?? options.fallbackModel;
     this.textCleanerBatchSize = options.textCleanerBatchSize;
     this.captionParserBatchSize = options.captionParserBatchSize;
     this.captionValidatorBatchSize = options.captionValidatorBatchSize;
     this.maxRetries = options.maxRetries ?? 3;
     this.enableFallbackRetry = options.enableFallbackRetry ?? false;
     this.abortSignal = options.abortSignal;
+    this.onTokenUsage = options.onTokenUsage;
+  }
+
+  /**
+   * Emit current token usage report via callback
+   *
+   * Calls the onTokenUsage callback with the current cumulative report
+   * from the usage aggregator. Safe to call even if no callback is set.
+   */
+  private emitTokenUsage(): void {
+    this.onTokenUsage?.(this.usageAggregator.getReport() as TokenUsageReport);
   }
 
   /**
@@ -234,44 +243,6 @@ export class DocumentProcessor {
       error.name = 'AbortError';
       throw error;
     }
-  }
-
-  /**
-   * Assess the quality of KCJ (Hanja) character recognition in the OCR output.
-   *
-   * Samples pages containing KCJ characters and uses Vision LLM to compare
-   * the OCR text against the original page images. Returns an assessment
-   * indicating whether the document should be re-parsed with VLM pipeline.
-   *
-   * @param doclingDoc - Original document extracted from Docling SDK
-   * @param outputPath - Path containing pages subdirectory (pages/page_0.png, etc.)
-   * @returns Assessment result with Hanja role and VLM re-parse recommendation
-   */
-  async assessHanjaQuality(
-    doclingDoc: DoclingDocument,
-    outputPath: string,
-  ): Promise<HanjaAssessment> {
-    this.logger.info(
-      '[DocumentProcessor] Starting Hanja quality assessment...',
-    );
-
-    const sampler = new HanjaQualitySampler(
-      this.logger,
-      this.hanjaQualitySamplerModel,
-      outputPath,
-      this.maxRetries,
-      this.enableFallbackRetry ? this.fallbackModel : undefined,
-      this.usageAggregator,
-      this.abortSignal,
-    );
-
-    const assessment = await sampler.assess(doclingDoc);
-
-    this.logger.info(
-      `[DocumentProcessor] Hanja assessment: hanjaRole=${assessment.hanjaRole}, needsVlmReparse=${assessment.needsVlmReparse}`,
-    );
-
-    return assessment;
   }
 
   /**
@@ -328,6 +299,7 @@ export class DocumentProcessor {
     this.logger.info(
       `[DocumentProcessor] Page range parsing took ${pageRangeTime}ms`,
     );
+    this.emitTokenUsage();
 
     // Check abort after page range parsing
     this.checkAborted();
@@ -336,6 +308,7 @@ export class DocumentProcessor {
     const tocEntries = await this.extractTableOfContents(doclingDoc, filtered);
     const tocTime = Date.now() - startTimeToc;
     this.logger.info(`[DocumentProcessor] TOC extraction took ${tocTime}ms`);
+    this.emitTokenUsage();
 
     // Check abort after TOC extraction
     this.checkAborted();
@@ -349,6 +322,7 @@ export class DocumentProcessor {
     this.logger.info(
       `[DocumentProcessor] Resource conversion took ${resourcesTime}ms`,
     );
+    this.emitTokenUsage();
 
     // Check abort after resource conversion
     this.checkAborted();

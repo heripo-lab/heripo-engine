@@ -19,52 +19,49 @@ import {
   CardHeader,
   CardTitle,
 } from '~/components/ui/card';
+import { useExchangeRate } from '~/features/result/hooks/use-exchange-rate';
 
-import { useExchangeRate } from '../hooks/use-exchange-rate';
-
-interface TokenUsageChartProps {
-  tokenUsage?: unknown;
+interface LiveTokenUsageCardProps {
+  tokenUsage?: TokenUsageReport;
 }
 
-export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
-  const usage = tokenUsage as TokenUsageReport | null;
+export function LiveTokenUsageCard({ tokenUsage }: LiveTokenUsageCardProps) {
   const { data: exchangeRateResult } = useExchangeRate();
 
   const exchangeRate = exchangeRateResult?.rate ?? FALLBACK_RATE;
   const isFallbackRate = exchangeRateResult?.isFallback ?? true;
 
   const totalCostUsd = useMemo(() => {
-    if (!usage?.components) return 0;
-    return calculateTotalCostUsd(usage.components);
-  }, [usage]);
+    if (!tokenUsage?.components) return 0;
+    return calculateTotalCostUsd(tokenUsage.components);
+  }, [tokenUsage]);
 
   const totalCostKrw = Math.round(totalCostUsd * exchangeRate);
 
-  if (!usage || !usage.components || usage.components.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Token Usage Report</CardTitle>
-          <CardDescription>
-            LLM API usage breakdown by component
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="text-muted-foreground py-4 text-center text-sm">
-            No token usage data available
-          </div>
-        </CardContent>
-      </Card>
-    );
+  // Don't render if no token usage data yet
+  if (
+    !tokenUsage ||
+    !tokenUsage.components ||
+    tokenUsage.components.length === 0
+  ) {
+    return null;
   }
 
-  const { components, total } = usage;
+  const { components, total } = tokenUsage;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Token Usage Report</CardTitle>
-        <CardDescription>LLM API usage breakdown by component</CardDescription>
+        <div className="flex items-center gap-2">
+          <CardTitle>Token Usage</CardTitle>
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
+          </span>
+        </div>
+        <CardDescription>
+          Real-time LLM API usage during processing
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">

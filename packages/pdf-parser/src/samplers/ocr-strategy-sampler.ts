@@ -1,0 +1,252 @@
+import type { LoggerMethods } from '@heripo/logger';
+import type { OcrStrategy } from '@heripo/model';
+import type { LLMTokenUsageAggregator } from '@heripo/shared';
+import type { LanguageModel } from 'ai';
+
+import type { PageRenderer } from '../processors/page-renderer';
+
+import { LLMCaller } from '@heripo/shared';
+import { readFileSync } from 'node:fs';
+import { z } from 'zod/v4';
+
+/** DPI for sampling pages (low resolution to reduce VLM input tokens) */
+const SAMPLE_DPI = 72;
+
+/** Ratio of pages to trim from front and back (covers, TOC, appendices) */
+const EDGE_TRIM_RATIO = 0.1;
+
+/** Default maximum number of pages to sample */
+const DEFAULT_MAX_SAMPLE_PAGES = 5;
+
+/** Default max retries per VLM call */
+const DEFAULT_MAX_RETRIES = 3;
+
+/** Zod schema for VLM hanja detection response */
+const hanjaDetectionSchema = z.object({
+  hasHanja: z
+    .boolean()
+    .describe(
+      'Whether the page contains any Hanja (漢字/Chinese characters) mixed with Korean text',
+    ),
+});
+
+/** System prompt for hanja detection */
+const HANJA_DETECTION_PROMPT = `Look at this page image carefully. Does it contain any Hanja (漢字/Chinese characters) mixed with Korean text?
+
+Hanja examples: 遺蹟, 發掘, 調査, 報告書, 文化財
+Note: Hanja are Chinese characters used in Korean documents, different from modern Korean (한글).
+
+Answer whether any Hanja characters are present on this page.`;
+
+/** Options for OcrStrategySampler */
+export interface OcrStrategySamplerOptions {
+  /** Maximum number of pages to sample (default: 5) */
+  maxSamplePages?: number;
+  /** Maximum retries per VLM call (default: 3) */
+  maxRetries?: number;
+  /** Temperature for VLM generation (default: 0) */
+  temperature?: number;
+  /** Abort signal for cancellation */
+  abortSignal?: AbortSignal;
+  /** Fallback model for retry after primary exhausts maxRetries */
+  fallbackModel?: LanguageModel;
+  /** Token usage aggregator for tracking */
+  aggregator?: LLMTokenUsageAggregator;
+}
+
+/**
+ * Samples pages from a PDF to determine whether to use ocrmac or VLM for processing.
+ *
+ * Renders a subset of pages at low DPI and sends them to a frontier VLM for
+ * binary hanja detection. If hanja is found on any page, the entire document
+ * is routed to the VLM pipeline. Otherwise, it goes through the standard
+ * ocrmac/Docling pipeline.
+ *
+ * Sampling strategy:
+ * - Trim front/back 10% of pages (covers, TOC, appendices)
+ * - Select up to 5 pages evenly distributed across the eligible range
+ * - Early exit on first hanja detection
+ */
+export class OcrStrategySampler {
+  private readonly logger: LoggerMethods;
+  private readonly pageRenderer: PageRenderer;
+
+  constructor(logger: LoggerMethods, pageRenderer: PageRenderer) {
+    this.logger = logger;
+    this.pageRenderer = pageRenderer;
+  }
+
+  /**
+   * Sample pages from a PDF and determine the OCR strategy.
+   *
+   * @param pdfPath - Path to the PDF file
+   * @param outputDir - Directory for temporary rendered pages
+   * @param model - Vision language model for hanja detection
+   * @param options - Sampling options
+   * @returns OcrStrategy with method ('ocrmac' or 'vlm') and metadata
+   */
+  async sample(
+    pdfPath: string,
+    outputDir: string,
+    model: LanguageModel,
+    options?: OcrStrategySamplerOptions,
+  ): Promise<OcrStrategy> {
+    const maxSamplePages = options?.maxSamplePages ?? DEFAULT_MAX_SAMPLE_PAGES;
+
+    this.logger.info('[OcrStrategySampler] Starting OCR strategy sampling...');
+
+    // Step 1: Render all pages at low DPI
+    const renderResult = await this.pageRenderer.renderPages(
+      pdfPath,
+      outputDir,
+      { dpi: SAMPLE_DPI },
+    );
+
+    if (renderResult.pageCount === 0) {
+      this.logger.info('[OcrStrategySampler] No pages found in PDF');
+      return {
+        method: 'ocrmac',
+        reason: 'No pages found in PDF',
+        sampledPages: 0,
+        totalPages: 0,
+      };
+    }
+
+    // Step 2: Select sample page indices
+    const sampleIndices = this.selectSamplePages(
+      renderResult.pageCount,
+      maxSamplePages,
+    );
+
+    this.logger.info(
+      `[OcrStrategySampler] Sampling ${sampleIndices.length} of ${renderResult.pageCount} pages: [${sampleIndices.map((i) => i + 1).join(', ')}]`,
+    );
+
+    // Step 3: Check each sample page for hanja (early exit on detection)
+    let sampledCount = 0;
+    for (const idx of sampleIndices) {
+      sampledCount++;
+      const pageFile = renderResult.pageFiles[idx];
+      const hasHanja = await this.checkHanja(pageFile, idx + 1, model, options);
+
+      if (hasHanja) {
+        this.logger.info(
+          `[OcrStrategySampler] Hanja detected on page ${idx + 1} → VLM strategy`,
+        );
+        return {
+          method: 'vlm',
+          reason: `Hanja detected on page ${idx + 1}`,
+          sampledPages: sampledCount,
+          totalPages: renderResult.pageCount,
+        };
+      }
+    }
+
+    // Step 4: No hanja found → ocrmac
+    this.logger.info(
+      '[OcrStrategySampler] No hanja detected → ocrmac strategy',
+    );
+    return {
+      method: 'ocrmac',
+      reason: `No hanja detected in ${sampledCount} sampled pages`,
+      sampledPages: sampledCount,
+      totalPages: renderResult.pageCount,
+    };
+  }
+
+  /**
+   * Select page indices for sampling.
+   * Trims front/back edges and distributes samples evenly.
+   *
+   * @param totalPages - Total number of pages
+   * @param maxSamples - Maximum number of samples
+   * @returns Array of 0-based page indices
+   */
+  selectSamplePages(totalPages: number, maxSamples: number): number[] {
+    if (totalPages === 0) return [];
+
+    // For very small documents, sample all pages
+    if (totalPages <= maxSamples) {
+      return Array.from({ length: totalPages }, (_, i) => i);
+    }
+
+    // Trim front/back edges
+    const trimCount = Math.max(1, Math.ceil(totalPages * EDGE_TRIM_RATIO));
+    const start = trimCount;
+    const end = totalPages - trimCount;
+    const eligibleCount = end - start;
+
+    // If trimming leaves no eligible pages, use middle page
+    if (eligibleCount <= 0) {
+      return [Math.floor(totalPages / 2)];
+    }
+
+    // If eligible pages fit within maxSamples, use all
+    if (eligibleCount <= maxSamples) {
+      return Array.from({ length: eligibleCount }, (_, i) => start + i);
+    }
+
+    // Distribute samples evenly across eligible range
+    const indices: number[] = [];
+    const step = eligibleCount / maxSamples;
+    for (let i = 0; i < maxSamples; i++) {
+      indices.push(start + Math.floor(i * step));
+    }
+    return indices;
+  }
+
+  /**
+   * Check a single page for hanja characters using VLM.
+   *
+   * @returns true if hanja is detected, false otherwise
+   */
+  private async checkHanja(
+    pageFile: string,
+    pageNo: number,
+    model: LanguageModel,
+    options?: OcrStrategySamplerOptions,
+  ): Promise<boolean> {
+    this.logger.debug(
+      `[OcrStrategySampler] Checking page ${pageNo} for hanja...`,
+    );
+
+    const base64Image = readFileSync(pageFile).toString('base64');
+
+    const messages = [
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: HANJA_DETECTION_PROMPT },
+          {
+            type: 'image' as const,
+            image: `data:image/png;base64,${base64Image}`,
+          },
+        ],
+      },
+    ];
+
+    const result = await LLMCaller.callVision({
+      schema: hanjaDetectionSchema as any,
+      messages,
+      primaryModel: model,
+      fallbackModel: options?.fallbackModel,
+      maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
+      temperature: options?.temperature ?? 0,
+      abortSignal: options?.abortSignal,
+      component: 'OcrStrategySampler',
+      phase: 'hanja-detection',
+    });
+
+    if (options?.aggregator) {
+      options.aggregator.track(result.usage);
+    }
+
+    const hasHanja = (result.output as { hasHanja: boolean }).hasHanja;
+
+    this.logger.debug(
+      `[OcrStrategySampler] Page ${pageNo}: hasHanja=${hasHanja}`,
+    );
+
+    return hasHanja;
+  }
+}

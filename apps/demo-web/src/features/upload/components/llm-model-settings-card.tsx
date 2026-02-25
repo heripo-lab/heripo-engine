@@ -148,7 +148,6 @@ type ModelFieldName = Extract<
   | 'visionTocExtractorModel'
   | 'validatorModel'
   | 'captionParserModel'
-  | 'hanjaQualitySamplerModel'
 >;
 
 interface ModelFieldConfig {
@@ -186,13 +185,6 @@ const MODEL_FIELDS: ModelFieldConfig[] = [
     name: 'captionParserModel',
     label: 'Caption Parser',
     description: 'Parses captions to extract numbers',
-  },
-  {
-    name: 'hanjaQualitySamplerModel',
-    label: 'Hanja Quality Sampler',
-    description: 'Assesses KCJ character quality for auto VLM fallback',
-    requiresVision: true,
-    optional: true,
   },
 ];
 

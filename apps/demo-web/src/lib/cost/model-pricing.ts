@@ -22,7 +22,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'anthropic/claude-opus-4.6': { input: 5, output: 25 },
     'anthropic/claude-sonnet-4.6': { input: 3, output: 15 },
     'anthropic/claude-haiku-4.6': { input: 1, output: 5 },
-    // VLM API preset keys (used by VlmProxyServer TokenUsageReport)
+    // VLM strategy models (provider-prefixed keys from TokenUsageReport)
     'openai/gpt-5.2': { input: 1.75, output: 14 },
     'openai/gpt-5.1': { input: 1.25, output: 10 },
     'openai/gpt-5-mini': { input: 0.25, output: 2 },

@@ -1,45 +1,32 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { TokenUsageReport } from '@heripo/model';
+import type { OcrStrategy, TokenUsageReport } from '@heripo/model';
+import type { LanguageModel } from 'ai';
 import type {
   AsyncConversionTask,
   ConversionOptions,
   DoclingAPIClient,
-  VlmModelApi,
-  VlmModelLocal,
 } from 'docling-sdk';
 
-import type { ResolveVlmApiOptions } from '../config/vlm-models';
-import type { AccumulatedTokenUsage } from '../utils/vlm-proxy-server';
-
-import { ValidationUtils } from 'docling-sdk';
+import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { omit } from 'es-toolkit';
-import { createWriteStream, existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 import { PDF_CONVERTER } from '../config/constants';
-import {
-  DEFAULT_VLM_MODEL,
-  resolveVlmApiModel,
-  resolveVlmModel,
-} from '../config/vlm-models';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
+import { PageRenderer } from '../processors/page-renderer';
+import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { LocalFileServer } from '../utils/local-file-server';
-import { VlmProxyServer } from '../utils/vlm-proxy-server';
 import { ImagePdfConverter } from './image-pdf-converter';
-
-// Workaround for docling-sdk@1.3.6 validation bug:
-// ValidationUtils.validateProcessingPipeline() uses a Zod enum ["default","fast","accurate"]
-// which doesn't include "vlm", even though the TypeScript ConversionOptions interface allows it.
-// This patch strips the `pipeline` field before validation to avoid the false rejection.
-// TODO: Remove this patch when docling-sdk fixes ProcessingPipelineSchema to include "vlm".
-const _origAssertValidConversionOptions =
-  ValidationUtils.assertValidConversionOptions.bind(ValidationUtils);
-ValidationUtils.assertValidConversionOptions = (options: unknown) => {
-  const { pipeline: _pipeline, ...rest } = options as Record<string, unknown>;
-  _origAssertValidConversionOptions(rest);
-};
+import { VlmPdfProcessor } from './vlm-pdf-processor';
 
 /**
  * Callback function invoked after PDF conversion completes
@@ -50,17 +37,7 @@ export type ConversionCompleteCallback = (
 ) => Promise<void> | void;
 
 /**
- * Pipeline type for PDF conversion
- * - 'standard': Use OCR-based pipeline (default, uses ocrmac)
- * - 'vlm': Use Vision Language Model pipeline for better KCJ/complex layout handling
- */
-export type PipelineType = 'standard' | 'vlm';
-
-/**
- * Extended options for PDF conversion including pipeline selection.
- *
- * For VLM pipeline, either vlm_model (local) or vlm_api_model (remote API)
- * can be specified. If both are provided, vlm_api_model takes precedence.
+ * Extended options for PDF conversion.
  */
 export type PDFConvertOptions = Omit<
   ConversionOptions,
@@ -77,19 +54,32 @@ export type PDFConvertOptions = Omit<
   | 'vlm_pipeline_model_api'
 > & {
   num_threads?: number;
-  pipeline?: PipelineType;
-  /** Local VLM model: preset key string or custom VlmModelLocal object */
-  vlm_model?: string | VlmModelLocal;
-  /** API VLM model: preset key string (e.g., 'openai/gpt-5.2') or custom VlmModelApi object */
-  vlm_api_model?: string | VlmModelApi;
-  /** Options for resolving API VLM model (API key, timeout overrides, etc.) */
-  vlm_api_options?: ResolveVlmApiOptions;
   /**
    * Force pre-conversion to image-based PDF before processing.
-   * Works with any pipeline type. Requires ImageMagick and Ghostscript.
+   * Requires ImageMagick and Ghostscript.
    */
   forceImagePdf?: boolean;
+  /** Vision model for OCR strategy sampling (enables new strategy-based flow) */
+  strategySamplerModel?: LanguageModel;
+  /** Vision model for VLM page processing (required when strategy selects VLM) */
+  vlmProcessorModel?: LanguageModel;
+  /** Concurrency for VLM page processing (default: 1) */
+  vlmConcurrency?: number;
+  /** Skip sampling and default to ocrmac */
+  skipSampling?: boolean;
+  /** Force a specific OCR method, bypassing sampling */
+  forcedMethod?: 'ocrmac' | 'vlm';
+  /** Token usage aggregator for tracking across sampling and VLM processing */
+  aggregator?: LLMTokenUsageAggregator;
 };
+
+/** Result of strategy-based conversion */
+export interface ConvertWithStrategyResult {
+  /** The OCR strategy that was determined */
+  strategy: OcrStrategy;
+  /** Token usage report from sampling and/or VLM processing (null when no LLM usage occurs) */
+  tokenUsageReport: TokenUsageReport | null;
+}
 
 export class PDFConverter {
   constructor(
@@ -130,6 +120,214 @@ export class PDFConverter {
       options,
       abortSignal,
     );
+  }
+
+  /**
+   * Convert a PDF using OCR strategy sampling to decide between ocrmac and VLM.
+   *
+   * Flow:
+   * 1. Determine strategy (forced, skipped, or sampled via VLM)
+   * 2. If VLM → VlmPdfProcessor (bypasses Docling entirely)
+   * 3. If ocrmac → existing Docling conversion
+   *
+   * @returns ConvertWithStrategyResult with the chosen strategy and token report
+   */
+  async convertWithStrategy(
+    url: string,
+    reportId: string,
+    onComplete: ConversionCompleteCallback,
+    cleanupAfterCallback: boolean,
+    options: PDFConvertOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<ConvertWithStrategyResult> {
+    this.logger.info('[PDFConverter] Starting strategy-based conversion:', url);
+
+    // Create an internal aggregator if none was provided so that
+    // sampling + VLM processing token usage is always captured.
+    const aggregator = options.aggregator ?? new LLMTokenUsageAggregator();
+    const trackedOptions: PDFConvertOptions = { ...options, aggregator };
+
+    const pdfPath = url.startsWith('file://') ? url.slice(7) : null;
+
+    // Step 1: Determine OCR strategy
+    const strategy = await this.determineStrategy(
+      pdfPath,
+      reportId,
+      trackedOptions,
+      abortSignal,
+    );
+    this.logger.info(
+      `[PDFConverter] OCR strategy: ${strategy.method} (${strategy.reason})`,
+    );
+
+    // Step 2: Execute conversion based on strategy
+    if (strategy.method === 'vlm') {
+      await this.convertWithVlm(
+        pdfPath,
+        reportId,
+        onComplete,
+        cleanupAfterCallback,
+        trackedOptions,
+        abortSignal,
+      );
+      return {
+        strategy,
+        tokenUsageReport: this.buildTokenReport(aggregator),
+      };
+    }
+
+    // ocrmac path: delegate to existing Docling conversion
+    await this.convert(
+      url,
+      reportId,
+      onComplete,
+      cleanupAfterCallback,
+      trackedOptions,
+      abortSignal,
+    );
+    return {
+      strategy,
+      tokenUsageReport: this.buildTokenReport(aggregator),
+    };
+  }
+
+  /**
+   * Build a token usage report from the aggregator.
+   * Returns null when no LLM calls were tracked (e.g. forced ocrmac without sampling).
+   */
+  private buildTokenReport(
+    aggregator: LLMTokenUsageAggregator,
+  ): TokenUsageReport | null {
+    const report = aggregator.getReport();
+    if (report.components.length === 0) {
+      return null;
+    }
+    return report;
+  }
+
+  /**
+   * Determine the OCR strategy based on options and page sampling.
+   */
+  private async determineStrategy(
+    pdfPath: string | null,
+    reportId: string,
+    options: PDFConvertOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<OcrStrategy> {
+    // Forced method bypasses all sampling
+    if (options.forcedMethod) {
+      return {
+        method: options.forcedMethod,
+        reason: `Forced: ${options.forcedMethod}`,
+        sampledPages: 0,
+        totalPages: 0,
+      };
+    }
+
+    // Skip sampling or no sampler model or non-local URL → default to ocrmac
+    if (options.skipSampling || !options.strategySamplerModel || !pdfPath) {
+      const reason = !pdfPath
+        ? 'Non-local URL, sampling skipped'
+        : 'Sampling skipped';
+      return {
+        method: 'ocrmac',
+        reason,
+        sampledPages: 0,
+        totalPages: 0,
+      };
+    }
+
+    // Sample pages to determine strategy
+    const samplingDir = join(process.cwd(), 'output', reportId, '_sampling');
+    const sampler = new OcrStrategySampler(
+      this.logger,
+      new PageRenderer(this.logger),
+    );
+
+    try {
+      return await sampler.sample(
+        pdfPath,
+        samplingDir,
+        options.strategySamplerModel,
+        {
+          aggregator: options.aggregator,
+          abortSignal,
+        },
+      );
+    } finally {
+      // Always clean up sampling temp directory
+      if (existsSync(samplingDir)) {
+        rmSync(samplingDir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  /**
+   * Execute VLM-based PDF conversion (bypasses Docling entirely).
+   * Renders pages, processes with VLM, assembles DoclingDocument, extracts images.
+   */
+  private async convertWithVlm(
+    pdfPath: string | null,
+    reportId: string,
+    onComplete: ConversionCompleteCallback,
+    cleanupAfterCallback: boolean,
+    options: PDFConvertOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    if (!options.vlmProcessorModel) {
+      throw new Error('vlmProcessorModel is required when OCR strategy is VLM');
+    }
+    if (!pdfPath) {
+      throw new Error('VLM conversion requires a local file (file:// URL)');
+    }
+
+    const outputDir = join(process.cwd(), 'output', reportId);
+    const filename = basename(pdfPath);
+
+    try {
+      const processor = VlmPdfProcessor.create(this.logger);
+      const result = await processor.process(
+        pdfPath,
+        outputDir,
+        filename,
+        options.vlmProcessorModel,
+        {
+          concurrency: options.vlmConcurrency,
+          aggregator: options.aggregator,
+          abortSignal,
+        },
+      );
+
+      // Write DoclingDocument as result.json
+      mkdirSync(outputDir, { recursive: true });
+      writeFileSync(
+        join(outputDir, 'result.json'),
+        JSON.stringify(result.document, null, 2),
+      );
+
+      // Check abort before callback
+      if (abortSignal?.aborted) {
+        this.logger.info(
+          '[PDFConverter] VLM conversion aborted before callback',
+        );
+        const error = new Error('PDF conversion was aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+
+      this.logger.info('[PDFConverter] Executing completion callback...');
+      await onComplete(outputDir);
+
+      this.logger.info('[PDFConverter] VLM conversion completed successfully');
+    } finally {
+      if (cleanupAfterCallback && existsSync(outputDir)) {
+        this.logger.info(
+          '[PDFConverter] Cleaning up output directory:',
+          outputDir,
+        );
+        rmSync(outputDir, { recursive: true, force: true });
+      }
+    }
   }
 
   /**
@@ -256,140 +454,93 @@ export class PDFConverter {
     abortSignal?: AbortSignal,
   ): Promise<TokenUsageReport | null> {
     const startTime = Date.now();
-    const pipelineType = options.pipeline ?? 'standard';
+    const conversionOptions = this.buildConversionOptions(options);
 
-    // Set up VLM proxy for API models to capture token usage
-    let proxy: VlmProxyServer | null = null;
-    let effectiveOptions = options;
-    let vlmModelName: string | null = null;
+    this.logger.info(
+      `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
+    );
+    this.logger.info(
+      '[PDFConverter] Converting document with Async Source API...',
+    );
+    this.logger.info('[PDFConverter] Server will download from URL directly');
+    this.logger.info(
+      '[PDFConverter] Results will be returned as ZIP to avoid memory limits',
+    );
 
-    if (pipelineType === 'vlm' && options.vlm_api_model !== undefined) {
-      const realModel = resolveVlmApiModel(
-        options.vlm_api_model,
-        options.vlm_api_options,
-      );
-      vlmModelName =
-        typeof options.vlm_api_model === 'string'
-          ? options.vlm_api_model
-          : ((realModel.params?.model as string | undefined) ??
-            'custom-vlm-api');
-      proxy = new VlmProxyServer(
-        this.logger,
-        realModel.url,
-        realModel.headers?.Authorization ?? '',
-      );
-      const proxyUrl = await proxy.start();
-      effectiveOptions = {
-        ...options,
-        vlm_api_model: { ...realModel, url: proxyUrl, headers: {} },
-      };
-    }
+    // Resolve URL (start local server for file:// URLs)
+    const { httpUrl, server } = await this.resolveUrl(url);
 
     try {
-      const conversionOptions =
-        pipelineType === 'vlm'
-          ? this.buildVlmConversionOptions(effectiveOptions)
-          : this.buildConversionOptions(effectiveOptions);
+      const task = await this.startConversionTask(httpUrl, conversionOptions);
+      await this.trackTaskProgress(task);
 
-      if (pipelineType === 'vlm') {
-        this.logger.info('[PDFConverter] Using VLM pipeline');
-      } else {
+      // Check abort after docling task completes
+      if (abortSignal?.aborted) {
         this.logger.info(
-          `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
+          '[PDFConverter] Conversion aborted after docling completion',
         );
-      }
-      this.logger.info(
-        '[PDFConverter] Converting document with Async Source API...',
-      );
-      this.logger.info('[PDFConverter] Server will download from URL directly');
-      this.logger.info(
-        '[PDFConverter] Results will be returned as ZIP to avoid memory limits',
-      );
-
-      // Resolve URL (start local server for file:// URLs)
-      const { httpUrl, server } = await this.resolveUrl(url);
-
-      try {
-        const task = await this.startConversionTask(httpUrl, conversionOptions);
-        await this.trackTaskProgress(task);
-
-        // Check abort after docling task completes
-        if (abortSignal?.aborted) {
-          this.logger.info(
-            '[PDFConverter] Conversion aborted after docling completion',
-          );
-          const error = new Error('PDF conversion was aborted');
-          error.name = 'AbortError';
-          throw error;
-        }
-
-        await this.downloadResult(task.taskId);
-      } finally {
-        // Stop local file server if started
-        if (server) {
-          this.logger.info('[PDFConverter] Stopping local file server...');
-          await server.stop();
-        }
+        const error = new Error('PDF conversion was aborted');
+        error.name = 'AbortError';
+        throw error;
       }
 
-      const cwd = process.cwd();
-      const zipPath = join(cwd, 'result.zip');
-      const extractDir = join(cwd, 'result_extracted');
-      const outputDir = join(cwd, 'output', reportId);
-
-      try {
-        await this.processConvertedFiles(zipPath, extractDir, outputDir);
-
-        // Check abort before callback
-        if (abortSignal?.aborted) {
-          this.logger.info('[PDFConverter] Conversion aborted before callback');
-          const error = new Error('PDF conversion was aborted');
-          error.name = 'AbortError';
-          throw error;
-        }
-
-        // Execute callback with absolute output path
-        this.logger.info('[PDFConverter] Executing completion callback...');
-        await onComplete(outputDir);
-
-        const duration = Date.now() - startTime;
-        this.logger.info('[PDFConverter] Conversion completed successfully!');
-        this.logger.info('[PDFConverter] Total time:', duration, 'ms');
-      } finally {
-        // Clean up temporary files (always cleanup temp files)
-        this.logger.info('[PDFConverter] Cleaning up temporary files...');
-        if (existsSync(zipPath)) {
-          rmSync(zipPath, { force: true });
-        }
-        if (existsSync(extractDir)) {
-          rmSync(extractDir, { recursive: true, force: true });
-        }
-
-        // Cleanup output directory only if requested
-        if (cleanupAfterCallback) {
-          this.logger.info(
-            '[PDFConverter] Cleaning up output directory:',
-            outputDir,
-          );
-          if (existsSync(outputDir)) {
-            rmSync(outputDir, { recursive: true, force: true });
-          }
-        } else {
-          this.logger.info('[PDFConverter] Output preserved at:', outputDir);
-        }
-      }
-
-      // Build token usage report from proxy if available
-      if (proxy) {
-        const usage = proxy.getAccumulatedUsage();
-        return this.buildVlmTokenUsageReport(vlmModelName!, usage);
-      }
-      return null;
+      await this.downloadResult(task.taskId);
     } finally {
-      if (proxy) {
-        await proxy.stop();
+      // Stop local file server if started
+      if (server) {
+        this.logger.info('[PDFConverter] Stopping local file server...');
+        await server.stop();
       }
     }
+
+    const cwd = process.cwd();
+    const zipPath = join(cwd, 'result.zip');
+    const extractDir = join(cwd, 'result_extracted');
+    const outputDir = join(cwd, 'output', reportId);
+
+    try {
+      await this.processConvertedFiles(zipPath, extractDir, outputDir);
+
+      // Check abort before callback
+      if (abortSignal?.aborted) {
+        this.logger.info('[PDFConverter] Conversion aborted before callback');
+        const error = new Error('PDF conversion was aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+
+      // Execute callback with absolute output path
+      this.logger.info('[PDFConverter] Executing completion callback...');
+      await onComplete(outputDir);
+
+      const duration = Date.now() - startTime;
+      this.logger.info('[PDFConverter] Conversion completed successfully!');
+      this.logger.info('[PDFConverter] Total time:', duration, 'ms');
+    } finally {
+      // Clean up temporary files (always cleanup temp files)
+      this.logger.info('[PDFConverter] Cleaning up temporary files...');
+      if (existsSync(zipPath)) {
+        rmSync(zipPath, { force: true });
+      }
+      if (existsSync(extractDir)) {
+        rmSync(extractDir, { recursive: true, force: true });
+      }
+
+      // Cleanup output directory only if requested
+      if (cleanupAfterCallback) {
+        this.logger.info(
+          '[PDFConverter] Cleaning up output directory:',
+          outputDir,
+        );
+        if (existsSync(outputDir)) {
+          rmSync(outputDir, { recursive: true, force: true });
+        }
+      } else {
+        this.logger.info('[PDFConverter] Output preserved at:', outputDir);
+      }
+    }
+
+    return null;
   }
 
   private buildConversionOptions(
@@ -398,11 +549,12 @@ export class PDFConverter {
     return {
       ...omit(options, [
         'num_threads',
-        'pipeline',
-        'vlm_model',
-        'vlm_api_model',
-        'vlm_api_options',
         'forceImagePdf',
+        'strategySamplerModel',
+        'vlmProcessorModel',
+        'skipSampling',
+        'forcedMethod',
+        'aggregator',
       ]),
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',
@@ -427,67 +579,6 @@ export class PDFConverter {
         device: 'mps',
         num_threads: options.num_threads,
       },
-    };
-  }
-
-  /**
-   * Build conversion options for VLM pipeline.
-   *
-   * VLM pipeline uses a Vision Language Model instead of traditional OCR,
-   * providing better accuracy for KCJ characters and complex layouts.
-   *
-   * Supports both local models (vlm_model) and remote API models (vlm_api_model).
-   * If vlm_api_model is specified, it takes precedence over vlm_model.
-   */
-  private buildVlmConversionOptions(
-    options: PDFConvertOptions,
-  ): ConversionOptions {
-    const stripped = omit(options, [
-      'num_threads',
-      'pipeline',
-      'vlm_model',
-      'vlm_api_model',
-      'vlm_api_options',
-      'ocr_lang',
-      'forceImagePdf',
-    ]);
-
-    const baseOptions = {
-      ...stripped,
-      to_formats: ['json', 'html'],
-      image_export_mode: 'embedded',
-      pipeline: 'vlm',
-      generate_picture_images: true,
-      images_scale: 2.0,
-      accelerator_options: {
-        device: 'mps',
-        num_threads: options.num_threads,
-      },
-    } satisfies ConversionOptions;
-
-    // API VLM model takes precedence over local VLM model
-    if (options.vlm_api_model !== undefined) {
-      const vlmApiModel = resolveVlmApiModel(
-        options.vlm_api_model,
-        options.vlm_api_options,
-      );
-      this.logger.info(
-        `[PDFConverter] VLM API model: ${String(vlmApiModel.params?.model ?? vlmApiModel.url)} (format: ${vlmApiModel.response_format})`,
-      );
-      return {
-        ...baseOptions,
-        vlm_pipeline_model_api: vlmApiModel,
-      };
-    }
-
-    // Fall back to local VLM model
-    const vlmModel = resolveVlmModel(options.vlm_model ?? DEFAULT_VLM_MODEL);
-    this.logger.info(
-      `[PDFConverter] VLM model: ${vlmModel.repo_id} (framework: ${vlmModel.inference_framework}, format: ${vlmModel.response_format})`,
-    );
-    return {
-      ...baseOptions,
-      vlm_pipeline_model_local: vlmModel,
     };
   }
 
@@ -638,48 +729,6 @@ export class PDFConverter {
     this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
     const writeStream = createWriteStream(zipPath);
     await pipeline(zipResult.fileStream, writeStream);
-  }
-
-  /**
-   * Build a TokenUsageReport from accumulated VLM proxy token usage.
-   */
-  private buildVlmTokenUsageReport(
-    modelName: string,
-    usage: AccumulatedTokenUsage,
-  ): TokenUsageReport {
-    return {
-      components: [
-        {
-          component: 'VlmPipeline',
-          phases: [
-            {
-              phase: 'page-conversion',
-              primary: {
-                modelName,
-                inputTokens: usage.inputTokens,
-                outputTokens: usage.outputTokens,
-                totalTokens: usage.totalTokens,
-              },
-              total: {
-                inputTokens: usage.inputTokens,
-                outputTokens: usage.outputTokens,
-                totalTokens: usage.totalTokens,
-              },
-            },
-          ],
-          total: {
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            totalTokens: usage.totalTokens,
-          },
-        },
-      ],
-      total: {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        totalTokens: usage.totalTokens,
-      },
-    };
   }
 
   private async processConvertedFiles(

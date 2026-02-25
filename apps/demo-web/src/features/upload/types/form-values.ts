@@ -22,8 +22,10 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   threadCount: 4,
   // Force image PDF pre-conversion
   forceImagePdf: false,
-  // Pipeline selection
-  pipeline: 'standard',
+  // OCR Strategy (undefined = legacy flow, no sampling)
+  strategySamplerModel: undefined,
+  vlmProcessorModel: undefined,
+  forcedMethod: undefined,
   // LLM Models
   fallbackModel: 'openai/gpt-5.2',
   validatorModel: 'openai/gpt-5.2',
@@ -31,9 +33,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   tocExtractorModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
   visionTocExtractorModel: 'google/gemini-3-flash-preview',
   captionParserModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
-  // Optional models (undefined = use defaults)
-  hanjaQualitySamplerModel: 'openai/gpt-5.2',
-  vlmModel: undefined,
+  // VLM Processing
+  vlmConcurrency: 1,
   // Batch & Retry
   textCleanerBatchSize: 20,
   captionParserBatchSize: 0,

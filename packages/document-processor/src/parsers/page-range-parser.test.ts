@@ -41,7 +41,7 @@ describe('PageRangeParser', () => {
     page_no: pageNo,
     size: { width, height },
     image: {
-      uri: `pages/page_${pageNo}.png`,
+      uri: `pages/page_${pageNo - 1}.png`,
       mimetype: mimetype!,
       dpi: 72,
       size: { width, height },

@@ -333,13 +333,20 @@ export class PDFParser {
       this.checkGhostscriptInstalled();
     }
 
-    // Auto-setup VLM dependencies if VLM pipeline is requested
-    if (options.pipeline === 'vlm' && this.environment && !this.baseUrl) {
-      const isApiVlm = options.vlm_api_model !== undefined;
-      this.logger.info(
-        `[PDFParser] VLM pipeline requested (${isApiVlm ? 'API' : 'local'}), ensuring VLM dependencies...`,
+    // Use strategy-based flow when new options are provided
+    const useStrategyFlow =
+      options.strategySamplerModel !== undefined ||
+      options.forcedMethod !== undefined;
+
+    if (useStrategyFlow) {
+      return this.parseWithStrategy(
+        url,
+        reportId,
+        onComplete,
+        cleanupAfterCallback,
+        options,
+        abortSignal,
       );
-      await this.environment.setupVlmDependencies();
     }
 
     // Enable recovery only for local server mode
@@ -366,6 +373,73 @@ export class PDFParser {
           options,
           abortSignal,
         );
+      } catch (error) {
+        // If aborted, don't retry - re-throw immediately
+        if (abortSignal?.aborted) {
+          throw error;
+        }
+
+        // Attempt server recovery on ECONNREFUSED (server crashed)
+        if (
+          canRecover &&
+          this.isConnectionRefusedError(error) &&
+          attempt < maxAttempts
+        ) {
+          this.logger.warn(
+            '[PDFParser] Connection refused, attempting server recovery...',
+          );
+          await this.restartServer();
+          attempt++;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    /* v8 ignore start */
+    return null;
+    /* v8 ignore stop */
+  }
+
+  /**
+   * Parse a PDF using OCR strategy sampling to decide between ocrmac and VLM.
+   * Delegates to PDFConverter.convertWithStrategy() and returns the token usage report.
+   *
+   * Server recovery (restart on ECONNREFUSED) is preserved because
+   * the ocrmac path still uses the Docling server.
+   */
+  private async parseWithStrategy(
+    url: string,
+    reportId: string,
+    onComplete: ConversionCompleteCallback,
+    cleanupAfterCallback: boolean,
+    options: PDFConvertOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<TokenUsageReport | null> {
+    // Enable recovery only for local server mode
+    const canRecover = !this.baseUrl && this.port !== undefined;
+    const maxAttempts = PDF_PARSER.MAX_SERVER_RECOVERY_ATTEMPTS;
+    let attempt = 0;
+
+    while (attempt <= maxAttempts) {
+      try {
+        const effectiveFallbackEnabled =
+          this.enableImagePdfFallback && !this.baseUrl;
+        const converter = new PDFConverter(
+          this.logger,
+          this.client!,
+          effectiveFallbackEnabled,
+          this.timeout,
+        );
+        const result = await converter.convertWithStrategy(
+          url,
+          reportId,
+          onComplete,
+          cleanupAfterCallback,
+          options,
+          abortSignal,
+        );
+        return result.tokenUsageReport;
       } catch (error) {
         // If aborted, don't retry - re-throw immediately
         if (abortSignal?.aborted) {

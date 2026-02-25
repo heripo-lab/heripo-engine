@@ -2,10 +2,9 @@ import type { LoggerMethods } from '@heripo/logger';
 
 import { spawnAsync } from '@heripo/shared';
 import { spawn } from 'node:child_process';
-import { arch, platform } from 'node:os';
 import { join } from 'node:path';
 
-import { DOCLING_ENVIRONMENT, VLM_ENVIRONMENT } from '../config/constants';
+import { DOCLING_ENVIRONMENT } from '../config/constants';
 import {
   PythonVersionError,
   type PythonVersionInfo,
@@ -18,7 +17,6 @@ export class DoclingEnvironment {
   private readonly venvPath: string;
   private readonly port: number;
   private readonly killExistingProcess: boolean;
-  private vlmDependenciesInstalled = false;
 
   constructor(options: {
     logger: LoggerMethods;
@@ -186,94 +184,6 @@ export class DoclingEnvironment {
         `Failed to install docling-serve. Exit code: ${result.code}`,
       );
     }
-  }
-
-  /**
-   * Install VLM-specific dependencies for the Docling VLM pipeline.
-   *
-   * Installs:
-   * 1. docling-serve[vlm] - VLM model support for docling-serve
-   * 2. mlx + mlx-lm (macOS ARM64 only) - Apple Silicon optimized inference
-   *
-   * This is idempotent - subsequent calls skip if already installed.
-   */
-  async setupVlmDependencies(): Promise<void> {
-    if (this.vlmDependenciesInstalled) {
-      this.logger.info(
-        '[DoclingEnvironment] VLM dependencies already installed, skipping',
-      );
-      return;
-    }
-
-    // Check if VLM modules are already importable (e.g., from a previous session)
-    if (await this.isVlmReady()) {
-      this.vlmDependenciesInstalled = true;
-      this.logger.info(
-        '[DoclingEnvironment] VLM dependencies already installed, skipping',
-      );
-      return;
-    }
-
-    this.logger.info('[DoclingEnvironment] Installing VLM dependencies...');
-
-    const pipPath = join(this.venvPath, 'bin', 'pip');
-
-    // Install docling[vlm]
-    this.logger.info('[DoclingEnvironment] Installing docling[vlm]...');
-    const vlmResult = await spawnAsync(
-      pipPath,
-      ['install', '--upgrade', 'docling-serve[vlm]'],
-      { timeout: VLM_ENVIRONMENT.SETUP_TIMEOUT_MS },
-    );
-
-    if (vlmResult.code !== 0) {
-      this.logger.error(
-        '[DoclingEnvironment] Failed to install docling-serve[vlm]:',
-        vlmResult.stderr,
-      );
-      throw new Error(
-        `Failed to install docling-serve[vlm]. Exit code: ${vlmResult.code}`,
-      );
-    }
-
-    // Install mlx + mlx-lm for macOS ARM64 (Apple Silicon)
-    if (platform() === 'darwin' && arch() === 'arm64') {
-      this.logger.info(
-        '[DoclingEnvironment] Installing mlx + mlx-lm for Apple Silicon...',
-      );
-      const mlxResult = await spawnAsync(
-        pipPath,
-        ['install', 'mlx', 'mlx-lm'],
-        { timeout: VLM_ENVIRONMENT.SETUP_TIMEOUT_MS },
-      );
-
-      if (mlxResult.code !== 0) {
-        this.logger.error(
-          '[DoclingEnvironment] Failed to install mlx/mlx-lm:',
-          mlxResult.stderr,
-        );
-        throw new Error(
-          `Failed to install mlx/mlx-lm. Exit code: ${mlxResult.code}`,
-        );
-      }
-    }
-
-    this.vlmDependenciesInstalled = true;
-    this.logger.info(
-      '[DoclingEnvironment] VLM dependencies installed successfully',
-    );
-  }
-
-  /**
-   * Check if VLM dependencies are ready by verifying Python module imports
-   */
-  async isVlmReady(): Promise<boolean> {
-    const pythonPath = join(this.venvPath, 'bin', 'python');
-    const result = await spawnAsync(pythonPath, [
-      '-c',
-      'import docling_core; import docling',
-    ]);
-    return result.code === 0;
   }
 
   private async isPortInUse(port: number): Promise<boolean> {

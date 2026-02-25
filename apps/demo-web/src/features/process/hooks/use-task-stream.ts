@@ -1,5 +1,7 @@
 'use client';
 
+import type { TokenUsageReport } from '@heripo/model';
+
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
@@ -28,6 +30,7 @@ export interface TaskStreamState {
   resultUrl?: string;
   isConnected: boolean;
   vlmFallbackTriggered: boolean;
+  tokenUsage?: TokenUsageReport;
 }
 
 const INITIAL_STATE: TaskStreamState = {
@@ -37,6 +40,7 @@ const INITIAL_STATE: TaskStreamState = {
   logs: [],
   isConnected: false,
   vlmFallbackTriggered: false,
+  tokenUsage: undefined,
 };
 
 export function useTaskStream(taskId: string | null): TaskStreamState {
@@ -104,6 +108,12 @@ export function useTaskStream(taskId: string | null): TaskStreamState {
           logs: [...prev.logs, data],
         };
       });
+    });
+
+    eventSource.addEventListener('token-usage', (e: MessageEvent) => {
+      if (isCleanedUp) return;
+      const data = JSON.parse(e.data) as TokenUsageReport;
+      setState((prev) => ({ ...prev, tokenUsage: data }));
     });
 
     eventSource.addEventListener('vlm-fallback', () => {

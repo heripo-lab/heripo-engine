@@ -4,7 +4,6 @@ import {
   LLM_MODELS,
   VISION_MODELS,
 } from '~/features/upload/constants/llm-models';
-import { ALL_VLM_MODEL_KEYS } from '~/features/upload/constants/vlm-models';
 
 import {
   imageIdSchema,
@@ -35,15 +34,6 @@ const visionModelSchema = z
   });
 
 /**
- * VLM model key validator (local and API vision model presets)
- */
-const vlmModelKeySchema = z
-  .string()
-  .refine((val) => ALL_VLM_MODEL_KEYS.includes(val), {
-    message: 'Invalid VLM model key',
-  });
-
-/**
  * Processing options schema for PDF processing.
  * Used for POST /api/tasks request body validation.
  */
@@ -55,13 +45,10 @@ export const processingOptionsSchema = z.object({
   // Force image PDF pre-conversion
   forceImagePdf: z.boolean().default(false),
 
-  // Pipeline selection
-  pipeline: z
-    .enum(['standard', 'vlm'])
-    .default('standard')
-    .describe(
-      'Processing pipeline: standard (OCR) or vlm (Vision Language Model)',
-    ),
+  // OCR Strategy — VLM sampling-based strategy selection
+  strategySamplerModel: visionModelSchema.optional(),
+  vlmProcessorModel: visionModelSchema.optional(),
+  forcedMethod: z.enum(['ocrmac', 'vlm']).optional(),
 
   // LLM Models
   fallbackModel: llmModelSchema,
@@ -70,10 +57,9 @@ export const processingOptionsSchema = z.object({
   validatorModel: llmModelSchema,
   visionTocExtractorModel: visionModelSchema,
   captionParserModel: llmModelSchema,
-  hanjaQualitySamplerModel: visionModelSchema.optional(),
 
-  // VLM Model (local vision model for VLM pipeline and hanja auto-fallback)
-  vlmModel: vlmModelKeySchema.optional(),
+  // VLM Processing
+  vlmConcurrency: z.number().int().positive().max(10).default(1),
 
   // Batch & Retry
   textCleanerBatchSize: z.number().int().nonnegative().default(20),

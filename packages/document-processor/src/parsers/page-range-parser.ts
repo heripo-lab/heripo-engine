@@ -327,7 +327,11 @@ export class PageRangeParser extends VisionLLMComponent {
 
     for (const pageNo of pageNos) {
       const page = pages[pageNo - 1];
-      const imagePath = path.resolve(this.outputPath, page.image.uri);
+      // Page files are 0-indexed: page_0.png, page_1.png, etc.
+      const imagePath = path.resolve(
+        this.outputPath,
+        `pages/page_${pageNo - 1}.png`,
+      );
       const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
       const mimeType = page.image.mimetype || 'image/png';

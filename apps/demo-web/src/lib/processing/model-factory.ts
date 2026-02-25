@@ -1,5 +1,6 @@
 import type { DocumentProcessorOptions } from '@heripo/document-processor';
 import type { LoggerMethods } from '@heripo/logger';
+import type { TokenUsageReport } from '@heripo/model';
 import type { LanguageModel } from 'ai';
 
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -84,6 +85,7 @@ export function createProcessorOptions(
   options: ProcessingOptions,
   logger: LoggerMethods,
   abortSignal?: AbortSignal,
+  onTokenUsage?: (report: TokenUsageReport) => void,
 ): DocumentProcessorOptions {
   return {
     logger,
@@ -93,14 +95,12 @@ export function createProcessorOptions(
     validatorModel: createModel(options.validatorModel),
     visionTocExtractorModel: createModel(options.visionTocExtractorModel),
     captionParserModel: createModel(options.captionParserModel),
-    hanjaQualitySamplerModel: options.hanjaQualitySamplerModel
-      ? createModel(options.hanjaQualitySamplerModel)
-      : undefined,
     textCleanerBatchSize: options.textCleanerBatchSize,
     captionParserBatchSize: options.captionParserBatchSize,
     captionValidatorBatchSize: options.captionValidatorBatchSize,
     maxRetries: options.maxRetries,
     enableFallbackRetry: options.enableFallbackRetry,
     abortSignal,
+    onTokenUsage,
   };
 }
