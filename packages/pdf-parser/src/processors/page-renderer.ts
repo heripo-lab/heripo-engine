@@ -4,8 +4,8 @@ import { spawnAsync } from '@heripo/shared';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Default rendering DPI matching Docling output */
-const DEFAULT_DPI = 144;
+/** Default rendering DPI for VLM text recognition quality */
+const DEFAULT_DPI = 300;
 
 /** Result of page rendering */
 export interface PageRenderResult {
@@ -19,7 +19,7 @@ export interface PageRenderResult {
 
 /** Options for page rendering */
 export interface PageRendererOptions {
-  /** DPI for rendered images (default: 144) */
+  /** DPI for rendered images (default: 300) */
   dpi?: number;
 }
 

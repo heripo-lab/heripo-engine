@@ -306,4 +306,208 @@ describe('VlmResponseValidator', () => {
       expect(scriptIssue?.message).toContain('10%');
     });
   });
+
+  describe('meta description detection', () => {
+    test('detects Korean meta description about image resolution', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('이미지 해상도가 낮아 판독하기 어렵습니다.', 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects Korean pattern: 해상도가 부족', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('해상도가 부족하여 텍스트를 판독할 수 없습니다.', 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects Korean pattern: 글자를 읽기 어렵', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('글자를 읽기 어렵습니다.', 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects Korean pattern: 정확한 판독이 불가', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('정확한 판독이 불가합니다.', 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects English meta description: "the image contains"', () => {
+      const result = VlmResponseValidator.validate([
+        textElement(
+          'The image contains Korean text that is difficult to read.',
+          0,
+        ),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects English meta description: "unable to transcribe"', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('Unable to transcribe the text due to low resolution.', 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects English meta description: "resolution too low"', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('The resolution is too low to read the text.', 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects English meta description: "text is not legible"', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('The text is not legible in this image.', 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('detects English meta description: "exact transcription is not possible"', () => {
+      const result = VlmResponseValidator.validate([
+        textElement(
+          'The exact transcription is not possible due to image quality.',
+          0,
+        ),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'meta_description')).toBe(
+        true,
+      );
+    });
+
+    test('does not flag normal text as meta description', () => {
+      const result = VlmResponseValidator.validate([
+        textElement(
+          '아산 지산공원 수목식재사업부지내 문화유적 발굴조사 보고서',
+          0,
+        ),
+      ]);
+      const metaIssue = result.issues.find(
+        (i) => i.type === 'meta_description',
+      );
+      expect(metaIssue).toBeUndefined();
+    });
+
+    test('reports correct affected element orders for meta description', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('Normal text here.', 0),
+        textElement('이미지 해상도가 낮습니다.', 1),
+        textElement('Another normal line.', 2),
+      ]);
+      const metaIssue = result.issues.find(
+        (i) => i.type === 'meta_description',
+      );
+      expect(metaIssue?.affectedElements).toEqual([1]);
+    });
+  });
+
+  describe('repetitive pattern detection', () => {
+    test('detects repetitive colon pattern ": : : : : : :"', () => {
+      const repetitive = ': : : : : : : : : : : : : : : : : : : :';
+      const result = VlmResponseValidator.validate([
+        textElement(repetitive, 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'repetitive_pattern')).toBe(
+        true,
+      );
+    });
+
+    test('detects repetitive equals pattern "= = = = = = ="', () => {
+      const repetitive = '= = = = = = = = = = = = = = = = = = = =';
+      const result = VlmResponseValidator.validate([
+        textElement(repetitive, 0),
+      ]);
+      expect(result.isValid).toBe(false);
+      expect(result.issues.some((i) => i.type === 'repetitive_pattern')).toBe(
+        true,
+      );
+    });
+
+    test('does not flag normal text as repetitive', () => {
+      const result = VlmResponseValidator.validate([
+        textElement('This is a normal paragraph with varied content.', 0),
+      ]);
+      const repIssue = result.issues.find(
+        (i) => i.type === 'repetitive_pattern',
+      );
+      expect(repIssue).toBeUndefined();
+    });
+
+    test('does not flag short repetitive patterns below ratio threshold', () => {
+      // Small repetitive portion in a larger text
+      const result = VlmResponseValidator.validate([
+        textElement(
+          'Normal text with lots of content that is much longer than any pattern. ' +
+            'More text to make the ratio low. Even more text to ensure the ratio stays under threshold. ' +
+            'And yet more text. : : : : :',
+          0,
+        ),
+      ]);
+      const repIssue = result.issues.find(
+        (i) => i.type === 'repetitive_pattern',
+      );
+      expect(repIssue).toBeUndefined();
+    });
+
+    test('does not flag patterns with fewer than 5 repetitions', () => {
+      const result = VlmResponseValidator.validate([textElement(': : : :', 0)]);
+      const repIssue = result.issues.find(
+        (i) => i.type === 'repetitive_pattern',
+      );
+      expect(repIssue).toBeUndefined();
+    });
+
+    test('includes ratio in repetitive pattern message', () => {
+      const repetitive = ': : : : : : : : : : : : : : : : : : : :';
+      const result = VlmResponseValidator.validate([
+        textElement(repetitive, 0),
+      ]);
+      const repIssue = result.issues.find(
+        (i) => i.type === 'repetitive_pattern',
+      );
+      expect(repIssue?.message).toContain('% of content');
+    });
+
+    test('reports all element orders as affected for repetitive pattern', () => {
+      const repetitive = ': : : : : : : : : : : : : : : : : : : :';
+      const result = VlmResponseValidator.validate([
+        textElement(repetitive, 0),
+        textElement(repetitive, 1),
+      ]);
+      const repIssue = result.issues.find(
+        (i) => i.type === 'repetitive_pattern',
+      );
+      expect(repIssue?.affectedElements).toEqual([0, 1]);
+    });
+  });
 });

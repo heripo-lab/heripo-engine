@@ -63,7 +63,7 @@ describe('PageRenderer', () => {
 
       expect(mockSpawnAsync).toHaveBeenCalledWith('magick', [
         '-density',
-        '144',
+        '300',
         '/tmp/input.pdf',
         '-background',
         'white',
@@ -186,7 +186,7 @@ describe('PageRenderer', () => {
       await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        '[PageRenderer] Rendering PDF at 144 DPI...',
+        '[PageRenderer] Rendering PDF at 300 DPI...',
       );
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[PageRenderer] Rendered 2 pages to /tmp/output/pages',

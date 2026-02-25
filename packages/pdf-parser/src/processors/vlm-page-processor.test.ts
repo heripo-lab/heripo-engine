@@ -1025,6 +1025,52 @@ describe('VlmPageProcessor', () => {
       expect(retryPromptText).toContain('LANGUAGE CONTEXT');
       expect(retryPromptText).toContain('Korean');
     });
+
+    test('includes meta_description warning in quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: '이미지 해상도가 낮아 판독하기 어렵습니다.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain(
+        'described the image instead of transcribing text',
+      );
+    });
+
+    test('includes repetitive_pattern warning in quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: ': : : : : : : : : : : : : : : : : : : :',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('repetitive character patterns');
+    });
   });
 
   describe('onTokenUsage callback', () => {

@@ -400,6 +400,18 @@ export class VlmPageProcessor {
             `This document is in ${this.getLanguageDisplayName(documentLanguage)}. ` +
             'Transcribe the actual characters visible on the page, not translated or fabricated text.',
         );
+      } else if (issue.type === 'meta_description') {
+        warnings.push(
+          '- WARNING: Your previous response described the image instead of transcribing text. ' +
+            'You are an OCR engine. Output the ACTUAL text characters visible on the page, ' +
+            'not descriptions about the image quality or resolution.',
+        );
+      } else if (issue.type === 'repetitive_pattern') {
+        warnings.push(
+          '- WARNING: Your previous response contained repetitive character patterns ' +
+            '(e.g., ": : : : :"). This indicates a transcription failure. ' +
+            'Read each line carefully and output the actual text content.',
+        );
       }
     }
     /* v8 ignore stop */

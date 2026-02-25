@@ -478,7 +478,7 @@ describe('DoclingDocumentAssembler', () => {
       expect(doc.pages['1'].page_no).toBe(1);
       expect(doc.pages['1'].size).toEqual({ width: 1190, height: 1684 });
       expect(doc.pages['1'].image.mimetype).toBe('image/png');
-      expect(doc.pages['1'].image.dpi).toBe(144);
+      expect(doc.pages['1'].image.dpi).toBe(300);
       expect(doc.pages['1'].image.uri).toBe(''); // Filled by VlmDocumentBuilder
       expect(doc.pages['2'].page_no).toBe(2);
     });
@@ -494,6 +494,27 @@ describe('DoclingDocumentAssembler', () => {
       const doc = assembler.assemble(pageResults, metadata);
 
       expect(doc.pages['5'].size).toEqual({ width: 0, height: 0 });
+    });
+
+    test('uses custom DPI when provided in metadata', () => {
+      const pageResults: VlmPageResult[] = [{ pageNo: 1, elements: [] }];
+      const metadata: AssemblerMetadata = {
+        ...createMetadata(1),
+        dpi: 150,
+      };
+
+      const doc = assembler.assemble(pageResults, metadata);
+
+      expect(doc.pages['1'].image.dpi).toBe(150);
+    });
+
+    test('defaults to DPI 300 when not provided in metadata', () => {
+      const pageResults: VlmPageResult[] = [{ pageNo: 1, elements: [] }];
+      const metadata = createMetadata(1);
+
+      const doc = assembler.assemble(pageResults, metadata);
+
+      expect(doc.pages['1'].image.dpi).toBe(300);
     });
   });
 

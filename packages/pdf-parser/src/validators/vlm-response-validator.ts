@@ -40,6 +40,35 @@ const PLACEHOLDER_PATTERNS: RegExp[] = [
   /ut\s+labore\s+et\s+dolore/i,
 ];
 
+/** Patterns indicating VLM described the image instead of transcribing text (Korean) */
+const META_DESCRIPTION_PATTERNS_KO: RegExp[] = [
+  /이미지\s*해상도/,
+  /판독하기?\s*어렵/,
+  /해상도가?\s*(매우\s*)?(낮|부족)/,
+  /텍스트를?\s*판독/,
+  /글자를?\s*읽기?\s*어렵/,
+  /정확한?\s*판독이?\s*(불가|어렵)/,
+];
+
+/** Patterns indicating VLM described the image instead of transcribing text (English) */
+const META_DESCRIPTION_PATTERNS_EN: RegExp[] = [
+  /the image contains/i,
+  /unable to (read|transcribe)/i,
+  /resolution.*(too low|insufficient)/i,
+  /cannot (read|make out|decipher)/i,
+  /text is (not |un)?(legible|readable)/i,
+  /exact transcription is not possible/i,
+];
+
+/**
+ * Minimum ratio of repetitive pattern characters to total content
+ * for flagging as repetitive.
+ */
+const REPETITIVE_PATTERN_RATIO_THRESHOLD = 0.3;
+
+/** Minimum number of repetitions to consider a pattern repetitive */
+const REPETITIVE_PATTERN_MIN_REPEATS = 5;
+
 /** Matches Hangul Syllables and Hangul Jamo */
 const HANGUL_REGEX = /[\uAC00-\uD7AF\u1100-\u11FF]/g;
 
@@ -49,9 +78,11 @@ const CJK_REGEX = /[\u4E00-\u9FFF]/g;
 /**
  * Lightweight, stateless validator for VLM page extraction responses.
  *
- * Detects two categories of hallucination without any additional VLM calls:
+ * Detects four categories of hallucination without any additional VLM calls:
  * 1. Placeholder text (Lorem ipsum and variants)
  * 2. Script anomaly (expected Korean but got Latin-only text)
+ * 3. Meta description (VLM described the image instead of transcribing text)
+ * 4. Repetitive pattern (repeated character patterns like `: : : : :`)
  */
 export class VlmResponseValidator {
   /**
@@ -85,6 +116,16 @@ export class VlmResponseValidator {
       if (scriptIssue) {
         issues.push(scriptIssue);
       }
+    }
+
+    const metaIssue = this.detectMetaDescription(textElements);
+    if (metaIssue) {
+      issues.push(metaIssue);
+    }
+
+    const repetitiveIssue = this.detectRepetitivePattern(textElements);
+    if (repetitiveIssue) {
+      issues.push(repetitiveIssue);
     }
 
     return { isValid: issues.length === 0, issues };
@@ -144,5 +185,78 @@ export class VlmResponseValidator {
     }
 
     return null;
+  }
+
+  /**
+   * Detect meta description: VLM described the image/resolution instead
+   * of transcribing actual text content.
+   */
+  private static detectMetaDescription(
+    elements: VlmPageElement[],
+  ): VlmQualityIssue | null {
+    const affectedElements: number[] = [];
+    const allPatterns = [
+      ...META_DESCRIPTION_PATTERNS_KO,
+      ...META_DESCRIPTION_PATTERNS_EN,
+    ];
+
+    for (const el of elements) {
+      for (const pattern of allPatterns) {
+        if (pattern.test(el.content)) {
+          affectedElements.push(el.order);
+          break;
+        }
+      }
+    }
+
+    if (affectedElements.length === 0) return null;
+
+    return {
+      type: 'meta_description',
+      message: `Detected meta-description of image instead of text transcription in ${affectedElements.length} element(s)`,
+      affectedElements,
+    };
+  }
+
+  /**
+   * Detect repetitive character patterns (e.g., `: : : : :` or `= = = = =`).
+   * Flags when the same character repeats with spaces 5+ times and the
+   * repetitive portion exceeds 30% of total content.
+   */
+  private static detectRepetitivePattern(
+    elements: VlmPageElement[],
+  ): VlmQualityIssue | null {
+    const allContent = elements.map((el) => el.content).join('\n');
+
+    if (allContent.trim().length === 0) return null;
+
+    // Match patterns like "x x x x x" where x is a non-whitespace character
+    const repetitiveRegex = /(\S)(\s+\1){4,}/g;
+    let totalRepetitiveLength = 0;
+
+    let match: RegExpExecArray | null;
+    while ((match = repetitiveRegex.exec(allContent)) !== null) {
+      const repeatedChar = match[1];
+      // Count actual repetitions: split by the repeated character
+      const segment = match[0];
+      const parts = segment.split(/\s+/).filter((p) => p === repeatedChar);
+      /* v8 ignore start -- regex {4,} guarantees ≥5 parts; defensive guard only */
+      if (parts.length >= REPETITIVE_PATTERN_MIN_REPEATS) {
+        /* v8 ignore stop */
+        totalRepetitiveLength += segment.length;
+      }
+    }
+
+    if (totalRepetitiveLength === 0) return null;
+
+    const ratio = totalRepetitiveLength / allContent.length;
+
+    if (ratio < REPETITIVE_PATTERN_RATIO_THRESHOLD) return null;
+
+    return {
+      type: 'repetitive_pattern',
+      message: `Detected repetitive character patterns (${(ratio * 100).toFixed(0)}% of content)`,
+      affectedElements: elements.map((el) => el.order),
+    };
   }
 }

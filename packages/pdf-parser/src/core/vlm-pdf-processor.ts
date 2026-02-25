@@ -17,7 +17,7 @@ import { VlmPageProcessor } from '../processors/vlm-page-processor';
 
 /** Options for VlmPdfProcessor */
 export interface VlmPdfProcessorOptions {
-  /** DPI for page rendering (default: 144) */
+  /** DPI for page rendering (default: 300) */
   renderDpi?: number;
   /** Concurrency for VLM page processing (default: 1) */
   concurrency?: number;
@@ -130,7 +130,8 @@ export class VlmPdfProcessor {
 
     // Step 4: Assemble DoclingDocument
     const name = filename.replace(/\.[^.]+$/, '');
-    const metadata: AssemblerMetadata = { name, filename, pageDimensions };
+    const dpi = options?.renderDpi ?? 300;
+    const metadata: AssemblerMetadata = { name, filename, pageDimensions, dpi };
     const doc = this.assembler.assemble(pageResults, metadata);
 
     // Step 5: Extract picture images

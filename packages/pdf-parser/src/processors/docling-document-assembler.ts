@@ -24,6 +24,8 @@ export interface AssemblerMetadata {
   filename: string;
   /** Page dimensions in pixels (width x height at render DPI) */
   pageDimensions: Map<number, { width: number; height: number }>;
+  /** DPI used for page rendering (default: 300) */
+  dpi?: number;
 }
 
 /** Tracked element metadata for caption linking */
@@ -129,7 +131,8 @@ export class DoclingDocumentAssembler {
       label: 'unspecified',
     };
 
-    const pages = this.buildPages(sortedPages, metadata.pageDimensions);
+    const dpi = metadata.dpi ?? 300;
+    const pages = this.buildPages(sortedPages, metadata.pageDimensions, dpi);
 
     return {
       schema_name: 'DoclingDocument',
@@ -331,6 +334,7 @@ export class DoclingDocumentAssembler {
   private buildPages(
     pageResults: VlmPageResult[],
     pageDimensions: Map<number, { width: number; height: number }>,
+    dpi: number,
   ): Record<string, DoclingPage> {
     const pages: Record<string, DoclingPage> = {};
 
@@ -346,7 +350,7 @@ export class DoclingDocumentAssembler {
         },
         image: {
           mimetype: 'image/png',
-          dpi: 144,
+          dpi,
           size: {
             width: dims?.width ?? 0,
             height: dims?.height ?? 0,

@@ -57,7 +57,11 @@ export interface VlmPageElement {
 }
 
 /** Types of quality issues detected in VLM responses */
-export type VlmQualityIssueType = 'placeholder_text' | 'script_anomaly';
+export type VlmQualityIssueType =
+  | 'placeholder_text'
+  | 'script_anomaly'
+  | 'meta_description'
+  | 'repetitive_pattern';
 
 /** Quality metadata for a processed page */
 export interface VlmPageQuality {

@@ -350,6 +350,35 @@ describe('VlmPdfProcessor', () => {
       );
     });
 
+    test('passes default DPI (300) to assembler metadata', async () => {
+      await processor.process(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        'test.pdf',
+        mockModel,
+      );
+
+      expect(mockAssembler.assemble).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ dpi: 300 }),
+      );
+    });
+
+    test('passes custom renderDpi to assembler metadata', async () => {
+      await processor.process(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        'test.pdf',
+        mockModel,
+        { renderDpi: 150 },
+      );
+
+      expect(mockAssembler.assemble).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ dpi: 150 }),
+      );
+    });
+
     test('passes page dimensions to assembler metadata', async () => {
       mockPageRenderer = createMockPageRenderer(2);
       processor = new VlmPdfProcessor(
