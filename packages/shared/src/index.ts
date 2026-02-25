@@ -15,3 +15,4 @@ export {
   LLMTokenUsageAggregator,
   type TokenUsage,
 } from './utils/llm-token-usage-aggregator';
+export { detectProvider, type ProviderType } from './utils/provider-detector';

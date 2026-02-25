@@ -48,10 +48,10 @@ const SHORT_TYPE_VALUES = Object.keys(TYPE_ABBREVIATIONS) as [
 
 /** Zod schema for a single bounding box */
 const bboxSchema = z.object({
-  l: z.number().min(0).max(1),
-  t: z.number().min(0).max(1),
-  r: z.number().min(0).max(1),
-  b: z.number().min(0).max(1),
+  l: z.number().min(0).max(1).describe('Left edge (0-1 normalized)'),
+  t: z.number().min(0).max(1).describe('Top edge (0-1 normalized)'),
+  r: z.number().min(0).max(1).describe('Right edge (0-1 normalized)'),
+  b: z.number().min(0).max(1).describe('Bottom edge (0-1 normalized)'),
 });
 
 /**
@@ -62,18 +62,24 @@ const bboxSchema = z.object({
  * `required` array. Nullable fields remain required but accept `null`.
  */
 const shortElementSchema = z.object({
-  /** Type abbreviation (e.g., "tx", "sh", "pi") */
-  t: z.enum(SHORT_TYPE_VALUES),
-  /** Content text */
-  c: z.string(),
-  /** Level (for section headers, null if not applicable) */
-  l: z.number().int().positive().nullable(),
-  /** Marker (for list items, null if not applicable) */
-  m: z.string().nullable(),
-  /** Reading order */
-  o: z.number().int().nonnegative(),
-  /** Bounding box (required for picture elements, null for others) */
-  b: bboxSchema.nullable(),
+  t: z
+    .enum(SHORT_TYPE_VALUES)
+    .describe('Type abbreviation (e.g., "tx", "sh", "pi")'),
+  c: z.string().describe('Content text'),
+  l: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .describe('Level (for section headers, null if not applicable)'),
+  m: z
+    .string()
+    .nullable()
+    .describe('Marker (for list items, null if not applicable)'),
+  o: z.number().int().nonnegative().describe('Reading order'),
+  b: bboxSchema
+    .nullable()
+    .describe('Bounding box (required for picture elements, null for others)'),
 });
 
 /** Zod schema for VLM page output with short field names */

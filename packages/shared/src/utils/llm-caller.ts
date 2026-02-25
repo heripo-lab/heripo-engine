@@ -1,6 +1,15 @@
 import type { z } from 'zod';
 
-import { type LanguageModel, Output, generateText } from 'ai';
+import {
+  type LanguageModel,
+  NoObjectGeneratedError,
+  Output,
+  generateText,
+  hasToolCall,
+  tool,
+} from 'ai';
+
+import { type ProviderType, detectProvider } from './provider-detector';
 
 /**
  * Configuration for LLM API call with retry and fallback support
@@ -212,9 +221,112 @@ export class LLMCaller {
   }
 
   /**
+   * Resolve provider options based on provider type.
+   *
+   * Google Gemini requires `structuredOutputs: false` to avoid frequent
+   * `NoObjectGeneratedError` when using `Output.object()`.
+   */
+  private static resolveProviderOptions(
+    providerType: ProviderType,
+  ): Record<string, unknown> | undefined {
+    if (providerType === 'google') {
+      return { google: { structuredOutputs: false } };
+    }
+    return undefined;
+  }
+
+  /**
+   * Generate structured output via forced tool call.
+   *
+   * Used for providers (Together AI, unknown) that do not reliably support
+   * `Output.object()`. Forces the model to call a tool whose inputSchema
+   * is the target Zod schema, then extracts the parsed input.
+   *
+   * @throws NoObjectGeneratedError when the model does not produce a tool call
+   */
+  private static async generateViaToolCall<TOutput>(
+    model: LanguageModel,
+    schema: z.ZodType<TOutput>,
+    promptParams: Record<string, unknown>,
+  ): Promise<{
+    output: TOutput;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+  }> {
+    const submitTool = tool({
+      description: 'Submit the structured result',
+      inputSchema: schema,
+    });
+
+    const result = await (generateText as any)({
+      ...promptParams,
+      model,
+      tools: { submitResult: submitTool },
+      toolChoice: { type: 'tool', toolName: 'submitResult' },
+      stopWhen: hasToolCall('submitResult'),
+    });
+
+    const toolCall = result.toolCalls?.[0] as { input: unknown } | undefined;
+    if (!toolCall) {
+      throw new NoObjectGeneratedError({
+        message: 'Model did not produce a tool call for structured output',
+        text: result.text ?? '',
+        response: result.response,
+        usage: result.usage,
+        finishReason: result.finishReason,
+      });
+    }
+
+    return {
+      output: toolCall.input as TOutput,
+      usage: result.usage,
+    };
+  }
+
+  /**
+   * Generate structured output with provider-aware strategy.
+   *
+   * Strategy per provider:
+   * - OpenAI / Anthropic: `Output.object()` (default)
+   * - Google Gemini: `Output.object()` + `providerOptions.google.structuredOutputs: false`
+   * - Together AI / unknown: forced tool call pattern
+   */
+  private static async generateStructuredOutput<TOutput>(
+    model: LanguageModel,
+    schema: z.ZodType<TOutput>,
+    promptParams: Record<string, unknown>,
+  ): Promise<{
+    output: TOutput;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+  }> {
+    const providerType = detectProvider(model);
+
+    if (providerType === 'togetherai' || providerType === 'unknown') {
+      return this.generateViaToolCall(model, schema, promptParams);
+    }
+
+    const providerOptions = this.resolveProviderOptions(providerType);
+
+    return (generateText as any)({
+      model,
+      output: Output.object({ schema }),
+      ...promptParams,
+      ...(providerOptions && { providerOptions }),
+    });
+  }
+
+  /**
    * Execute LLM call with fallback support
    *
    * Common execution logic for both text and vision calls.
+   * Logs additional details when NoObjectGeneratedError occurs.
    */
   private static async executeWithFallback<TOutput>(
     config: ExecutionConfig,
@@ -269,6 +381,8 @@ export class LLMCaller {
    * 2. If all fail and fallbackModel provided, try fallback up to maxRetries times
    * 3. Throw error if all attempts exhausted
    *
+   * Provider-aware strategy is automatically applied based on the model's provider field.
+   *
    * @template TOutput - Output type from schema validation
    * @param config - LLM call configuration
    * @returns Result with parsed object and usage information
@@ -278,11 +392,7 @@ export class LLMCaller {
     config: LLMCallConfig<z.ZodType<TOutput>>,
   ): Promise<LLMCallResult<TOutput>> {
     return this.executeWithFallback(config, (model) =>
-      generateText({
-        model,
-        output: Output.object({
-          schema: config.schema,
-        }),
+      this.generateStructuredOutput(model, config.schema, {
         system: config.systemPrompt,
         prompt: config.userPrompt,
         temperature: config.temperature,
@@ -296,6 +406,7 @@ export class LLMCaller {
    * Call LLM for vision tasks with message format support
    *
    * Same retry and fallback logic as call(), but using message format instead of system/user prompts.
+   * Provider-aware strategy is automatically applied based on the model's provider field.
    *
    * @template TOutput - Output type from schema validation
    * @param config - LLM vision call configuration
@@ -306,11 +417,7 @@ export class LLMCaller {
     config: LLMVisionCallConfig<z.ZodType<TOutput>>,
   ): Promise<LLMCallResult<TOutput>> {
     return this.executeWithFallback(config, (model) =>
-      generateText({
-        model,
-        output: Output.object({
-          schema: config.schema,
-        }),
+      this.generateStructuredOutput(model, config.schema, {
         messages: config.messages,
         temperature: config.temperature,
         maxRetries: config.maxRetries,

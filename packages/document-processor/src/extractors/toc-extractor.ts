@@ -32,18 +32,37 @@ const VALIDATION_CODE_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
- * Zod schema for recursive TocEntry structure
+ * Build a fixed-depth TocEntry schema to avoid z.lazy() recursion.
+ *
+ * Some LLM providers (e.g., Together AI) cannot resolve lazy Zod schemas
+ * when converting to JSON Schema. This builder creates an eagerly-evaluated
+ * schema with a maximum nesting depth.
  */
-export const TocEntrySchema: z.ZodType<TocEntry> = z.lazy(() =>
-  z.object({
+function buildTocEntrySchema(maxDepth: number): z.ZodObject<any> {
+  const base = {
     title: z.string().describe('Chapter or section title'),
     level: z.number().int().min(1).describe('Hierarchy depth (1 = top level)'),
     pageNo: z.number().int().min(1).describe('Starting page number'),
+  };
+
+  if (maxDepth <= 0) {
+    return z.object(base);
+  }
+
+  return z.object({
+    ...base,
     children: z
-      .array(TocEntrySchema)
+      .array(buildTocEntrySchema(maxDepth - 1))
       .describe('Child sections (use empty array [] if none)'),
-  }),
-);
+  });
+}
+
+/**
+ * Zod schema for TocEntry structure with fixed 4-level depth
+ */
+export const TocEntrySchema: z.ZodType<TocEntry> = buildTocEntrySchema(
+  4,
+) as unknown as z.ZodType<TocEntry>;
 
 /**
  * Schema for LLM response

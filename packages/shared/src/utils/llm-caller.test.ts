@@ -4,12 +4,44 @@ import { Output, generateText } from 'ai';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { LLMCaller } from './llm-caller';
+import { detectProvider } from './provider-detector';
 
 vi.mock('ai', () => ({
   generateText: vi.fn(),
   Output: {
     object: vi.fn((config: { schema: unknown }) => config),
   },
+  tool: vi.fn(
+    (config: { description: string; inputSchema: unknown }) => config,
+  ),
+  hasToolCall: vi.fn((name: string) => `stopWhen:${name}`),
+  NoObjectGeneratedError: class MockNoObjectGeneratedError extends Error {
+    text: string;
+    response: unknown;
+    usage: unknown;
+    finishReason: string;
+    constructor(opts: {
+      message: string;
+      text: string;
+      response?: unknown;
+      usage?: unknown;
+      finishReason?: string;
+    }) {
+      super(opts.message);
+      this.name = 'NoObjectGeneratedError';
+      this.text = opts.text;
+      this.response = opts.response;
+      this.usage = opts.usage;
+      this.finishReason = opts.finishReason ?? 'stop';
+    }
+    static isInstance(error: unknown): boolean {
+      return error instanceof MockNoObjectGeneratedError;
+    }
+  },
+}));
+
+vi.mock('./provider-detector', () => ({
+  detectProvider: vi.fn().mockReturnValue('openai'),
 }));
 
 // Helper to create a mock generateText result
@@ -31,6 +63,35 @@ function createMockGenerateTextResult<T>(
   } as any;
 }
 
+// Helper to create a mock tool-call generateText result
+function createMockToolCallResult(
+  input: unknown,
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  },
+) {
+  return {
+    toolCalls: [{ input }],
+    text: '',
+    response: { id: '', modelId: '', timestamp: new Date() },
+    usage: usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    finishReason: 'tool-calls',
+  } as any;
+}
+
+// Helper to create a mock result with no tool calls
+function createMockEmptyToolCallResult() {
+  return {
+    toolCalls: [],
+    text: 'raw model output',
+    response: { id: '', modelId: '', timestamp: new Date() },
+    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    finishReason: 'stop',
+  } as any;
+}
+
 describe('LLMCaller', () => {
   const mockPrimaryModel = { modelId: 'gpt-5' } as LanguageModel;
   const mockFallbackModel = { modelId: 'claude-opus-4-5' } as LanguageModel;
@@ -38,6 +99,7 @@ describe('LLMCaller', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(detectProvider).mockReturnValue('openai');
   });
 
   describe('extractModelName (via model name extraction)', () => {
@@ -95,7 +157,9 @@ describe('LLMCaller', () => {
         schema: mockSchema,
         systemPrompt: 'test',
         userPrompt: 'test',
-        primaryModel: { model: 'claude-3-sonnet' } as unknown as LanguageModel,
+        primaryModel: {
+          model: 'claude-3-sonnet',
+        } as unknown as LanguageModel,
         maxRetries: 3,
         component: 'Test',
         phase: 'test',
@@ -283,7 +347,7 @@ describe('LLMCaller', () => {
       expect(generateText).toHaveBeenCalledOnce();
     });
 
-    test('should pass correct parameters to generateObject', async () => {
+    test('should pass correct parameters to generateText for OpenAI', async () => {
       const mockResponse = createMockGenerateTextResult(
         { result: 'success' },
         { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
@@ -546,7 +610,7 @@ describe('LLMCaller', () => {
       expect(generateText).toHaveBeenCalledTimes(2);
     });
 
-    test('should pass correct parameters to generateObject with temperature', async () => {
+    test('should pass correct parameters to generateText with temperature', async () => {
       const mockResponse = createMockGenerateTextResult(
         { result: 'success' },
         { inputTokens: 500, outputTokens: 100, totalTokens: 600 },
@@ -702,6 +766,278 @@ describe('LLMCaller', () => {
       expect(result.usage.outputTokens).toBe(120);
       expect(result.usage.totalTokens).toBe(0);
       expect(result.usedFallback).toBe(true);
+    });
+  });
+
+  describe('provider-aware strategy', () => {
+    test('should use Output.object() without providerOptions for OpenAI', async () => {
+      vi.mocked(detectProvider).mockReturnValue('openai');
+      const mockResponse = createMockGenerateTextResult(
+        { result: 'success' },
+        { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(mockResponse);
+
+      await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(callArgs.output).toBeDefined();
+      expect(callArgs.providerOptions).toBeUndefined();
+      expect(callArgs.tools).toBeUndefined();
+    });
+
+    test('should use Output.object() without providerOptions for Anthropic', async () => {
+      vi.mocked(detectProvider).mockReturnValue('anthropic');
+      const mockResponse = createMockGenerateTextResult(
+        { result: 'success' },
+        { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(mockResponse);
+
+      await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(callArgs.output).toBeDefined();
+      expect(callArgs.providerOptions).toBeUndefined();
+      expect(callArgs.tools).toBeUndefined();
+    });
+
+    test('should add google providerOptions for Google Gemini', async () => {
+      vi.mocked(detectProvider).mockReturnValue('google');
+      const mockResponse = createMockGenerateTextResult(
+        { result: 'success' },
+        { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(mockResponse);
+
+      await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(callArgs.output).toBeDefined();
+      expect(callArgs.providerOptions).toEqual({
+        google: { structuredOutputs: false },
+      });
+      expect(callArgs.tools).toBeUndefined();
+    });
+
+    test('should use tool call pattern for Together AI', async () => {
+      vi.mocked(detectProvider).mockReturnValue('togetherai');
+      const mockResult = createMockToolCallResult(
+        { result: 'tool-output' },
+        { inputTokens: 20, outputTokens: 10, totalTokens: 30 },
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(mockResult);
+
+      const result = await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(callArgs.tools).toBeDefined();
+      expect(callArgs.tools.submitResult).toBeDefined();
+      expect(callArgs.toolChoice).toEqual({
+        type: 'tool',
+        toolName: 'submitResult',
+      });
+      expect(callArgs.stopWhen).toBeDefined();
+      expect(callArgs.output).toBeUndefined();
+      expect(result.output).toEqual({ result: 'tool-output' });
+    });
+
+    test('should use tool call pattern for unknown providers', async () => {
+      vi.mocked(detectProvider).mockReturnValue('unknown');
+      const mockResult = createMockToolCallResult({ result: 'unknown-output' });
+      vi.mocked(generateText).mockResolvedValueOnce(mockResult);
+
+      const result = await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(callArgs.tools).toBeDefined();
+      expect(result.output).toEqual({ result: 'unknown-output' });
+    });
+
+    test('should throw NoObjectGeneratedError when tool call not produced', async () => {
+      vi.mocked(detectProvider).mockReturnValue('togetherai');
+      vi.mocked(generateText).mockResolvedValueOnce(
+        createMockEmptyToolCallResult(),
+      );
+
+      await expect(
+        LLMCaller.call({
+          schema: mockSchema,
+          systemPrompt: 'sys',
+          userPrompt: 'usr',
+          primaryModel: mockPrimaryModel,
+          maxRetries: 3,
+          component: 'Test',
+          phase: 'test',
+        }),
+      ).rejects.toThrow(
+        'Model did not produce a tool call for structured output',
+      );
+    });
+
+    test('should use empty string when result.text is undefined in tool call error', async () => {
+      vi.mocked(detectProvider).mockReturnValue('togetherai');
+      vi.mocked(generateText).mockResolvedValueOnce({
+        toolCalls: [],
+        text: undefined,
+        response: { id: '', modelId: '', timestamp: new Date() },
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        finishReason: 'stop',
+      } as any);
+
+      await expect(
+        LLMCaller.call({
+          schema: mockSchema,
+          systemPrompt: 'sys',
+          userPrompt: 'usr',
+          primaryModel: mockPrimaryModel,
+          maxRetries: 3,
+          component: 'Test',
+          phase: 'test',
+        }),
+      ).rejects.toThrow(
+        'Model did not produce a tool call for structured output',
+      );
+    });
+
+    test('should fallback to different provider strategy when primary fails', async () => {
+      // Primary: togetherai (tool call) → fails
+      // Fallback: openai (Output.object) → succeeds
+      vi.mocked(detectProvider)
+        .mockReturnValueOnce('togetherai')
+        .mockReturnValueOnce('openai');
+
+      vi.mocked(generateText).mockRejectedValueOnce(
+        new Error('Tool call failed'),
+      );
+
+      const fallbackResponse = createMockGenerateTextResult(
+        { result: 'openai-fallback' },
+        { inputTokens: 50, outputTokens: 25, totalTokens: 75 },
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(fallbackResponse);
+
+      const result = await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        fallbackModel: mockFallbackModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      expect(result.usedFallback).toBe(true);
+      expect(result.output).toEqual({ result: 'openai-fallback' });
+
+      // First call should use tool call pattern
+      const firstCallArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(firstCallArgs.tools).toBeDefined();
+
+      // Second call should use Output.object
+      const secondCallArgs = vi.mocked(generateText).mock.calls[1][0] as any;
+      expect(secondCallArgs.output).toBeDefined();
+      expect(secondCallArgs.tools).toBeUndefined();
+    });
+
+    test('should apply provider strategy in callVision too', async () => {
+      vi.mocked(detectProvider).mockReturnValue('google');
+      const mockResponse = createMockGenerateTextResult(
+        { result: 'vision-google' },
+        { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+      );
+      vi.mocked(generateText).mockResolvedValueOnce(mockResponse);
+
+      const messages = [
+        {
+          role: 'user' as const,
+          content: [{ type: 'text', text: 'Analyze this image' }],
+        },
+      ];
+
+      await LLMCaller.callVision({
+        schema: mockSchema,
+        messages,
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(callArgs.providerOptions).toEqual({
+        google: { structuredOutputs: false },
+      });
+    });
+
+    test('should extract .input from tool call result', async () => {
+      vi.mocked(detectProvider).mockReturnValue('togetherai');
+      const expectedOutput = {
+        title: 'Chapter 1',
+        level: 1,
+        pageNo: 1,
+      };
+      const mockResult = createMockToolCallResult(expectedOutput, {
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+      });
+      vi.mocked(generateText).mockResolvedValueOnce(mockResult);
+
+      const result = await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      expect(result.output).toEqual(expectedOutput);
+      expect(result.usage.inputTokens).toBe(100);
+      expect(result.usage.outputTokens).toBe(50);
     });
   });
 });
