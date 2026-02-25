@@ -1073,6 +1073,147 @@ describe('VlmPageProcessor', () => {
     });
   });
 
+  describe('text context injection', () => {
+    test('injects TEXT REFERENCE block when pageTexts has text for the page', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, '한국어 텍스트 from pdftotext']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('TEXT REFERENCE');
+      expect(promptText).toContain('한국어 텍스트 from pdftotext');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('does not inject TEXT REFERENCE when pageTexts is not provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('does not inject TEXT REFERENCE when page text is empty string', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, '']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+    });
+
+    test('does not inject TEXT REFERENCE when page text is whitespace only', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, '   \n\n  ']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+    });
+
+    test('does not inject TEXT REFERENCE when page number is not in pageTexts', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[2, 'Text for page 2']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+    });
+
+    test('combines text context with language context when both provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, 'PDF text layer content']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+        documentLanguage: 'ko',
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('TEXT REFERENCE');
+      expect(promptText).toContain('PDF text layer content');
+      expect(promptText).toContain('LANGUAGE CONTEXT');
+      expect(promptText).toContain('Korean');
+    });
+
+    test('injects text context into quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      const pageTexts = new Map([[1, 'Actual PDF text']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('TEXT REFERENCE');
+      expect(retryPromptText).toContain('Actual PDF text');
+      expect(retryPromptText).toContain('quality issues');
+    });
+
+    test('wraps page text in code fences', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, 'Line 1\nLine 2']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('```\nLine 1\nLine 2\n```');
+    });
+  });
+
   describe('onTokenUsage callback', () => {
     test('calls onTokenUsage after each batch completes', async () => {
       const mockAggregator = {

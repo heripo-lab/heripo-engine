@@ -39,6 +39,17 @@ function createMockPageRenderer(pageCount: number = 2, pageFiles?: string[]) {
   };
 }
 
+/** Create a mock PdfTextExtractor */
+function createMockPdfTextExtractor(pageTexts?: Map<number, string>): {
+  extractText: ReturnType<typeof vi.fn>;
+} {
+  return {
+    extractText: vi
+      .fn()
+      .mockResolvedValue(pageTexts ?? new Map<number, string>()),
+  };
+}
+
 /** Create a mock VlmPageProcessor */
 function createMockVlmPageProcessor(results?: VlmPageResult[]) {
   return {
@@ -147,6 +158,7 @@ function mockPageDimensions(dimensions: [number, number][]) {
 
 describe('VlmPdfProcessor', () => {
   let mockPageRenderer: ReturnType<typeof createMockPageRenderer>;
+  let mockPdfTextExtractor: ReturnType<typeof createMockPdfTextExtractor>;
   let mockVlmPageProcessor: ReturnType<typeof createMockVlmPageProcessor>;
   let mockAssembler: ReturnType<typeof createMockAssembler>;
   let mockImageExtractor: ReturnType<typeof createMockImageExtractor>;
@@ -157,6 +169,7 @@ describe('VlmPdfProcessor', () => {
     vi.clearAllMocks();
 
     mockPageRenderer = createMockPageRenderer();
+    mockPdfTextExtractor = createMockPdfTextExtractor();
     mockVlmPageProcessor = createMockVlmPageProcessor();
     mockAssembler = createMockAssembler();
     mockImageExtractor = createMockImageExtractor();
@@ -172,6 +185,7 @@ describe('VlmPdfProcessor', () => {
     processor = new VlmPdfProcessor(
       mockLogger,
       mockPageRenderer as any,
+      mockPdfTextExtractor as any,
       mockVlmPageProcessor as any,
       mockAssembler as any,
       mockImageExtractor as any,
@@ -189,6 +203,10 @@ describe('VlmPdfProcessor', () => {
           pagesDir: '/tmp/output/pages',
           pageFiles: ['/tmp/output/pages/page_0.png'],
         };
+      });
+      mockPdfTextExtractor.extractText.mockImplementation(async () => {
+        callOrder.push('extractText');
+        return new Map();
       });
       mockVlmPageProcessor.processPages.mockImplementation(async () => {
         callOrder.push('processPages');
@@ -220,6 +238,7 @@ describe('VlmPdfProcessor', () => {
 
       expect(callOrder).toEqual([
         'renderPages',
+        'extractText',
         'processPages',
         'getPageDimensions',
         'assemble',
@@ -256,6 +275,41 @@ describe('VlmPdfProcessor', () => {
         '/tmp/test.pdf',
         '/tmp/output',
         { dpi: 300 },
+      );
+    });
+
+    test('passes pdfPath and pageCount to PdfTextExtractor', async () => {
+      await processor.process(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        'test.pdf',
+        mockModel,
+      );
+
+      expect(mockPdfTextExtractor.extractText).toHaveBeenCalledWith(
+        '/tmp/test.pdf',
+        2,
+      );
+    });
+
+    test('passes extracted pageTexts to VlmPageProcessor', async () => {
+      const pageTexts = new Map([
+        [1, 'Page 1 text'],
+        [2, 'Page 2 text'],
+      ]);
+      mockPdfTextExtractor.extractText.mockResolvedValue(pageTexts);
+
+      await processor.process(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        'test.pdf',
+        mockModel,
+      );
+
+      expect(mockVlmPageProcessor.processPages).toHaveBeenCalledWith(
+        expect.any(Array),
+        mockModel,
+        expect.objectContaining({ pageTexts }),
       );
     });
 
@@ -303,7 +357,7 @@ describe('VlmPdfProcessor', () => {
       expect(mockVlmPageProcessor.processPages).toHaveBeenCalledWith(
         expect.any(Array),
         mockModel,
-        {
+        expect.objectContaining({
           concurrency: 3,
           maxRetries: 5,
           temperature: 0.5,
@@ -311,7 +365,7 @@ describe('VlmPdfProcessor', () => {
           fallbackModel,
           aggregator,
           onTokenUsage,
-        },
+        }),
       );
     });
 
@@ -384,6 +438,7 @@ describe('VlmPdfProcessor', () => {
       processor = new VlmPdfProcessor(
         mockLogger,
         mockPageRenderer as any,
+        mockPdfTextExtractor as any,
         mockVlmPageProcessor as any,
         mockAssembler as any,
         mockImageExtractor as any,
@@ -414,8 +469,14 @@ describe('VlmPdfProcessor', () => {
 
     test('passes page results to assembler', async () => {
       const pageResults: VlmPageResult[] = [
-        { pageNo: 1, elements: [{ type: 'text', content: 'Hello', order: 0 }] },
-        { pageNo: 2, elements: [{ type: 'text', content: 'World', order: 0 }] },
+        {
+          pageNo: 1,
+          elements: [{ type: 'text', content: 'Hello', order: 0 }],
+        },
+        {
+          pageNo: 2,
+          elements: [{ type: 'text', content: 'World', order: 0 }],
+        },
       ];
       mockVlmPageProcessor.processPages.mockResolvedValue(pageResults);
 
@@ -562,6 +623,21 @@ describe('VlmPdfProcessor', () => {
       ).rejects.toThrow('Render failed');
     });
 
+    test('propagates PdfTextExtractor errors', async () => {
+      mockPdfTextExtractor.extractText.mockRejectedValue(
+        new Error('pdftotext not found'),
+      );
+
+      await expect(
+        processor.process(
+          '/tmp/test.pdf',
+          '/tmp/output',
+          'test.pdf',
+          mockModel,
+        ),
+      ).rejects.toThrow('pdftotext not found');
+    });
+
     test('propagates VlmPageProcessor errors', async () => {
       mockVlmPageProcessor.processPages.mockRejectedValue(
         new Error('VLM failed'),
@@ -686,6 +762,7 @@ describe('VlmPdfProcessor', () => {
       processor = new VlmPdfProcessor(
         mockLogger,
         mockPageRenderer as any,
+        mockPdfTextExtractor as any,
         mockVlmPageProcessor as any,
         mockAssembler as any,
         mockImageExtractor as any,
@@ -731,6 +808,7 @@ describe('VlmPdfProcessor', () => {
       processor = new VlmPdfProcessor(
         mockLogger,
         mockPageRenderer as any,
+        mockPdfTextExtractor as any,
         mockVlmPageProcessor as any,
         mockAssembler as any,
         mockImageExtractor as any,
@@ -761,6 +839,7 @@ describe('VlmPdfProcessor', () => {
       processor = new VlmPdfProcessor(
         mockLogger,
         mockPageRenderer as any,
+        mockPdfTextExtractor as any,
         mockVlmPageProcessor as any,
         mockAssembler as any,
         mockImageExtractor as any,
@@ -789,6 +868,7 @@ describe('VlmPdfProcessor', () => {
       processor = new VlmPdfProcessor(
         mockLogger,
         mockPageRenderer as any,
+        mockPdfTextExtractor as any,
         mockVlmPageProcessor as any,
         mockAssembler as any,
         mockImageExtractor as any,
@@ -818,6 +898,7 @@ describe('VlmPdfProcessor', () => {
       processor = new VlmPdfProcessor(
         mockLogger,
         mockPageRenderer as any,
+        mockPdfTextExtractor as any,
         mockVlmPageProcessor as any,
         mockAssembler as any,
         mockImageExtractor as any,

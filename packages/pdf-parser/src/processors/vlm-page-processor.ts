@@ -73,6 +73,17 @@ For a page with a header, paragraph, picture, caption, and footer:
 - CRITICAL: You are an OCR engine, NOT an image describer. The "c" field must contain the ACTUAL text characters visible on the page, transcribed verbatim. NEVER output meta-descriptions such as "The image contains...", "The text is not legible...", or "exact transcription is not possible". Always attempt to read and transcribe every visible character, regardless of text size, contrast, or resolution.
 - If text appears blurry or low-contrast, still output your best-effort transcription of the actual characters rather than a description of the image.`;
 
+/** Prompt block for injecting pdftotext reference text */
+const TEXT_REFERENCE_PROMPT =
+  `TEXT REFERENCE: The following text was extracted from the PDF text layer of this page. ` +
+  `This text may be accurate, partially correct, or completely garbled/empty depending ` +
+  `on how the PDF was created. Scanned or image-based PDFs may produce no text or garbage characters.\n\n` +
+  `- If the extracted text looks correct and matches the page image, use it as-is for the "c" field. ` +
+  `Focus on identifying element types, reading order, and bounding boxes.\n` +
+  `- If the extracted text is garbled, empty, or clearly wrong, IGNORE it entirely ` +
+  `and perform OCR from the image as usual.\n` +
+  `- Do NOT blindly trust the extracted text — always verify against what you see in the image.`;
+
 /** Options for VlmPageProcessor */
 export interface VlmPageProcessorOptions {
   /** Number of concurrent page processing (default: 1) */
@@ -91,6 +102,8 @@ export interface VlmPageProcessorOptions {
   onTokenUsage?: (report: TokenUsageReport) => void;
   /** Expected document language for quality validation (ISO 639-1, e.g., 'ko') */
   documentLanguage?: string;
+  /** Pre-extracted page texts from pdftotext (1-based pageNo → text) */
+  pageTexts?: Map<number, string>;
 }
 
 /**
@@ -185,9 +198,14 @@ export class VlmPageProcessor {
 
     const base64Image = readFileSync(filePath).toString('base64');
 
-    const initialPrompt = options?.documentLanguage
+    const basePrompt = options?.documentLanguage
       ? this.buildLanguageAwarePrompt(options.documentLanguage)
       : PAGE_ANALYSIS_PROMPT;
+
+    const initialPrompt = this.injectTextContext(
+      basePrompt,
+      options?.pageTexts?.get(pageNo),
+    );
 
     const messages = [
       {
@@ -297,9 +315,14 @@ export class VlmPageProcessor {
       `[VlmPageProcessor] Page ${pageNo}: quality issues detected: ${issueTypes.join(', ')}`,
     );
 
-    const retryPrompt = this.buildQualityRetryPrompt(
+    const baseRetryPrompt = this.buildQualityRetryPrompt(
       validation.issues,
       options?.documentLanguage,
+    );
+
+    const retryPrompt = this.injectTextContext(
+      baseRetryPrompt,
+      options?.pageTexts?.get(pageNo),
     );
 
     const retryMessages = [
@@ -362,6 +385,20 @@ export class VlmPageProcessor {
         issueTypes: retryValidation.issues.map((i) => i.type),
       },
     };
+  }
+
+  /**
+   * Inject pdftotext reference text into the prompt.
+   * If the page text is empty or undefined, the original prompt is returned unchanged.
+   */
+  private injectTextContext(prompt: string, pageText?: string): string {
+    if (!pageText || pageText.trim().length === 0) {
+      return prompt;
+    }
+
+    return (
+      TEXT_REFERENCE_PROMPT + '\n\n```\n' + pageText + '\n```\n\n' + prompt
+    );
   }
 
   /**

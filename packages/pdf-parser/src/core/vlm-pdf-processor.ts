@@ -11,6 +11,7 @@ import { spawnAsync } from '@heripo/shared';
 
 import { DoclingDocumentAssembler } from '../processors/docling-document-assembler';
 import { PageRenderer } from '../processors/page-renderer';
+import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmDocumentBuilder } from '../processors/vlm-document-builder';
 import { VlmImageExtractor } from '../processors/vlm-image-extractor';
 import { VlmPageProcessor } from '../processors/vlm-page-processor';
@@ -48,10 +49,11 @@ export interface VlmPdfProcessorResult {
  *
  * Execution order:
  * 1. PageRenderer.renderPages() — PDF → page images (PNG)
- * 2. VlmPageProcessor.processPages() — page images → VlmPageResult[]
- * 3. DoclingDocumentAssembler.assemble() — VlmPageResult[] → DoclingDocument
- * 4. VlmImageExtractor.extractImages() — crop picture regions
- * 5. VlmDocumentBuilder.build() — fill image URIs
+ * 2. PdfTextExtractor.extractText() — PDF → page texts (Map)
+ * 3. VlmPageProcessor.processPages() — page images + texts → VlmPageResult[]
+ * 4. DoclingDocumentAssembler.assemble() — VlmPageResult[] → DoclingDocument
+ * 5. VlmImageExtractor.extractImages() — crop picture regions
+ * 6. VlmDocumentBuilder.build() — fill image URIs
  *
  * This processor bypasses Docling entirely, producing a DoclingDocument
  * directly from VLM output.
@@ -60,6 +62,7 @@ export class VlmPdfProcessor {
   constructor(
     private readonly logger: LoggerMethods,
     private readonly pageRenderer: PageRenderer,
+    private readonly pdfTextExtractor: PdfTextExtractor,
     private readonly vlmPageProcessor: VlmPageProcessor,
     private readonly assembler: DoclingDocumentAssembler,
     private readonly imageExtractor: VlmImageExtractor,
@@ -73,6 +76,7 @@ export class VlmPdfProcessor {
     return new VlmPdfProcessor(
       logger,
       new PageRenderer(logger),
+      new PdfTextExtractor(logger),
       new VlmPageProcessor(logger),
       new DoclingDocumentAssembler(),
       new VlmImageExtractor(logger),
@@ -109,7 +113,13 @@ export class VlmPdfProcessor {
       `[VlmPdfProcessor] Rendered ${renderResult.pageCount} pages`,
     );
 
-    // Step 2: Process pages through VLM
+    // Step 2: Extract text from PDF pages using pdftotext
+    const pageTexts = await this.pdfTextExtractor.extractText(
+      pdfPath,
+      renderResult.pageCount,
+    );
+
+    // Step 3: Process pages through VLM (with text context)
     const pageResults = await this.vlmPageProcessor.processPages(
       renderResult.pageFiles,
       model,
@@ -122,19 +132,20 @@ export class VlmPdfProcessor {
         aggregator: options?.aggregator,
         onTokenUsage: options?.onTokenUsage,
         documentLanguage: options?.documentLanguage,
+        pageTexts,
       },
     );
 
-    // Step 3: Get page dimensions for assembler metadata
+    // Step 4: Get page dimensions for assembler metadata
     const pageDimensions = await this.getPageDimensions(renderResult.pageFiles);
 
-    // Step 4: Assemble DoclingDocument
+    // Step 5: Assemble DoclingDocument
     const name = filename.replace(/\.[^.]+$/, '');
     const dpi = options?.renderDpi ?? 300;
     const metadata: AssemblerMetadata = { name, filename, pageDimensions, dpi };
     const doc = this.assembler.assemble(pageResults, metadata);
 
-    // Step 5: Extract picture images
+    // Step 6: Extract picture images
     const pictureLocations = this.extractPictureLocations(pageResults);
     const imageFiles = await this.imageExtractor.extractImages(
       renderResult.pageFiles,
@@ -142,7 +153,7 @@ export class VlmPdfProcessor {
       outputDir,
     );
 
-    // Step 6: Build final document with image URIs
+    // Step 7: Build final document with image URIs
     const finalDoc = this.documentBuilder.build(
       doc,
       renderResult.pageFiles,
