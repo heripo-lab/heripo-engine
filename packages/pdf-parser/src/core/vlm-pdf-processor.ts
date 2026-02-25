@@ -1,5 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { DoclingDocument } from '@heripo/model';
+import type { DoclingDocument, TokenUsageReport } from '@heripo/model';
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
@@ -31,6 +31,8 @@ export interface VlmPdfProcessorOptions {
   fallbackModel?: LanguageModel;
   /** Token usage aggregator for tracking */
   aggregator?: LLMTokenUsageAggregator;
+  /** Callback fired after each batch of pages completes, with cumulative token usage */
+  onTokenUsage?: (report: TokenUsageReport) => void;
 }
 
 /** Result of VLM-based PDF processing */
@@ -116,6 +118,7 @@ export class VlmPdfProcessor {
         abortSignal: options?.abortSignal,
         fallbackModel: options?.fallbackModel,
         aggregator: options?.aggregator,
+        onTokenUsage: options?.onTokenUsage,
       },
     );
 

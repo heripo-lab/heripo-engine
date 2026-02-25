@@ -71,6 +71,8 @@ export type PDFConvertOptions = Omit<
   forcedMethod?: 'ocrmac' | 'vlm';
   /** Token usage aggregator for tracking across sampling and VLM processing */
   aggregator?: LLMTokenUsageAggregator;
+  /** Callback fired after each batch of VLM pages completes, with cumulative token usage */
+  onTokenUsage?: (report: TokenUsageReport) => void;
 };
 
 /** Result of strategy-based conversion */
@@ -159,6 +161,14 @@ export class PDFConverter {
     this.logger.info(
       `[PDFConverter] OCR strategy: ${strategy.method} (${strategy.reason})`,
     );
+
+    // Emit token usage after sampling phase (so frontend sees sampling cost immediately)
+    if (trackedOptions.onTokenUsage) {
+      const samplingReport = this.buildTokenReport(aggregator);
+      if (samplingReport) {
+        trackedOptions.onTokenUsage(samplingReport);
+      }
+    }
 
     // Step 2: Execute conversion based on strategy
     if (strategy.method === 'vlm') {
@@ -295,6 +305,7 @@ export class PDFConverter {
           concurrency: options.vlmConcurrency,
           aggregator: options.aggregator,
           abortSignal,
+          onTokenUsage: options.onTokenUsage,
         },
       );
 
@@ -555,6 +566,7 @@ export class PDFConverter {
         'skipSampling',
         'forcedMethod',
         'aggregator',
+        'onTokenUsage',
       ]),
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',

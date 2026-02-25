@@ -280,6 +280,13 @@ export async function runTaskWorker(
         : {}),
       ...(options.forcedMethod ? { forcedMethod: options.forcedMethod } : {}),
       vlmConcurrency: options.vlmConcurrency,
+      onTokenUsage: (report: TokenUsageReport) => {
+        const tokenEvent: SSEEvent = {
+          type: 'token-usage',
+          data: report,
+        };
+        emitter.emit(`task:${taskId}`, tokenEvent);
+      },
     };
 
     try {
@@ -301,15 +308,6 @@ export async function runTaskWorker(
 
     logger.info('PDF parsing completed');
     emitProgress('pdf-parse', calculateProgress(1, 100));
-
-    // Emit VLM token usage immediately after PDF parsing (if available)
-    if (vlmTokenUsage) {
-      const vlmEvent: SSEEvent = {
-        type: 'token-usage',
-        data: vlmTokenUsage,
-      };
-      emitter.emit(`task:${taskId}`, vlmEvent);
-    }
 
     // Create DocumentProcessor with real-time token usage callback
     const onTokenUsage = (dpReport: TokenUsageReport) => {

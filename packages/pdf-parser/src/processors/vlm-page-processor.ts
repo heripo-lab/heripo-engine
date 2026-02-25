@@ -1,4 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
+import type { TokenUsageReport } from '@heripo/model';
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
@@ -73,6 +74,8 @@ export interface VlmPageProcessorOptions {
   fallbackModel?: LanguageModel;
   /** Token usage aggregator for tracking */
   aggregator?: LLMTokenUsageAggregator;
+  /** Callback fired after each batch of pages completes, with cumulative token usage */
+  onTokenUsage?: (report: TokenUsageReport) => void;
 }
 
 /**
@@ -134,6 +137,13 @@ export class VlmPageProcessor {
         ),
       );
       results.push(...batchResults);
+
+      // Emit incremental token usage after each batch
+      if (options?.onTokenUsage && options?.aggregator) {
+        options.onTokenUsage(
+          options.aggregator.getReport() as TokenUsageReport,
+        );
+      }
     }
 
     this.logger.info(

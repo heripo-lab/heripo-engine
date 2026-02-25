@@ -282,6 +282,7 @@ describe('VlmPdfProcessor', () => {
       const abortController = new AbortController();
       const fallbackModel = { modelId: 'fallback' } as any;
       const aggregator = { track: vi.fn() } as any;
+      const onTokenUsage = vi.fn();
 
       await processor.process(
         '/tmp/test.pdf',
@@ -295,6 +296,7 @@ describe('VlmPdfProcessor', () => {
           abortSignal: abortController.signal,
           fallbackModel,
           aggregator,
+          onTokenUsage,
         },
       );
 
@@ -308,7 +310,26 @@ describe('VlmPdfProcessor', () => {
           abortSignal: abortController.signal,
           fallbackModel,
           aggregator,
+          onTokenUsage,
         },
+      );
+    });
+
+    test('forwards onTokenUsage callback to VlmPageProcessor', async () => {
+      const onTokenUsage = vi.fn();
+
+      await processor.process(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        'test.pdf',
+        mockModel,
+        { onTokenUsage },
+      );
+
+      expect(mockVlmPageProcessor.processPages).toHaveBeenCalledWith(
+        expect.any(Array),
+        mockModel,
+        expect.objectContaining({ onTokenUsage }),
       );
     });
 

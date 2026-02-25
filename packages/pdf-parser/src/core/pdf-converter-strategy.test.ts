@@ -390,7 +390,34 @@ describe('PDFConverter.convertWithStrategy', () => {
         '/test/cwd/output/report-1',
         'test.pdf',
         mockModel,
-        { aggregator, abortSignal: abortController.signal },
+        expect.objectContaining({
+          aggregator,
+          abortSignal: abortController.signal,
+        }),
+      );
+    });
+
+    test('forwards onTokenUsage callback to VlmPdfProcessor', async () => {
+      const onTokenUsage = vi.fn();
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          forcedMethod: 'vlm',
+          vlmProcessorModel: mockModel,
+          onTokenUsage,
+        },
+      );
+
+      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
+        mockModel,
+        expect.objectContaining({ onTokenUsage }),
       );
     });
 
@@ -712,6 +739,75 @@ describe('PDFConverter.convertWithStrategy', () => {
       );
 
       expect(result.tokenUsageReport).toBeNull();
+
+      convertSpy.mockRestore();
+    });
+
+    test('calls onTokenUsage after sampling phase with sampling report', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+      const onTokenUsage = vi.fn();
+
+      // Simulate OcrStrategySampler calling aggregator.track() during sampling
+      mockSamplerInstance.sample.mockImplementation(
+        async (
+          _pdfPath: string,
+          _samplingDir: string,
+          _model: unknown,
+          opts: { aggregator?: LLMTokenUsageAggregator },
+        ) => {
+          opts.aggregator?.track({
+            component: 'OcrStrategySampler',
+            phase: 'korean-hanja-mix-detection',
+            model: 'primary',
+            modelName: 'sampler-model',
+            inputTokens: 800,
+            outputTokens: 30,
+            totalTokens: 830,
+          });
+          return {
+            method: 'ocrmac' as const,
+            reason: 'No Korean-Hanja mix detected',
+            sampledPages: 3,
+            totalPages: 10,
+          };
+        },
+      );
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { strategySamplerModel: mockModel, onTokenUsage },
+      );
+
+      // onTokenUsage should be called after sampling completes
+      expect(onTokenUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          components: expect.arrayContaining([
+            expect.objectContaining({ component: 'OcrStrategySampler' }),
+          ]),
+          total: expect.objectContaining({ inputTokens: 800 }),
+        }),
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('does not call onTokenUsage after sampling when no LLM calls were tracked', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+      const onTokenUsage = vi.fn();
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'ocrmac', onTokenUsage },
+      );
+
+      // Forced ocrmac skips sampling entirely → no LLM usage → onTokenUsage not called
+      expect(onTokenUsage).not.toHaveBeenCalled();
 
       convertSpy.mockRestore();
     });

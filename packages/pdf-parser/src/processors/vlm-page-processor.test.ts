@@ -643,4 +643,64 @@ describe('VlmPageProcessor', () => {
       expect(mockAggregator.track).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('onTokenUsage callback', () => {
+    test('calls onTokenUsage after each batch completes', async () => {
+      const mockAggregator = {
+        track: vi.fn(),
+        getReport: vi.fn().mockReturnValue({
+          components: [{ component: 'VlmPageProcessor' }],
+          total: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 },
+        }),
+      };
+      const onTokenUsage = vi.fn();
+
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(
+        ['/tmp/p0.png', '/tmp/p1.png', '/tmp/p2.png'],
+        mockModel,
+        { concurrency: 2, aggregator: mockAggregator as any, onTokenUsage },
+      );
+
+      // 3 pages with concurrency 2 = 2 batches
+      expect(onTokenUsage).toHaveBeenCalledTimes(2);
+      expect(onTokenUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          total: expect.objectContaining({ inputTokens: 1000 }),
+        }),
+      );
+    });
+
+    test('does not call onTokenUsage when aggregator is not provided', async () => {
+      const onTokenUsage = vi.fn();
+
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/p0.png'], mockModel, {
+        onTokenUsage,
+      });
+
+      expect(onTokenUsage).not.toHaveBeenCalled();
+    });
+
+    test('does not call onTokenUsage when only aggregator is provided', async () => {
+      const mockAggregator = { track: vi.fn() };
+
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      // No onTokenUsage callback — should not throw
+      await processor.processPages(['/tmp/p0.png'], mockModel, {
+        aggregator: mockAggregator as any,
+      });
+
+      expect(mockAggregator.track).toHaveBeenCalledTimes(1);
+    });
+  });
 });
