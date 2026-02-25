@@ -662,6 +662,83 @@ describe('DoclingDocumentAssembler', () => {
     });
   });
 
+  describe('extractIndex (private)', () => {
+    test('extracts numeric index from valid self_ref', () => {
+      const result = (assembler as any).extractIndex('#/pictures/0');
+      expect(result).toBe(0);
+    });
+
+    test('extracts higher numeric index', () => {
+      const result = (assembler as any).extractIndex('#/tables/5');
+      expect(result).toBe(5);
+    });
+
+    test('returns null for non-numeric self_ref', () => {
+      const result = (assembler as any).extractIndex('#/pictures/abc');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('assemble - caption linking with invalid selfRef', () => {
+    test('does not link caption when picture selfRef has invalid index', () => {
+      // Use a picture element, then a caption.
+      // Override the selfRef to simulate invalid data by monkeypatching.
+      const pageResults: VlmPageResult[] = [
+        {
+          pageNo: 1,
+          elements: [
+            {
+              type: 'picture',
+              content: '',
+              order: 0,
+              bbox: { l: 0, t: 0, r: 1, b: 0.5 },
+            },
+            { type: 'caption', content: 'Figure caption', order: 1 },
+          ],
+        },
+      ];
+      const metadata = createMetadata(1);
+
+      // Spy on extractIndex to return null for picture refs
+      const origExtractIndex = (assembler as any).extractIndex.bind(assembler);
+      (assembler as any).extractIndex = (selfRef: string) => {
+        if (selfRef.includes('pictures')) return null;
+        return origExtractIndex(selfRef);
+      };
+
+      const doc = assembler.assemble(pageResults, metadata);
+      expect(doc.pictures[0].captions).toEqual([]);
+
+      // Restore
+      (assembler as any).extractIndex = origExtractIndex;
+    });
+
+    test('does not link caption when table selfRef has invalid index', () => {
+      const pageResults: VlmPageResult[] = [
+        {
+          pageNo: 1,
+          elements: [
+            { type: 'table', content: '| A | B |', order: 0 },
+            { type: 'caption', content: 'Table caption', order: 1 },
+          ],
+        },
+      ];
+      const metadata = createMetadata(1);
+
+      const origExtractIndex = (assembler as any).extractIndex.bind(assembler);
+      (assembler as any).extractIndex = (selfRef: string) => {
+        if (selfRef.includes('tables')) return null;
+        return origExtractIndex(selfRef);
+      };
+
+      const doc = assembler.assemble(pageResults, metadata);
+      expect(doc.tables[0].captions).toEqual([]);
+
+      // Restore
+      (assembler as any).extractIndex = origExtractIndex;
+    });
+  });
+
   describe('assemble - mixed element numbering', () => {
     test('numbers texts, pictures, tables independently', () => {
       const pageResults: VlmPageResult[] = [
