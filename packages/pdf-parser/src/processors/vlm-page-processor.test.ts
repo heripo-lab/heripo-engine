@@ -1,4 +1,4 @@
-import { BatchProcessor, LLMCaller } from '@heripo/shared';
+import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -8,14 +8,23 @@ vi.mock('@heripo/shared', () => ({
   LLMCaller: {
     callVision: vi.fn(),
   },
-  BatchProcessor: {
-    createBatches: <T>(items: T[], batchSize: number): T[][] => {
-      const batches: T[][] = [];
-      for (let i = 0; i < items.length; i += batchSize) {
-        batches.push(items.slice(i, i + batchSize));
-      }
-      return batches;
-    },
+  ConcurrentPool: {
+    run: vi.fn(
+      async <T, R>(
+        items: T[],
+        _concurrency: number,
+        processFn: (item: T, index: number) => Promise<R>,
+        onItemComplete?: (result: R, index: number) => void,
+      ): Promise<R[]> => {
+        const results: R[] = [];
+        for (let i = 0; i < items.length; i++) {
+          const result = await processFn(items[i], i);
+          results.push(result);
+          onItemComplete?.(result, i);
+        }
+        return results;
+      },
+    ),
   },
 }));
 
@@ -32,6 +41,7 @@ const mockLogger = {
 
 const mockCallVision = LLMCaller.callVision as Mock;
 const mockReadFileSync = readFileSync as Mock;
+const mockConcurrentPoolRun = ConcurrentPool.run as Mock;
 
 /** Minimal mock LanguageModel for testing */
 const mockModel = { modelId: 'test-vision-model' } as any;
@@ -70,6 +80,23 @@ describe('VlmPageProcessor', () => {
     vi.clearAllMocks();
     processor = new VlmPageProcessor(mockLogger);
     mockReadFileSync.mockReturnValue(Buffer.from('fake-image-data'));
+    // Restore default ConcurrentPool.run implementation after clearAllMocks
+    mockConcurrentPoolRun.mockImplementation(
+      async <T, R>(
+        items: T[],
+        _concurrency: number,
+        processFn: (item: T, index: number) => Promise<R>,
+        onItemComplete?: (result: R, index: number) => void,
+      ): Promise<R[]> => {
+        const results: R[] = [];
+        for (let i = 0; i < items.length; i++) {
+          const result = await processFn(items[i], i);
+          results.push(result);
+          onItemComplete?.(result, i);
+        }
+        return results;
+      },
+    );
   });
 
   describe('processPages', () => {
@@ -140,18 +167,21 @@ describe('VlmPageProcessor', () => {
     });
 
     test('uses default concurrency of 1', async () => {
-      const createBatchesSpy = vi.spyOn(BatchProcessor, 'createBatches');
       mockCallVision.mockResolvedValue(
         createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
       );
 
       await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
 
-      expect(createBatchesSpy).toHaveBeenCalledWith(expect.any(Array), 1);
+      expect(mockConcurrentPoolRun).toHaveBeenCalledWith(
+        expect.any(Array),
+        1,
+        expect.any(Function),
+        expect.any(Function),
+      );
     });
 
     test('uses custom concurrency when specified', async () => {
-      const createBatchesSpy = vi.spyOn(BatchProcessor, 'createBatches');
       mockCallVision.mockResolvedValue(
         createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
       );
@@ -160,15 +190,18 @@ describe('VlmPageProcessor', () => {
         concurrency: 2,
       });
 
-      expect(createBatchesSpy).toHaveBeenCalledWith(expect.any(Array), 2);
+      expect(mockConcurrentPoolRun).toHaveBeenCalledWith(
+        expect.any(Array),
+        2,
+        expect.any(Function),
+        expect.any(Function),
+      );
     });
 
-    test('processes batches sequentially for concurrency control', async () => {
-      const callOrder: number[] = [];
-      mockCallVision.mockImplementation(async () => {
-        callOrder.push(callOrder.length);
-        return createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]);
-      });
+    test('processes all pages via ConcurrentPool', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
 
       const results = await processor.processPages(
         ['/tmp/p0.png', '/tmp/p1.png', '/tmp/p2.png'],
@@ -176,7 +209,6 @@ describe('VlmPageProcessor', () => {
         { concurrency: 2 },
       );
 
-      // 3 pages with concurrency 2: batch 1 (2 pages), batch 2 (1 page)
       expect(results).toHaveLength(3);
       expect(mockCallVision).toHaveBeenCalledTimes(3);
     });
@@ -1215,7 +1247,7 @@ describe('VlmPageProcessor', () => {
   });
 
   describe('onTokenUsage callback', () => {
-    test('calls onTokenUsage after each batch completes', async () => {
+    test('calls onTokenUsage after each page completes', async () => {
       const mockAggregator = {
         track: vi.fn(),
         getReport: vi.fn().mockReturnValue({
@@ -1235,8 +1267,8 @@ describe('VlmPageProcessor', () => {
         { concurrency: 2, aggregator: mockAggregator as any, onTokenUsage },
       );
 
-      // 3 pages with concurrency 2 = 2 batches
-      expect(onTokenUsage).toHaveBeenCalledTimes(2);
+      // Worker pool calls onItemComplete per page, so 3 pages = 3 calls
+      expect(onTokenUsage).toHaveBeenCalledTimes(3);
       expect(onTokenUsage).toHaveBeenCalledWith(
         expect.objectContaining({
           total: expect.objectContaining({ inputTokens: 1000 }),

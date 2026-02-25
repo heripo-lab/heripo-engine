@@ -7,7 +7,7 @@ import type { VlmPageResult } from '../types/vlm-page-result';
 import type { VlmPageOutput } from '../types/vlm-page-schema';
 import type { VlmQualityIssue } from '../validators/vlm-response-validator';
 
-import { BatchProcessor, LLMCaller } from '@heripo/shared';
+import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 
 import { toVlmPageResult, vlmPageOutputSchema } from '../types/vlm-page-schema';
@@ -98,7 +98,7 @@ export interface VlmPageProcessorOptions {
   fallbackModel?: LanguageModel;
   /** Token usage aggregator for tracking */
   aggregator?: LLMTokenUsageAggregator;
-  /** Callback fired after each batch of pages completes, with cumulative token usage */
+  /** Callback fired after each page completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
   /** Expected document language for quality validation (ISO 639-1, e.g., 'ko') */
   documentLanguage?: string;
@@ -113,7 +113,7 @@ export interface VlmPageProcessorOptions {
  * output schema. The VLM analyzes the page and returns classified elements
  * (text, headers, pictures, tables, etc.) with reading order and bounding boxes.
  *
- * Uses batch processing for concurrent page handling and tracks token usage
+ * Uses a worker pool for concurrent page handling and tracks token usage
  * via LLMTokenUsageAggregator.
  */
 export class VlmPageProcessor {
@@ -153,26 +153,21 @@ export class VlmPageProcessor {
       filePath,
     }));
 
-    // Process pages in batches for concurrency control.
-    // Each batch runs concurrently; batches run sequentially.
-    const batches = BatchProcessor.createBatches(pageInputs, concurrency);
-    const results: VlmPageResult[] = [];
-
-    for (const batch of batches) {
-      const batchResults = await Promise.all(
-        batch.map((input) =>
-          this.processPage(input.pageNo, input.filePath, model, options),
-        ),
-      );
-      results.push(...batchResults);
-
-      // Emit incremental token usage after each batch
-      if (options?.onTokenUsage && options?.aggregator) {
-        options.onTokenUsage(
-          options.aggregator.getReport() as TokenUsageReport,
-        );
-      }
-    }
+    // Process pages using a worker pool for optimal concurrency.
+    // Workers pull from a shared queue; when one finishes, it immediately takes the next item.
+    const results = await ConcurrentPool.run(
+      pageInputs,
+      concurrency,
+      (input) => this.processPage(input.pageNo, input.filePath, model, options),
+      () => {
+        // Emit incremental token usage after each page completes
+        if (options?.onTokenUsage && options?.aggregator) {
+          options.onTokenUsage(
+            options.aggregator.getReport() as TokenUsageReport,
+          );
+        }
+      },
+    );
 
     this.logger.info(
       `[VlmPageProcessor] Completed processing ${results.length} pages`,

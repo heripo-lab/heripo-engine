@@ -1,4 +1,5 @@
 export { BatchProcessor } from './utils/batch-processor';
+export { ConcurrentPool } from './utils/concurrent-pool';
 export {
   spawnAsync,
   type SpawnAsyncOptions,

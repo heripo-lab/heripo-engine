@@ -330,9 +330,11 @@ export function ProcessingOptionsCard({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="1">1 (sequential)</SelectItem>
-                    <SelectItem value="2">2 concurrent</SelectItem>
                     <SelectItem value="3">3 concurrent</SelectItem>
                     <SelectItem value="5">5 concurrent</SelectItem>
+                    <SelectItem value="10">10 concurrent</SelectItem>
+                    <SelectItem value="20">20 concurrent</SelectItem>
+                    <SelectItem value="50">50 concurrent</SelectItem>
                   </SelectContent>
                 </Select>
               </DisabledWrapper>

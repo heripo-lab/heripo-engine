@@ -59,7 +59,7 @@ export const processingOptionsSchema = z.object({
   captionParserModel: llmModelSchema,
 
   // VLM Processing
-  vlmConcurrency: z.number().int().positive().max(10).default(1),
+  vlmConcurrency: z.number().int().positive().max(50).default(1),
 
   // Batch & Retry
   textCleanerBatchSize: z.number().int().nonnegative().default(20),
