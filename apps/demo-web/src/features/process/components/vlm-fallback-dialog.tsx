@@ -28,7 +28,7 @@ const TEXT = {
   en: {
     title: 'Switched to VLM Pipeline',
     description:
-      'Automatically switched to VLM pipeline due to insufficient Hanja quality in OCR results.',
+      'Automatically switched to VLM pipeline due to insufficient Korean-Hanja mix quality in OCR results.',
     timeWarning:
       'The VLM pipeline re-analyzes each page with a vision model, which may take {{bold}}over 1 hour{{/bold}} additionally. The progress reset is expected.',
     browserClose:

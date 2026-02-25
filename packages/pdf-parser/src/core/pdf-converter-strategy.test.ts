@@ -107,7 +107,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     mockSamplerInstance = {
       sample: vi.fn().mockResolvedValue({
         method: 'ocrmac',
-        reason: 'No hanja detected',
+        reason: 'No Korean-Hanja mix detected',
         sampledPages: 3,
         totalPages: 10,
       }),
@@ -339,7 +339,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     test('uses VlmPdfProcessor when strategy is VLM', async () => {
       mockSamplerInstance.sample.mockResolvedValue({
         method: 'vlm',
-        reason: 'Hanja detected on page 3',
+        reason: 'Korean-Hanja mix detected on page 3',
         sampledPages: 2,
         totalPages: 10,
       });
@@ -596,7 +596,7 @@ describe('PDFConverter.convertWithStrategy', () => {
         ) => {
           opts.aggregator?.track({
             component: 'OcrStrategySampler',
-            phase: 'hanja-detection',
+            phase: 'korean-hanja-mix-detection',
             model: 'primary',
             modelName: 'sampler-model',
             inputTokens: 1000,
@@ -605,7 +605,7 @@ describe('PDFConverter.convertWithStrategy', () => {
           });
           return {
             method: 'ocrmac' as const,
-            reason: 'No hanja detected',
+            reason: 'No Korean-Hanja mix detected',
             sampledPages: 3,
             totalPages: 10,
           };
@@ -643,7 +643,7 @@ describe('PDFConverter.convertWithStrategy', () => {
         ) => {
           opts.aggregator?.track({
             component: 'OcrStrategySampler',
-            phase: 'hanja-detection',
+            phase: 'korean-hanja-mix-detection',
             model: 'primary',
             modelName: 'sampler-model',
             inputTokens: 800,
@@ -652,7 +652,7 @@ describe('PDFConverter.convertWithStrategy', () => {
           });
           return {
             method: 'vlm' as const,
-            reason: 'Hanja detected',
+            reason: 'Korean-Hanja mix detected',
             sampledPages: 3,
             totalPages: 10,
           };

@@ -14,9 +14,9 @@ export interface KnownLimitation {
 
 export const KNOWN_LIMITATIONS: KnownLimitation[] = [
   {
-    id: 'hanja-ocr',
-    titleKo: '한자 OCR 문제',
-    titleEn: 'Hanja OCR Issues',
+    id: 'korean-hanja-mix-ocr',
+    titleKo: '한글·한자 혼용 OCR 문제',
+    titleEn: 'Korean-Hanja Mix OCR Issues',
     descriptionKo:
       '한글/한자 혼용 문서에서 한자가 깨질 수 있습니다. 국한문 혼용 문서 전용 OCR을 준비 중입니다.',
     descriptionEn:

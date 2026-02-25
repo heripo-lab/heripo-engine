@@ -42,13 +42,13 @@ function createMockPageRenderer(pageCount: number = 3) {
   };
 }
 
-/** Helper to create a mock VLM hanja detection result */
-function createMockHanjaResult(hasHanja: boolean) {
+/** Helper to create a mock VLM Korean-Hanja mix detection result */
+function createMockKoreanHanjaMixResult(hasKoreanHanjaMix: boolean) {
   return {
-    output: { hasHanja },
+    output: { hasKoreanHanjaMix },
     usage: {
       component: 'OcrStrategySampler',
-      phase: 'hanja-detection',
+      phase: 'korean-hanja-mix-detection',
       model: 'primary' as const,
       modelName: 'test-vision-model',
       inputTokens: 500,
@@ -87,8 +87,8 @@ describe('OcrStrategySampler', () => {
       expect(result.totalPages).toBe(0);
     });
 
-    test('returns vlm when hanja is detected', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(true));
+    test('returns vlm when Korean-Hanja mix is detected', async () => {
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(true));
 
       const result = await sampler.sample(
         '/tmp/test.pdf',
@@ -97,12 +97,12 @@ describe('OcrStrategySampler', () => {
       );
 
       expect(result.method).toBe('vlm');
-      expect(result.reason).toContain('Hanja detected');
+      expect(result.reason).toContain('Korean-Hanja mix detected');
       expect(result.totalPages).toBe(3);
     });
 
-    test('returns ocrmac when no hanja is detected', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+    test('returns ocrmac when no Korean-Hanja mix is detected', async () => {
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       const result = await sampler.sample(
         '/tmp/test.pdf',
@@ -111,17 +111,17 @@ describe('OcrStrategySampler', () => {
       );
 
       expect(result.method).toBe('ocrmac');
-      expect(result.reason).toContain('No hanja detected');
+      expect(result.reason).toContain('No Korean-Hanja mix detected');
       expect(result.totalPages).toBe(3);
     });
 
-    test('early exits on first hanja detection', async () => {
+    test('early exits on first Korean-Hanja mix detection', async () => {
       mockPageRenderer = createMockPageRenderer(20);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
 
       mockCallVision
-        .mockResolvedValueOnce(createMockHanjaResult(false))
-        .mockResolvedValueOnce(createMockHanjaResult(true));
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(true));
 
       const result = await sampler.sample(
         '/tmp/test.pdf',
@@ -136,7 +136,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('renders pages at 72 DPI for sampling', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
@@ -148,7 +148,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('passes correct arguments to LLMCaller.callVision', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
@@ -156,7 +156,7 @@ describe('OcrStrategySampler', () => {
         expect.objectContaining({
           primaryModel: mockModel,
           component: 'OcrStrategySampler',
-          phase: 'hanja-detection',
+          phase: 'korean-hanja-mix-detection',
           maxRetries: 3,
           temperature: 0,
         }),
@@ -164,7 +164,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('passes fallback model when provided', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel, {
         fallbackModel: mockFallbackModel,
@@ -178,7 +178,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('passes custom maxRetries', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel, {
         maxRetries: 5,
@@ -193,7 +193,7 @@ describe('OcrStrategySampler', () => {
 
     test('passes abort signal', async () => {
       const abortController = new AbortController();
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel, {
         abortSignal: abortController.signal,
@@ -208,7 +208,7 @@ describe('OcrStrategySampler', () => {
 
     test('tracks token usage with aggregator', async () => {
       const mockAggregator = { track: vi.fn() };
-      const mockResult = createMockHanjaResult(false);
+      const mockResult = createMockKoreanHanjaMixResult(false);
       mockCallVision.mockResolvedValue(mockResult);
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel, {
@@ -219,7 +219,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('does not track usage when no aggregator provided', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       // Should not throw
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
@@ -230,7 +230,7 @@ describe('OcrStrategySampler', () => {
     test('uses custom maxSamplePages', async () => {
       mockPageRenderer = createMockPageRenderer(50);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel, {
         maxSamplePages: 3,
@@ -240,7 +240,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('reads page image files as base64', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
 
@@ -253,7 +253,7 @@ describe('OcrStrategySampler', () => {
       const imageBuffer = Buffer.from('test-image');
       const expectedBase64 = imageBuffer.toString('base64');
       mockReadFileSync.mockReturnValue(imageBuffer);
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
 
@@ -281,7 +281,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('logs sampling start', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
@@ -291,7 +291,7 @@ describe('OcrStrategySampler', () => {
     });
 
     test('logs sampled page numbers', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
@@ -301,17 +301,17 @@ describe('OcrStrategySampler', () => {
     });
 
     test('logs debug for each page check', async () => {
-      mockCallVision.mockResolvedValue(createMockHanjaResult(false));
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
       expect(mockLogger.debug).toHaveBeenCalledWith(
-        '[OcrStrategySampler] Checking page 1 for hanja...',
+        '[OcrStrategySampler] Checking page 1 for Korean-Hanja mix...',
       );
       expect(mockLogger.debug).toHaveBeenCalledWith(
-        '[OcrStrategySampler] Page 1: hasHanja=false',
+        '[OcrStrategySampler] Page 1: hasKoreanHanjaMix=false',
       );
     });
 

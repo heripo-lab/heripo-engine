@@ -21,17 +21,17 @@ const DEFAULT_MAX_SAMPLE_PAGES = 5;
 /** Default max retries per VLM call */
 const DEFAULT_MAX_RETRIES = 3;
 
-/** Zod schema for VLM hanja detection response */
-const hanjaDetectionSchema = z.object({
-  hasHanja: z
+/** Zod schema for VLM Korean-Hanja mix detection response */
+const koreanHanjaMixSchema = z.object({
+  hasKoreanHanjaMix: z
     .boolean()
     .describe(
       'Whether the page contains any Hanja (漢字/Chinese characters) mixed with Korean text',
     ),
 });
 
-/** System prompt for hanja detection */
-const HANJA_DETECTION_PROMPT = `Look at this page image carefully. Does it contain any Hanja (漢字/Chinese characters) mixed with Korean text?
+/** System prompt for Korean-Hanja mix detection */
+const KOREAN_HANJA_MIX_PROMPT = `Look at this page image carefully. Does it contain any Hanja (漢字/Chinese characters) mixed with Korean text?
 
 Hanja examples: 遺蹟, 發掘, 調査, 報告書, 文化財
 Note: Hanja are Chinese characters used in Korean documents, different from modern Korean (한글).
@@ -58,14 +58,14 @@ export interface OcrStrategySamplerOptions {
  * Samples pages from a PDF to determine whether to use ocrmac or VLM for processing.
  *
  * Renders a subset of pages at low DPI and sends them to a frontier VLM for
- * binary hanja detection. If hanja is found on any page, the entire document
- * is routed to the VLM pipeline. Otherwise, it goes through the standard
- * ocrmac/Docling pipeline.
+ * binary Korean-Hanja mix detection. If a Korean-Hanja mix is found on any
+ * page, the entire document is routed to the VLM pipeline. Otherwise, it goes
+ * through the standard ocrmac/Docling pipeline.
  *
  * Sampling strategy:
  * - Trim front/back 10% of pages (covers, TOC, appendices)
  * - Select up to 5 pages evenly distributed across the eligible range
- * - Early exit on first hanja detection
+ * - Early exit on first Korean-Hanja mix detection
  */
 export class OcrStrategySampler {
   private readonly logger: LoggerMethods;
@@ -81,7 +81,7 @@ export class OcrStrategySampler {
    *
    * @param pdfPath - Path to the PDF file
    * @param outputDir - Directory for temporary rendered pages
-   * @param model - Vision language model for hanja detection
+   * @param model - Vision language model for Korean-Hanja mix detection
    * @param options - Sampling options
    * @returns OcrStrategy with method ('ocrmac' or 'vlm') and metadata
    */
@@ -122,33 +122,38 @@ export class OcrStrategySampler {
       `[OcrStrategySampler] Sampling ${sampleIndices.length} of ${renderResult.pageCount} pages: [${sampleIndices.map((i) => i + 1).join(', ')}]`,
     );
 
-    // Step 3: Check each sample page for hanja (early exit on detection)
+    // Step 3: Check each sample page for Korean-Hanja mix (early exit on detection)
     let sampledCount = 0;
     for (const idx of sampleIndices) {
       sampledCount++;
       const pageFile = renderResult.pageFiles[idx];
-      const hasHanja = await this.checkHanja(pageFile, idx + 1, model, options);
+      const hasKoreanHanjaMix = await this.checkKoreanHanjaMix(
+        pageFile,
+        idx + 1,
+        model,
+        options,
+      );
 
-      if (hasHanja) {
+      if (hasKoreanHanjaMix) {
         this.logger.info(
-          `[OcrStrategySampler] Hanja detected on page ${idx + 1} → VLM strategy`,
+          `[OcrStrategySampler] Korean-Hanja mix detected on page ${idx + 1} → VLM strategy`,
         );
         return {
           method: 'vlm',
-          reason: `Hanja detected on page ${idx + 1}`,
+          reason: `Korean-Hanja mix detected on page ${idx + 1}`,
           sampledPages: sampledCount,
           totalPages: renderResult.pageCount,
         };
       }
     }
 
-    // Step 4: No hanja found → ocrmac
+    // Step 4: No Korean-Hanja mix found → ocrmac
     this.logger.info(
-      '[OcrStrategySampler] No hanja detected → ocrmac strategy',
+      '[OcrStrategySampler] No Korean-Hanja mix detected → ocrmac strategy',
     );
     return {
       method: 'ocrmac',
-      reason: `No hanja detected in ${sampledCount} sampled pages`,
+      reason: `No Korean-Hanja mix detected in ${sampledCount} sampled pages`,
       sampledPages: sampledCount,
       totalPages: renderResult.pageCount,
     };
@@ -196,18 +201,18 @@ export class OcrStrategySampler {
   }
 
   /**
-   * Check a single page for hanja characters using VLM.
+   * Check a single page for Korean-Hanja mixed script using VLM.
    *
-   * @returns true if hanja is detected, false otherwise
+   * @returns true if Korean-Hanja mix is detected, false otherwise
    */
-  private async checkHanja(
+  private async checkKoreanHanjaMix(
     pageFile: string,
     pageNo: number,
     model: LanguageModel,
     options?: OcrStrategySamplerOptions,
   ): Promise<boolean> {
     this.logger.debug(
-      `[OcrStrategySampler] Checking page ${pageNo} for hanja...`,
+      `[OcrStrategySampler] Checking page ${pageNo} for Korean-Hanja mix...`,
     );
 
     const base64Image = readFileSync(pageFile).toString('base64');
@@ -216,7 +221,7 @@ export class OcrStrategySampler {
       {
         role: 'user' as const,
         content: [
-          { type: 'text' as const, text: HANJA_DETECTION_PROMPT },
+          { type: 'text' as const, text: KOREAN_HANJA_MIX_PROMPT },
           {
             type: 'image' as const,
             image: `data:image/png;base64,${base64Image}`,
@@ -226,7 +231,7 @@ export class OcrStrategySampler {
     ];
 
     const result = await LLMCaller.callVision({
-      schema: hanjaDetectionSchema as any,
+      schema: koreanHanjaMixSchema as any,
       messages,
       primaryModel: model,
       fallbackModel: options?.fallbackModel,
@@ -234,19 +239,20 @@ export class OcrStrategySampler {
       temperature: options?.temperature ?? 0,
       abortSignal: options?.abortSignal,
       component: 'OcrStrategySampler',
-      phase: 'hanja-detection',
+      phase: 'korean-hanja-mix-detection',
     });
 
     if (options?.aggregator) {
       options.aggregator.track(result.usage);
     }
 
-    const hasHanja = (result.output as { hasHanja: boolean }).hasHanja;
+    const hasKoreanHanjaMix = (result.output as { hasKoreanHanjaMix: boolean })
+      .hasKoreanHanjaMix;
 
     this.logger.debug(
-      `[OcrStrategySampler] Page ${pageNo}: hasHanja=${hasHanja}`,
+      `[OcrStrategySampler] Page ${pageNo}: hasKoreanHanjaMix=${hasKoreanHanjaMix}`,
     );
 
-    return hasHanja;
+    return hasKoreanHanjaMix;
   }
 }
