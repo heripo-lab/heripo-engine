@@ -195,7 +195,10 @@ describe('OcrStrategySampler', () => {
         mockModel,
       );
 
-      // Falls through to VLM sampling
+      // Falls through to VLM sampling (empty text = no Hangul)
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[OcrStrategySampler] No Hangul in text layer, falling back to VLM sampling',
+      );
       expect(mockPageRenderer.renderPages).toHaveBeenCalled();
       expect(result.method).toBe('ocrmac');
     });
@@ -266,7 +269,7 @@ describe('OcrStrategySampler', () => {
       expect(result.totalPages).toBe(20);
     });
 
-    test('returns ocrmac when only Hanja without Hangul', async () => {
+    test('falls back to VLM when no Hangul in text layer', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 3,
         pageTexts: new Map([
@@ -275,10 +278,14 @@ describe('OcrStrategySampler', () => {
           [3, 'Another page'],
         ]),
       });
+      mockPageRenderer = createMockPageRenderer(3);
       sampler = new OcrStrategySampler(
         mockLogger,
         mockPageRenderer as any,
         mockTextExtractor as any,
+      );
+      mockCallVision.mockResolvedValue(
+        createMockKoreanHanjaMixResult(false, ['en-US']),
       );
 
       const result = await sampler.sample(
@@ -287,9 +294,41 @@ describe('OcrStrategySampler', () => {
         mockModel,
       );
 
-      // Hanja without Hangul does not trigger VLM
+      // No Hangul → falls through to VLM sampling
+      expect(mockPageRenderer.renderPages).toHaveBeenCalled();
       expect(result.method).toBe('ocrmac');
-      expect(result.reason).toContain('No Hangul-Hanja mix in PDF text layer');
+      expect(result.detectedLanguages).toEqual(['en-US']);
+    });
+
+    test('falls back to VLM when text has only non-Korean text', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 3,
+        pageTexts: new Map([
+          [1, 'This is English only text'],
+          [2, 'Another English paragraph'],
+          [3, 'More content without any Korean'],
+        ]),
+      });
+      mockPageRenderer = createMockPageRenderer(3);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+      mockCallVision.mockResolvedValue(
+        createMockKoreanHanjaMixResult(false, ['en-US']),
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      // No Hangul → delegates to VLM for language detection
+      expect(mockPageRenderer.renderPages).toHaveBeenCalled();
+      expect(mockCallVision).toHaveBeenCalled();
+      expect(result.detectedLanguages).toEqual(['en-US']);
     });
 
     test('includes sampledPages count in result', async () => {

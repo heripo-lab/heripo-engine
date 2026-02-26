@@ -196,7 +196,10 @@ export class OcrStrategySampler {
 
   /**
    * Pre-check for Hangul-Hanja mix in PDF text layer using pdftotext.
-   * Returns an OcrStrategy if a definitive decision can be made, or null to fall back to VLM.
+   * Only makes a definitive decision for Korean (Hangul) documents:
+   * - Hangul + Hanja → VLM (confirmed Korean-Hanja mix)
+   * - Hangul only → ocrmac with ko-KR (confirmed Korean)
+   * - No Hangul (English, Japanese, etc.) → null (delegates to VLM for language detection)
    */
   private async preCheckHanjaFromTextLayer(
     pdfPath: string,
@@ -208,29 +211,32 @@ export class OcrStrategySampler {
 
       const sampleIndices = this.selectSamplePages(totalPages, maxSamplePages);
 
-      let hasText = false;
+      let hasHangul = false;
       for (const idx of sampleIndices) {
         const text = await this.textExtractor.extractPageText(pdfPath, idx + 1);
         if (text.trim().length === 0) continue;
-        hasText = true;
 
-        if (HANGUL_REGEX.test(text) && CJK_REGEX.test(text)) {
-          this.logger.info(
-            `[OcrStrategySampler] Hangul-Hanja mix detected in text layer (page ${idx + 1}) → VLM strategy`,
-          );
-          return {
-            method: 'vlm',
-            detectedLanguages: ['ko-KR'],
-            reason: `Hangul-Hanja mix found in PDF text layer (page ${idx + 1})`,
-            sampledPages: sampleIndices.length,
-            totalPages,
-          };
+        if (HANGUL_REGEX.test(text)) {
+          hasHangul = true;
+
+          if (CJK_REGEX.test(text)) {
+            this.logger.info(
+              `[OcrStrategySampler] Hangul-Hanja mix detected in text layer (page ${idx + 1}) → VLM strategy`,
+            );
+            return {
+              method: 'vlm',
+              detectedLanguages: ['ko-KR'],
+              reason: `Hangul-Hanja mix found in PDF text layer (page ${idx + 1})`,
+              sampledPages: sampleIndices.length,
+              totalPages,
+            };
+          }
         }
       }
 
-      if (!hasText) {
+      if (!hasHangul) {
         this.logger.debug(
-          '[OcrStrategySampler] Text layer empty, falling back to VLM sampling',
+          '[OcrStrategySampler] No Hangul in text layer, falling back to VLM sampling',
         );
         return null;
       }
