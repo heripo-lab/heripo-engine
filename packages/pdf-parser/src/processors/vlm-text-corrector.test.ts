@@ -227,7 +227,7 @@ describe('VlmTextCorrector', () => {
       });
 
       const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [{ i: 0, t: '잘못된 遺蹟' }],
+        tc: [{ i: 0, s: [{ f: '遣蹟', r: '遺蹟' }] }],
         cc: [],
       };
 
@@ -255,7 +255,7 @@ describe('VlmTextCorrector', () => {
         expect.any(String),
       );
 
-      // Verify correction was applied
+      // Verify substitution was applied
       const savedDoc = JSON.parse(
         vi.mocked(writeFileSync).mock.calls[0][1] as string,
       );
@@ -514,7 +514,7 @@ describe('VlmTextCorrector', () => {
       });
 
       const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [{ i: 99, t: 'should not apply' }],
+        tc: [{ i: 99, s: [{ f: 'original', r: 'should not apply' }] }],
         cc: [],
       };
 
@@ -552,6 +552,125 @@ describe('VlmTextCorrector', () => {
         vi.mocked(writeFileSync).mock.calls[0][1] as string,
       );
       expect(savedDoc.tables[0].data.table_cells[0].text).toBe('original');
+    });
+
+    test('applies multiple substitutions in order', async () => {
+      const doc = createTestDoc([
+        createTextItem('AAA 잘못1 BBB 잘못2 CCC', 'text', 1),
+      ]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      const correctionOutput: VlmTextCorrectionOutput = {
+        tc: [
+          {
+            i: 0,
+            s: [
+              { f: '잘못1', r: '보정1' },
+              { f: '잘못2', r: '보정2' },
+            ],
+          },
+        ],
+        cc: [],
+      };
+
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const savedDoc = JSON.parse(
+        vi.mocked(writeFileSync).mock.calls[0][1] as string,
+      );
+      expect(savedDoc.texts[0].text).toBe('AAA 보정1 BBB 보정2 CCC');
+      expect(savedDoc.texts[0].orig).toBe('AAA 보정1 BBB 보정2 CCC');
+    });
+
+    test('logs warning and skips when find string is not found', async () => {
+      const doc = createTestDoc([
+        createTextItem('original text here', 'text', 1),
+      ]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      const correctionOutput: VlmTextCorrectionOutput = {
+        tc: [{ i: 0, s: [{ f: 'nonexistent', r: 'replacement' }] }],
+        cc: [],
+      };
+
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('find string not found, skipping substitution'),
+      );
+
+      const savedDoc = JSON.parse(
+        vi.mocked(writeFileSync).mock.calls[0][1] as string,
+      );
+      expect(savedDoc.texts[0].text).toBe('original text here');
+    });
+
+    test('does not modify document when substitutions produce no change', async () => {
+      const doc = createTestDoc([createTextItem('text with same', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      const correctionOutput: VlmTextCorrectionOutput = {
+        tc: [{ i: 0, s: [{ f: 'same', r: 'same' }] }],
+        cc: [],
+      };
+
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const savedDoc = JSON.parse(
+        vi.mocked(writeFileSync).mock.calls[0][1] as string,
+      );
+      // orig should remain as original, not overwritten
+      expect(savedDoc.texts[0].text).toBe('text with same');
+      expect(savedDoc.texts[0].orig).toBe('text with same');
+    });
+
+    test('replaces only first occurrence of find string', async () => {
+      const doc = createTestDoc([createTextItem('AAA BBB AAA', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      const correctionOutput: VlmTextCorrectionOutput = {
+        tc: [{ i: 0, s: [{ f: 'AAA', r: 'CCC' }] }],
+        cc: [],
+      };
+
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const savedDoc = JSON.parse(
+        vi.mocked(writeFileSync).mock.calls[0][1] as string,
+      );
+      expect(savedDoc.texts[0].text).toBe('CCC BBB AAA');
     });
   });
 
@@ -902,7 +1021,7 @@ describe('VlmTextCorrector', () => {
       });
 
       const vlmResponse = mockVlmResponse({
-        tc: [{ i: 0, t: 'corrected text' }],
+        tc: [{ i: 0, s: [{ f: 'wrong text', r: 'corrected text' }] }],
         cc: [],
       });
 

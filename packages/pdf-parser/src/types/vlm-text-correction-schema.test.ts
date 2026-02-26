@@ -6,8 +6,14 @@ describe('vlmTextCorrectionSchema', () => {
   test('parses valid correction output with both text and cell corrections', () => {
     const input = {
       tc: [
-        { i: 1, t: '遺蹟' },
-        { i: 3, t: '發掘調査' },
+        { i: 1, s: [{ f: '遣蹟', r: '遺蹟' }] },
+        {
+          i: 3,
+          s: [
+            { f: '發뻘', r: '發掘' },
+            { f: '調사', r: '調査' },
+          ],
+        },
       ],
       cc: [{ ti: 0, r: 1, c: 0, t: '住居址' }],
     };
@@ -15,8 +21,8 @@ describe('vlmTextCorrectionSchema', () => {
     const result = vlmTextCorrectionSchema.parse(input);
 
     expect(result.tc).toHaveLength(2);
-    expect(result.tc[0]).toEqual({ i: 1, t: '遺蹟' });
-    expect(result.tc[1]).toEqual({ i: 3, t: '發掘調査' });
+    expect(result.tc[0]).toEqual({ i: 1, s: [{ f: '遣蹟', r: '遺蹟' }] });
+    expect(result.tc[1].s).toHaveLength(2);
     expect(result.cc).toHaveLength(1);
     expect(result.cc[0]).toEqual({ ti: 0, r: 1, c: 0, t: '住居址' });
   });
@@ -32,7 +38,7 @@ describe('vlmTextCorrectionSchema', () => {
 
   test('parses output with only text corrections', () => {
     const input = {
-      tc: [{ i: 0, t: '漢字' }],
+      tc: [{ i: 0, s: [{ f: '漢宇', r: '漢字' }] }],
       cc: [],
     };
 
@@ -54,6 +60,37 @@ describe('vlmTextCorrectionSchema', () => {
     expect(result.cc).toHaveLength(1);
   });
 
+  test('allows empty substitutions array', () => {
+    const input = {
+      tc: [{ i: 0, s: [] }],
+      cc: [],
+    };
+
+    const result = vlmTextCorrectionSchema.parse(input);
+
+    expect(result.tc[0].s).toHaveLength(0);
+  });
+
+  test('allows empty find/replace strings (deletion/insertion)', () => {
+    const input = {
+      tc: [
+        {
+          i: 0,
+          s: [
+            { f: 'extra', r: '' },
+            { f: '', r: 'inserted' },
+          ],
+        },
+      ],
+      cc: [],
+    };
+
+    const result = vlmTextCorrectionSchema.parse(input);
+
+    expect(result.tc[0].s[0]).toEqual({ f: 'extra', r: '' });
+    expect(result.tc[0].s[1]).toEqual({ f: '', r: 'inserted' });
+  });
+
   test('rejects missing tc field', () => {
     const input = { cc: [] };
 
@@ -68,7 +105,7 @@ describe('vlmTextCorrectionSchema', () => {
 
   test('rejects negative text element index', () => {
     const input = {
-      tc: [{ i: -1, t: 'text' }],
+      tc: [{ i: -1, s: [{ f: 'a', r: 'b' }] }],
       cc: [],
     };
 
@@ -77,7 +114,7 @@ describe('vlmTextCorrectionSchema', () => {
 
   test('rejects non-integer text element index', () => {
     const input = {
-      tc: [{ i: 1.5, t: 'text' }],
+      tc: [{ i: 1.5, s: [{ f: 'a', r: 'b' }] }],
       cc: [],
     };
 
@@ -113,7 +150,7 @@ describe('vlmTextCorrectionSchema', () => {
 
   test('accepts zero indices', () => {
     const input = {
-      tc: [{ i: 0, t: 'first' }],
+      tc: [{ i: 0, s: [{ f: 'old', r: 'new' }] }],
       cc: [{ ti: 0, r: 0, c: 0, t: 'cell' }],
     };
 

@@ -7,22 +7,30 @@ import { z } from 'zod/v4';
  * If all text is correct, both arrays are empty.
  *
  * Short field names are used to minimize output tokens:
- * - tc = text corrections
- * - cc = cell corrections
+ * - tc = text corrections (substitution-based)
+ * - cc = cell corrections (full replacement)
  * - i  = text element index
+ * - s  = substitutions array [{f: find, r: replace}]
  * - ti = table index (within the page)
  * - r  = row index
  * - c  = column index
- * - t  = corrected text
+ * - t  = corrected text (for cell corrections)
  */
 export const vlmTextCorrectionSchema = z.object({
-  /** Text element corrections */
+  /** Text element corrections (substitution-based) */
   tc: z.array(
     z.object({
       /** Text element index (from prompt) */
       i: z.number().int().nonnegative(),
-      /** Corrected text */
-      t: z.string(),
+      /** Substitutions: find/replace pairs applied left-to-right */
+      s: z.array(
+        z.object({
+          /** Exact garbled substring to find */
+          f: z.string(),
+          /** Corrected replacement text */
+          r: z.string(),
+        }),
+      ),
     }),
   ),
   /** Table cell corrections */

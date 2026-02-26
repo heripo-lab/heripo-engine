@@ -101,9 +101,16 @@ When NO |ref| line is present:
 - The PDF text layer could not be matched to this element
 - READ THE IMAGE directly to determine the correct text
 
-Output JSON with corrections only:
-tc=[{i:index, t:corrected}] for text elements
+Output JSON with corrections:
+tc=[{i:index, s:[{f:"garbled_substring",r:"corrected_text"}, ...]}] for text
 cc=[{ti:tableIndex, r:row, c:col, t:corrected}] for table cells
+
+Substitution rules for tc:
+- 'f': exact garbled/wrong substring from the input text (must match exactly)
+- 'r': the corrected replacement
+- Include ALL garbled portions for each element as separate s entries
+- Order substitutions left-to-right as they appear in the text
+- Do NOT include unchanged text — only the specific substrings that need fixing
 
 If all correct: {"tc":[],"cc":[]}`;
 
@@ -595,14 +602,31 @@ export class VlmTextCorrector {
     pageNo: number,
     corrections: VlmTextCorrectionOutput,
   ): void {
-    // Apply text corrections
+    // Apply text corrections (substitution-based)
     if (corrections.tc.length > 0) {
       const pageTexts = this.getPageTexts(doc, pageNo);
       for (const correction of corrections.tc) {
         if (correction.i >= 0 && correction.i < pageTexts.length) {
           const docIndex = pageTexts[correction.i].index;
-          doc.texts[docIndex].text = correction.t;
-          doc.texts[docIndex].orig = correction.t;
+          let text = doc.texts[docIndex].text;
+          for (const sub of correction.s) {
+            const idx = text.indexOf(sub.f);
+            if (idx >= 0) {
+              text =
+                text.substring(0, idx) +
+                sub.r +
+                text.substring(idx + sub.f.length);
+            } else {
+              this.logger.warn(
+                `[VlmTextCorrector] Page ${pageNo}, text ${correction.i}: ` +
+                  `find string not found, skipping substitution`,
+              );
+            }
+          }
+          if (text !== doc.texts[docIndex].text) {
+            doc.texts[docIndex].text = text;
+            doc.texts[docIndex].orig = text;
+          }
         }
       }
     }
