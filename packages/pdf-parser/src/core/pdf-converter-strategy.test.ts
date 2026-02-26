@@ -2,7 +2,7 @@ import type { LoggerMethods } from '@heripo/logger';
 import type { DoclingAPIClient } from 'docling-sdk';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PageRenderer } from '../processors/page-renderer';
@@ -12,6 +12,7 @@ import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { PDFConverter } from './pdf-converter';
 
 vi.mock('node:fs', () => ({
+  copyFileSync: vi.fn(),
   existsSync: vi.fn(),
   readFileSync: vi.fn(),
   rmSync: vi.fn(),
@@ -1151,6 +1152,156 @@ describe('PDFConverter.convertWithStrategy', () => {
         mockModel,
         expect.objectContaining({ pageTexts: undefined }),
       );
+
+      convertSpy.mockRestore();
+    });
+  });
+
+  describe('detectedLanguages → ocr_lang passthrough', () => {
+    test('VLM path passes detectedLanguages as ocr_lang to convert()', async () => {
+      mockSamplerInstance.sample.mockResolvedValue({
+        method: 'vlm',
+        reason: 'Korean-Hanja mix detected',
+        sampledPages: 2,
+        totalPages: 10,
+        detectedLanguages: ['ko-KR', 'zh-CN'],
+      });
+
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          strategySamplerModel: mockModel,
+          vlmProcessorModel: mockFallbackModel,
+        },
+      );
+
+      expect(convertSpy).toHaveBeenCalledWith(
+        'file:///tmp/report.pdf',
+        'report-1',
+        expect.any(Function),
+        false,
+        expect.objectContaining({ ocr_lang: ['ko-KR', 'zh-CN'] }),
+        undefined,
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('VLM path preserves existing options when detectedLanguages is undefined', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          forcedMethod: 'vlm',
+          vlmProcessorModel: mockModel,
+          ocr_lang: ['en-US'],
+        },
+      );
+
+      // When detectedLanguages is undefined, original ocr_lang should be preserved
+      expect(convertSpy).toHaveBeenCalledWith(
+        'file:///tmp/test.pdf',
+        'report-1',
+        expect.any(Function),
+        false,
+        expect.objectContaining({ ocr_lang: ['en-US'] }),
+        undefined,
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('ocrmac path passes detectedLanguages as ocr_lang to convert()', async () => {
+      mockSamplerInstance.sample.mockResolvedValue({
+        method: 'ocrmac',
+        reason: 'No Korean-Hanja mix detected',
+        sampledPages: 3,
+        totalPages: 10,
+        detectedLanguages: ['ko-KR'],
+      });
+
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { strategySamplerModel: mockModel },
+      );
+
+      expect(convertSpy).toHaveBeenCalledWith(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        expect.objectContaining({ ocr_lang: ['ko-KR'] }),
+        undefined,
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('ocrmac path preserves existing options when detectedLanguages is undefined', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'ocrmac', ocr_lang: ['ja-JP'] },
+      );
+
+      expect(convertSpy).toHaveBeenCalledWith(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        expect.objectContaining({ ocr_lang: ['ja-JP'] }),
+        undefined,
+      );
+
+      convertSpy.mockRestore();
+    });
+  });
+
+  describe('OCR origin result saving', () => {
+    test('copies result.json to result_ocr_origin.json before VLM correction', async () => {
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
+      );
+
+      expect(copyFileSync).toHaveBeenCalledWith(
+        '/test/output/result.json',
+        '/test/output/result_ocr_origin.json',
+      );
+
+      // copyFileSync should be called before VlmTextCorrector.correctAndSave
+      const copyOrder = vi.mocked(copyFileSync).mock.invocationCallOrder[0];
+      const correctorOrder =
+        mockCorrectorInstance.correctAndSave.mock.invocationCallOrder[0];
+      expect(copyOrder).toBeLessThan(correctorOrder);
 
       convertSpy.mockRestore();
     });

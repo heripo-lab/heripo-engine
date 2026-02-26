@@ -9,7 +9,13 @@ import type {
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { omit } from 'es-toolkit';
-import { createWriteStream, existsSync, readFileSync, rmSync } from 'node:fs';
+import {
+  copyFileSync,
+  createWriteStream,
+  existsSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -183,12 +189,15 @@ export class PDFConverter {
     }
 
     // ocrmac path: delegate to existing Docling conversion
+    const ocrmacOptions: PDFConvertOptions = strategy.detectedLanguages
+      ? { ...trackedOptions, ocr_lang: strategy.detectedLanguages }
+      : trackedOptions;
     await this.convert(
       url,
       reportId,
       onComplete,
       cleanupAfterCallback,
-      trackedOptions,
+      ocrmacOptions,
       abortSignal,
     );
     return {
@@ -308,6 +317,11 @@ export class PDFConverter {
         );
       }
 
+      // Save OCR-only result before VLM correction for debugging
+      const resultPath = join(outputDir, 'result.json');
+      const ocrOriginPath = join(outputDir, 'result_ocr_origin.json');
+      copyFileSync(resultPath, ocrOriginPath);
+
       const corrector = new VlmTextCorrector(this.logger);
       await corrector.correctAndSave(outputDir, options.vlmProcessorModel!, {
         concurrency: options.vlmConcurrency,
@@ -321,12 +335,15 @@ export class PDFConverter {
     };
 
     // Run the standard OCR pipeline, then apply VLM correction via the wrapped callback
+    const vlmOptions: PDFConvertOptions = detectedLanguages
+      ? { ...options, ocr_lang: detectedLanguages }
+      : options;
     await this.convert(
       url,
       reportId,
       wrappedCallback,
       cleanupAfterCallback,
-      options,
+      vlmOptions,
       abortSignal,
     );
 

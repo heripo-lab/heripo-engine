@@ -1088,6 +1088,46 @@ describe('VlmTextCorrector', () => {
 
       expect(result).toBe('T:\n0|tx|text A\n1|tx|text B\n1|ref|ref for B');
     });
+
+    test('includes C_REF section when tableContext is provided', () => {
+      const cells = [
+        createTableCell('#쩯및표뽰', 0, 0),
+        createTableCell('조선시대', 0, 1),
+      ];
+      const pageTables = [{ index: 0, item: createTableItem(cells, 1) }];
+
+      const result = corrector.buildUserPrompt(
+        [],
+        pageTables,
+        undefined,
+        '發刊日 調査機關 遺蹟名 類型 및 基數',
+      );
+
+      expect(result).toContain('C:\n');
+      expect(result).toContain('C_REF:\n發刊日 調査機關 遺蹟名 類型 및 基數');
+    });
+
+    test('does not include C_REF section when tableContext is not provided', () => {
+      const cells = [createTableCell('data', 0, 0)];
+      const pageTables = [{ index: 0, item: createTableItem(cells, 1) }];
+
+      const result = corrector.buildUserPrompt([], pageTables);
+
+      expect(result).not.toContain('C_REF:');
+    });
+
+    test('does not include C_REF section when there are no table cells', () => {
+      const pageTexts = [{ index: 0, item: createTextItem('text', 'text', 1) }];
+
+      const result = corrector.buildUserPrompt(
+        pageTexts,
+        [],
+        undefined,
+        'unused reference',
+      );
+
+      expect(result).not.toContain('C_REF:');
+    });
   });
 
   describe('page image path mapping', () => {
@@ -1457,6 +1497,162 @@ describe('VlmTextCorrector', () => {
     });
   });
 
+  describe('system prompt content', () => {
+    function setupProcessFn() {
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+    }
+
+    function getPromptText(): string {
+      const callArgs = vi.mocked(LLMCaller.callVision).mock.calls[0][0];
+      return (callArgs.messages[0].content as any[]).find(
+        (c: any) => c.type === 'text',
+      ).text;
+    }
+
+    test('includes footnote special instructions', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const promptText = getPromptText();
+      expect(promptText).toContain('FOOTNOTE (fn) SPECIAL INSTRUCTIONS');
+      expect(promptText).toContain('(財)');
+    });
+
+    test('includes table cell special instructions', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const promptText = getPromptText();
+      expect(promptText).toContain('TABLE CELL (C:) SPECIAL INSTRUCTIONS');
+      expect(promptText).toContain('發刊日');
+    });
+
+    test('includes dropped Hanja pattern', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const promptText = getPromptText();
+      expect(promptText).toContain('Hanja dropped entirely');
+      expect(promptText).toContain('(株)韓國纖維');
+    });
+
+    test('includes phonetic reading substitution pattern', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const promptText = getPromptText();
+      expect(promptText).toContain('Phonetic reading substitution');
+      expect(promptText).toContain('충남문화재연구원');
+    });
+
+    test('includes image fallback instructions when both OCR and ref are garbled', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const promptText = getPromptText();
+      expect(promptText).toContain(
+        'IGNORE the ref text and READ THE IMAGE directly',
+      );
+    });
+
+    test('includes image fallback instructions when no ref line is present', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      await corrector.correctAndSave('/output/report-1', mockModel);
+
+      const promptText = getPromptText();
+      expect(promptText).toContain('When NO |ref| line is present');
+      expect(promptText).toContain(
+        'READ THE IMAGE directly to determine the correct text',
+      );
+    });
+  });
+
   describe('pdftotext inline reference injection', () => {
     function setupProcessFn() {
       vi.mocked(ConcurrentPool.run).mockImplementation(
@@ -1614,6 +1810,151 @@ describe('VlmTextCorrector', () => {
       // Page 2: OCR text identical to pdftotext → no ref data line
       const page2Prompt = getPromptText(1);
       expect(page2Prompt).not.toMatch(/^\d+\|ref\|/m);
+    });
+  });
+
+  describe('C_REF table context injection via correctPage', () => {
+    function setupProcessFn() {
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+    }
+
+    function getPromptText(callIndex = 0): string {
+      const callArgs = vi.mocked(LLMCaller.callVision).mock.calls[callIndex][0];
+      return (callArgs.messages[0].content as any[]).find(
+        (c: any) => c.type === 'text',
+      ).text;
+    }
+
+    test('injects C_REF when page has tables and unused pdftotext blocks', async () => {
+      const cells = [
+        createTableCell('#쩯및표뽰', 0, 0),
+        createTableCell('조선시대', 0, 1),
+      ];
+      const doc = createTestDoc(
+        [createTextItem('본문 텍스트', 'text', 1)],
+        [createTableItem(cells, 1)],
+      );
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      // pdftotext has body text block + table header block (separated by blank line)
+      const pageTexts = new Map<number, string>();
+      pageTexts.set(1, '본문 텍스트\n\n發刊日 調査機關 遺蹟名 類型 및 基數');
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        pageTexts,
+      });
+
+      const promptText = getPromptText();
+      expect(promptText).toContain('C_REF:');
+      expect(promptText).toContain('發刊日 調査機關 遺蹟名 類型 및 基數');
+    });
+
+    test('does not inject C_REF when page has no tables', async () => {
+      const doc = createTestDoc([createTextItem('본문 텍스트', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      // pdftotext has two blocks but no tables on page
+      const pageTexts = new Map<number, string>();
+      pageTexts.set(1, '본문 텍스트\n\n추가 블록');
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        pageTexts,
+      });
+
+      const promptText = getPromptText();
+      // C_REF: appears in system prompt description but should not appear as a standalone section
+      expect(promptText).not.toMatch(/^C_REF:\n/m);
+    });
+
+    test('injects C_REF with multiple unused blocks joined by newline', async () => {
+      const cells = [createTableCell('garbled', 0, 0)];
+      // No text elements, only a table → all pdftotext blocks become unused
+      const doc = createTestDoc([], [createTableItem(cells, 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      // pdftotext has 3 blocks (separated by blank lines), all unused since no text elements
+      const pageTexts = new Map<number, string>();
+      pageTexts.set(1, '發刊日\n\n調査機關\n\n遺蹟名');
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        pageTexts,
+      });
+
+      const promptText = getPromptText();
+      expect(promptText).toMatch(/^C_REF:\n/m);
+      expect(promptText).toContain('發刊日\n調査機關\n遺蹟名');
+    });
+
+    test('does not inject C_REF when all pdftotext blocks are consumed by text matching', async () => {
+      const doc = createTestDoc([
+        createTextItem('AAA BBB text', 'text', 1),
+        createTextItem('CCC DDD text', 'text', 1),
+      ]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      setupProcessFn();
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      // Both blocks should be consumed by text matching (identical → no ref, but consumed)
+      const pageTexts = new Map<number, string>();
+      pageTexts.set(1, 'AAA BBB text\n\nCCC DDD text');
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        pageTexts,
+      });
+
+      const promptText = getPromptText();
+      // C_REF: appears in system prompt description but should not appear as a standalone section
+      expect(promptText).not.toMatch(/^C_REF:\n/m);
     });
   });
 });
