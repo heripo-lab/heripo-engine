@@ -9,24 +9,19 @@ import type {
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { omit } from 'es-toolkit';
-import {
-  createWriteStream,
-  existsSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { basename, join } from 'node:path';
+import { createWriteStream, existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 import { PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
+import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { LocalFileServer } from '../utils/local-file-server';
 import { ImagePdfConverter } from './image-pdf-converter';
-import { VlmPdfProcessor } from './vlm-pdf-processor';
 
 /**
  * Callback function invoked after PDF conversion completes
@@ -129,7 +124,7 @@ export class PDFConverter {
    *
    * Flow:
    * 1. Determine strategy (forced, skipped, or sampled via VLM)
-   * 2. If VLM → VlmPdfProcessor (bypasses Docling entirely)
+   * 2. If VLM → OCR pipeline + VlmTextCorrector (text correction)
    * 3. If ocrmac → existing Docling conversion
    *
    * @returns ConvertWithStrategyResult with the chosen strategy and token report
@@ -179,7 +174,7 @@ export class PDFConverter {
         cleanupAfterCallback,
         trackedOptions,
         abortSignal,
-        strategy.detectedLanguage,
+        strategy.detectedLanguages,
       );
       return {
         strategy,
@@ -274,8 +269,10 @@ export class PDFConverter {
   }
 
   /**
-   * Execute VLM-based PDF conversion (bypasses Docling entirely).
-   * Renders pages, processes with VLM, assembles DoclingDocument, extracts images.
+   * Execute VLM-enhanced PDF conversion.
+   *
+   * Runs the standard OCR pipeline (Docling) first, then applies VLM text
+   * correction to fix garbled Chinese characters (漢字/Hanja) in OCR output.
    */
   private async convertWithVlm(
     pdfPath: string | null,
@@ -284,7 +281,7 @@ export class PDFConverter {
     cleanupAfterCallback: boolean,
     options: PDFConvertOptions,
     abortSignal?: AbortSignal,
-    detectedLanguage?: string,
+    detectedLanguages?: string[],
   ): Promise<void> {
     if (!options.vlmProcessorModel) {
       throw new Error('vlmProcessorModel is required when OCR strategy is VLM');
@@ -293,55 +290,47 @@ export class PDFConverter {
       throw new Error('VLM conversion requires a local file (file:// URL)');
     }
 
-    const outputDir = join(process.cwd(), 'output', reportId);
-    const filename = basename(pdfPath);
+    const url = `file://${pdfPath}`;
 
-    try {
-      const processor = VlmPdfProcessor.create(this.logger);
-      const result = await processor.process(
-        pdfPath,
-        outputDir,
-        filename,
-        options.vlmProcessorModel,
-        {
-          concurrency: options.vlmConcurrency,
-          aggregator: options.aggregator,
-          abortSignal,
-          onTokenUsage: options.onTokenUsage,
-          documentLanguage: detectedLanguage,
-        },
-      );
-
-      // Write DoclingDocument as result.json
-      mkdirSync(outputDir, { recursive: true });
-      writeFileSync(
-        join(outputDir, 'result.json'),
-        JSON.stringify(result.document, null, 2),
-      );
-
-      // Check abort before callback
-      if (abortSignal?.aborted) {
-        this.logger.info(
-          '[PDFConverter] VLM conversion aborted before callback',
+    // Wrap the original callback with VLM text correction
+    const wrappedCallback: ConversionCompleteCallback = async (outputDir) => {
+      // Pre-extract text from PDF text layer for VLM reference
+      let pageTexts: Map<number, string> | undefined;
+      try {
+        const resultPath = join(outputDir, 'result.json');
+        const doc = JSON.parse(readFileSync(resultPath, 'utf-8'));
+        const totalPages = Object.keys(doc.pages).length;
+        const textExtractor = new PdfTextExtractor(this.logger);
+        pageTexts = await textExtractor.extractText(pdfPath, totalPages);
+      } catch {
+        this.logger.warn(
+          '[PDFConverter] pdftotext extraction failed, proceeding without text reference',
         );
-        const error = new Error('PDF conversion was aborted');
-        error.name = 'AbortError';
-        throw error;
       }
 
-      this.logger.info('[PDFConverter] Executing completion callback...');
+      const corrector = new VlmTextCorrector(this.logger);
+      await corrector.correctAndSave(outputDir, options.vlmProcessorModel!, {
+        concurrency: options.vlmConcurrency,
+        aggregator: options.aggregator,
+        abortSignal,
+        onTokenUsage: options.onTokenUsage,
+        documentLanguages: detectedLanguages,
+        pageTexts,
+      });
       await onComplete(outputDir);
+    };
 
-      this.logger.info('[PDFConverter] VLM conversion completed successfully');
-    } finally {
-      if (cleanupAfterCallback && existsSync(outputDir)) {
-        this.logger.info(
-          '[PDFConverter] Cleaning up output directory:',
-          outputDir,
-        );
-        rmSync(outputDir, { recursive: true, force: true });
-      }
-    }
+    // Run the standard OCR pipeline, then apply VLM correction via the wrapped callback
+    await this.convert(
+      url,
+      reportId,
+      wrappedCallback,
+      cleanupAfterCallback,
+      options,
+      abortSignal,
+    );
+
+    this.logger.info('[PDFConverter] VLM conversion completed successfully');
   }
 
   /**

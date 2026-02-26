@@ -26,7 +26,6 @@ const llmModelSchema = z.string().refine((val) => llmModelIds.includes(val), {
  */
 export const processingOptionsSchema = z.object({
   // Processing options
-  ocrLanguages: z.array(z.string().min(1)).min(1).default(['ko-KR', 'en-US']),
   threadCount: z.number().int().positive().max(16).default(4),
 
   // Force image PDF pre-conversion

@@ -20,7 +20,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '~/components/ui/select';
-import { SortableMultiSelect } from '~/components/ui/sortable-multi-select';
 import {
   Tooltip,
   TooltipContent,
@@ -30,11 +29,6 @@ import {
 
 import { LLM_MODELS } from '../constants/llm-models';
 import { useProcessingForm } from '../contexts/processing-form-context';
-
-interface StringArrayFieldApi {
-  state: { value: string[] };
-  handleChange: (value: string[]) => void;
-}
 
 interface NumberFieldApi {
   state: { value: number };
@@ -50,21 +44,6 @@ interface OptionalStringFieldApi {
   state: { value: string | undefined };
   handleChange: (value: string | undefined) => void;
 }
-
-export const OCR_LANGUAGES = [
-  { label: 'English', value: 'en-US' },
-  { label: 'Korean', value: 'ko-KR' },
-  { label: 'Japanese', value: 'ja-JP' },
-  { label: 'Chinese (Simplified)', value: 'zh-Hans' },
-  { label: 'Chinese (Traditional)', value: 'zh-Hant' },
-  { label: 'French', value: 'fr-FR' },
-  { label: 'German', value: 'de-DE' },
-  { label: 'Italian', value: 'it-IT' },
-  { label: 'Spanish', value: 'es-ES' },
-  { label: 'Portuguese (Brazil)', value: 'pt-BR' },
-  { label: 'Russian', value: 'ru-RU' },
-  { label: 'Ukrainian', value: 'uk-UA' },
-] as const;
 
 const NONE_VALUE = '__none__';
 
@@ -359,21 +338,6 @@ export function ProcessingOptionsCard({
                   />
                 </DisabledWrapper>
               </div>
-            </div>
-          )}
-        </form.Field>
-
-        {/* OCR Languages */}
-        <form.Field name="ocrLanguages">
-          {(field: StringArrayFieldApi) => (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">OCR Languages</label>
-              <SortableMultiSelect
-                options={OCR_LANGUAGES}
-                value={field.state.value}
-                onChange={field.handleChange}
-                placeholder="Select languages..."
-              />
             </div>
           )}
         </form.Field>

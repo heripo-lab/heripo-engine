@@ -65,6 +65,28 @@ export const CONTINUATION_MARKERS = [
 export const PAGE_NUMBER_PATTERN = /\.{2,}\s*\d+\s*$|…+\s*\d+\s*$|\s+\d+\s*$/;
 
 /**
+ * Resource index patterns for detecting non-TOC document index tables
+ * (e.g., drawing index, photo index, figure list)
+ * Korean: [도면 N], [사진 N], [표 N], [그림 N], 도면 N., 사진 N.
+ * English: Fig. N, Photo N, Plate N, Map N
+ * Chinese/Japanese: 圖 N
+ */
+export const RESOURCE_INDEX_PATTERNS: RegExp[] = [
+  /^\[도면\s*\d+\]/,
+  /^\[사진\s*\d+\]/,
+  /^\[표\s*\d+\]/,
+  /^\[그림\s*\d+\]/,
+  /^도면\s*\d+[.:)\s]/,
+  /^사진\s*\d+[.:)\s]/,
+  /^표\s*\d+[.:)\s]/,
+  /^Fig\.\s*\d+/i,
+  /^Photo\.?\s*\d+/i,
+  /^Plate\s*\d+/i,
+  /^Map\s*\d+/i,
+  /^圖\s*\d+/,
+];
+
+/**
  * TocFinder options
  */
 export interface TocFinderOptions {
@@ -165,6 +187,12 @@ export class TocFinder {
       if (result) {
         return this.expandToConsecutivePages(result, doc);
       }
+
+      // When container not found (e.g., parent is #/body), try adjacent body siblings
+      const siblingResult = this.findSiblingTocItem(doc, text.self_ref, pageNo);
+      if (siblingResult) {
+        return this.expandToConsecutivePages(siblingResult, doc);
+      }
     }
 
     return null;
@@ -207,7 +235,10 @@ export class TocFinder {
       }
 
       if (this.isTableTocLike(table)) {
-        const score = this.calculateTableScore(table, pageNo);
+        let score = this.calculateTableScore(table, pageNo);
+        if (this.isResourceIndexTable(table)) {
+          score -= 100;
+        }
         candidates.push({
           result: {
             itemRefs: [table.self_ref],
@@ -264,6 +295,51 @@ export class TocFinder {
       return this.findTocContainer(doc, item.parent.$ref, pageNo);
     }
 
+    return null;
+  }
+
+  /**
+   * Find adjacent TOC item among body siblings following the keyword text.
+   * Used when findTocContainer returns null (e.g., parent is #/body).
+   */
+  private findSiblingTocItem(
+    doc: DoclingDocument,
+    textRef: string,
+    pageNo: number,
+  ): TocAreaResult | null {
+    const idx = doc.body.children.findIndex((c) => c.$ref === textRef);
+    if (idx < 0) return null;
+
+    for (
+      let i = idx + 1;
+      i < Math.min(idx + 4, doc.body.children.length);
+      i++
+    ) {
+      const ref = doc.body.children[i].$ref;
+      const table = this.refResolver.resolveTable(ref);
+      if (
+        table &&
+        table.prov[0]?.page_no === pageNo &&
+        this.isTableTocLike(table)
+      ) {
+        return {
+          itemRefs: [table.self_ref],
+          startPage: pageNo,
+          endPage: pageNo,
+        };
+      }
+      const group = this.refResolver.resolveGroup(ref);
+      if (group) {
+        const groupPage = this.getGroupFirstPage(group);
+        if (groupPage === pageNo && this.isGroupTocLike(group, doc)) {
+          return {
+            itemRefs: [group.self_ref],
+            startPage: pageNo,
+            endPage: pageNo,
+          };
+        }
+      }
+    }
     return null;
   }
 
@@ -327,6 +403,25 @@ export class TocFinder {
 
     // More than 50% of data rows have numeric last column
     return numberCount > 0 && numberCount / (num_rows - 1) > 0.5;
+  }
+
+  /**
+   * Check if a table is a resource index (drawing/photo/figure list)
+   * rather than a main TOC table
+   */
+  private isResourceIndexTable(table: DoclingTableItem): boolean {
+    const firstColCells = table.data.table_cells.filter(
+      (c) => c.start_col_offset_idx === 0,
+    );
+    if (firstColCells.length === 0) return false;
+
+    let resourceCount = 0;
+    for (const cell of firstColCells) {
+      if (RESOURCE_INDEX_PATTERNS.some((p) => p.test(cell.text.trim()))) {
+        resourceCount++;
+      }
+    }
+    return resourceCount / firstColCells.length > 0.5;
   }
 
   /**
@@ -428,7 +523,11 @@ export class TocFinder {
         continue;
       }
 
-      if (this.isTableTocLike(table) && !refs.includes(table.self_ref)) {
+      if (
+        this.isTableTocLike(table) &&
+        !this.isResourceIndexTable(table) &&
+        !refs.includes(table.self_ref)
+      ) {
         refs.push(table.self_ref);
       }
     }

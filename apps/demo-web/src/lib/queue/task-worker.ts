@@ -269,7 +269,6 @@ export async function runTaskWorker(
 
     // Build PDF convert options with new strategy fields
     const pdfConvertOptions: PDFConvertOptions = {
-      ocr_lang: options.ocrLanguages,
       num_threads: options.threadCount,
       forceImagePdf: options.forceImagePdf,
       ...(options.strategySamplerModel

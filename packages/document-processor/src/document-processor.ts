@@ -12,6 +12,7 @@ import type {
   ProcessedTableCell,
   TokenUsageReport,
 } from '@heripo/model';
+import type { ExtendedTokenUsage } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { TocEntry } from './types';
@@ -23,6 +24,7 @@ import {
   TocExtractor,
   TocFinder,
   TocNotFoundError,
+  TocValidationError,
   VisionTocExtractor,
 } from './extractors';
 import { CaptionParser, PageRangeParser } from './parsers';
@@ -657,7 +659,9 @@ export class DocumentProcessor {
     }
 
     // Stage 4: Vision fallback if needed
+    let fromVision = false;
     if (!markdown) {
+      fromVision = true;
       this.logger.info('[DocumentProcessor] Using vision fallback for TOC');
       const totalPages = Object.keys(doclingDoc.pages).length;
       markdown = await this.visionTocExtractor!.extract(totalPages);
@@ -688,13 +692,58 @@ export class DocumentProcessor {
     const effectiveTotalPages =
       maxTocPageNo > totalPages ? undefined : totalPages;
 
-    const tocResult = await this.tocExtractor!.extract(markdown, {
-      totalPages: effectiveTotalPages,
-    });
+    let tocResult: { entries: TocEntry[]; usages: ExtendedTokenUsage[] };
+    try {
+      tocResult = await this.tocExtractor!.extract(markdown, {
+        totalPages: effectiveTotalPages,
+      });
+    } catch (error) {
+      if (error instanceof TocValidationError) {
+        this.logger.warn(
+          `[DocumentProcessor] TOC extraction validation failed: ${error.message}`,
+        );
+        tocResult = { entries: [], usages: [] };
+      } else {
+        throw error;
+      }
+    }
 
     // Track token usage (initial extraction + any correction retries)
     for (const usage of tocResult.usages) {
       this.usageAggregator.track(usage);
+    }
+
+    // Stage 5b: Vision fallback when text-based extraction yields 0 entries
+    if (tocResult.entries.length === 0 && !fromVision) {
+      this.logger.warn(
+        '[DocumentProcessor] Text-based TOC extraction yielded 0 entries, retrying with vision',
+      );
+      const visionMarkdown = await this.visionTocExtractor!.extract(totalPages);
+      if (visionMarkdown) {
+        this.logger.info(
+          `[DocumentProcessor] Vision extracted TOC markdown (${visionMarkdown.length} chars)`,
+        );
+        const visionMaxPageNo = this.extractMaxPageNumber(visionMarkdown);
+        const visionEffectivePages =
+          visionMaxPageNo > totalPages ? undefined : totalPages;
+
+        try {
+          const visionResult = await this.tocExtractor!.extract(
+            visionMarkdown,
+            {
+              totalPages: visionEffectivePages,
+            },
+          );
+          for (const usage of visionResult.usages) {
+            this.usageAggregator.track(usage);
+          }
+          if (visionResult.entries.length > 0) {
+            tocResult = visionResult;
+          }
+        } catch {
+          // Vision retry also failed, will fall through to error below
+        }
+      }
     }
 
     if (tocResult.entries.length === 0) {
@@ -715,15 +764,25 @@ export class DocumentProcessor {
    * Extract the maximum page number from TOC markdown
    *
    * Parses page numbers from dot-leader patterns (e.g., "..... 175")
-   * to detect compiled volume scenarios where TOC page numbers exceed
-   * the sub-document's page count.
+   * and table cell patterns (e.g., "| title | 175 |") to detect compiled
+   * volume scenarios where TOC page numbers exceed the sub-document's page count.
    */
   private extractMaxPageNumber(markdown: string): number {
-    const matches = [...markdown.matchAll(/\.{2,}\s*(\d+)/g)];
-    if (matches.length === 0) {
+    // Pattern 1: dot-leader format (e.g., "..... 175")
+    const dotLeaderMatches = [...markdown.matchAll(/\.{2,}\s*(\d+)/g)];
+
+    // Pattern 2: table last cell (e.g., "| title | 175 |")
+    const tableCellMatches = [...markdown.matchAll(/\|\s*(\d+)\s*\|\s*$/gm)];
+
+    const allNumbers = [
+      ...dotLeaderMatches.map((m) => parseInt(m[1], 10)),
+      ...tableCellMatches.map((m) => parseInt(m[1], 10)),
+    ];
+
+    if (allNumbers.length === 0) {
       return 0;
     }
-    return Math.max(...matches.map((m) => parseInt(m[1], 10)));
+    return Math.max(...allNumbers);
   }
 
   /**

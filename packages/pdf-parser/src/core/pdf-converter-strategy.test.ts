@@ -1,27 +1,25 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { DoclingDocument } from '@heripo/model';
 import type { DoclingAPIClient } from 'docling-sdk';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PageRenderer } from '../processors/page-renderer';
+import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { PDFConverter } from './pdf-converter';
-import { VlmPdfProcessor } from './vlm-pdf-processor';
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
+  readFileSync: vi.fn(),
   rmSync: vi.fn(),
-  mkdirSync: vi.fn(),
-  writeFileSync: vi.fn(),
   createWriteStream: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
   join: vi.fn((...args: string[]) => args.join('/')),
-  basename: vi.fn((p: string) => p.split('/').pop() ?? ''),
 }));
 
 vi.mock('../samplers/ocr-strategy-sampler', () => ({
@@ -32,10 +30,12 @@ vi.mock('../processors/page-renderer', () => ({
   PageRenderer: vi.fn(),
 }));
 
-vi.mock('./vlm-pdf-processor', () => ({
-  VlmPdfProcessor: {
-    create: vi.fn(),
-  },
+vi.mock('../processors/pdf-text-extractor', () => ({
+  PdfTextExtractor: vi.fn(),
+}));
+
+vi.mock('../processors/vlm-text-corrector', () => ({
+  VlmTextCorrector: vi.fn(),
 }));
 
 const mockModel = { modelId: 'test-model' } as any;
@@ -47,37 +47,8 @@ describe('PDFConverter.convertWithStrategy', () => {
   let converter: PDFConverter;
   let mockOnComplete: Mock;
   let mockSamplerInstance: { sample: Mock };
-  let mockProcessorInstance: { process: Mock };
-
-  const testDoc: DoclingDocument = {
-    schema_name: 'DoclingDocument',
-    version: '1.0.0',
-    name: 'test',
-    origin: {
-      mimetype: 'application/pdf',
-      binary_hash: 0,
-      filename: 'test.pdf',
-    },
-    furniture: {
-      self_ref: '#/furniture',
-      name: '_root_',
-      label: 'unspecified',
-      children: [],
-      content_layer: 'furniture',
-    },
-    body: {
-      self_ref: '#/body',
-      name: '_root_',
-      label: 'unspecified',
-      children: [],
-      content_layer: 'body',
-    },
-    groups: [],
-    texts: [],
-    pictures: [],
-    tables: [],
-    pages: {},
-  };
+  let mockCorrectorInstance: { correctAndSave: Mock };
+  let mockTextExtractorInstance: { extractText: Mock };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -116,12 +87,30 @@ describe('PDFConverter.convertWithStrategy', () => {
       return mockSamplerInstance as any;
     });
 
-    // Mock VlmPdfProcessor.create
-    mockProcessorInstance = {
-      process: vi.fn().mockResolvedValue({ document: testDoc }),
+    // Mock VlmTextCorrector constructor
+    mockCorrectorInstance = {
+      correctAndSave: vi.fn().mockResolvedValue({
+        textCorrections: 0,
+        cellCorrections: 0,
+        pagesProcessed: 5,
+        pagesFailed: 0,
+      }),
     };
-    vi.mocked(VlmPdfProcessor.create).mockReturnValue(
-      mockProcessorInstance as any,
+    vi.mocked(VlmTextCorrector).mockImplementation(function () {
+      return mockCorrectorInstance as any;
+    });
+
+    // Mock PdfTextExtractor constructor
+    mockTextExtractorInstance = {
+      extractText: vi.fn().mockResolvedValue(new Map<number, string>()),
+    };
+    vi.mocked(PdfTextExtractor).mockImplementation(function () {
+      return mockTextExtractorInstance as any;
+    });
+
+    // Default: readFileSync returns a doc with 1 page for wrappedCallback
+    vi.mocked(readFileSync).mockReturnValue(
+      Buffer.from(JSON.stringify({ pages: { '1': { page_no: 1 } } })),
     );
   });
 
@@ -336,13 +325,8 @@ describe('PDFConverter.convertWithStrategy', () => {
   });
 
   describe('VLM path', () => {
-    test('uses VlmPdfProcessor when strategy is VLM', async () => {
-      mockSamplerInstance.sample.mockResolvedValue({
-        method: 'vlm',
-        reason: 'Korean-Hanja mix detected on page 3',
-        sampledPages: 2,
-        totalPages: 10,
-      });
+    test('delegates to convert() with file URL when strategy is VLM', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
 
       await converter.convertWithStrategy(
         'file:///tmp/report.pdf',
@@ -352,52 +336,35 @@ describe('PDFConverter.convertWithStrategy', () => {
         {
           strategySamplerModel: mockModel,
           vlmProcessorModel: mockFallbackModel,
+          forcedMethod: 'vlm',
         },
       );
 
-      expect(VlmPdfProcessor.create).toHaveBeenCalledWith(logger);
-      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
-        '/tmp/report.pdf',
-        '/test/cwd/output/report-1',
-        'report.pdf',
-        mockFallbackModel,
+      // convertWithVlm delegates to convert() with the file URL
+      expect(convertSpy).toHaveBeenCalledWith(
+        'file:///tmp/report.pdf',
+        'report-1',
+        expect.any(Function), // wrapped callback
+        false,
         expect.objectContaining({
-          aggregator: expect.any(LLMTokenUsageAggregator),
-          abortSignal: undefined,
-        }),
-      );
-    });
-
-    test('passes detectedLanguage from strategy to VlmPdfProcessor as documentLanguage', async () => {
-      mockSamplerInstance.sample.mockResolvedValue({
-        method: 'vlm',
-        reason: 'Korean-Hanja mix detected',
-        sampledPages: 2,
-        totalPages: 10,
-        detectedLanguage: 'ko',
-      });
-
-      await converter.convertWithStrategy(
-        'file:///tmp/report.pdf',
-        'report-1',
-        mockOnComplete,
-        false,
-        {
-          strategySamplerModel: mockModel,
           vlmProcessorModel: mockFallbackModel,
-        },
+        }),
+        undefined,
       );
 
-      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(String),
-        expect.any(String),
-        mockFallbackModel,
-        expect.objectContaining({ documentLanguage: 'ko' }),
-      );
+      convertSpy.mockRestore();
     });
 
-    test('passes undefined documentLanguage when strategy has no detectedLanguage', async () => {
+    test('wrapped callback calls VlmTextCorrector then onComplete', async () => {
+      // Capture the wrapped callback passed to convert()
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          // Invoke the wrapped callback to test its behavior
+          await callback('/test/output');
+          return null;
+        });
+
       await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
         'report-1',
@@ -406,18 +373,93 @@ describe('PDFConverter.convertWithStrategy', () => {
         { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
       );
 
-      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(String),
-        expect.any(String),
+      // VlmTextCorrector should have been instantiated and called
+      expect(VlmTextCorrector).toHaveBeenCalledWith(logger);
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
         mockModel,
-        expect.objectContaining({ documentLanguage: undefined }),
+        expect.objectContaining({
+          aggregator: expect.any(LLMTokenUsageAggregator),
+        }),
       );
+
+      // Original onComplete should have been called after correction
+      expect(mockOnComplete).toHaveBeenCalledWith('/test/output');
+
+      convertSpy.mockRestore();
     });
 
-    test('passes aggregator and abortSignal to VlmPdfProcessor', async () => {
+    test('passes detectedLanguages to VlmTextCorrector as documentLanguages', async () => {
+      mockSamplerInstance.sample.mockResolvedValue({
+        method: 'vlm',
+        reason: 'Korean-Hanja mix detected',
+        sampledPages: 2,
+        totalPages: 10,
+        detectedLanguages: ['ko-KR'],
+      });
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
+      await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          strategySamplerModel: mockModel,
+          vlmProcessorModel: mockFallbackModel,
+        },
+      );
+
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
+        mockFallbackModel,
+        expect.objectContaining({ documentLanguages: ['ko-KR'] }),
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('passes undefined documentLanguages when strategy has no detectedLanguages', async () => {
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
+      );
+
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        expect.any(String),
+        mockModel,
+        expect.objectContaining({ documentLanguages: undefined }),
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('passes aggregator and abortSignal to VlmTextCorrector', async () => {
       const aggregator = new LLMTokenUsageAggregator();
       const abortController = new AbortController();
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
 
       await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
@@ -432,20 +474,27 @@ describe('PDFConverter.convertWithStrategy', () => {
         abortController.signal,
       );
 
-      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
-        '/tmp/test.pdf',
-        '/test/cwd/output/report-1',
-        'test.pdf',
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
         mockModel,
         expect.objectContaining({
           aggregator,
           abortSignal: abortController.signal,
         }),
       );
+
+      convertSpy.mockRestore();
     });
 
-    test('forwards onTokenUsage callback to VlmPdfProcessor', async () => {
+    test('forwards onTokenUsage callback to VlmTextCorrector', async () => {
       const onTokenUsage = vi.fn();
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
 
       await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
@@ -459,46 +508,47 @@ describe('PDFConverter.convertWithStrategy', () => {
         },
       );
 
-      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.any(String),
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
         expect.any(String),
         mockModel,
         expect.objectContaining({ onTokenUsage }),
       );
+
+      convertSpy.mockRestore();
     });
 
-    test('writes result.json to output directory', async () => {
+    test('forwards vlmConcurrency to VlmTextCorrector as concurrency', async () => {
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
       await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
         'report-1',
         mockOnComplete,
         false,
-        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
+        {
+          forcedMethod: 'vlm',
+          vlmProcessorModel: mockModel,
+          vlmConcurrency: 4,
+        },
       );
 
-      expect(mkdirSync).toHaveBeenCalledWith('/test/cwd/output/report-1', {
-        recursive: true,
-      });
-      expect(writeFileSync).toHaveBeenCalledWith(
-        '/test/cwd/output/report-1/result.json',
-        JSON.stringify(testDoc, null, 2),
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        expect.any(String),
+        mockModel,
+        expect.objectContaining({ concurrency: 4 }),
       );
+
+      convertSpy.mockRestore();
     });
 
-    test('calls onComplete with output directory', async () => {
-      await converter.convertWithStrategy(
-        'file:///tmp/test.pdf',
-        'report-1',
-        mockOnComplete,
-        false,
-        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
-      );
+    test('returns null tokenUsageReport for VLM path when no LLM calls tracked', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
 
-      expect(mockOnComplete).toHaveBeenCalledWith('/test/cwd/output/report-1');
-    });
-
-    test('returns null tokenUsageReport for VLM path', async () => {
       const result = await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
         'report-1',
@@ -509,42 +559,8 @@ describe('PDFConverter.convertWithStrategy', () => {
 
       expect(result.strategy.method).toBe('vlm');
       expect(result.tokenUsageReport).toBeNull();
-    });
 
-    test('cleans up output directory when cleanupAfterCallback is true', async () => {
-      vi.mocked(existsSync).mockReturnValue(true);
-
-      await converter.convertWithStrategy(
-        'file:///tmp/test.pdf',
-        'report-1',
-        mockOnComplete,
-        true,
-        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
-      );
-
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/output/report-1', {
-        recursive: true,
-        force: true,
-      });
-    });
-
-    test('does not clean up output when cleanupAfterCallback is false', async () => {
-      vi.mocked(existsSync).mockReturnValue(true);
-
-      await converter.convertWithStrategy(
-        'file:///tmp/test.pdf',
-        'report-1',
-        mockOnComplete,
-        false,
-        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
-      );
-
-      // rmSync should NOT be called for output dir (only sampling dir may be called)
-      const rmSyncCalls = vi.mocked(rmSync).mock.calls;
-      const outputDirCleanup = rmSyncCalls.find(
-        (call) => call[0] === '/test/cwd/output/report-1',
-      );
-      expect(outputDirCleanup).toBeUndefined();
+      convertSpy.mockRestore();
     });
 
     test('throws error when vlmProcessorModel is missing', async () => {
@@ -573,9 +589,10 @@ describe('PDFConverter.convertWithStrategy', () => {
       ).rejects.toThrow('VLM conversion requires a local file (file:// URL)');
     });
 
-    test('throws AbortError when aborted before callback', async () => {
-      const abortController = new AbortController();
-      abortController.abort();
+    test('propagates errors from convert()', async () => {
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockRejectedValue(new Error('Docling conversion failed'));
 
       await expect(
         converter.convertWithStrategy(
@@ -584,17 +601,22 @@ describe('PDFConverter.convertWithStrategy', () => {
           mockOnComplete,
           false,
           { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
-          abortController.signal,
         ),
-      ).rejects.toThrow('PDF conversion was aborted');
+      ).rejects.toThrow('Docling conversion failed');
 
-      expect(mockOnComplete).not.toHaveBeenCalled();
+      convertSpy.mockRestore();
     });
 
-    test('cleans up on VLM processor error', async () => {
-      vi.mocked(existsSync).mockReturnValue(true);
-      mockProcessorInstance.process.mockRejectedValue(
-        new Error('VLM processing failed'),
+    test('propagates errors from VlmTextCorrector', async () => {
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
+      mockCorrectorInstance.correctAndSave.mockRejectedValue(
+        new Error('VLM correction failed'),
       );
 
       await expect(
@@ -602,42 +624,48 @@ describe('PDFConverter.convertWithStrategy', () => {
           'file:///tmp/test.pdf',
           'report-1',
           mockOnComplete,
-          true,
+          false,
           { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
         ),
-      ).rejects.toThrow('VLM processing failed');
+      ).rejects.toThrow('VLM correction failed');
 
-      // Should still clean up
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/output/report-1', {
-        recursive: true,
-        force: true,
-      });
+      convertSpy.mockRestore();
     });
   });
 
   describe('token usage tracking', () => {
     test('creates internal aggregator and returns report when VLM tracks usage', async () => {
-      // Simulate VlmPdfProcessor calling aggregator.track() during processing
-      mockProcessorInstance.process.mockImplementation(
+      // Simulate VlmTextCorrector calling aggregator.track() during processing
+      mockCorrectorInstance.correctAndSave.mockImplementation(
         async (
-          _pdfPath: string,
           _outputDir: string,
-          _filename: string,
           _model: unknown,
           opts: { aggregator?: LLMTokenUsageAggregator },
         ) => {
           opts.aggregator?.track({
-            component: 'VlmPageProcessor',
-            phase: 'page-analysis',
+            component: 'VlmTextCorrector',
+            phase: 'text-correction',
             model: 'primary',
             modelName: 'test-model',
             inputTokens: 500,
             outputTokens: 200,
             totalTokens: 700,
           });
-          return { document: testDoc };
+          return {
+            textCorrections: 1,
+            cellCorrections: 0,
+            pagesProcessed: 1,
+            pagesFailed: 0,
+          };
         },
       );
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
 
       const result = await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
@@ -650,11 +678,13 @@ describe('PDFConverter.convertWithStrategy', () => {
       expect(result.tokenUsageReport).not.toBeNull();
       expect(result.tokenUsageReport!.components).toHaveLength(1);
       expect(result.tokenUsageReport!.components[0].component).toBe(
-        'VlmPageProcessor',
+        'VlmTextCorrector',
       );
       expect(result.tokenUsageReport!.total.inputTokens).toBe(500);
       expect(result.tokenUsageReport!.total.outputTokens).toBe(200);
       expect(result.tokenUsageReport!.total.totalTokens).toBe(700);
+
+      convertSpy.mockRestore();
     });
 
     test('returns token report with sampling usage on ocrmac path', async () => {
@@ -733,27 +763,37 @@ describe('PDFConverter.convertWithStrategy', () => {
         },
       );
 
-      // Simulate VLM processing tracking
-      mockProcessorInstance.process.mockImplementation(
+      // Simulate VlmTextCorrector tracking
+      mockCorrectorInstance.correctAndSave.mockImplementation(
         async (
-          _pdfPath: string,
           _outputDir: string,
-          _filename: string,
           _model: unknown,
           opts: { aggregator?: LLMTokenUsageAggregator },
         ) => {
           opts.aggregator?.track({
-            component: 'VlmPageProcessor',
-            phase: 'page-analysis',
+            component: 'VlmTextCorrector',
+            phase: 'text-correction',
             model: 'primary',
             modelName: 'vlm-model',
             inputTokens: 5000,
             outputTokens: 1500,
             totalTokens: 6500,
           });
-          return { document: testDoc };
+          return {
+            textCorrections: 3,
+            cellCorrections: 1,
+            pagesProcessed: 5,
+            pagesFailed: 0,
+          };
         },
       );
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
 
       const result = await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
@@ -772,6 +812,8 @@ describe('PDFConverter.convertWithStrategy', () => {
       expect(result.tokenUsageReport!.total.inputTokens).toBe(5800);
       expect(result.tokenUsageReport!.total.outputTokens).toBe(1530);
       expect(result.tokenUsageReport!.total.totalTokens).toBe(7330);
+
+      convertSpy.mockRestore();
     });
 
     test('returns null tokenUsageReport when no LLM calls are tracked', async () => {
@@ -862,26 +904,36 @@ describe('PDFConverter.convertWithStrategy', () => {
     test('uses externally provided aggregator instead of creating a new one', async () => {
       const externalAggregator = new LLMTokenUsageAggregator();
 
-      mockProcessorInstance.process.mockImplementation(
+      mockCorrectorInstance.correctAndSave.mockImplementation(
         async (
-          _pdfPath: string,
           _outputDir: string,
-          _filename: string,
           _model: unknown,
           opts: { aggregator?: LLMTokenUsageAggregator },
         ) => {
           opts.aggregator?.track({
-            component: 'VlmPageProcessor',
-            phase: 'page-analysis',
+            component: 'VlmTextCorrector',
+            phase: 'text-correction',
             model: 'primary',
             modelName: 'test-model',
             inputTokens: 100,
             outputTokens: 50,
             totalTokens: 150,
           });
-          return { document: testDoc };
+          return {
+            textCorrections: 0,
+            cellCorrections: 0,
+            pagesProcessed: 1,
+            pagesFailed: 0,
+          };
         },
       );
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
 
       await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
@@ -899,9 +951,18 @@ describe('PDFConverter.convertWithStrategy', () => {
       const report = externalAggregator.getReport();
       expect(report.components).toHaveLength(1);
       expect(report.total.totalTokens).toBe(150);
+
+      convertSpy.mockRestore();
     });
 
-    test('creates internal aggregator when none provided and passes to VLM processor', async () => {
+    test('creates internal aggregator when none provided and passes to VlmTextCorrector', async () => {
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
       await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
         'report-1',
@@ -910,16 +971,16 @@ describe('PDFConverter.convertWithStrategy', () => {
         { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
       );
 
-      // VlmPdfProcessor should receive an LLMTokenUsageAggregator instance
-      expect(mockProcessorInstance.process).toHaveBeenCalledWith(
-        '/tmp/test.pdf',
-        '/test/cwd/output/report-1',
-        'test.pdf',
+      // VlmTextCorrector should receive an LLMTokenUsageAggregator instance
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
         mockModel,
         expect.objectContaining({
           aggregator: expect.any(LLMTokenUsageAggregator),
         }),
       );
+
+      convertSpy.mockRestore();
     });
   });
 
@@ -962,6 +1023,8 @@ describe('PDFConverter.convertWithStrategy', () => {
     });
 
     test('logs VLM conversion completion', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
       await converter.convertWithStrategy(
         'file:///tmp/test.pdf',
         'report-1',
@@ -973,6 +1036,123 @@ describe('PDFConverter.convertWithStrategy', () => {
       expect(logger.info).toHaveBeenCalledWith(
         '[PDFConverter] VLM conversion completed successfully',
       );
+
+      convertSpy.mockRestore();
+    });
+  });
+
+  describe('pdftotext extraction in VLM path', () => {
+    test('extracts text with PdfTextExtractor and passes pageTexts to VlmTextCorrector', async () => {
+      const pageTexts = new Map<number, string>();
+      pageTexts.set(1, 'extracted text page 1');
+      mockTextExtractorInstance.extractText.mockResolvedValue(pageTexts);
+
+      vi.mocked(readFileSync).mockReturnValue(
+        Buffer.from(
+          JSON.stringify({
+            pages: { '1': { page_no: 1 }, '2': { page_no: 2 } },
+          }),
+        ),
+      );
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
+      );
+
+      // PdfTextExtractor should have been called with pdfPath and totalPages
+      expect(PdfTextExtractor).toHaveBeenCalledWith(logger);
+      expect(mockTextExtractorInstance.extractText).toHaveBeenCalledWith(
+        '/tmp/test.pdf',
+        2,
+      );
+
+      // VlmTextCorrector should receive the pageTexts
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
+        mockModel,
+        expect.objectContaining({ pageTexts }),
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('proceeds without pageTexts when PdfTextExtractor fails', async () => {
+      mockTextExtractorInstance.extractText.mockRejectedValue(
+        new Error('pdftotext not found'),
+      );
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
+      );
+
+      // Should warn but not throw
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFConverter] pdftotext extraction failed, proceeding without text reference',
+      );
+
+      // VlmTextCorrector should still be called with undefined pageTexts
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
+        mockModel,
+        expect.objectContaining({ pageTexts: undefined }),
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('proceeds without pageTexts when result.json read fails', async () => {
+      vi.mocked(readFileSync).mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(async (_url, _id, callback) => {
+          await callback('/test/output');
+          return null;
+        });
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'vlm', vlmProcessorModel: mockModel },
+      );
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFConverter] pdftotext extraction failed, proceeding without text reference',
+      );
+
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
+        mockModel,
+        expect.objectContaining({ pageTexts: undefined }),
+      );
+
+      convertSpy.mockRestore();
     });
   });
 });

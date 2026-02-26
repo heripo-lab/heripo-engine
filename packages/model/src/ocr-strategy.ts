@@ -10,8 +10,8 @@ export interface OcrStrategy {
   /** OCR language weights for ocrmac (e.g., ['ko-KR', 'en-US'] or ['zh-Hant', 'ko-KR']) */
   ocrLanguages?: string[];
 
-  /** Primary document language detected during sampling (ISO 639-1, e.g., 'ko') */
-  detectedLanguage?: string;
+  /** BCP 47 language tags detected during sampling (e.g., ['ko-KR', 'en-US']) */
+  detectedLanguages?: string[];
 
   /** Human-readable explanation of the decision */
   reason: string;

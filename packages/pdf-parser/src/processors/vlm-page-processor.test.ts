@@ -704,7 +704,7 @@ describe('VlmPageProcessor', () => {
       });
     });
 
-    test('performs quality retry when script anomaly detected with documentLanguage ko', async () => {
+    test('performs quality retry when script anomaly detected with documentLanguages ko-KR', async () => {
       mockCallVision
         .mockResolvedValueOnce(
           createMockVlmResult([
@@ -724,7 +724,7 @@ describe('VlmPageProcessor', () => {
       const results = await processor.processPages(
         ['/tmp/pages/page_0.png'],
         mockModel,
-        { documentLanguage: 'ko' },
+        { documentLanguages: ['ko-KR'] },
       );
 
       expect(mockCallVision).toHaveBeenCalledTimes(2);
@@ -743,14 +743,14 @@ describe('VlmPageProcessor', () => {
       const results = await processor.processPages(
         ['/tmp/pages/page_0.png'],
         mockModel,
-        { documentLanguage: 'ko' },
+        { documentLanguages: ['ko-KR'] },
       );
 
       expect(mockCallVision).toHaveBeenCalledTimes(1);
       expect(results[0].quality).toBeUndefined();
     });
 
-    test('does not perform quality retry when documentLanguage is not set and text is Latin', async () => {
+    test('does not perform quality retry when documentLanguages is not set and text is Latin', async () => {
       mockCallVision.mockResolvedValue(
         createMockVlmResult([
           {
@@ -953,13 +953,13 @@ describe('VlmPageProcessor', () => {
   });
 
   describe('document language prompt', () => {
-    test('prepends language context to prompt when documentLanguage is set', async () => {
+    test('prepends language context to prompt when documentLanguages is set', async () => {
       mockCallVision.mockResolvedValue(
         createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
       );
 
       await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
-        documentLanguage: 'ko',
+        documentLanguages: ['ko-KR'],
       });
 
       const promptText =
@@ -969,7 +969,22 @@ describe('VlmPageProcessor', () => {
       expect(promptText).toContain('Analyze the page image');
     });
 
-    test('uses default prompt when documentLanguage is not set', async () => {
+    test('includes multiple languages in prompt when documentLanguages has multiple entries', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguages: ['ko-KR', 'en-US'],
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('primarily written in Korean');
+      expect(promptText).toContain('with English also present');
+    });
+
+    test('uses default prompt when documentLanguages is not set', async () => {
       mockCallVision.mockResolvedValue(
         createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
       );
@@ -983,7 +998,7 @@ describe('VlmPageProcessor', () => {
     });
 
     test('includes both placeholder and script anomaly warnings when both detected', async () => {
-      // Lorem ipsum with documentLanguage 'ko' triggers both placeholder_text and script_anomaly
+      // Lorem ipsum with documentLanguages ['ko-KR'] triggers both placeholder_text and script_anomaly
       mockCallVision
         .mockResolvedValueOnce(
           createMockVlmResult([
@@ -999,7 +1014,7 @@ describe('VlmPageProcessor', () => {
         );
 
       await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
-        documentLanguage: 'ko',
+        documentLanguages: ['ko-KR'],
       });
 
       const retryPromptText =
@@ -1024,7 +1039,7 @@ describe('VlmPageProcessor', () => {
         );
 
       await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
-        documentLanguage: 'ko',
+        documentLanguages: ['ko-KR'],
       });
 
       const retryPromptText =
@@ -1033,7 +1048,7 @@ describe('VlmPageProcessor', () => {
       expect(retryPromptText).toContain('Korean');
     });
 
-    test('includes language context in quality retry prompt when documentLanguage set', async () => {
+    test('includes language context in quality retry prompt when documentLanguages set', async () => {
       mockCallVision
         .mockResolvedValueOnce(
           createMockVlmResult([
@@ -1049,7 +1064,7 @@ describe('VlmPageProcessor', () => {
         );
 
       await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
-        documentLanguage: 'ko',
+        documentLanguages: ['ko-KR'],
       });
 
       const retryPromptText =
@@ -1194,7 +1209,7 @@ describe('VlmPageProcessor', () => {
 
       await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
         pageTexts,
-        documentLanguage: 'ko',
+        documentLanguages: ['ko-KR'],
       });
 
       const promptText =

@@ -1,10 +1,7 @@
 // Components
 export { PdfDropzone } from './components/pdf-dropzone';
 export { StartProcessingButton } from './components/start-processing-button';
-export {
-  ProcessingOptionsCard,
-  OCR_LANGUAGES,
-} from './components/processing-options-card';
+export { ProcessingOptionsCard } from './components/processing-options-card';
 export { LLMModelSettingsCard } from './components/llm-model-settings-card';
 export { AdvancedOptionsCard } from './components/advanced-options-card';
 export { RateLimitBanner } from './components/rate-limit-banner';

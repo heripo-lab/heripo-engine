@@ -28,12 +28,19 @@ const EMPTY_PAGE_RETRY_TEMPERATURE = 0.3;
 /** Temperature for retrying pages that failed quality validation */
 const QUALITY_RETRY_TEMPERATURE = 0.5;
 
-/** Language display names for VLM prompt context */
+/** Language display names for VLM prompt context (keyed by ISO 639-1 base language code) */
 const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
   ko: 'Korean (한국어)',
   ja: 'Japanese (日本語)',
   zh: 'Chinese (中文)',
   en: 'English',
+  fr: 'French (Français)',
+  de: 'German (Deutsch)',
+  es: 'Spanish (Español)',
+  pt: 'Portuguese (Português)',
+  ru: 'Russian (Русский)',
+  uk: 'Ukrainian (Українська)',
+  it: 'Italian (Italiano)',
 };
 
 /**
@@ -100,8 +107,8 @@ export interface VlmPageProcessorOptions {
   aggregator?: LLMTokenUsageAggregator;
   /** Callback fired after each page completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
-  /** Expected document language for quality validation (ISO 639-1, e.g., 'ko') */
-  documentLanguage?: string;
+  /** BCP 47 language tags detected during sampling (e.g., ['ko-KR', 'en-US']) */
+  documentLanguages?: string[];
   /** Pre-extracted page texts from pdftotext (1-based pageNo → text) */
   pageTexts?: Map<number, string>;
 }
@@ -193,8 +200,8 @@ export class VlmPageProcessor {
 
     const base64Image = readFileSync(filePath).toString('base64');
 
-    const basePrompt = options?.documentLanguage
-      ? this.buildLanguageAwarePrompt(options.documentLanguage)
+    const basePrompt = options?.documentLanguages?.length
+      ? this.buildLanguageAwarePrompt(options.documentLanguages)
       : PAGE_ANALYSIS_PROMPT;
 
     const initialPrompt = this.injectTextContext(
@@ -274,7 +281,7 @@ export class VlmPageProcessor {
     // Quality validation: detect hallucination and script anomalies
     const validation = VlmResponseValidator.validate(
       pageResult.elements,
-      options?.documentLanguage,
+      options?.documentLanguages,
     );
 
     if (!validation.isValid) {
@@ -312,7 +319,7 @@ export class VlmPageProcessor {
 
     const baseRetryPrompt = this.buildQualityRetryPrompt(
       validation.issues,
-      options?.documentLanguage,
+      options?.documentLanguages,
     );
 
     const retryPrompt = this.injectTextContext(
@@ -356,7 +363,7 @@ export class VlmPageProcessor {
 
     const retryValidation = VlmResponseValidator.validate(
       retryPageResult.elements,
-      options?.documentLanguage,
+      options?.documentLanguages,
     );
 
     if (retryValidation.isValid) {
@@ -399,10 +406,17 @@ export class VlmPageProcessor {
   /**
    * Build the initial prompt with language context prepended.
    */
-  private buildLanguageAwarePrompt(documentLanguage: string): string {
-    const languageName = this.getLanguageDisplayName(documentLanguage);
+  private buildLanguageAwarePrompt(documentLanguages: string[]): string {
+    const primaryName = this.getLanguageDisplayName(documentLanguages[0]);
+    const otherNames = documentLanguages
+      .slice(1)
+      .map((code) => this.getLanguageDisplayName(code));
+    const languageDesc =
+      otherNames.length > 0
+        ? `primarily written in ${primaryName}, with ${otherNames.join(', ')} also present`
+        : `written in ${primaryName}`;
     const prefix =
-      `LANGUAGE CONTEXT: This document is written in ${languageName}. ` +
+      `LANGUAGE CONTEXT: This document is ${languageDesc}. ` +
       'The extracted text MUST be in this language. ' +
       'Do not output text in other languages unless it is actually visible on the page.\n\n';
     return prefix + PAGE_ANALYSIS_PROMPT;
@@ -413,11 +427,15 @@ export class VlmPageProcessor {
    */
   private buildQualityRetryPrompt(
     issues: VlmQualityIssue[],
-    documentLanguage?: string,
+    documentLanguages?: string[],
   ): string {
     const warnings: string[] = [
       'IMPORTANT: Your previous response had quality issues. Please re-analyze this page carefully.',
     ];
+
+    const primaryDisplayName = documentLanguages?.length
+      ? this.getLanguageDisplayName(documentLanguages[0])
+      : 'unknown';
 
     /* v8 ignore start -- all branches tested; V8 undercounts if/else-if per call site */
     for (const issue of issues) {
@@ -429,7 +447,7 @@ export class VlmPageProcessor {
       } else if (issue.type === 'script_anomaly') {
         warnings.push(
           '- WARNING: Your previous response contained text in the wrong language/script. ' +
-            `This document is in ${this.getLanguageDisplayName(documentLanguage)}. ` +
+            `This document is in ${primaryDisplayName}. ` +
             'Transcribe the actual characters visible on the page, not translated or fabricated text.',
         );
       } else if (issue.type === 'meta_description') {
@@ -448,9 +466,9 @@ export class VlmPageProcessor {
     }
     /* v8 ignore stop */
 
-    if (documentLanguage) {
+    if (documentLanguages?.length) {
       warnings.push(
-        `- LANGUAGE CONTEXT: This document is written in ${this.getLanguageDisplayName(documentLanguage)}. ` +
+        `- LANGUAGE CONTEXT: This document is written in ${primaryDisplayName}. ` +
           'The extracted text MUST be in this language. Do not output text in other languages unless it is actually visible on the page.',
       );
     }
@@ -459,11 +477,13 @@ export class VlmPageProcessor {
   }
 
   /**
-   * Get human-readable display name for a language code.
+   * Get human-readable display name for a BCP 47 or ISO 639-1 language code.
    */
-  /* v8 ignore start -- defensive fallback; script_anomaly always implies documentLanguage is set */
+  /* v8 ignore start -- defensive fallback; script_anomaly always implies documentLanguages is set */
   private getLanguageDisplayName(code?: string): string {
-    return code ? (LANGUAGE_DISPLAY_NAMES[code] ?? code) : 'unknown';
+    if (!code) return 'unknown';
+    const baseCode = code.split('-')[0];
+    return LANGUAGE_DISPLAY_NAMES[baseCode] ?? code;
   }
   /* v8 ignore stop */
 }

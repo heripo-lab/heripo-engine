@@ -22,7 +22,7 @@ function pictureElement(order: number): VlmPageElement {
 describe('VlmResponseValidator', () => {
   describe('validate', () => {
     test('returns valid for empty elements array', () => {
-      const result = VlmResponseValidator.validate([], 'ko');
+      const result = VlmResponseValidator.validate([], ['ko-KR']);
       expect(result.isValid).toBe(true);
       expect(result.issues).toEqual([]);
     });
@@ -30,7 +30,7 @@ describe('VlmResponseValidator', () => {
     test('returns valid for picture-only elements', () => {
       const result = VlmResponseValidator.validate(
         [pictureElement(0), pictureElement(1)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
       expect(result.issues).toEqual([]);
@@ -45,7 +45,7 @@ describe('VlmResponseValidator', () => {
           ),
           textElement('본 조사에서는 정밀한 층위 분석을 수행하였다.', 1),
         ],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
       expect(result.issues).toEqual([]);
@@ -57,7 +57,7 @@ describe('VlmResponseValidator', () => {
           textElement('OCR 엔진을 사용하여 PDF를 변환합니다.', 0),
           textElement('VLM (Vision Language Model) 기반 처리', 1),
         ],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
     });
@@ -65,12 +65,12 @@ describe('VlmResponseValidator', () => {
     test('returns valid for Korean text with numbers and punctuation', () => {
       const result = VlmResponseValidator.validate(
         [textElement('유적번호 15, 16, 17 (2009년 조사)', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
     });
 
-    test('returns valid without documentLanguage even for Latin text', () => {
+    test('returns valid without documentLanguages even for Latin text', () => {
       const result = VlmResponseValidator.validate([
         textElement(
           'This is entirely English text that would normally be flagged.',
@@ -88,7 +88,7 @@ describe('VlmResponseValidator', () => {
             0,
           ),
         ],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(false);
       const issueTypes = result.issues.map((i) => i.type);
@@ -99,7 +99,7 @@ describe('VlmResponseValidator', () => {
     test('returns isValid=false when any issue is detected', () => {
       const result = VlmResponseValidator.validate(
         [textElement('Lorem ipsum dolor sit amet.', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(false);
       expect(result.issues.length).toBeGreaterThan(0);
@@ -108,7 +108,7 @@ describe('VlmResponseValidator', () => {
     test('returns isValid=true only when no issues found', () => {
       const result = VlmResponseValidator.validate(
         [textElement('정상적인 한국어 텍스트입니다.', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
       expect(result.issues).toEqual([]);
@@ -193,7 +193,7 @@ describe('VlmResponseValidator', () => {
   });
 
   describe('script anomaly detection', () => {
-    test('detects all-Latin content when documentLanguage is ko', () => {
+    test('detects all-Latin content when documentLanguages starts with ko', () => {
       const result = VlmResponseValidator.validate(
         [
           textElement(
@@ -201,7 +201,7 @@ describe('VlmResponseValidator', () => {
             0,
           ),
         ],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(false);
       expect(result.issues.some((i) => i.type === 'script_anomaly')).toBe(true);
@@ -210,13 +210,13 @@ describe('VlmResponseValidator', () => {
     test('detects all-Latin content even with numbers mixed in', () => {
       const result = VlmResponseValidator.validate(
         [textElement('Section 12.3 of the report dated 2024-01-15', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(false);
       expect(result.issues.some((i) => i.type === 'script_anomaly')).toBe(true);
     });
 
-    test('does not flag when documentLanguage is not set', () => {
+    test('does not flag when documentLanguages is not set', () => {
       const result = VlmResponseValidator.validate([
         textElement(
           'Entirely English text without any Korean characters at all.',
@@ -226,10 +226,10 @@ describe('VlmResponseValidator', () => {
       expect(result.isValid).toBe(true);
     });
 
-    test('does not flag when documentLanguage is en', () => {
+    test('does not flag when documentLanguages is en-US', () => {
       const result = VlmResponseValidator.validate(
         [textElement('English text that should not be flagged as anomaly.', 0)],
-        'en',
+        ['en-US'],
       );
       expect(result.isValid).toBe(true);
     });
@@ -238,7 +238,7 @@ describe('VlmResponseValidator', () => {
       // ~50% Korean characters — well above 10% threshold
       const result = VlmResponseValidator.validate(
         [textElement('한국어 text와 English가 mixed된 content입니다.', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
     });
@@ -247,7 +247,7 @@ describe('VlmResponseValidator', () => {
       // Short Latin text (< 20 non-whitespace chars) should not be flagged
       const result = VlmResponseValidator.validate(
         [textElement('Page 5', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
     });
@@ -255,7 +255,7 @@ describe('VlmResponseValidator', () => {
     test('skips validation for whitespace-only content', () => {
       const result = VlmResponseValidator.validate(
         [textElement('   \n\t   ', 0)],
-        'ko',
+        ['ko-KR'],
       );
       // whitespace-only: non-whitespace length is 0 → skip
       expect(result.isValid).toBe(true);
@@ -265,7 +265,7 @@ describe('VlmResponseValidator', () => {
       // 10 Hangul + 10 Latin + 5 numbers = 25 non-whitespace chars → 40% Korean
       const result = VlmResponseValidator.validate(
         [textElement('가나다라마바사아자차 abcdefghij 12345', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
     });
@@ -274,7 +274,7 @@ describe('VlmResponseValidator', () => {
       // Hanja characters count toward Korean/CJK ratio
       const result = VlmResponseValidator.validate(
         [textElement('遺蹟 發掘 調査 報告書 文化財 research', 0)],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(true);
     });
@@ -285,7 +285,7 @@ describe('VlmResponseValidator', () => {
           textElement('English paragraph one with enough text.', 0),
           textElement('English paragraph two with more content.', 1),
         ],
-        'ko',
+        ['ko-KR'],
       );
       expect(result.isValid).toBe(false);
       const scriptIssue = result.issues.find(
@@ -297,7 +297,7 @@ describe('VlmResponseValidator', () => {
     test('includes ratio percentage in script anomaly message', () => {
       const result = VlmResponseValidator.validate(
         [textElement('All English text without Korean characters here.', 0)],
-        'ko',
+        ['ko-KR'],
       );
       const scriptIssue = result.issues.find(
         (i) => i.type === 'script_anomaly',

@@ -45,10 +45,10 @@ function createMockPageRenderer(pageCount: number = 3) {
 /** Helper to create a mock VLM Korean-Hanja mix detection result */
 function createMockKoreanHanjaMixResult(
   hasKoreanHanjaMix: boolean,
-  primaryLanguage: string = 'ko',
+  detectedLanguages: string[] = ['ko-KR'],
 ) {
   return {
-    output: { hasKoreanHanjaMix, primaryLanguage },
+    output: { hasKoreanHanjaMix, detectedLanguages },
     usage: {
       component: 'OcrStrategySampler',
       phase: 'korean-hanja-mix-detection',
@@ -314,7 +314,7 @@ describe('OcrStrategySampler', () => {
         '[OcrStrategySampler] Analyzing page 1 for Korean-Hanja mix and language...',
       );
       expect(mockLogger.debug).toHaveBeenCalledWith(
-        '[OcrStrategySampler] Page 1: hasKoreanHanjaMix=false, primaryLanguage=ko',
+        '[OcrStrategySampler] Page 1: hasKoreanHanjaMix=false, detectedLanguages=ko-KR',
       );
     });
 
@@ -336,9 +336,9 @@ describe('OcrStrategySampler', () => {
       ).rejects.toThrow('Render failed');
     });
 
-    test('includes detectedLanguage in result on early exit', async () => {
+    test('includes detectedLanguages in result on early exit', async () => {
       mockCallVision.mockResolvedValue(
-        createMockKoreanHanjaMixResult(true, 'ko'),
+        createMockKoreanHanjaMixResult(true, ['ko-KR']),
       );
 
       const result = await sampler.sample(
@@ -348,12 +348,12 @@ describe('OcrStrategySampler', () => {
       );
 
       expect(result.method).toBe('vlm');
-      expect(result.detectedLanguage).toBe('ko');
+      expect(result.detectedLanguages).toEqual(['ko-KR']);
     });
 
-    test('includes detectedLanguage in result when no Korean-Hanja mix', async () => {
+    test('includes detectedLanguages in result when no Korean-Hanja mix', async () => {
       mockCallVision.mockResolvedValue(
-        createMockKoreanHanjaMixResult(false, 'en'),
+        createMockKoreanHanjaMixResult(false, ['en-US']),
       );
 
       const result = await sampler.sample(
@@ -363,19 +363,21 @@ describe('OcrStrategySampler', () => {
       );
 
       expect(result.method).toBe('ocrmac');
-      expect(result.detectedLanguage).toBe('en');
+      expect(result.detectedLanguages).toEqual(['en-US']);
     });
 
-    test('uses last sampled page language when no Korean-Hanja mix', async () => {
+    test('uses last sampled page languages when no Korean-Hanja mix', async () => {
       mockPageRenderer = createMockPageRenderer(20);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
 
       mockCallVision
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'ko'))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, 'en'));
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(
+          createMockKoreanHanjaMixResult(false, ['en-US']),
+        );
 
       const result = await sampler.sample(
         '/tmp/test.pdf',
@@ -383,10 +385,10 @@ describe('OcrStrategySampler', () => {
         mockModel,
       );
 
-      expect(result.detectedLanguage).toBe('en');
+      expect(result.detectedLanguages).toEqual(['en-US']);
     });
 
-    test('detectedLanguage is undefined when no pages found', async () => {
+    test('detectedLanguages is undefined when no pages found', async () => {
       mockPageRenderer = createMockPageRenderer(0);
       sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
 
@@ -396,7 +398,7 @@ describe('OcrStrategySampler', () => {
         mockModel,
       );
 
-      expect(result.detectedLanguage).toBeUndefined();
+      expect(result.detectedLanguages).toBeUndefined();
     });
   });
 

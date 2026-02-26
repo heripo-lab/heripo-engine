@@ -6,7 +6,10 @@ import { BatchProcessor } from '@heripo/shared';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { DocumentProcessor } from './document-processor';
-import { TocNotFoundError } from './extractors/toc-extract-error';
+import {
+  TocNotFoundError,
+  TocValidationError,
+} from './extractors/toc-extract-error';
 import { CaptionParser } from './parsers/caption-parser';
 
 // Mock CaptionParser for fallback reparse tests
@@ -2582,6 +2585,747 @@ describe('DocumentProcessor', () => {
       const result = (processor as any).convertFootnotes(mockDoc);
 
       expect(result).toHaveLength(0);
+    });
+  });
+
+  describe('extractMaxPageNumber', () => {
+    let processor: DocumentProcessor;
+
+    beforeEach(() => {
+      processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+    });
+
+    test('extracts max page number from dot-leader markdown', () => {
+      const markdown = [
+        '- Ⅰ. 調査概要 ...... 175',
+        '- Ⅱ. 調査内容 ...... 180',
+        '- Ⅲ. 考察 ........... 228',
+      ].join('\n');
+
+      const result = (processor as any).extractMaxPageNumber(markdown);
+      expect(result).toBe(228);
+    });
+
+    test('extracts max page number from table markdown', () => {
+      const markdown = [
+        '| 목차 | 페이지 |',
+        '| --- | --- |',
+        '| I. 調査概要 | 175 |',
+        '| II. 調査内容 | 180 |',
+        '| III. 考察 | 228 |',
+      ].join('\n');
+
+      const result = (processor as any).extractMaxPageNumber(markdown);
+      expect(result).toBe(228);
+    });
+
+    test('extracts max from mixed dot-leader and table markdown', () => {
+      const markdown = [
+        '- Ⅰ. 調査概要 ...... 175',
+        '| II. 調査内容 | 300 |',
+        '- Ⅲ. 考察 ........... 228',
+      ].join('\n');
+
+      const result = (processor as any).extractMaxPageNumber(markdown);
+      expect(result).toBe(300);
+    });
+
+    test('returns 0 when no page numbers found', () => {
+      const markdown = ['- Introduction', '- Chapter 1', '- Chapter 2'].join(
+        '\n',
+      );
+
+      const result = (processor as any).extractMaxPageNumber(markdown);
+      expect(result).toBe(0);
+    });
+  });
+
+  describe('extractTableOfContents - Vision fallback after Stage 5 failure', () => {
+    const createMockDoc = (pageCount: number): DoclingDocument =>
+      ({
+        schema_name: 'DoclingDocument',
+        version: '1.0.0',
+        name: 'test-doc',
+        origin: {
+          mimetype: 'application/pdf',
+          binary_hash: 123,
+          filename: 'test.pdf',
+        },
+        furniture: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/furniture',
+          children: [],
+          content_layer: 'furniture',
+        },
+        texts: [],
+        pictures: [],
+        tables: [],
+        groups: [],
+        body: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/body',
+          children: [],
+          content_layer: 'body',
+        },
+        pages: Object.fromEntries(
+          Array.from({ length: pageCount }, (_, i) => [
+            String(i + 1),
+            {} as any,
+          ]),
+        ),
+      }) as DoclingDocument;
+
+    test('should retry with vision when text-based extraction returns 0 entries', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '| I. 調査概要 | 175 |',
+          reason: 'Valid',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('| I. 調査概要 | 175 |'),
+      };
+
+      // Text-based extraction returns 0 entries
+      const mockTocExtractor = {
+        extract: vi
+          .fn()
+          .mockResolvedValueOnce({
+            entries: [],
+            usages: [],
+          })
+          .mockResolvedValueOnce({
+            entries: [{ title: 'I. 調査概要', level: 1, pageNo: 175 }],
+            usages: [
+              {
+                component: 'TocExtractor',
+                phase: 'extraction',
+                model: 'primary',
+                modelName: 'test-model',
+                inputTokens: 100,
+                outputTokens: 50,
+                totalTokens: 150,
+              },
+            ],
+          }),
+      };
+
+      // Vision fallback returns markdown
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- I. 調査概要 ...... 175'),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+          orig: '| I. 調査概要 | 175 |',
+          label: 'text',
+          self_ref: '#/texts/0',
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(66);
+
+      const result = await (processor as any).extractTableOfContents(
+        mockDoc,
+        [],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].title).toBe('I. 調査概要');
+      // Vision fallback should be called for Stage 5b
+      expect(mockVisionTocExtractor.extract).toHaveBeenCalledWith(66);
+      expect(mockTocExtractor.extract).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Text-based TOC extraction yielded 0 entries'),
+      );
+    });
+
+    test('should retry with vision when text-based extraction throws TocValidationError', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '| I. 調査概要 | 175 |',
+          reason: 'Valid',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('| I. 調査概要 | 175 |'),
+      };
+
+      // First call throws TocValidationError, second succeeds
+      const mockTocExtractor = {
+        extract: vi
+          .fn()
+          .mockRejectedValueOnce(
+            new TocValidationError('V002: pageNo 175 exceeds totalPages 66', {
+              valid: false,
+              issues: [
+                {
+                  code: 'V002',
+                  message: 'pageNo 175 exceeds totalPages 66',
+                  path: '[0]',
+                  entry: { title: 'I. 調査概要', level: 1, pageNo: 175 },
+                },
+              ],
+              errorCount: 1,
+            }),
+          )
+          .mockResolvedValueOnce({
+            entries: [{ title: 'I. 調査概要', level: 1, pageNo: 175 }],
+            usages: [
+              {
+                component: 'TocExtractor',
+                phase: 'extraction',
+                model: 'primary',
+                modelName: 'test-model',
+                inputTokens: 100,
+                outputTokens: 50,
+                totalTokens: 150,
+              },
+            ],
+          }),
+      };
+
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- I. 調査概要 ...... 175'),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+          orig: '| I. 調査概要 | 175 |',
+          label: 'text',
+          self_ref: '#/texts/0',
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(66);
+
+      const result = await (processor as any).extractTableOfContents(
+        mockDoc,
+        [],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0].title).toBe('I. 調査概要');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('TOC extraction validation failed'),
+      );
+      expect(mockVisionTocExtractor.extract).toHaveBeenCalledWith(66);
+    });
+
+    test('should not retry with vision when markdown already from vision', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      // Rule-based extraction fails -> triggers vision (Stage 4)
+      const mockTocFinder = {
+        find: vi.fn().mockImplementation(() => {
+          throw new TocNotFoundError('TOC not found');
+        }),
+      };
+
+      // Vision returns markdown but LLM extracts 0 entries
+      const mockTocExtractor = {
+        extract: vi.fn().mockResolvedValue({
+          entries: [],
+          usages: [],
+        }),
+      };
+
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- Some markdown'),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(10);
+
+      await expect(
+        (processor as any).extractTableOfContents(mockDoc, []),
+      ).rejects.toThrow(TocNotFoundError);
+
+      // Vision was called once in Stage 4, should NOT be called again in Stage 5b
+      expect(mockVisionTocExtractor.extract).toHaveBeenCalledTimes(1);
+    });
+
+    test('should re-throw non-TocValidationError from tocExtractor', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '- Chapter 1 ..... 1',
+          reason: 'Valid',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('- Chapter 1 ..... 1'),
+      };
+
+      const genericError = new Error('Unexpected LLM failure');
+      const mockTocExtractor = {
+        extract: vi.fn().mockRejectedValue(genericError),
+      };
+
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue(null),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          text: 'Chapter 1 ..... 1',
+          orig: 'Chapter 1 ..... 1',
+          label: 'text',
+          self_ref: '#/texts/0',
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: 'Chapter 1 ..... 1',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(2);
+
+      await expect(
+        (processor as any).extractTableOfContents(mockDoc, []),
+      ).rejects.toThrow(genericError);
+    });
+
+    test('should throw when vision fallback returns null in Stage 5b', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '| I. 調査概要 | 175 |',
+          reason: 'Valid',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('| I. 調査概要 | 175 |'),
+      };
+
+      const mockTocExtractor = {
+        extract: vi.fn().mockResolvedValue({
+          entries: [],
+          usages: [],
+        }),
+      };
+
+      // Vision returns null — no markdown available
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue(null),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+          orig: '| I. 調査概要 | 175 |',
+          label: 'text',
+          self_ref: '#/texts/0',
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(66);
+
+      await expect(
+        (processor as any).extractTableOfContents(mockDoc, []),
+      ).rejects.toThrow(TocNotFoundError);
+
+      expect(mockVisionTocExtractor.extract).toHaveBeenCalledWith(66);
+      // TocExtractor only called once (no vision markdown to retry with)
+      expect(mockTocExtractor.extract).toHaveBeenCalledTimes(1);
+    });
+
+    test('should handle vision retry throwing an error in Stage 5b', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '| I. 調査概要 | 175 |',
+          reason: 'Valid',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('| I. 調査概要 | 175 |'),
+      };
+
+      // First call returns 0 entries, second call throws
+      const mockTocExtractor = {
+        extract: vi
+          .fn()
+          .mockResolvedValueOnce({
+            entries: [],
+            usages: [],
+          })
+          .mockRejectedValueOnce(new Error('Vision extraction failed')),
+      };
+
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- I. 調査概要 ...... 175'),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+          orig: '| I. 調査概要 | 175 |',
+          label: 'text',
+          self_ref: '#/texts/0',
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(66);
+
+      // Should throw TocNotFoundError since both attempts failed
+      await expect(
+        (processor as any).extractTableOfContents(mockDoc, []),
+      ).rejects.toThrow(TocNotFoundError);
+
+      expect(mockTocExtractor.extract).toHaveBeenCalledTimes(2);
+    });
+
+    test('should pass totalPages to vision retry when visionMaxPageNo does not exceed totalPages', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '| I. 조사개요 | 5 |',
+          reason: 'Valid',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('| I. 조사개요 | 5 |'),
+      };
+
+      // Text-based returns 0 entries, vision retry succeeds
+      const mockTocExtractor = {
+        extract: vi
+          .fn()
+          .mockResolvedValueOnce({ entries: [], usages: [] })
+          .mockResolvedValueOnce({
+            entries: [{ title: 'I. 조사개요', level: 1, pageNo: 5 }],
+            usages: [
+              {
+                component: 'TocExtractor',
+                phase: 'extraction',
+                model: 'primary',
+                modelName: 'test-model',
+                inputTokens: 100,
+                outputTokens: 50,
+                totalTokens: 150,
+              },
+            ],
+          }),
+      };
+
+      // Vision returns markdown with page number <= totalPages
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- I. 조사개요 ...... 5'),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          text: '| I. 조사개요 | 5 |',
+          orig: '| I. 조사개요 | 5 |',
+          label: 'text',
+          self_ref: '#/texts/0',
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: '| I. 조사개요 | 5 |',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(66);
+
+      const result = await (processor as any).extractTableOfContents(
+        mockDoc,
+        [],
+      );
+
+      expect(result).toHaveLength(1);
+      // Vision retry should pass totalPages (not undefined) since 5 <= 66
+      expect(mockTocExtractor.extract).toHaveBeenNthCalledWith(
+        2,
+        '- I. 조사개요 ...... 5',
+        { totalPages: 66 },
+      );
+    });
+
+    test('should throw when both text-based and vision extraction fail', async () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+      const mockTocFinder = {
+        find: vi.fn().mockReturnValue({
+          startPage: 1,
+          endPage: 2,
+          itemRefs: ['#/texts/0'],
+        }),
+      };
+
+      const mockTocContentValidator = {
+        validate: vi.fn().mockResolvedValue({
+          isValid: true,
+          confidence: 0.9,
+          contentType: 'pure_toc',
+          validTocMarkdown: '| I. 調査概要 | 175 |',
+          reason: 'Valid',
+        }),
+        isValid: vi.fn().mockReturnValue(true),
+        getValidMarkdown: vi.fn().mockReturnValue('| I. 調査概要 | 175 |'),
+      };
+
+      // Both calls return 0 entries
+      const mockTocExtractor = {
+        extract: vi.fn().mockResolvedValue({
+          entries: [],
+          usages: [],
+        }),
+      };
+
+      // Vision returns markdown but extraction still fails
+      const mockVisionTocExtractor = {
+        extract: vi.fn().mockResolvedValue('- I. 調査概要 ...... 175'),
+      };
+
+      const mockRefResolver = {
+        resolve: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+          orig: '| I. 調査概要 | 175 |',
+          label: 'text',
+          self_ref: '#/texts/0',
+        }),
+        resolveText: vi.fn().mockReturnValue({
+          text: '| I. 調査概要 | 175 |',
+        }),
+      };
+
+      (processor as any).tocFinder = mockTocFinder;
+      (processor as any).tocContentValidator = mockTocContentValidator;
+      (processor as any).tocExtractor = mockTocExtractor;
+      (processor as any).visionTocExtractor = mockVisionTocExtractor;
+      (processor as any).refResolver = mockRefResolver;
+      (processor as any).usageAggregator = {
+        track: vi.fn(),
+        reset: vi.fn(),
+        logSummary: vi.fn(),
+      };
+
+      const mockDoc = createMockDoc(66);
+
+      await expect(
+        (processor as any).extractTableOfContents(mockDoc, []),
+      ).rejects.toThrow(TocNotFoundError);
+
+      // Text-based failed, then vision fallback was tried
+      expect(mockVisionTocExtractor.extract).toHaveBeenCalledWith(66);
+      expect(mockTocExtractor.extract).toHaveBeenCalledTimes(2);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'TOC area was detected but LLM could not extract any structured entries',
+        ),
+      );
     });
   });
 });

@@ -25,7 +25,7 @@ export interface VlmValidationResult {
 const MIN_CONTENT_LENGTH = 20;
 
 /**
- * Minimum ratio of Hangul/CJK characters when documentLanguage is 'ko'.
+ * Minimum ratio of Hangul/CJK characters when primary language starts with 'ko'.
  * 10% is very permissive — catches pure-Latin hallucinations while
  * allowing mixed content with numbers, coordinates, and English terms.
  */
@@ -89,12 +89,12 @@ export class VlmResponseValidator {
    * Validate VLM page result quality.
    *
    * @param elements - Extracted page elements to validate
-   * @param documentLanguage - Expected document language (ISO 639-1, e.g., 'ko')
+   * @param documentLanguages - BCP 47 language tags (e.g., ['ko-KR', 'en-US'])
    * @returns Validation result with issues list
    */
   static validate(
     elements: VlmPageElement[],
-    documentLanguage?: string,
+    documentLanguages?: string[],
   ): VlmValidationResult {
     const issues: VlmQualityIssue[] = [];
 
@@ -111,7 +111,7 @@ export class VlmResponseValidator {
       issues.push(placeholderIssue);
     }
 
-    if (documentLanguage === 'ko') {
+    if (documentLanguages?.[0]?.startsWith('ko')) {
       const scriptIssue = this.detectScriptAnomaly(textElements);
       if (scriptIssue) {
         issues.push(scriptIssue);
