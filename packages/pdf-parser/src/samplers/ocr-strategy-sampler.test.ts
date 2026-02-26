@@ -110,8 +110,8 @@ describe('OcrStrategySampler', () => {
     );
   });
 
-  describe('preCheckCjkFromTextLayer', () => {
-    test('returns vlm when CJK and Hangul detected in text layer', async () => {
+  describe('preCheckHanjaFromTextLayer', () => {
+    test('returns vlm when Hangul-Hanja mix detected in text layer', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 10,
         pageTexts: new Map([
@@ -133,14 +133,16 @@ describe('OcrStrategySampler', () => {
       );
 
       expect(result.method).toBe('vlm');
-      expect(result.reason).toContain('CJK characters found in PDF text layer');
+      expect(result.reason).toContain(
+        'Hangul-Hanja mix found in PDF text layer',
+      );
       expect(result.detectedLanguages).toEqual(['ko-KR']);
       // PageRenderer and LLMCaller should NOT be called
       expect(mockPageRenderer.renderPages).not.toHaveBeenCalled();
       expect(mockCallVision).not.toHaveBeenCalled();
     });
 
-    test('returns ocrmac when text layer has Hangul but no CJK', async () => {
+    test('returns ocrmac when text layer has Hangul but no Hanja', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 5,
         pageTexts: new Map([
@@ -164,7 +166,7 @@ describe('OcrStrategySampler', () => {
       );
 
       expect(result.method).toBe('ocrmac');
-      expect(result.reason).toContain('No CJK characters in PDF text layer');
+      expect(result.reason).toContain('No Hangul-Hanja mix in PDF text layer');
       expect(result.detectedLanguages).toEqual(['ko-KR']);
       expect(mockPageRenderer.renderPages).not.toHaveBeenCalled();
       expect(mockCallVision).not.toHaveBeenCalled();
@@ -238,7 +240,7 @@ describe('OcrStrategySampler', () => {
       );
     });
 
-    test('detects CJK on first matching page and returns immediately', async () => {
+    test('detects Hangul-Hanja mix on first matching page and returns immediately', async () => {
       // 20 pages: selectSamplePages(20, 15) trims 2 from edges → indices 2..17 (1-based: 3..18)
       mockTextExtractor = createMockTextExtractor({
         pageCount: 20,
@@ -264,7 +266,7 @@ describe('OcrStrategySampler', () => {
       expect(result.totalPages).toBe(20);
     });
 
-    test('returns ocrmac when only CJK without Hangul', async () => {
+    test('returns ocrmac when only Hanja without Hangul', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 3,
         pageTexts: new Map([
@@ -285,9 +287,9 @@ describe('OcrStrategySampler', () => {
         mockModel,
       );
 
-      // CJK without Hangul does not trigger VLM
+      // Hanja without Hangul does not trigger VLM
       expect(result.method).toBe('ocrmac');
-      expect(result.reason).toContain('No CJK characters in PDF text layer');
+      expect(result.reason).toContain('No Hangul-Hanja mix in PDF text layer');
     });
 
     test('includes sampledPages count in result', async () => {
