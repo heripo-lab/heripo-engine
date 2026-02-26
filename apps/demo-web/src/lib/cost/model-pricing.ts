@@ -57,9 +57,9 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'gemini-3-flash-preview': { input: 0.5, output: 3 },
     'gemini-3.1-pro-preview': { input: 2, output: 12 },
     // Claude
-    'anthropic/claude-opus-4.6': { input: 5, output: 25 },
-    'anthropic/claude-sonnet-4.6': { input: 3, output: 15 },
-    'anthropic/claude-haiku-4.6': { input: 1, output: 5 },
+    'anthropic/claude-opus-4-6': { input: 5, output: 25 },
+    'anthropic/claude-sonnet-4-6': { input: 3, output: 15 },
+    'anthropic/claude-haiku-4-5': { input: 1, output: 5 },
     // VLM strategy models (provider-prefixed keys from TokenUsageReport)
     'openai/gpt-5.2': { input: 1.75, output: 14 },
     'openai/gpt-5.1': { input: 1.25, output: 10 },

@@ -28,7 +28,7 @@ import {
   TooltipTrigger,
 } from '~/components/ui/tooltip';
 
-import { VISION_MODELS } from '../constants/llm-models';
+import { LLM_MODELS } from '../constants/llm-models';
 import { useProcessingForm } from '../contexts/processing-form-context';
 
 interface StringArrayFieldApi {
@@ -69,9 +69,9 @@ export const OCR_LANGUAGES = [
 const NONE_VALUE = '__none__';
 
 /**
- * Group vision models by provider for select dropdown
+ * Group models by provider for select dropdown
  */
-const VISION_MODELS_BY_PROVIDER = VISION_MODELS.reduce(
+const MODELS_BY_PROVIDER = LLM_MODELS.reduce(
   (acc, model) => {
     if (!acc[model.provider]) {
       acc[model.provider] = [];
@@ -79,7 +79,7 @@ const VISION_MODELS_BY_PROVIDER = VISION_MODELS.reduce(
     acc[model.provider].push(model);
     return acc;
   },
-  {} as Record<string, typeof VISION_MODELS>,
+  {} as Record<string, typeof LLM_MODELS>,
 );
 
 /**
@@ -198,18 +198,16 @@ function VisionModelSelect({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE_VALUE}>None (disabled)</SelectItem>
-            {Object.entries(VISION_MODELS_BY_PROVIDER).map(
-              ([provider, models]) => (
-                <SelectGroup key={provider}>
-                  <SelectLabel>{provider}</SelectLabel>
-                  {models.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ),
-            )}
+            {Object.entries(MODELS_BY_PROVIDER).map(([provider, models]) => (
+              <SelectGroup key={provider}>
+                <SelectLabel>{provider}</SelectLabel>
+                {models.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
           </SelectContent>
         </Select>
       </DisabledWrapper>

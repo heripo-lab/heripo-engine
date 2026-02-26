@@ -25,7 +25,7 @@ export type {
   ChunkedUploadStatus,
 } from './hooks/use-chunked-upload';
 // Constants
-export { LLM_MODELS, VISION_MODELS } from './constants/llm-models';
+export { LLM_MODELS } from './constants/llm-models';
 export type { LLMModel } from './constants/llm-models';
 export { KNOWN_LIMITATIONS } from './constants/known-limitations';
 export type { KnownLimitation } from './constants/known-limitations';

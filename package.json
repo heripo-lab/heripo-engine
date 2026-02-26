@@ -34,7 +34,9 @@
   ],
   "scripts": {
     "build": "turbo build",
+    "build:packages": "turbo build --filter='!@heripo/demo-web'",
     "build:force": "turbo build --force",
+    "build:packages:force": "turbo build --filter='!@heripo/demo-web' --force",
     "demo-web:dev": "pnpm --filter @heripo/demo-web dev",
     "demo-web:build": "pnpm --filter @heripo/demo-web build",
     "demo-web:start": "pnpm --filter @heripo/demo-web start",

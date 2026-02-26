@@ -1,6 +1,6 @@
 import type { LanguageModel } from 'ai';
 
-import { Output, generateText } from 'ai';
+import { NoObjectGeneratedError, Output, generateText } from 'ai';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { LLMCaller } from './llm-caller';
@@ -818,7 +818,7 @@ describe('LLMCaller', () => {
       expect(callArgs.tools).toBeUndefined();
     });
 
-    test('should add google providerOptions for Google Gemini', async () => {
+    test('should use Output.object() without providerOptions for Google Gemini', async () => {
       vi.mocked(detectProvider).mockReturnValue('google');
       const mockResponse = createMockGenerateTextResult(
         { result: 'success' },
@@ -838,9 +838,7 @@ describe('LLMCaller', () => {
 
       const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
       expect(callArgs.output).toBeDefined();
-      expect(callArgs.providerOptions).toEqual({
-        google: { structuredOutputs: false },
-      });
+      expect(callArgs.providerOptions).toBeUndefined();
       expect(callArgs.tools).toBeUndefined();
     });
 
@@ -896,8 +894,8 @@ describe('LLMCaller', () => {
 
     test('should throw NoObjectGeneratedError after exhausting all tool call retries', async () => {
       vi.mocked(detectProvider).mockReturnValue('togetherai');
-      // 5 attempts (1 initial + 4 retries) all return empty tool calls
-      for (let i = 0; i < 5; i++) {
+      // 11 attempts (1 initial + 10 retries) all return empty tool calls
+      for (let i = 0; i < 11; i++) {
         vi.mocked(generateText).mockResolvedValueOnce(
           createMockEmptyToolCallResult(),
         );
@@ -917,8 +915,8 @@ describe('LLMCaller', () => {
         'Model did not produce a tool call for structured output',
       );
 
-      // Should have attempted 5 times total
-      expect(generateText).toHaveBeenCalledTimes(5);
+      // Should have attempted 11 times total
+      expect(generateText).toHaveBeenCalledTimes(11);
     });
 
     test('should succeed on retry when tool call eventually produced', async () => {
@@ -953,8 +951,8 @@ describe('LLMCaller', () => {
 
     test('should use empty string when result.text is undefined in tool call error', async () => {
       vi.mocked(detectProvider).mockReturnValue('togetherai');
-      // All 5 attempts return undefined text
-      for (let i = 0; i < 5; i++) {
+      // All 11 attempts return undefined text
+      for (let i = 0; i < 11; i++) {
         vi.mocked(generateText).mockResolvedValueOnce({
           toolCalls: [],
           text: undefined,
@@ -1045,9 +1043,9 @@ describe('LLMCaller', () => {
       });
 
       const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
-      expect(callArgs.providerOptions).toEqual({
-        google: { structuredOutputs: false },
-      });
+      expect(callArgs.output).toBeDefined();
+      expect(callArgs.providerOptions).toBeUndefined();
+      expect(callArgs.tools).toBeUndefined();
     });
 
     test('should extract .input from tool call result', async () => {
@@ -1077,6 +1075,90 @@ describe('LLMCaller', () => {
       expect(result.output).toEqual(expectedOutput);
       expect(result.usage.inputTokens).toBe(100);
       expect(result.usage.outputTokens).toBe(50);
+    });
+
+    test('should retry on NoObjectGeneratedError and succeed', async () => {
+      vi.mocked(detectProvider).mockReturnValue('google');
+      const schemaError = new NoObjectGeneratedError({
+        message: 'No object generated: response did not match schema.',
+        text: 'invalid json',
+        response: { id: '', modelId: '', timestamp: new Date() },
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } as any,
+        finishReason: 'stop',
+      });
+      const successResponse = createMockGenerateTextResult(
+        { result: 'recovered' },
+        { inputTokens: 20, outputTokens: 10, totalTokens: 30 },
+      );
+
+      vi.mocked(generateText)
+        .mockRejectedValueOnce(schemaError)
+        .mockRejectedValueOnce(schemaError)
+        .mockResolvedValueOnce(successResponse);
+
+      const result = await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      expect(result.output).toEqual({ result: 'recovered' });
+      expect(generateText).toHaveBeenCalledTimes(3);
+    });
+
+    test('should throw NoObjectGeneratedError after exhausting all schema retries', async () => {
+      vi.mocked(detectProvider).mockReturnValue('google');
+      const schemaError = new NoObjectGeneratedError({
+        message: 'No object generated: response did not match schema.',
+        text: 'invalid json',
+        response: { id: '', modelId: '', timestamp: new Date() },
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } as any,
+        finishReason: 'stop',
+      });
+
+      // 11 attempts (1 initial + 10 retries) all fail with schema mismatch
+      for (let i = 0; i < 11; i++) {
+        vi.mocked(generateText).mockRejectedValueOnce(schemaError);
+      }
+
+      await expect(
+        LLMCaller.call({
+          schema: mockSchema,
+          systemPrompt: 'sys',
+          userPrompt: 'usr',
+          primaryModel: mockPrimaryModel,
+          maxRetries: 3,
+          component: 'Test',
+          phase: 'test',
+        }),
+      ).rejects.toThrow('No object generated: response did not match schema.');
+
+      expect(generateText).toHaveBeenCalledTimes(11);
+    });
+
+    test('should not retry on non-NoObjectGeneratedError in Output.object path', async () => {
+      vi.mocked(detectProvider).mockReturnValue('google');
+      const networkError = new Error('Network timeout');
+
+      vi.mocked(generateText).mockRejectedValueOnce(networkError);
+
+      await expect(
+        LLMCaller.call({
+          schema: mockSchema,
+          systemPrompt: 'sys',
+          userPrompt: 'usr',
+          primaryModel: mockPrimaryModel,
+          maxRetries: 3,
+          component: 'Test',
+          phase: 'test',
+        }),
+      ).rejects.toThrow('Network timeout');
+
+      expect(generateText).toHaveBeenCalledTimes(1);
     });
   });
 });

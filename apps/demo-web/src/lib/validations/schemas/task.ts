@@ -1,9 +1,6 @@
 import { z } from 'zod';
 
-import {
-  LLM_MODELS,
-  VISION_MODELS,
-} from '~/features/upload/constants/llm-models';
+import { LLM_MODELS } from '~/features/upload/constants/llm-models';
 
 import {
   imageIdSchema,
@@ -15,23 +12,13 @@ import { paginationSchema } from './pagination';
 
 // Valid LLM model IDs
 const llmModelIds = LLM_MODELS.map((m) => m.id);
-const visionModelIds = VISION_MODELS.map((m) => m.id);
 
 /**
- * LLM model ID validator (any model)
+ * LLM model ID validator
  */
 const llmModelSchema = z.string().refine((val) => llmModelIds.includes(val), {
   message: 'Invalid LLM model ID',
 });
-
-/**
- * Vision-capable model ID validator
- */
-const visionModelSchema = z
-  .string()
-  .refine((val) => visionModelIds.includes(val), {
-    message: 'Model does not support vision',
-  });
 
 /**
  * Processing options schema for PDF processing.
@@ -46,16 +33,16 @@ export const processingOptionsSchema = z.object({
   forceImagePdf: z.boolean().default(false),
 
   // OCR Strategy — VLM sampling-based strategy selection
-  strategySamplerModel: visionModelSchema.optional(),
-  vlmProcessorModel: visionModelSchema.optional(),
+  strategySamplerModel: llmModelSchema.optional(),
+  vlmProcessorModel: llmModelSchema.optional(),
   forcedMethod: z.enum(['ocrmac', 'vlm']).optional(),
 
   // LLM Models
   fallbackModel: llmModelSchema,
-  pageRangeParserModel: visionModelSchema,
+  pageRangeParserModel: llmModelSchema,
   tocExtractorModel: llmModelSchema,
   validatorModel: llmModelSchema,
-  visionTocExtractorModel: visionModelSchema,
+  visionTocExtractorModel: llmModelSchema,
   captionParserModel: llmModelSchema,
 
   // VLM Processing

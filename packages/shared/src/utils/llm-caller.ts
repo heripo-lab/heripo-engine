@@ -9,7 +9,7 @@ import {
   tool,
 } from 'ai';
 
-import { type ProviderType, detectProvider } from './provider-detector';
+import { detectProvider } from './provider-detector';
 
 /**
  * Configuration for LLM API call with retry and fallback support
@@ -221,25 +221,14 @@ export class LLMCaller {
   }
 
   /**
-   * Resolve provider options based on provider type.
+   * Maximum number of retries when structured output generation fails.
+   * Total attempts = MAX_STRUCTURED_OUTPUT_RETRIES + 1.
    *
-   * Google Gemini requires `structuredOutputs: false` to avoid frequent
-   * `NoObjectGeneratedError` when using `Output.object()`.
+   * Applied to both:
+   * - `Output.object()` path: retries on NoObjectGeneratedError (schema mismatch)
+   * - Tool call path: retries when model does not produce a tool call
    */
-  private static resolveProviderOptions(
-    providerType: ProviderType,
-  ): Record<string, unknown> | undefined {
-    if (providerType === 'google') {
-      return { google: { structuredOutputs: false } };
-    }
-    return undefined;
-  }
-
-  /**
-   * Maximum number of retries when the model fails to produce a tool call.
-   * Total attempts = MAX_TOOL_CALL_RETRIES + 1.
-   */
-  private static readonly MAX_TOOL_CALL_RETRIES = 4;
+  private static readonly MAX_STRUCTURED_OUTPUT_RETRIES = 10;
 
   /**
    * Generate structured output via forced tool call.
@@ -248,8 +237,8 @@ export class LLMCaller {
    * `Output.object()`. Forces the model to call a tool whose inputSchema
    * is the target Zod schema, then extracts the parsed input.
    *
-   * Retries up to MAX_TOOL_CALL_RETRIES times when the model does not
-   * produce a tool call, for a total of MAX_TOOL_CALL_RETRIES + 1 attempts.
+   * Retries up to MAX_STRUCTURED_OUTPUT_RETRIES times when the model does not
+   * produce a tool call, for a total of MAX_STRUCTURED_OUTPUT_RETRIES + 1 attempts.
    *
    * @throws NoObjectGeneratedError when all attempts fail to produce a tool call
    */
@@ -272,7 +261,11 @@ export class LLMCaller {
 
     let lastResult: any;
 
-    for (let attempt = 0; attempt <= this.MAX_TOOL_CALL_RETRIES; attempt++) {
+    for (
+      let attempt = 0;
+      attempt <= this.MAX_STRUCTURED_OUTPUT_RETRIES;
+      attempt++
+    ) {
       lastResult = await (generateText as any)({
         ...promptParams,
         model,
@@ -305,9 +298,11 @@ export class LLMCaller {
    * Generate structured output with provider-aware strategy.
    *
    * Strategy per provider:
-   * - OpenAI / Anthropic: `Output.object()` (default)
-   * - Google Gemini: `Output.object()` + `providerOptions.google.structuredOutputs: false`
+   * - OpenAI / Anthropic / Google Gemini: `Output.object()` with schema retry
    * - Together AI / unknown: forced tool call pattern
+   *
+   * Retries up to MAX_STRUCTURED_OUTPUT_RETRIES times on NoObjectGeneratedError
+   * (schema mismatch), re-throwing the last error if all attempts fail.
    */
   private static async generateStructuredOutput<TOutput>(
     model: LanguageModel,
@@ -327,14 +322,29 @@ export class LLMCaller {
       return this.generateViaToolCall(model, schema, promptParams);
     }
 
-    const providerOptions = this.resolveProviderOptions(providerType);
+    let lastError: unknown;
 
-    return (generateText as any)({
-      model,
-      output: Output.object({ schema }),
-      ...promptParams,
-      ...(providerOptions && { providerOptions }),
-    });
+    for (
+      let attempt = 0;
+      attempt <= this.MAX_STRUCTURED_OUTPUT_RETRIES;
+      attempt++
+    ) {
+      try {
+        return await (generateText as any)({
+          model,
+          output: Output.object({ schema }),
+          ...promptParams,
+        });
+      } catch (error) {
+        if (NoObjectGeneratedError.isInstance(error)) {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError;
   }
 
   /**
