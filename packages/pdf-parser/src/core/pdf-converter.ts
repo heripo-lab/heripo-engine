@@ -222,6 +222,11 @@ export class PDFConverter {
 
   /**
    * Determine the OCR strategy based on options and page sampling.
+   *
+   * When sampling is possible (strategySamplerModel + local file), it always
+   * runs — even with forcedMethod — so that detectedLanguages are available
+   * for OCR engine configuration. The forced method simply overrides the
+   * sampled method choice.
    */
   private async determineStrategy(
     pdfPath: string | null,
@@ -229,30 +234,18 @@ export class PDFConverter {
     options: PDFConvertOptions,
     abortSignal?: AbortSignal,
   ): Promise<OcrStrategy> {
-    // Forced method bypasses all sampling
-    if (options.forcedMethod) {
-      return {
-        method: options.forcedMethod,
-        reason: `Forced: ${options.forcedMethod}`,
-        sampledPages: 0,
-        totalPages: 0,
-      };
-    }
-
-    // Skip sampling or no sampler model or non-local URL → default to ocrmac
+    // Cannot sample: skip, no sampler model, or non-local URL
     if (options.skipSampling || !options.strategySamplerModel || !pdfPath) {
-      const reason = !pdfPath
-        ? 'Non-local URL, sampling skipped'
-        : 'Sampling skipped';
-      return {
-        method: 'ocrmac',
-        reason,
-        sampledPages: 0,
-        totalPages: 0,
-      };
+      const method = options.forcedMethod ?? 'ocrmac';
+      const reason = options.forcedMethod
+        ? `Forced: ${options.forcedMethod}`
+        : !pdfPath
+          ? 'Non-local URL, sampling skipped'
+          : 'Sampling skipped';
+      return { method, reason, sampledPages: 0, totalPages: 0 };
     }
 
-    // Sample pages to determine strategy
+    // Sample pages to determine strategy (also detects languages)
     const samplingDir = join(process.cwd(), 'output', reportId, '_sampling');
     const sampler = new OcrStrategySampler(
       this.logger,
@@ -261,7 +254,7 @@ export class PDFConverter {
     );
 
     try {
-      return await sampler.sample(
+      const strategy = await sampler.sample(
         pdfPath,
         samplingDir,
         options.strategySamplerModel,
@@ -270,6 +263,17 @@ export class PDFConverter {
           abortSignal,
         },
       );
+
+      // Override method when forced, preserving detected languages from sampling
+      if (options.forcedMethod) {
+        return {
+          ...strategy,
+          method: options.forcedMethod,
+          reason: `Forced: ${options.forcedMethod} (${strategy.reason})`,
+        };
+      }
+
+      return strategy;
     } finally {
       // Always clean up sampling temp directory
       if (existsSync(samplingDir)) {

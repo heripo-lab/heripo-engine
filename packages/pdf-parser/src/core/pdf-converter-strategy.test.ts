@@ -155,6 +155,46 @@ describe('PDFConverter.convertWithStrategy', () => {
       convertSpy.mockRestore();
     });
 
+    test('runs sampling for language detection when forcedMethod + strategySamplerModel provided', async () => {
+      mockSamplerInstance.sample.mockResolvedValue({
+        method: 'ocrmac',
+        reason: 'No Korean-Hanja mix detected',
+        sampledPages: 3,
+        totalPages: 10,
+        detectedLanguages: ['ko-KR'],
+      });
+
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      const result = await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          strategySamplerModel: mockModel,
+          vlmProcessorModel: mockFallbackModel,
+          forcedMethod: 'vlm',
+        },
+      );
+
+      // Sampler should be called even with forcedMethod
+      expect(mockSamplerInstance.sample).toHaveBeenCalled();
+      // Method should be overridden to forced value
+      expect(result.strategy.method).toBe('vlm');
+      // Reason should combine forced label with original sampling reason
+      expect(result.strategy.reason).toBe(
+        'Forced: vlm (No Korean-Hanja mix detected)',
+      );
+      // Detected languages from sampling should be preserved
+      expect(result.strategy.detectedLanguages).toEqual(['ko-KR']);
+      // Sampling metadata should be preserved
+      expect(result.strategy.sampledPages).toBe(3);
+      expect(result.strategy.totalPages).toBe(10);
+
+      convertSpy.mockRestore();
+    });
+
     test('defaults to ocrmac when skipSampling is true', async () => {
       const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
 
@@ -1269,6 +1309,42 @@ describe('PDFConverter.convertWithStrategy', () => {
         mockOnComplete,
         false,
         expect.objectContaining({ ocr_lang: ['ja-JP'] }),
+        undefined,
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('VLM path passes sampled detectedLanguages as ocr_lang when forcedMethod + strategySamplerModel', async () => {
+      mockSamplerInstance.sample.mockResolvedValue({
+        method: 'ocrmac',
+        reason: 'No Korean-Hanja mix detected',
+        sampledPages: 3,
+        totalPages: 10,
+        detectedLanguages: ['ko-KR'],
+      });
+
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          strategySamplerModel: mockModel,
+          vlmProcessorModel: mockFallbackModel,
+          forcedMethod: 'vlm',
+        },
+      );
+
+      // Sampling detectedLanguages should flow through as ocr_lang
+      expect(convertSpy).toHaveBeenCalledWith(
+        'file:///tmp/report.pdf',
+        'report-1',
+        expect.any(Function),
+        false,
+        expect.objectContaining({ ocr_lang: ['ko-KR'] }),
         undefined,
       );
 
