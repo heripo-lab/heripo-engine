@@ -23,7 +23,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   forceImagePdf: false,
   // OCR Strategy
   strategySamplerModel: 'openai/gpt-5.2',
-  vlmProcessorModel: 'openai/gpt-5-mini',
+  vlmProcessorModel: 'openai/gpt-5.1',
   forcedMethod: undefined,
   // LLM Models
   fallbackModel: 'openai/gpt-5.2',
