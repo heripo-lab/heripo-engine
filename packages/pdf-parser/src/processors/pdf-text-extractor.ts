@@ -48,13 +48,26 @@ export class PdfTextExtractor {
   }
 
   /**
+   * Get total page count of a PDF using pdfinfo.
+   * Returns 0 on failure.
+   */
+  async getPageCount(pdfPath: string): Promise<number> {
+    const result = await spawnAsync('pdfinfo', [pdfPath]);
+    if (result.code !== 0) {
+      this.logger.warn(
+        `[PdfTextExtractor] pdfinfo failed: ${result.stderr || 'Unknown error'}`,
+      );
+      return 0;
+    }
+    const match = result.stdout.match(/^Pages:\s+(\d+)/m);
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  /**
    * Extract text from a single PDF page using pdftotext.
    * Returns empty string on failure (logged as warning).
    */
-  private async extractPageText(
-    pdfPath: string,
-    page: number,
-  ): Promise<string> {
+  async extractPageText(pdfPath: string, page: number): Promise<string> {
     const result = await spawnAsync('pdftotext', [
       '-f',
       page.toString(),

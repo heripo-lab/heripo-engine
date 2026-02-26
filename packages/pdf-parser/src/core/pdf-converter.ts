@@ -257,6 +257,7 @@ export class PDFConverter {
     const sampler = new OcrStrategySampler(
       this.logger,
       new PageRenderer(this.logger),
+      new PdfTextExtractor(this.logger),
     );
 
     try {

@@ -9,17 +9,25 @@ import { LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod/v4';
 
-/** DPI for sampling pages (low resolution to reduce VLM input tokens) */
-const SAMPLE_DPI = 72;
+import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+
+/** DPI for sampling pages */
+const SAMPLE_DPI = 150;
 
 /** Ratio of pages to trim from front and back (covers, TOC, appendices) */
 const EDGE_TRIM_RATIO = 0.1;
 
 /** Default maximum number of pages to sample */
-const DEFAULT_MAX_SAMPLE_PAGES = 5;
+const DEFAULT_MAX_SAMPLE_PAGES = 15;
 
 /** Default max retries per VLM call */
 const DEFAULT_MAX_RETRIES = 3;
+
+/** Regex to detect CJK Unified Ideographs (Hanja/Kanji/Hanzi) */
+const CJK_REGEX = /[\u4E00-\u9FFF]/;
+
+/** Regex to detect Hangul syllables */
+const HANGUL_REGEX = /[\uAC00-\uD7AF]/;
 
 /** Zod schema for VLM Korean-Hanja mix detection response */
 const koreanHanjaMixSchema = z.object({
@@ -48,7 +56,7 @@ Examples: ["ko-KR", "en-US"], ["ja-JP"], ["zh-TW", "en-US"]`;
 
 /** Options for OcrStrategySampler */
 export interface OcrStrategySamplerOptions {
-  /** Maximum number of pages to sample (default: 5) */
+  /** Maximum number of pages to sample (default: 15) */
   maxSamplePages?: number;
   /** Maximum retries per VLM call (default: 3) */
   maxRetries?: number;
@@ -65,23 +73,28 @@ export interface OcrStrategySamplerOptions {
 /**
  * Samples pages from a PDF to determine whether to use ocrmac or VLM for processing.
  *
- * Renders a subset of pages at low DPI and sends them to a frontier VLM for
- * binary Korean-Hanja mix detection. If a Korean-Hanja mix is found on any
- * page, the entire document is routed to the VLM pipeline. Otherwise, it goes
- * through the standard ocrmac/Docling pipeline.
+ * First attempts to detect CJK characters directly from the PDF text layer using
+ * pdftotext (zero-cost, high accuracy for PDFs with embedded text). Only falls back
+ * to VLM-based image analysis for image-only PDFs without a text layer.
  *
- * Sampling strategy:
+ * VLM fallback sampling strategy:
  * - Trim front/back 10% of pages (covers, TOC, appendices)
- * - Select up to 5 pages evenly distributed across the eligible range
+ * - Select up to 15 pages evenly distributed across the eligible range
  * - Early exit on first Korean-Hanja mix detection
  */
 export class OcrStrategySampler {
   private readonly logger: LoggerMethods;
   private readonly pageRenderer: PageRenderer;
+  private readonly textExtractor: PdfTextExtractor;
 
-  constructor(logger: LoggerMethods, pageRenderer: PageRenderer) {
+  constructor(
+    logger: LoggerMethods,
+    pageRenderer: PageRenderer,
+    textExtractor?: PdfTextExtractor,
+  ) {
     this.logger = logger;
     this.pageRenderer = pageRenderer;
+    this.textExtractor = textExtractor ?? new PdfTextExtractor(logger);
   }
 
   /**
@@ -103,7 +116,16 @@ export class OcrStrategySampler {
 
     this.logger.info('[OcrStrategySampler] Starting OCR strategy sampling...');
 
-    // Step 1: Render all pages at low DPI
+    // Step 1: Try text layer pre-check (zero-cost CJK detection)
+    const preCheckResult = await this.preCheckCjkFromTextLayer(
+      pdfPath,
+      maxSamplePages,
+    );
+    if (preCheckResult) {
+      return preCheckResult;
+    }
+
+    // Step 2: Render pages at medium DPI for VLM analysis (image-only PDFs)
     const renderResult = await this.pageRenderer.renderPages(
       pdfPath,
       outputDir,
@@ -120,7 +142,7 @@ export class OcrStrategySampler {
       };
     }
 
-    // Step 2: Select sample page indices
+    // Step 3: Select sample page indices
     const sampleIndices = this.selectSamplePages(
       renderResult.pageCount,
       maxSamplePages,
@@ -130,7 +152,7 @@ export class OcrStrategySampler {
       `[OcrStrategySampler] Sampling ${sampleIndices.length} of ${renderResult.pageCount} pages: [${sampleIndices.map((i) => i + 1).join(', ')}]`,
     );
 
-    // Step 3: Check each sample page for Korean-Hanja mix (early exit on detection)
+    // Step 4: Check each sample page for Korean-Hanja mix (early exit on detection)
     let sampledCount = 0;
     let detectedLanguages: string[] | undefined;
     for (const idx of sampleIndices) {
@@ -159,7 +181,7 @@ export class OcrStrategySampler {
       }
     }
 
-    // Step 4: No Korean-Hanja mix found → ocrmac
+    // Step 5: No Korean-Hanja mix found → ocrmac
     this.logger.info(
       '[OcrStrategySampler] No Korean-Hanja mix detected → ocrmac strategy',
     );
@@ -170,6 +192,65 @@ export class OcrStrategySampler {
       sampledPages: sampledCount,
       totalPages: renderResult.pageCount,
     };
+  }
+
+  /**
+   * Pre-check for CJK characters in PDF text layer using pdftotext.
+   * Returns an OcrStrategy if a definitive decision can be made, or null to fall back to VLM.
+   */
+  private async preCheckCjkFromTextLayer(
+    pdfPath: string,
+    maxSamplePages: number,
+  ): Promise<OcrStrategy | null> {
+    try {
+      const totalPages = await this.textExtractor.getPageCount(pdfPath);
+      if (totalPages === 0) return null;
+
+      const sampleIndices = this.selectSamplePages(totalPages, maxSamplePages);
+
+      let hasText = false;
+      for (const idx of sampleIndices) {
+        const text = await this.textExtractor.extractPageText(pdfPath, idx + 1);
+        if (text.trim().length === 0) continue;
+        hasText = true;
+
+        if (HANGUL_REGEX.test(text) && CJK_REGEX.test(text)) {
+          this.logger.info(
+            `[OcrStrategySampler] CJK detected in text layer (page ${idx + 1}) → VLM strategy`,
+          );
+          return {
+            method: 'vlm',
+            detectedLanguages: ['ko-KR'],
+            reason: `CJK characters found in PDF text layer (page ${idx + 1})`,
+            sampledPages: sampleIndices.length,
+            totalPages,
+          };
+        }
+      }
+
+      if (!hasText) {
+        this.logger.debug(
+          '[OcrStrategySampler] Text layer empty, falling back to VLM sampling',
+        );
+        return null;
+      }
+
+      this.logger.info(
+        '[OcrStrategySampler] No CJK in text layer → ocrmac strategy',
+      );
+      return {
+        method: 'ocrmac',
+        detectedLanguages: ['ko-KR'],
+        reason: `No CJK characters in PDF text layer (${sampleIndices.length} pages sampled)`,
+        sampledPages: sampleIndices.length,
+        totalPages,
+      };
+    } catch {
+      this.logger.debug(
+        '[OcrStrategySampler] Text layer pre-check failed, falling back to VLM sampling',
+      );
+      return null;
+    }
   }
 
   /**

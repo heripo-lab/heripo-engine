@@ -225,6 +225,7 @@ describe('PDFConverter.convertWithStrategy', () => {
       expect(OcrStrategySampler).toHaveBeenCalledWith(
         logger,
         expect.any(Object),
+        expect.any(Object),
       );
       expect(PageRenderer).toHaveBeenCalledWith(logger);
       expect(mockSamplerInstance.sample).toHaveBeenCalledWith(

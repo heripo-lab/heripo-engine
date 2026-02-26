@@ -203,4 +203,128 @@ describe('PdfTextExtractor', () => {
       );
     });
   });
+
+  describe('extractPageText', () => {
+    test('returns text from a single page', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 0,
+        stdout: 'Single page text',
+        stderr: '',
+      });
+
+      const result = await extractor.extractPageText('/tmp/test.pdf', 3);
+
+      expect(result).toBe('Single page text');
+      expect(mockSpawnAsync).toHaveBeenCalledWith('pdftotext', [
+        '-f',
+        '3',
+        '-l',
+        '3',
+        '-layout',
+        '/tmp/test.pdf',
+        '-',
+      ]);
+    });
+
+    test('returns empty string on failure', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 1,
+        stdout: '',
+        stderr: 'Error reading PDF',
+      });
+
+      const result = await extractor.extractPageText('/tmp/test.pdf', 1);
+
+      expect(result).toBe('');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdftotext failed for page 1: Error reading PDF',
+      );
+    });
+  });
+
+  describe('getPageCount', () => {
+    test('returns page count from pdfinfo output', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 0,
+        stdout: [
+          'Title:          Test Document',
+          'Author:         Test',
+          'Pages:          42',
+          'Page size:      595.276 x 841.89 pts (A4)',
+        ].join('\n'),
+        stderr: '',
+      });
+
+      const result = await extractor.getPageCount('/tmp/test.pdf');
+
+      expect(result).toBe(42);
+      expect(mockSpawnAsync).toHaveBeenCalledWith('pdfinfo', ['/tmp/test.pdf']);
+    });
+
+    test('returns 0 when pdfinfo fails', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 1,
+        stdout: '',
+        stderr: 'Command not found',
+      });
+
+      const result = await extractor.getPageCount('/tmp/test.pdf');
+
+      expect(result).toBe(0);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdfinfo failed: Command not found',
+      );
+    });
+
+    test('returns 0 when pdfinfo fails with empty stderr', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 1,
+        stdout: '',
+        stderr: '',
+      });
+
+      const result = await extractor.getPageCount('/tmp/test.pdf');
+
+      expect(result).toBe(0);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdfinfo failed: Unknown error',
+      );
+    });
+
+    test('returns 0 when Pages line is missing from output', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 0,
+        stdout: 'Title: Test\nAuthor: Test\n',
+        stderr: '',
+      });
+
+      const result = await extractor.getPageCount('/tmp/test.pdf');
+
+      expect(result).toBe(0);
+    });
+
+    test('parses single-digit page count', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 0,
+        stdout: 'Pages:          1\n',
+        stderr: '',
+      });
+
+      const result = await extractor.getPageCount('/tmp/test.pdf');
+
+      expect(result).toBe(1);
+    });
+
+    test('parses large page count', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 0,
+        stdout: 'Pages:          1234\n',
+        stderr: '',
+      });
+
+      const result = await extractor.getPageCount('/tmp/test.pdf');
+
+      expect(result).toBe(1234);
+    });
+  });
 });

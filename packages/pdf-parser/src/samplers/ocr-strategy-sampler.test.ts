@@ -2,6 +2,7 @@ import { LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { OcrStrategySampler } from './ocr-strategy-sampler';
 
 vi.mock('@heripo/shared', () => ({
@@ -13,6 +14,8 @@ vi.mock('@heripo/shared', () => ({
 vi.mock('node:fs', () => ({
   readFileSync: vi.fn(),
 }));
+
+vi.mock('../processors/pdf-text-extractor');
 
 const mockLogger = {
   info: vi.fn(),
@@ -42,6 +45,33 @@ function createMockPageRenderer(pageCount: number = 3) {
   };
 }
 
+/** Create a mock PdfTextExtractor */
+function createMockTextExtractor(options?: {
+  pageCount?: number;
+  pageTexts?: Map<number, string>;
+  getPageCountError?: boolean;
+  extractPageTextError?: boolean;
+}) {
+  const {
+    pageCount = 0,
+    pageTexts = new Map<number, string>(),
+    getPageCountError = false,
+    extractPageTextError = false,
+  } = options ?? {};
+
+  return {
+    getPageCount: getPageCountError
+      ? vi.fn().mockRejectedValue(new Error('pdfinfo failed'))
+      : vi.fn().mockResolvedValue(pageCount),
+    extractPageText: extractPageTextError
+      ? vi.fn().mockRejectedValue(new Error('pdftotext failed'))
+      : vi.fn().mockImplementation((_path: string, page: number) => {
+          return Promise.resolve(pageTexts.get(page) ?? '');
+        }),
+    extractText: vi.fn(),
+  };
+}
+
 /** Helper to create a mock VLM Korean-Hanja mix detection result */
 function createMockKoreanHanjaMixResult(
   hasKoreanHanjaMix: boolean,
@@ -65,18 +95,235 @@ function createMockKoreanHanjaMixResult(
 describe('OcrStrategySampler', () => {
   let sampler: OcrStrategySampler;
   let mockPageRenderer: ReturnType<typeof createMockPageRenderer>;
+  let mockTextExtractor: ReturnType<typeof createMockTextExtractor>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockReadFileSync.mockReturnValue(Buffer.from('fake-image'));
     mockPageRenderer = createMockPageRenderer();
-    sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+    // Default: text extractor returns 0 pages → falls through to VLM
+    mockTextExtractor = createMockTextExtractor();
+    sampler = new OcrStrategySampler(
+      mockLogger,
+      mockPageRenderer as any,
+      mockTextExtractor as any,
+    );
   });
 
-  describe('sample', () => {
+  describe('preCheckCjkFromTextLayer', () => {
+    test('returns vlm when CJK and Hangul detected in text layer', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 10,
+        pageTexts: new Map([
+          [1, '한글 텍스트'],
+          [2, '일반 텍스트'],
+          [3, '한글과 漢字가 혼합된 텍스트'],
+        ]),
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('vlm');
+      expect(result.reason).toContain('CJK characters found in PDF text layer');
+      expect(result.detectedLanguages).toEqual(['ko-KR']);
+      // PageRenderer and LLMCaller should NOT be called
+      expect(mockPageRenderer.renderPages).not.toHaveBeenCalled();
+      expect(mockCallVision).not.toHaveBeenCalled();
+    });
+
+    test('returns ocrmac when text layer has Hangul but no CJK', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 5,
+        pageTexts: new Map([
+          [1, '한글만 있는 텍스트'],
+          [2, '더 많은 한글 텍스트'],
+          [3, '세번째 페이지'],
+          [4, '네번째 페이지'],
+          [5, '다섯번째 페이지'],
+        ]),
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('ocrmac');
+      expect(result.reason).toContain('No CJK characters in PDF text layer');
+      expect(result.detectedLanguages).toEqual(['ko-KR']);
+      expect(mockPageRenderer.renderPages).not.toHaveBeenCalled();
+      expect(mockCallVision).not.toHaveBeenCalled();
+    });
+
+    test('falls back to VLM when text layer is empty (image PDF)', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 10,
+        pageTexts: new Map([
+          [1, '   \n  '],
+          [2, ''],
+          [3, '  '],
+        ]),
+      });
+      mockPageRenderer = createMockPageRenderer(10);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      // Falls through to VLM sampling
+      expect(mockPageRenderer.renderPages).toHaveBeenCalled();
+      expect(result.method).toBe('ocrmac');
+    });
+
+    test('falls back to VLM when pdfinfo fails (pageCount = 0)', async () => {
+      mockTextExtractor = createMockTextExtractor({ pageCount: 0 });
+      mockPageRenderer = createMockPageRenderer(3);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(mockPageRenderer.renderPages).toHaveBeenCalled();
+      expect(result.method).toBe('ocrmac');
+    });
+
+    test('falls back to VLM when text extraction throws', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        getPageCountError: true,
+      });
+      mockPageRenderer = createMockPageRenderer(3);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
+
+      await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
+
+      expect(mockPageRenderer.renderPages).toHaveBeenCalled();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[OcrStrategySampler] Text layer pre-check failed, falling back to VLM sampling',
+      );
+    });
+
+    test('detects CJK on first matching page and returns immediately', async () => {
+      // 20 pages: selectSamplePages(20, 15) trims 2 from edges → indices 2..17 (1-based: 3..18)
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 20,
+        pageTexts: new Map([
+          [3, '한글 텍스트'],
+          [4, '한글과 發掘 보고서'],
+        ]),
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('vlm');
+      expect(result.reason).toContain('page 4');
+      expect(result.totalPages).toBe(20);
+    });
+
+    test('returns ocrmac when only CJK without Hangul', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 3,
+        pageTexts: new Map([
+          [1, 'English text with 漢字'],
+          [2, 'More English text'],
+          [3, 'Another page'],
+        ]),
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      // CJK without Hangul does not trigger VLM
+      expect(result.method).toBe('ocrmac');
+      expect(result.reason).toContain('No CJK characters in PDF text layer');
+    });
+
+    test('includes sampledPages count in result', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 5,
+        pageTexts: new Map([
+          [1, '한글 텍스트'],
+          [2, '한글과 遺蹟 문서'],
+        ]),
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('vlm');
+      expect(result.sampledPages).toBe(5); // all 5 pages sampled (totalPages <= maxSamples)
+      expect(result.totalPages).toBe(5);
+    });
+  });
+
+  describe('sample (VLM fallback)', () => {
     test('returns ocrmac when no pages found in PDF', async () => {
       mockPageRenderer = createMockPageRenderer(0);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
 
       const result = await sampler.sample(
         '/tmp/test.pdf',
@@ -120,7 +367,11 @@ describe('OcrStrategySampler', () => {
 
     test('early exits on first Korean-Hanja mix detection', async () => {
       mockPageRenderer = createMockPageRenderer(20);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
 
       mockCallVision
         .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false))
@@ -138,7 +389,7 @@ describe('OcrStrategySampler', () => {
       expect(mockCallVision).toHaveBeenCalledTimes(2);
     });
 
-    test('renders pages at 72 DPI for sampling', async () => {
+    test('renders pages at 150 DPI for sampling', async () => {
       mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
@@ -146,7 +397,7 @@ describe('OcrStrategySampler', () => {
       expect(mockPageRenderer.renderPages).toHaveBeenCalledWith(
         '/tmp/test.pdf',
         '/tmp/output',
-        { dpi: 72 },
+        { dpi: 150 },
       );
     });
 
@@ -232,7 +483,11 @@ describe('OcrStrategySampler', () => {
 
     test('uses custom maxSamplePages', async () => {
       mockPageRenderer = createMockPageRenderer(50);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
       mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel, {
@@ -245,7 +500,11 @@ describe('OcrStrategySampler', () => {
     test('reads page image files as base64', async () => {
       mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
@@ -258,7 +517,11 @@ describe('OcrStrategySampler', () => {
       mockReadFileSync.mockReturnValue(imageBuffer);
       mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
@@ -306,7 +569,11 @@ describe('OcrStrategySampler', () => {
     test('logs debug for each page analysis', async () => {
       mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
 
       await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
 
@@ -368,9 +635,23 @@ describe('OcrStrategySampler', () => {
 
     test('uses last sampled page languages when no Korean-Hanja mix', async () => {
       mockPageRenderer = createMockPageRenderer(20);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
 
       mockCallVision
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
         .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
         .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
         .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
@@ -390,7 +671,11 @@ describe('OcrStrategySampler', () => {
 
     test('detectedLanguages is undefined when no pages found', async () => {
       mockPageRenderer = createMockPageRenderer(0);
-      sampler = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
 
       const result = await sampler.sample(
         '/tmp/test.pdf',
@@ -404,76 +689,42 @@ describe('OcrStrategySampler', () => {
 
   describe('selectSamplePages', () => {
     test('returns empty array for 0 pages', () => {
-      expect(sampler.selectSamplePages(0, 5)).toEqual([]);
+      expect(sampler.selectSamplePages(0, 15)).toEqual([]);
     });
 
     test('returns all pages when total <= maxSamples', () => {
-      expect(sampler.selectSamplePages(3, 5)).toEqual([0, 1, 2]);
+      expect(sampler.selectSamplePages(3, 15)).toEqual([0, 1, 2]);
     });
 
     test('returns all pages when total equals maxSamples', () => {
-      expect(sampler.selectSamplePages(5, 5)).toEqual([0, 1, 2, 3, 4]);
+      expect(sampler.selectSamplePages(15, 15)).toEqual([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+      ]);
     });
 
     test('trims front/back 10% for large documents', () => {
       // 20 pages: trim 2 from each end, eligible: 2-17 (indices)
-      const result = sampler.selectSamplePages(20, 5);
+      const result = sampler.selectSamplePages(20, 15);
 
       // All indices should be in eligible range [2, 18)
       for (const idx of result) {
         expect(idx).toBeGreaterThanOrEqual(2);
         expect(idx).toBeLessThan(18);
       }
-      expect(result).toHaveLength(5);
+      expect(result).toHaveLength(15);
     });
 
     test('distributes samples evenly across eligible range', () => {
-      // 100 pages: trim 10 from each end, eligible: 10-89 (indices)
-      const result = sampler.selectSamplePages(100, 5);
+      // 200 pages: trim 20 from each end, eligible: 20-179 (indices)
+      const result = sampler.selectSamplePages(200, 15);
 
-      expect(result).toHaveLength(5);
-      expect(result[0]).toBe(10); // start of eligible range
+      expect(result).toHaveLength(15);
+      expect(result[0]).toBe(20); // start of eligible range
 
       // Check samples are spaced roughly evenly
       for (let i = 1; i < result.length; i++) {
         const gap = result[i] - result[i - 1];
         expect(gap).toBeGreaterThan(0);
-      }
-    });
-
-    test('returns middle page when trimming leaves no eligible pages', () => {
-      // 6 pages: trim ceil(0.6)=1 from each end, eligible: [1, 5)
-      // With 6 pages and trim=1, start=1, end=5, eligible=4 > 0
-      // But for very small case: 3 pages, trim=1, eligible: [1, 2) = 1 page
-      // For trimming leaving 0: need totalPages where ceil(total*0.1) >= total/2
-      // That's when ceil(total*0.1) * 2 >= total
-      // For total=2: trim=1, start=1, end=1, eligible=0
-      const result = sampler.selectSamplePages(2, 5);
-      // totalPages=2 <= maxSamples=5, so returns all: [0, 1]
-      expect(result).toEqual([0, 1]);
-    });
-
-    test('handles case where eligible count is less than maxSamples', () => {
-      // 12 pages: trim ceil(1.2)=2, eligible range: [2, 10) = 8 pages
-      // 8 <= maxSamples doesn't apply since maxSamples=5 and 8 > 5
-      // Let's use: 8 pages, trim=1, eligible [1, 7) = 6 pages, maxSamples=10
-      const result = sampler.selectSamplePages(8, 10);
-      // totalPages=8 <= maxSamples=10, so returns all: [0,1,...,7]
-      expect(result).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    });
-
-    test('returns all eligible pages when eligible count <= maxSamples', () => {
-      // 10 pages: trim=1, eligible: [1, 9) = 8 pages, maxSamples=10
-      // But totalPages=10 <= maxSamples=10, so returns all
-      // Need totalPages > maxSamples but eligible <= maxSamples
-      // 12 pages: trim=2, eligible: [2, 10) = 8 pages, maxSamples=8
-      // But 12 > 8 so doesn't hit first branch
-      const result = sampler.selectSamplePages(12, 8);
-      expect(result).toHaveLength(8);
-      // All should be in [2, 10)
-      for (const idx of result) {
-        expect(idx).toBeGreaterThanOrEqual(2);
-        expect(idx).toBeLessThan(10);
       }
     });
 
@@ -485,17 +736,50 @@ describe('OcrStrategySampler', () => {
       expect(result).toEqual([1]); // Math.floor(2/2) = 1
     });
 
+    test('handles case where eligible count is less than maxSamples', () => {
+      // 18 pages: trim=2, eligible: [2, 16) = 14 pages, maxSamples=15
+      // 14 <= 15 → returns all eligible
+      const result = sampler.selectSamplePages(18, 15);
+      // totalPages=18 > maxSamples=15, so trim applies
+      // trimCount = ceil(1.8) = 2, eligible: [2, 16) = 14
+      // 14 <= 15, so returns all eligible
+      expect(result).toHaveLength(14);
+      for (const idx of result) {
+        expect(idx).toBeGreaterThanOrEqual(2);
+        expect(idx).toBeLessThan(16);
+      }
+    });
+
+    test('returns all eligible pages when eligible count <= maxSamples', () => {
+      // 20 pages: trim=2, eligible: [2, 18) = 16 pages, maxSamples=16
+      const result = sampler.selectSamplePages(20, 16);
+      expect(result).toHaveLength(16);
+      for (const idx of result) {
+        expect(idx).toBeGreaterThanOrEqual(2);
+        expect(idx).toBeLessThan(18);
+      }
+    });
+
     test('returns unique indices (no duplicates)', () => {
-      const result = sampler.selectSamplePages(50, 5);
+      const result = sampler.selectSamplePages(50, 15);
       const unique = new Set(result);
       expect(unique.size).toBe(result.length);
     });
 
     test('returns sorted indices', () => {
-      const result = sampler.selectSamplePages(50, 5);
+      const result = sampler.selectSamplePages(50, 15);
       for (let i = 1; i < result.length; i++) {
         expect(result[i]).toBeGreaterThan(result[i - 1]);
       }
+    });
+  });
+
+  describe('constructor', () => {
+    test('creates default PdfTextExtractor when none provided', () => {
+      const s = new OcrStrategySampler(mockLogger, mockPageRenderer as any);
+      // PdfTextExtractor constructor was called via the mock
+      expect(PdfTextExtractor).toHaveBeenCalledWith(mockLogger);
+      expect(s).toBeInstanceOf(OcrStrategySampler);
     });
   });
 });
