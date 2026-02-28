@@ -20,6 +20,7 @@
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Usage](#usage)
+- [OCR Strategy System](#ocr-strategy-system)
 - [Why macOS Only?](#why-macos-only)
 - [System Dependencies Details](#system-dependencies-details)
 - [API Documentation](#api-documentation)
@@ -28,7 +29,8 @@
 
 ## Key Features
 
-- **High-Quality OCR**: document recognition using Docling SDK
+- **High-Quality OCR**: Document recognition using Docling SDK (ocrmac / Apple Vision Framework)
+- **Mixed Script Auto-Detection & Correction**: Automatically detects Korean-Hanja mixed pages and corrects them via VLM
 - **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
@@ -68,13 +70,21 @@ brew install python@3.11
 python3.11 --version
 ```
 
-#### 4. jq (JSON processing tool)
+#### 4. poppler (PDF text extraction)
+
+Required for the OCR strategy system's text layer pre-check (`pdftotext`).
+
+```bash
+brew install poppler
+```
+
+#### 5. jq (JSON processing tool)
 
 ```bash
 brew install jq
 ```
 
-#### 5. lsof (port management)
+#### 6. lsof (port management)
 
 Installed by default on macOS. Verify:
 
@@ -190,6 +200,51 @@ Clean up resources after work is complete:
 await pdfParser.shutdown();
 ```
 
+## OCR Strategy System
+
+### Why This Strategy?
+
+**ocrmac (Apple Vision Framework) is an excellent OCR engine** — it's free, GPU-accelerated, and delivers high-quality results. For processing thousands to millions of archaeological reports, there's no better solution.
+
+**However, ocrmac cannot handle mixed character systems.** Documents containing Korean-Hanja combinations (and potentially other mixed scripts) produce garbled text for the non-primary script. Rather than switching the entire pipeline to a costly VLM, the system **targets only the affected pages** for VLM correction, minimizing cost and processing time.
+
+### Two-Stage Detection (`OcrStrategySampler`)
+
+1. **Text Layer Pre-Check** (zero cost): Extracts the document's text layer using `pdftotext` and checks for both Hangul and CJK characters. If both are present, the document is immediately flagged as mixed-script.
+2. **VLM Sampling** (only when needed): Samples up to 15 pages (trimming 10% from front/back to skip covers and appendices) and analyzes them with a Vision LLM. Uses early exit on first Korean-Hanja mix detection to minimize API costs.
+
+### Per-Page Correction (`VlmTextCorrector`)
+
+When mixed-script pages are detected, only those pages are sent to the VLM for correction:
+
+- Extracts OCR text elements and table cells from each page
+- Uses `pdftotext` reference text as a quality anchor
+- VLM returns substitution-based corrections (find → replace)
+- Failed page corrections are gracefully skipped, preserving original OCR text
+
+### Strategy Options
+
+```typescript
+const outputPath = await pdfParser.parse(
+  'input.pdf',
+  'output',
+  (result) => console.log(result),
+  {
+    // Enable OCR strategy sampling (provide a Vision LLM model)
+    strategySamplerModel: openai('gpt-5.1'),
+
+    // VLM model for text correction (required when mixed-script is detected)
+    vlmProcessorModel: openai('gpt-5.1'),
+
+    // Concurrency for VLM page processing (default: 1)
+    vlmConcurrency: 3,
+
+    // Skip sampling and force a specific OCR method
+    forcedMethod: 'ocrmac', // or 'vlm'
+  },
+);
+```
+
 ## Why macOS Only?
 
 `@heripo/pdf-parser` **intentionally relies heavily on macOS**. The key reason for this decision is **Docling SDK's local OCR performance**.
@@ -226,11 +281,12 @@ Archaeological excavation report PDFs have the following characteristics:
 
 `@heripo/pdf-parser` requires the following system-level dependencies:
 
-| Dependency | Required Version | Installation               | Purpose                                     |
-| ---------- | ---------------- | -------------------------- | ------------------------------------------- |
-| Python     | 3.9 - 3.12       | `brew install python@3.11` | Docling SDK runtime                         |
-| jq         | Any              | `brew install jq`          | JSON processing (conversion result parsing) |
-| lsof       | Any              | Included with macOS        | docling-serve port management               |
+| Dependency | Required Version | Installation               | Purpose                                            |
+| ---------- | ---------------- | -------------------------- | -------------------------------------------------- |
+| Python     | 3.9 - 3.12       | `brew install python@3.11` | Docling SDK runtime                                |
+| poppler    | Any              | `brew install poppler`     | Text layer extraction for OCR strategy (pdftotext) |
+| jq         | Any              | `brew install jq`          | JSON processing (conversion result parsing)        |
+| lsof       | Any              | Included with macOS        | docling-serve port management                      |
 
 > ⚠️ **Python 3.13+ is not supported.** Some Docling SDK dependencies are not compatible with Python 3.13.
 
@@ -311,6 +367,18 @@ interface ConversionOptions {
   doOcr?: boolean; // Enable OCR (default: true)
   formats?: string[]; // Output formats (default: ['docling_json'])
   pdfBackend?: string; // PDF backend (default: 'dlparse_v2')
+}
+```
+
+### PDFConvertOptions (Extended)
+
+```typescript
+interface PDFConvertOptions extends ConversionOptions {
+  strategySamplerModel?: LanguageModel; // Vision LLM for OCR strategy sampling
+  vlmProcessorModel?: LanguageModel; // Vision LLM for text correction
+  vlmConcurrency?: number; // Parallel page processing (default: 1)
+  skipSampling?: boolean; // Skip strategy sampling
+  forcedMethod?: 'ocrmac' | 'vlm'; // Force specific OCR method
 }
 ```
 

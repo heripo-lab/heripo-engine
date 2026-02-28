@@ -14,12 +14,11 @@
 > ⚠️ **macOS Only**: This project currently supports only macOS (Apple Silicon or Intel).
 > See [@heripo/pdf-parser README](./packages/pdf-parser/README.md#prerequisites) for detailed system requirements.
 
-> ⚠️ **Known Limitations (v0.1.x)**:
+> ℹ️ **Notes (v0.1.x)**:
 >
-> - **Hanja OCR**: Chinese characters may not be recognized correctly in mixed Korean-Chinese documents (improvement in progress)
-> - **TOC Extraction**: May fail if TOC is missing or has unusual structure. Some seemingly normal TOCs also fail occasionally (continuously improving)
-> - **Vertical Text**: Old documents with vertical text and Chinese numeral page numbers are planned for long-term support, but not currently scheduled
-> - **Automation Scope**: Does not aim for full automation. Goal is to automate 90% of previously 100% manual work. Page mapping/TOC extraction are the pipeline foundation but near-100% automation is impossible—focusing on common patterns and stopping at optimal point. Reports difficult even for humans are expected to fail. Subsequent stages (feature/artifact extraction) aim for near-100% automation. Edge cases handled via hybrid approach
+> - **Mixed Script Detection**: Korean-Hanja mixed documents are automatically detected and corrected via VLM (Vision Language Model)
+> - **TOC Dependency**: Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention
+> - **Vertical Text**: Old vertical-text documents with Chinese numeral page numbers are a long-term goal, not currently scheduled
 
 > 🌐 **Online Demo**: Try it without local installation → [engine-demo.heripo.com](https://engine-demo.heripo.com)
 
@@ -105,7 +104,8 @@ For a detailed roadmap, see [docs/roadmap.md](./docs/roadmap.md).
 
 ### PDF Parsing (`@heripo/pdf-parser`)
 
-- **High-Quality OCR**: Document recognition using Docling SDK
+- **High-Quality OCR**: Document recognition using Docling SDK (ocrmac / Apple Vision Framework)
+- **Mixed Script Auto-Detection & Correction**: Automatically detects Korean-Hanja mixed pages and corrects them via VLM — ocrmac excels at speed and quality for large-scale processing, but cannot handle mixed character systems, so only affected pages are targeted for VLM correction
 - **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
