@@ -672,6 +672,223 @@ describe('VlmTextCorrector', () => {
       );
       expect(savedDoc.texts[0].text).toBe('CCC BBB AAA');
     });
+
+    test('filters to koreanHanjaMixPages when provided', async () => {
+      const doc: DoclingDocument = {
+        ...createTestDoc([
+          createTextItem('page1 text', 'text', 1),
+          createTextItem('page2 漢字', 'text', 2),
+          createTextItem('page3 text', 'text', 3),
+        ]),
+        pages: {
+          '1': {
+            page_no: 1,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_0.png',
+            },
+          },
+          '2': {
+            page_no: 2,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_1.png',
+            },
+          },
+          '3': {
+            page_no: 3,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_2.png',
+            },
+          },
+        },
+      };
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([{ tc: [], cc: [] }]);
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+        { koreanHanjaMixPages: [2] },
+      );
+
+      // Only page 2 should be processed
+      expect(ConcurrentPool.run).toHaveBeenCalledWith(
+        [2],
+        1,
+        expect.any(Function),
+        expect.any(Function),
+      );
+      expect(result.pagesProcessed).toBe(1);
+      expect(logger.info).toHaveBeenCalledWith(
+        '[VlmTextCorrector] Filtering to 1 Korean-Hanja mix pages out of 3 total',
+      );
+    });
+
+    test('processes all pages when koreanHanjaMixPages is undefined', async () => {
+      const doc: DoclingDocument = {
+        ...createTestDoc([
+          createTextItem('page1 text', 'text', 1),
+          createTextItem('page2 text', 'text', 2),
+        ]),
+        pages: {
+          '1': {
+            page_no: 1,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_0.png',
+            },
+          },
+          '2': {
+            page_no: 2,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_1.png',
+            },
+          },
+        },
+      };
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([
+        { tc: [], cc: [] },
+        { tc: [], cc: [] },
+      ]);
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+      );
+
+      // All pages should be processed
+      expect(ConcurrentPool.run).toHaveBeenCalledWith(
+        [1, 2],
+        1,
+        expect.any(Function),
+        expect.any(Function),
+      );
+      expect(result.pagesProcessed).toBe(2);
+    });
+
+    test('returns correct pagesProcessed count after filtering', async () => {
+      const doc: DoclingDocument = {
+        ...createTestDoc([
+          createTextItem('page1', 'text', 1),
+          createTextItem('page2 漢字', 'text', 2),
+          createTextItem('page3', 'text', 3),
+          createTextItem('page4 遺蹟', 'text', 4),
+          createTextItem('page5', 'text', 5),
+        ]),
+        pages: {
+          '1': {
+            page_no: 1,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_0.png',
+            },
+          },
+          '2': {
+            page_no: 2,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_1.png',
+            },
+          },
+          '3': {
+            page_no: 3,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_2.png',
+            },
+          },
+          '4': {
+            page_no: 4,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_3.png',
+            },
+          },
+          '5': {
+            page_no: 5,
+            size: { width: 595, height: 842 },
+            image: {
+              mimetype: 'image/png',
+              dpi: 300,
+              size: { width: 2480, height: 3508 },
+              uri: 'pages/page_4.png',
+            },
+          },
+        },
+      };
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([
+        { tc: [{ i: 0, s: [{ f: '漢字', r: '漢字' }] }], cc: [] },
+        { tc: [], cc: [] },
+      ]);
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+        { koreanHanjaMixPages: [2, 4] },
+      );
+
+      expect(ConcurrentPool.run).toHaveBeenCalledWith(
+        [2, 4],
+        1,
+        expect.any(Function),
+        expect.any(Function),
+      );
+      expect(result.pagesProcessed).toBe(2);
+      expect(result.textCorrections).toBe(1);
+    });
   });
 
   describe('correctPage (via ConcurrentPool processFn)', () => {

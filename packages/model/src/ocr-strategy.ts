@@ -21,4 +21,7 @@ export interface OcrStrategy {
 
   /** Total number of pages in the document */
   totalPages: number;
+
+  /** 1-based page numbers where Korean-Hanja mixed script was detected in text layer */
+  koreanHanjaMixPages?: number[];
 }

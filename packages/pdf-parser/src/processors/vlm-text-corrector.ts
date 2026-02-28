@@ -132,6 +132,8 @@ export interface VlmTextCorrectorOptions {
   documentLanguages?: string[];
   /** Pre-extracted page texts from pdftotext (1-based pageNo → text) */
   pageTexts?: Map<number, string>;
+  /** Pages containing Hanja detected from text layer (1-based). Only these pages get VLM correction. */
+  koreanHanjaMixPages?: number[];
 }
 
 /** Result of VLM text correction */
@@ -176,7 +178,7 @@ export class VlmTextCorrector {
     const resultPath = join(outputDir, 'result.json');
     const doc: DoclingDocument = JSON.parse(readFileSync(resultPath, 'utf-8'));
 
-    const pageNumbers = this.getPageNumbers(doc);
+    let pageNumbers = this.getPageNumbers(doc);
     if (pageNumbers.length === 0) {
       this.logger.info('[VlmTextCorrector] No pages to process');
       return {
@@ -185,6 +187,18 @@ export class VlmTextCorrector {
         pagesProcessed: 0,
         pagesFailed: 0,
       };
+    }
+
+    if (
+      options?.koreanHanjaMixPages &&
+      options.koreanHanjaMixPages.length > 0
+    ) {
+      const totalPageCount = pageNumbers.length;
+      const hanjaSet = new Set(options.koreanHanjaMixPages);
+      pageNumbers = pageNumbers.filter((p) => hanjaSet.has(p));
+      this.logger.info(
+        `[VlmTextCorrector] Filtering to ${pageNumbers.length} Korean-Hanja mix pages out of ${totalPageCount} total`,
+      );
     }
 
     const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;

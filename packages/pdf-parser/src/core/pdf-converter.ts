@@ -181,6 +181,7 @@ export class PDFConverter {
         trackedOptions,
         abortSignal,
         strategy.detectedLanguages,
+        strategy.koreanHanjaMixPages,
       );
       return {
         strategy,
@@ -296,6 +297,7 @@ export class PDFConverter {
     options: PDFConvertOptions,
     abortSignal?: AbortSignal,
     detectedLanguages?: string[],
+    koreanHanjaMixPages?: number[],
   ): Promise<void> {
     if (!options.vlmProcessorModel) {
       throw new Error('vlmProcessorModel is required when OCR strategy is VLM');
@@ -335,6 +337,7 @@ export class PDFConverter {
         onTokenUsage: options.onTokenUsage,
         documentLanguages: detectedLanguages,
         pageTexts,
+        koreanHanjaMixPages,
       });
       await onComplete(outputDir);
     };

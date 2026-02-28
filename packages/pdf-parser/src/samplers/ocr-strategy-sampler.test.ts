@@ -140,6 +140,8 @@ describe('OcrStrategySampler', () => {
         'Hangul-Hanja mix found in PDF text layer',
       );
       expect(result.detectedLanguages).toEqual(['ko-KR']);
+      expect(result.koreanHanjaMixPages).toBeDefined();
+      expect(result.koreanHanjaMixPages!.length).toBeGreaterThan(0);
       // PageRenderer and LLMCaller should NOT be called
       expect(mockPageRenderer.renderPages).not.toHaveBeenCalled();
       expect(mockCallVision).not.toHaveBeenCalled();
@@ -167,6 +169,7 @@ describe('OcrStrategySampler', () => {
       expect(result.reason).toBe('Hangul-Hanja mix found in PDF text layer');
       expect(result.sampledPages).toBe(100);
       expect(result.totalPages).toBe(100);
+      expect(result.koreanHanjaMixPages).toBeDefined();
     });
 
     test('returns ocrmac when text layer has Hangul but no Hanja', async () => {
@@ -357,6 +360,83 @@ describe('OcrStrategySampler', () => {
       expect(result.method).toBe('vlm');
       expect(result.sampledPages).toBe(50);
       expect(result.totalPages).toBe(50);
+    });
+
+    test('marks only pages containing Hanja via form feed split', async () => {
+      // 5 pages separated by \f: pages 2 and 4 contain Hanja
+      const fullText = [
+        '한글만 있는 첫 페이지',
+        '두번째 페이지 遺蹟 발굴',
+        '세번째 페이지 한글만',
+        '네번째 페이지 調査 報告書',
+        '다섯번째 페이지 끝',
+      ].join('\f');
+
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 5,
+        fullText,
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('vlm');
+      expect(result.koreanHanjaMixPages).toEqual([2, 4]);
+    });
+
+    test('does not include koreanHanjaMixPages when method is ocrmac', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 5,
+        fullText:
+          '한글만 있는 텍스트\f더 많은 한글 텍스트\f세번째 페이지\f네번째 페이지\f다섯번째 페이지',
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('ocrmac');
+      expect(result.koreanHanjaMixPages).toBeUndefined();
+    });
+
+    test('handles trailing form feed producing empty last element', async () => {
+      // pdftotext sometimes adds a trailing \f
+      const fullText = '한글 페이지\f漢字 페이지\f';
+
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 2,
+        fullText,
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('vlm');
+      // Only page 2 has Hanja, page 3 (empty trailing) should not be marked
+      expect(result.koreanHanjaMixPages).toEqual([2]);
     });
 
     test('uses extractFullText instead of per-page extraction', async () => {

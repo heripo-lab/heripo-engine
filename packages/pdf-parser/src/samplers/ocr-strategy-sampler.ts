@@ -225,13 +225,22 @@ export class OcrStrategySampler {
       }
 
       if (hasHanja) {
+        const pageTextArray = fullText.split('\f');
+        const koreanHanjaMixPages: number[] = [];
+        for (let i = 0; i < pageTextArray.length; i++) {
+          if (CJK_REGEX.test(pageTextArray[i])) {
+            koreanHanjaMixPages.push(i + 1); // 1-based
+          }
+        }
+
         this.logger.info(
-          '[OcrStrategySampler] Hangul-Hanja mix detected in text layer → VLM strategy',
+          `[OcrStrategySampler] Hangul-Hanja mix detected in text layer → VLM strategy (${koreanHanjaMixPages.length} pages with Hanja)`,
         );
         return {
           method: 'vlm',
           detectedLanguages: ['ko-KR'],
           reason: 'Hangul-Hanja mix found in PDF text layer',
+          koreanHanjaMixPages,
           sampledPages: totalPages,
           totalPages,
         };
