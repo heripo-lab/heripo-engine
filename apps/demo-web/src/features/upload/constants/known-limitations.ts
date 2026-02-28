@@ -18,7 +18,7 @@ export const KNOWN_LIMITATIONS: KnownLimitation[] = [
     titleKo: '목차 의존성',
     titleEn: 'TOC Dependency',
     descriptionKo:
-      '목차(TOC)가 없는 보고서는 처리가 실패합니다 (의도된 동작). 목차가 있더라도 드물게 추출이 실패할 수 있습니다. 향후 human intervention 시스템으로 대응할 예정입니다.',
+      '목차(TOC)가 없는 보고서는 처리가 실패합니다 (의도된 동작). 목차가 있더라도 드물게 추출이 실패할 수 있습니다. 향후 수동 검증 시스템으로 대응할 예정입니다.',
     descriptionEn:
       'Reports without a table of contents (TOC) will fail processing (intentional). Even with a TOC present, extraction may rarely fail. This will be addressed via a human intervention system in the future.',
     status: 'not-planned',
@@ -38,7 +38,7 @@ export const KNOWN_LIMITATIONS: KnownLimitation[] = [
     titleKo: '자동화 범위',
     titleEn: 'Automation Scope',
     descriptionKo:
-      '이 엔진은 완전 자동화를 지향하지 않습니다. 엣지 케이스는 향후 human intervention 시스템으로 대응할 예정입니다.',
+      '이 엔진은 완전 자동화를 지향하지 않습니다. 엣지 케이스는 향후 수동 검증 시스템으로 대응할 예정입니다.',
     descriptionEn:
       'This engine does not aim for full automation. Edge cases will be addressed via a human intervention system in the future.',
     status: 'not-planned',
