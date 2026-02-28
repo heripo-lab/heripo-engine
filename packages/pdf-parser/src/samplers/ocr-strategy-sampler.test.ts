@@ -48,14 +48,18 @@ function createMockPageRenderer(pageCount: number = 3) {
 /** Create a mock PdfTextExtractor */
 function createMockTextExtractor(options?: {
   pageCount?: number;
+  fullText?: string;
   pageTexts?: Map<number, string>;
   getPageCountError?: boolean;
+  extractFullTextError?: boolean;
   extractPageTextError?: boolean;
 }) {
   const {
     pageCount = 0,
+    fullText = '',
     pageTexts = new Map<number, string>(),
     getPageCountError = false,
+    extractFullTextError = false,
     extractPageTextError = false,
   } = options ?? {};
 
@@ -63,6 +67,9 @@ function createMockTextExtractor(options?: {
     getPageCount: getPageCountError
       ? vi.fn().mockRejectedValue(new Error('pdfinfo failed'))
       : vi.fn().mockResolvedValue(pageCount),
+    extractFullText: extractFullTextError
+      ? vi.fn().mockRejectedValue(new Error('pdftotext failed'))
+      : vi.fn().mockResolvedValue(fullText),
     extractPageText: extractPageTextError
       ? vi.fn().mockRejectedValue(new Error('pdftotext failed'))
       : vi.fn().mockImplementation((_path: string, page: number) => {
@@ -114,11 +121,7 @@ describe('OcrStrategySampler', () => {
     test('returns vlm when Hangul-Hanja mix detected in text layer', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 10,
-        pageTexts: new Map([
-          [1, '한글 텍스트'],
-          [2, '일반 텍스트'],
-          [3, '한글과 漢字가 혼합된 텍스트'],
-        ]),
+        fullText: '한글 텍스트\n일반 텍스트\n한글과 漢字가 혼합된 텍스트',
       });
       sampler = new OcrStrategySampler(
         mockLogger,
@@ -142,16 +145,35 @@ describe('OcrStrategySampler', () => {
       expect(mockCallVision).not.toHaveBeenCalled();
     });
 
+    test('detects Hangul and Hanja on different pages in document', async () => {
+      // Hangul in body text, Hanja only in appendix - detected at document level
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 100,
+        fullText: '한글 본문 텍스트가 있는 페이지\n\n\n부록: 發掘 調査 報告書',
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.method).toBe('vlm');
+      expect(result.reason).toBe('Hangul-Hanja mix found in PDF text layer');
+      expect(result.sampledPages).toBe(100);
+      expect(result.totalPages).toBe(100);
+    });
+
     test('returns ocrmac when text layer has Hangul but no Hanja', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 5,
-        pageTexts: new Map([
-          [1, '한글만 있는 텍스트'],
-          [2, '더 많은 한글 텍스트'],
-          [3, '세번째 페이지'],
-          [4, '네번째 페이지'],
-          [5, '다섯번째 페이지'],
-        ]),
+        fullText:
+          '한글만 있는 텍스트\n더 많은 한글 텍스트\n세번째 페이지\n네번째 페이지\n다섯번째 페이지',
       });
       sampler = new OcrStrategySampler(
         mockLogger,
@@ -175,11 +197,7 @@ describe('OcrStrategySampler', () => {
     test('falls back to VLM when text layer is empty (image PDF)', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 10,
-        pageTexts: new Map([
-          [1, '   \n  '],
-          [2, ''],
-          [3, '  '],
-        ]),
+        fullText: '   \n  ',
       });
       mockPageRenderer = createMockPageRenderer(10);
       sampler = new OcrStrategySampler(
@@ -243,40 +261,31 @@ describe('OcrStrategySampler', () => {
       );
     });
 
-    test('detects Hangul-Hanja mix on first matching page and returns immediately', async () => {
-      // 20 pages: selectSamplePages(20, 15) trims 2 from edges → indices 2..17 (1-based: 3..18)
+    test('falls back to VLM when extractFullText throws', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 20,
-        pageTexts: new Map([
-          [3, '한글 텍스트'],
-          [4, '한글과 發掘 보고서'],
-        ]),
+        extractFullTextError: true,
       });
+      mockPageRenderer = createMockPageRenderer(3);
       sampler = new OcrStrategySampler(
         mockLogger,
         mockPageRenderer as any,
         mockTextExtractor as any,
       );
+      mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
 
-      const result = await sampler.sample(
-        '/tmp/test.pdf',
-        '/tmp/output',
-        mockModel,
+      await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
+
+      expect(mockPageRenderer.renderPages).toHaveBeenCalled();
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[OcrStrategySampler] Text layer pre-check failed, falling back to VLM sampling',
       );
-
-      expect(result.method).toBe('vlm');
-      expect(result.reason).toContain('page 4');
-      expect(result.totalPages).toBe(20);
     });
 
     test('falls back to VLM when no Hangul in text layer', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 3,
-        pageTexts: new Map([
-          [1, 'English text with 漢字'],
-          [2, 'More English text'],
-          [3, 'Another page'],
-        ]),
+        fullText: 'English text with 漢字\nMore English text\nAnother page',
       });
       mockPageRenderer = createMockPageRenderer(3);
       sampler = new OcrStrategySampler(
@@ -303,11 +312,8 @@ describe('OcrStrategySampler', () => {
     test('falls back to VLM when text has only non-Korean text', async () => {
       mockTextExtractor = createMockTextExtractor({
         pageCount: 3,
-        pageTexts: new Map([
-          [1, 'This is English only text'],
-          [2, 'Another English paragraph'],
-          [3, 'More content without any Korean'],
-        ]),
+        fullText:
+          'This is English only text\nAnother English paragraph\nMore content without any Korean',
       });
       mockPageRenderer = createMockPageRenderer(3);
       sampler = new OcrStrategySampler(
@@ -331,13 +337,10 @@ describe('OcrStrategySampler', () => {
       expect(result.detectedLanguages).toEqual(['en-US']);
     });
 
-    test('includes sampledPages count in result', async () => {
+    test('sets sampledPages equal to totalPages (full scan)', async () => {
       mockTextExtractor = createMockTextExtractor({
-        pageCount: 5,
-        pageTexts: new Map([
-          [1, '한글 텍스트'],
-          [2, '한글과 遺蹟 문서'],
-        ]),
+        pageCount: 50,
+        fullText: '한글 텍스트\n遺蹟 문서',
       });
       sampler = new OcrStrategySampler(
         mockLogger,
@@ -352,8 +355,27 @@ describe('OcrStrategySampler', () => {
       );
 
       expect(result.method).toBe('vlm');
-      expect(result.sampledPages).toBe(5); // all 5 pages sampled (totalPages <= maxSamples)
-      expect(result.totalPages).toBe(5);
+      expect(result.sampledPages).toBe(50);
+      expect(result.totalPages).toBe(50);
+    });
+
+    test('uses extractFullText instead of per-page extraction', async () => {
+      mockTextExtractor = createMockTextExtractor({
+        pageCount: 10,
+        fullText: '한글만 있는 텍스트',
+      });
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      await sampler.sample('/tmp/test.pdf', '/tmp/output', mockModel);
+
+      expect(mockTextExtractor.extractFullText).toHaveBeenCalledWith(
+        '/tmp/test.pdf',
+      );
+      expect(mockTextExtractor.extractPageText).not.toHaveBeenCalled();
     });
   });
 

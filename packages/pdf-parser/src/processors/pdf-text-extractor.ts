@@ -64,6 +64,23 @@ export class PdfTextExtractor {
   }
 
   /**
+   * Extract text from the entire PDF in a single pdftotext invocation.
+   * Returns empty string on failure (logged as warning).
+   */
+  async extractFullText(pdfPath: string): Promise<string> {
+    const result = await spawnAsync('pdftotext', ['-layout', pdfPath, '-']);
+
+    if (result.code !== 0) {
+      this.logger.warn(
+        `[PdfTextExtractor] pdftotext (full) failed: ${result.stderr || 'Unknown error'}`,
+      );
+      return '';
+    }
+
+    return result.stdout;
+  }
+
+  /**
    * Extract text from a single PDF page using pdftotext.
    * Returns empty string on failure (logged as warning).
    */

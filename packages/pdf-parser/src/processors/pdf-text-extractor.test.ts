@@ -204,6 +204,55 @@ describe('PdfTextExtractor', () => {
     });
   });
 
+  describe('extractFullText', () => {
+    test('extracts full text from PDF in a single invocation', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 0,
+        stdout: 'Full document text content',
+        stderr: '',
+      });
+
+      const result = await extractor.extractFullText('/tmp/test.pdf');
+
+      expect(result).toBe('Full document text content');
+      expect(mockSpawnAsync).toHaveBeenCalledWith('pdftotext', [
+        '-layout',
+        '/tmp/test.pdf',
+        '-',
+      ]);
+    });
+
+    test('returns empty string on failure', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 1,
+        stdout: '',
+        stderr: 'Syntax Error: Invalid PDF',
+      });
+
+      const result = await extractor.extractFullText('/tmp/test.pdf');
+
+      expect(result).toBe('');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdftotext (full) failed: Syntax Error: Invalid PDF',
+      );
+    });
+
+    test('logs warning with fallback message when stderr is empty', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 1,
+        stdout: '',
+        stderr: '',
+      });
+
+      const result = await extractor.extractFullText('/tmp/test.pdf');
+
+      expect(result).toBe('');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdftotext (full) failed: Unknown error',
+      );
+    });
+  });
+
   describe('extractPageText', () => {
     test('returns text from a single page', async () => {
       mockSpawnAsync.mockResolvedValueOnce({

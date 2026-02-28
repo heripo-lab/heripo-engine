@@ -117,10 +117,7 @@ export class OcrStrategySampler {
     this.logger.info('[OcrStrategySampler] Starting OCR strategy sampling...');
 
     // Step 1: Try text layer pre-check (zero-cost Hangul-Hanja detection)
-    const preCheckResult = await this.preCheckHanjaFromTextLayer(
-      pdfPath,
-      maxSamplePages,
-    );
+    const preCheckResult = await this.preCheckHanjaFromTextLayer(pdfPath);
     if (preCheckResult) {
       return preCheckResult;
     }
@@ -196,43 +193,29 @@ export class OcrStrategySampler {
 
   /**
    * Pre-check for Hangul-Hanja mix in PDF text layer using pdftotext.
+   * Extracts full document text in a single process and checks at document level.
    * Only makes a definitive decision for Korean (Hangul) documents:
-   * - Hangul + Hanja → VLM (confirmed Korean-Hanja mix)
+   * - Hangul + Hanja (anywhere in document) → VLM (confirmed Korean-Hanja mix)
    * - Hangul only → ocrmac with ko-KR (confirmed Korean)
    * - No Hangul (English, Japanese, etc.) → null (delegates to VLM for language detection)
    */
   private async preCheckHanjaFromTextLayer(
     pdfPath: string,
-    maxSamplePages: number,
   ): Promise<OcrStrategy | null> {
     try {
       const totalPages = await this.textExtractor.getPageCount(pdfPath);
       if (totalPages === 0) return null;
 
-      const sampleIndices = this.selectSamplePages(totalPages, maxSamplePages);
-
-      let hasHangul = false;
-      for (const idx of sampleIndices) {
-        const text = await this.textExtractor.extractPageText(pdfPath, idx + 1);
-        if (text.trim().length === 0) continue;
-
-        if (HANGUL_REGEX.test(text)) {
-          hasHangul = true;
-
-          if (CJK_REGEX.test(text)) {
-            this.logger.info(
-              `[OcrStrategySampler] Hangul-Hanja mix detected in text layer (page ${idx + 1}) → VLM strategy`,
-            );
-            return {
-              method: 'vlm',
-              detectedLanguages: ['ko-KR'],
-              reason: `Hangul-Hanja mix found in PDF text layer (page ${idx + 1})`,
-              sampledPages: sampleIndices.length,
-              totalPages,
-            };
-          }
-        }
+      const fullText = await this.textExtractor.extractFullText(pdfPath);
+      if (fullText.trim().length === 0) {
+        this.logger.debug(
+          '[OcrStrategySampler] No Hangul in text layer, falling back to VLM sampling',
+        );
+        return null;
       }
+
+      const hasHangul = HANGUL_REGEX.test(fullText);
+      const hasHanja = CJK_REGEX.test(fullText);
 
       if (!hasHangul) {
         this.logger.debug(
@@ -241,14 +224,27 @@ export class OcrStrategySampler {
         return null;
       }
 
+      if (hasHanja) {
+        this.logger.info(
+          '[OcrStrategySampler] Hangul-Hanja mix detected in text layer → VLM strategy',
+        );
+        return {
+          method: 'vlm',
+          detectedLanguages: ['ko-KR'],
+          reason: 'Hangul-Hanja mix found in PDF text layer',
+          sampledPages: totalPages,
+          totalPages,
+        };
+      }
+
       this.logger.info(
         '[OcrStrategySampler] No Hangul-Hanja mix in text layer → ocrmac strategy',
       );
       return {
         method: 'ocrmac',
         detectedLanguages: ['ko-KR'],
-        reason: `No Hangul-Hanja mix in PDF text layer (${sampleIndices.length} pages sampled)`,
-        sampledPages: sampleIndices.length,
+        reason: `No Hangul-Hanja mix in PDF text layer (${totalPages} pages checked)`,
+        sampledPages: totalPages,
         totalPages,
       };
     } catch {
