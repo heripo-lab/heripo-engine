@@ -236,8 +236,16 @@ export class PDFParser {
    */
   private isConnectionRefusedError(error: unknown): boolean {
     if (error instanceof Error) {
-      const errorStr = JSON.stringify(error);
-      return errorStr.includes('ECONNREFUSED');
+      // Check message and cause chain for ECONNREFUSED
+      if (error.message.includes('ECONNREFUSED')) {
+        return true;
+      }
+      if (
+        error.cause instanceof Error &&
+        error.cause.message.includes('ECONNREFUSED')
+      ) {
+        return true;
+      }
     }
     return false;
   }

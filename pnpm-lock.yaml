@@ -264,8 +264,8 @@ importers:
         specifier: 'catalog:'
         version: 6.0.105(zod@4.3.6)
       docling-sdk:
-        specifier: ^1.3.6
-        version: 1.3.6(typescript@5.9.3)
+        specifier: ^2.0.4
+        version: 2.0.4(typescript@5.9.3)
       es-toolkit:
         specifier: 'catalog:'
         version: 1.44.0
@@ -2639,6 +2639,9 @@ packages:
   deep-is@0.1.4:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
 
+  destr@2.0.5:
+    resolution: {integrity: sha512-ugFTXCtDZunbzasqBxrK93Ik/DRYsO6S/fedkWEMKqt04xZ4csmnmwGDBAb07QWNaGMAmnTIemsYZCksjATwsA==}
+
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -2646,13 +2649,22 @@ packages:
   detect-node-es@1.1.0:
     resolution: {integrity: sha512-ypdmJU/TbBby2Dxibuv7ZLW3Bs1QEmM7nHjEANfohJLvE0XVujisn1qPJcZxg+qDucsr+bP6fLD1rPS3AhJ7EQ==}
 
-  docling-sdk@1.3.6:
-    resolution: {integrity: sha512-LcuWYh9VR0gecIC84z+kBDnrJcE+hXiJBO9iSO30froU0k5uynGcKIx2Hxz2k0uecf1JKcB5gQ8D35Gl2Wmo8w==}
+  docling-sdk@2.0.4:
+    resolution: {integrity: sha512-nQ4IWQCRSEIBAbhHTwY/oA4/6cBOhNvCnQfppffL+pGU4cK/8kcoN6J6QMLlfbep3pRv2HO4JAgkjjc0FXGF8g==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
+      '@huggingface/transformers': '>=3.0.0'
+      onnxruntime-web: '>=1.18.0'
       typescript: '>=4.9.0'
+      unpdf: '>=0.12.0'
     peerDependenciesMeta:
+      '@huggingface/transformers':
+        optional: true
+      onnxruntime-web:
+        optional: true
       typescript:
+        optional: true
+      unpdf:
         optional: true
 
   eastasianwidth@0.2.0:
@@ -3081,6 +3093,9 @@ packages:
     resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
     engines: {node: '>=16 || 14 >=14.17'}
 
+  mitt@3.0.1:
+    resolution: {integrity: sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==}
+
   mlly@1.8.0:
     resolution: {integrity: sha512-l8D9ODSRWLe2KHJSifWGwBqpTZXIXTeo8mlKjY+E2HAakaTeNpqAyBZ8GSqLzHgw4XmHmC8whvpjJNMbFZN7/g==}
 
@@ -3123,6 +3138,9 @@ packages:
     resolution: {integrity: sha512-lgimEHPE/QDgFlywTd8yTR61ptugX3Qer29efeyWw2rv259HtGBNn1vZVmp8lB9uo9wC0t/AT4iGqXxia+CJFg==}
     engines: {node: '>=6.0.0'}
 
+  node-fetch-native@1.6.7:
+    resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
+
   node-releases@2.0.27:
     resolution: {integrity: sha512-nmh3lCkYZ3grZvqcCH+fjmQ7X+H0OeZgP40OierEaAptX4XofMh5kwNbWh7lBduUzCcV/8kZ+NDLCwm2iorIlA==}
 
@@ -3136,6 +3154,9 @@ packages:
 
   obug@2.1.1:
     resolution: {integrity: sha512-uTqF9MuPraAQ+IsnPf366RG4cP9RtUi7MLO1N3KEc+wb0a6yKpeL0lmk2IB1jY5KHPAlTc6T/JRdC/YqxHNwkQ==}
+
+  ofetch@1.5.1:
+    resolution: {integrity: sha512-2W4oUZlVaqAPAil6FUg/difl6YhqhUR7x2eZY4bQCko22UXg3hptq9KLQdqFClV+Wu85UX7hNtdGTngi/1BxcA==}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -5727,17 +5748,21 @@ snapshots:
 
   deep-is@0.1.4: {}
 
+  destr@2.0.5: {}
+
   detect-libc@2.1.2: {}
 
   detect-node-es@1.1.0: {}
 
-  docling-sdk@1.3.6(typescript@5.9.3):
+  docling-sdk@2.0.4(typescript@5.9.3):
     dependencies:
-      archiver: 7.0.1
-      ws: 8.18.3
+      mitt: 3.0.1
+      ofetch: 1.5.1
       zod: 4.3.6
     optionalDependencies:
+      archiver: 7.0.1
       typescript: 5.9.3
+      ws: 8.18.3
     transitivePeerDependencies:
       - bare-abort-controller
       - bufferutil
@@ -6188,6 +6213,8 @@ snapshots:
 
   minipass@7.1.3: {}
 
+  mitt@3.0.1: {}
+
   mlly@1.8.0:
     dependencies:
       acorn: 8.15.0
@@ -6234,6 +6261,8 @@ snapshots:
 
   node-cron@4.2.1: {}
 
+  node-fetch-native@1.6.7: {}
+
   node-releases@2.0.27: {}
 
   normalize-path@3.0.0: {}
@@ -6241,6 +6270,12 @@ snapshots:
   object-assign@4.1.1: {}
 
   obug@2.1.1: {}
+
+  ofetch@1.5.1:
+    dependencies:
+      destr: 2.0.5
+      node-fetch-native: 1.6.7
+      ufo: 1.6.1
 
   optionator@0.9.4:
     dependencies:
@@ -6868,7 +6903,8 @@ snapshots:
       string-width: 5.1.2
       strip-ansi: 7.1.2
 
-  ws@8.18.3: {}
+  ws@8.18.3:
+    optional: true
 
   yauzl@3.2.0:
     dependencies:

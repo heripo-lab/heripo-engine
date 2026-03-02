@@ -4,6 +4,7 @@ import type { Readable } from 'node:stream';
 
 import { omit } from 'es-toolkit';
 import { createWriteStream, existsSync, rmSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -31,6 +32,10 @@ vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
   rmSync: vi.fn(),
   createWriteStream: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  writeFile: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
@@ -745,7 +750,7 @@ describe('PDFConverter', () => {
   });
 
   describe('downloadResult', () => {
-    test('should download result file successfully', async () => {
+    test('should download via stream when fileStream is present', async () => {
       const mockTask = createMockTask();
       const mockFileStream = {} as Readable;
       const writeStream = { write: vi.fn(), end: vi.fn() };
@@ -778,32 +783,37 @@ describe('PDFConverter', () => {
       expect(pipeline).toHaveBeenCalledWith(mockFileStream, writeStream);
     });
 
-    test('should throw error when success is false', async () => {
+    test('should download via writeFile when data is present', async () => {
       const mockTask = createMockTask();
+      const mockData = new Uint8Array([1, 2, 3]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
       vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: false,
-      } as any);
+        success: true,
+        data: mockData,
+      });
+      vi.mocked(writeFile).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
 
-      await expect(
-        converter.convert(
-          'http://test.com/doc.pdf',
-          'report-fail',
-          vi.fn(),
-          false,
-          {},
-        ),
-      ).rejects.toThrow('Failed to get ZIP file result');
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      expect(writeFile).toHaveBeenCalledWith('/test/cwd/result.zip', mockData);
+      expect(createWriteStream).not.toHaveBeenCalled();
+      expect(pipeline).not.toHaveBeenCalled();
     });
 
-    test('should throw error when fileStream is missing', async () => {
+    test('should throw error when neither fileStream nor data is present', async () => {
       const mockTask = createMockTask();
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
       vi.mocked(client.getTaskResultFile).mockResolvedValue({
         success: true,
-        fileStream: undefined,
       } as any);
 
       await expect(

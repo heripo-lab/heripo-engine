@@ -641,8 +641,9 @@ describe('PDFParser', () => {
       killSpy.mockResolvedValue(undefined);
 
       // First call fails with ECONNREFUSED, second succeeds
-      const econnRefusedError = new Error('Connection refused');
-      (econnRefusedError as any).code = 'ECONNREFUSED';
+      const econnRefusedError = new Error(
+        'connect ECONNREFUSED 127.0.0.1:5001',
+      );
       convertMock
         .mockRejectedValueOnce(econnRefusedError)
         .mockResolvedValueOnce('OK');
@@ -684,8 +685,9 @@ describe('PDFParser', () => {
       });
       doclingClient.health.mockResolvedValueOnce();
 
-      const econnRefusedError = new Error('Connection refused');
-      (econnRefusedError as any).code = 'ECONNREFUSED';
+      const econnRefusedError = new Error(
+        'connect ECONNREFUSED 127.0.0.1:5001',
+      );
       convertMock.mockRejectedValueOnce(econnRefusedError);
 
       const logger = makeLogger();
@@ -697,7 +699,7 @@ describe('PDFParser', () => {
         parser.parse('http://file.pdf', 'report-1', onComplete, false, {
           num_threads: 4,
         }),
-      ).rejects.toThrow('Connection refused');
+      ).rejects.toThrow('ECONNREFUSED');
 
       expect(logger.warn).not.toHaveBeenCalled();
     });
@@ -714,8 +716,9 @@ describe('PDFParser', () => {
       killSpy.mockResolvedValue(undefined);
 
       // Both calls fail with ECONNREFUSED
-      const econnRefusedError = new Error('Connection refused');
-      (econnRefusedError as any).code = 'ECONNREFUSED';
+      const econnRefusedError = new Error(
+        'connect ECONNREFUSED 127.0.0.1:5001',
+      );
       convertMock
         .mockRejectedValueOnce(econnRefusedError)
         .mockRejectedValueOnce(econnRefusedError);
@@ -738,7 +741,7 @@ describe('PDFParser', () => {
         parser.parse('http://file.pdf', 'report-1', onComplete, false, {
           num_threads: 4,
         }),
-      ).rejects.toThrow('Connection refused');
+      ).rejects.toThrow('ECONNREFUSED');
 
       expect(logger.warn).toHaveBeenCalledWith(
         '[PDFParser] Connection refused, attempting server recovery...',
@@ -794,6 +797,48 @@ describe('PDFParser', () => {
       ).rejects.toBe('string error');
 
       expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    test('parse recovers from ECONNREFUSED in error cause chain (ofetch style)', async () => {
+      vi.mocked(platform).mockReturnValue('darwin');
+      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('sw_vers')) return '12.6.0';
+        if (cmd.startsWith('which jq')) return '';
+        return '';
+      });
+      doclingClient.health.mockResolvedValue(undefined);
+      const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
+      killSpy.mockResolvedValue(undefined);
+
+      // ofetch-style error: ECONNREFUSED in cause, not in main message
+      const causeError = new Error('connect ECONNREFUSED 127.0.0.1:5001');
+      const fetchError = new Error('fetch failed', { cause: causeError });
+      convertMock.mockRejectedValueOnce(fetchError).mockResolvedValueOnce('OK');
+
+      const startServerMock = vi.fn().mockResolvedValue(undefined);
+      (DoclingEnvironment as any).mockImplementation(function () {
+        return {
+          setup: envMocks.setupMock,
+          startServer: startServerMock,
+        };
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { num_threads: 4 },
+      );
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFParser] Connection refused, attempting server recovery...',
+      );
+      expect(result).toBe('OK');
     });
 
     test('parse throws immediately when abortSignal is already aborted', async () => {
@@ -965,8 +1010,9 @@ describe('PDFParser', () => {
       killSpy.mockResolvedValue(undefined);
 
       // First call fails with ECONNREFUSED, second succeeds
-      const econnRefusedError = new Error('Connection refused');
-      (econnRefusedError as any).code = 'ECONNREFUSED';
+      const econnRefusedError = new Error(
+        'connect ECONNREFUSED 127.0.0.1:5001',
+      );
       convertWithStrategyMock
         .mockRejectedValueOnce(econnRefusedError)
         .mockResolvedValueOnce({
@@ -1014,8 +1060,9 @@ describe('PDFParser', () => {
       });
       doclingClient.health.mockResolvedValueOnce();
 
-      const econnRefusedError = new Error('Connection refused');
-      (econnRefusedError as any).code = 'ECONNREFUSED';
+      const econnRefusedError = new Error(
+        'connect ECONNREFUSED 127.0.0.1:5001',
+      );
       convertWithStrategyMock.mockRejectedValueOnce(econnRefusedError);
 
       const logger = makeLogger();
@@ -1026,7 +1073,7 @@ describe('PDFParser', () => {
         parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
           forcedMethod: 'ocrmac',
         }),
-      ).rejects.toThrow('Connection refused');
+      ).rejects.toThrow('ECONNREFUSED');
 
       expect(logger.warn).not.toHaveBeenCalled();
     });
@@ -1076,8 +1123,9 @@ describe('PDFParser', () => {
       const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
       killSpy.mockResolvedValue(undefined);
 
-      const econnRefusedError = new Error('Connection refused');
-      (econnRefusedError as any).code = 'ECONNREFUSED';
+      const econnRefusedError = new Error(
+        'connect ECONNREFUSED 127.0.0.1:5001',
+      );
       convertWithStrategyMock
         .mockRejectedValueOnce(econnRefusedError)
         .mockRejectedValueOnce(econnRefusedError);
@@ -1098,7 +1146,7 @@ describe('PDFParser', () => {
         parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
           forcedMethod: 'ocrmac',
         }),
-      ).rejects.toThrow('Connection refused');
+      ).rejects.toThrow('ECONNREFUSED');
     });
 
     test('strategy flow passes enableImagePdfFallback=true for local server', async () => {

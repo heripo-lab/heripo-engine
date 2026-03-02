@@ -16,6 +16,7 @@ import {
   readFileSync,
   rmSync,
 } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -749,15 +750,19 @@ export class PDFConverter {
 
     const zipResult = await this.client.getTaskResultFile(taskId);
 
-    if (!zipResult.success || !zipResult.fileStream) {
+    const zipPath = join(process.cwd(), 'result.zip');
+    this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
+
+    if (zipResult.fileStream) {
+      // Stream-based download (v1.x behavior)
+      const writeStream = createWriteStream(zipPath);
+      await pipeline(zipResult.fileStream, writeStream);
+    } else if (zipResult.data) {
+      // Buffer-based download (v2.x behavior)
+      await writeFile(zipPath, zipResult.data);
+    } else {
       throw new Error('Failed to get ZIP file result');
     }
-
-    const zipPath = join(process.cwd(), 'result.zip');
-
-    this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
-    const writeStream = createWriteStream(zipPath);
-    await pipeline(zipResult.fileStream, writeStream);
   }
 
   private async processConvertedFiles(
