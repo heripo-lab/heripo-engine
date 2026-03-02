@@ -93,10 +93,11 @@ flowchart TB
 
 heripo engine utilizes two types of AI technology:
 
-| Type              | Technology                   | Stage                            | Characteristics                                        |
-| ----------------- | ---------------------------- | -------------------------------- | ------------------------------------------------------ |
-| **Deep Learning** | Apple Vision Framework (OCR) | Preprocessing 1                  | Text recognition from images, local processing, free   |
-| **LLM**           | GPT, Claude, Qwen, etc.      | Preprocessing 2, Main Processing | Text understanding/analysis, API calls, cost per token |
+| Type              | Technology                   | Stage                            | Characteristics                                                |
+| ----------------- | ---------------------------- | -------------------------------- | -------------------------------------------------------------- |
+| **Deep Learning** | Apple Vision Framework (OCR) | Preprocessing 1                  | Text recognition from images, local processing, free           |
+| **VLM**           | GPT, Gemini, etc. (Vision)   | Preprocessing 1                  | Mixed script detection and per-page text correction, API calls |
+| **LLM**           | GPT, Claude, Qwen, etc.      | Preprocessing 2, Main Processing | Text understanding/analysis, API calls, cost per token         |
 
 ### LLM Model Selection Strategy
 
@@ -167,11 +168,15 @@ Preprocessing 1 is designed for macOS only, considering **performance** (output 
 flowchart LR
     subgraph PDFParser[PDF Parser - macOS]
         direction TB
-        A[Receive PDF File] --> B[Connect to Docling Server]
-        B --> C[OCR Processing - Apple Vision]
+        A[Receive PDF File] --> B[OCR Strategy Sampling]
+        B -->|ocrmac| C[OCR Processing - Apple Vision]
+        B -->|vlm| C
         C --> D[Structure Analysis - Docling]
         D --> E[Image Extraction]
-        E --> F[Save Results]
+        E --> F{Mixed Script Detected?}
+        F -->|Yes| G[VLM Text Correction]
+        F -->|No| H[Save Results]
+        G --> H
     end
 
     PDF[PDF File] --> PDFParser
@@ -182,12 +187,26 @@ flowchart LR
 
 #### Key Features
 
-| Feature                | Description                                            | AI Technology                |
-| ---------------------- | ------------------------------------------------------ | ---------------------------- |
-| **OCR Processing**     | Text extraction from scanned images (Korean/English)   | Deep Learning (Apple Vision) |
-| **Structure Analysis** | Automatic identification of text, table, image regions | Docling (Rules + ML)         |
-| **Image Extraction**   | Save all images in document as files                   | -                            |
-| **Page Images**        | Save each page as image (for LLM Vision)               | -                            |
+| Feature                    | Description                                                          | AI Technology                |
+| -------------------------- | -------------------------------------------------------------------- | ---------------------------- |
+| **OCR Processing**         | Text extraction from scanned images (Korean/English)                 | Deep Learning (Apple Vision) |
+| **Mixed Script Detection** | Auto-detect Korean-Hanja mix via text layer pre-check + VLM sampling | VLM (Vision LLM)             |
+| **VLM Text Correction**    | Per-page correction of mixed script characters                       | VLM (Vision LLM)             |
+| **Structure Analysis**     | Automatic identification of text, table, image regions               | Docling (Rules + ML)         |
+| **Image Extraction**       | Save all images in document as files                                 | -                            |
+| **Page Images**            | Save each page as image (for LLM Vision)                             | -                            |
+
+#### OCR Strategy System
+
+The OCR strategy system addresses a key challenge: **ocrmac (Apple Vision Framework) is excellent for large-scale processing** — it's free, GPU-accelerated, and delivers high-quality results, making it the ideal solution for processing thousands to millions of reports. **However, ocrmac cannot handle mixed character systems** such as Korean-Hanja combinations.
+
+To solve this, the system uses a **two-stage detection + targeted correction** approach:
+
+1. **Stage 1: Text Layer Pre-Check** (zero cost) — Uses `pdftotext` to check for Hangul and CJK characters in the document's text layer. If both are present, the document is flagged as mixed-script.
+2. **Stage 2: VLM Sampling** (only when needed) — Samples up to 15 pages and analyzes them with a Vision LLM to confirm mixed-script presence. Uses early exit on first detection to minimize API costs.
+3. **Targeted Correction** — Only pages with mixed-script issues are sent to VLM for correction, keeping cost and time minimal while the rest of the document uses the fast ocrmac pipeline.
+
+This approach ensures that the vast majority of documents are processed entirely with the fast, free ocrmac engine, while the small fraction of mixed-script pages receive targeted VLM correction.
 
 #### Output: DoclingDocument
 

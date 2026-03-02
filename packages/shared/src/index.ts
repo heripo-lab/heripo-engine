@@ -1,4 +1,5 @@
 export { BatchProcessor } from './utils/batch-processor';
+export { ConcurrentPool } from './utils/concurrent-pool';
 export {
   spawnAsync,
   type SpawnAsyncOptions,
@@ -15,3 +16,4 @@ export {
   LLMTokenUsageAggregator,
   type TokenUsage,
 } from './utils/llm-token-usage-aggregator';
+export { detectProvider, type ProviderType } from './utils/provider-detector';

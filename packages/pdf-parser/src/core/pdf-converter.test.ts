@@ -1,12 +1,7 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type {
-  AsyncConversionTask,
-  DoclingAPIClient,
-  VlmModelLocal,
-} from 'docling-sdk';
+import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
 import type { Readable } from 'node:stream';
 
-import { ValidationUtils } from 'docling-sdk';
 import { omit } from 'es-toolkit';
 import { createWriteStream, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -90,6 +85,14 @@ describe('PDFConverter', () => {
         start: vi.fn().mockResolvedValue('http://127.0.0.1:12345/test.pdf'),
         stop: vi.fn().mockResolvedValue(undefined),
       } as unknown as LocalFileServer;
+    });
+
+    // Mock ImagePdfConverter (used by forceImagePdf and image PDF fallback)
+    vi.mocked(ImagePdfConverter).mockImplementation(function () {
+      return {
+        convert: vi.fn().mockResolvedValue('/tmp/image.pdf'),
+        cleanup: vi.fn(),
+      } as any;
     });
   });
 
@@ -187,122 +190,6 @@ describe('PDFConverter', () => {
           num_threads: 8,
         },
       });
-    });
-  });
-
-  describe('buildVlmConversionOptions', () => {
-    test('should build VLM options with default model when pipeline is vlm', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { pipeline: 'vlm', num_threads: 4, ocr_lang: ['ko', 'en'] },
-      );
-
-      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
-      expect(callArgs.options).toMatchObject({
-        to_formats: ['json', 'html'],
-        image_export_mode: 'embedded',
-        pipeline: 'vlm',
-        generate_picture_images: true,
-        images_scale: 2.0,
-        accelerator_options: {
-          device: 'mps',
-          num_threads: 4,
-        },
-      });
-      // VLM options should have vlm_pipeline_model_local
-      expect(callArgs.options).toHaveProperty('vlm_pipeline_model_local');
-      // VLM options should NOT have OCR-specific settings
-      expect(callArgs.options).not.toHaveProperty('ocr_engine');
-      expect(callArgs.options).not.toHaveProperty('ocr_options');
-      expect(callArgs.options).not.toHaveProperty('force_ocr');
-      expect(callArgs.options).not.toHaveProperty('ocr_lang');
-    });
-
-    test('should resolve VLM model preset from string key', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { pipeline: 'vlm', vlm_model: 'granite-docling-258M' },
-      );
-
-      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
-      expect(callArgs.options!.vlm_pipeline_model_local).toMatchObject({
-        repo_id: 'ibm-granite/granite-docling-258M',
-        inference_framework: 'transformers',
-        response_format: 'doctags',
-        transformers_model_type: 'automodel-vision2seq',
-      });
-    });
-
-    test('should use custom VlmModelLocal object directly', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      const customModel = {
-        repo_id: 'custom/model',
-        inference_framework: 'transformers',
-        response_format: 'markdown',
-        transformers_model_type: 'automodel',
-      } as unknown as VlmModelLocal;
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { pipeline: 'vlm', vlm_model: customModel },
-      );
-
-      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
-      expect(callArgs.options!.vlm_pipeline_model_local).toEqual(customModel);
-    });
-
-    test('should log VLM pipeline usage', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { pipeline: 'vlm' },
-      );
-
-      expect(logger.info).toHaveBeenCalledWith(
-        '[PDFConverter] Using VLM pipeline',
-      );
     });
   });
 
@@ -460,7 +347,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
 
       expect(logger.error).toHaveBeenCalledWith(
         '[PDFConverter] Conversion failed:',
@@ -782,7 +669,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
     });
 
     test('should throw on task timeout', async () => {
@@ -1066,10 +953,129 @@ describe('PDFConverter', () => {
           {},
           abortController.signal,
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
 
       // Should NOT attempt fallback when aborted
       expect(ImagePdfConverter).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getTaskFailureDetails', () => {
+    test('should include error messages from task result', async () => {
+      const mockTask = {
+        taskId: 'task-123',
+        poll: vi.fn().mockResolvedValue({
+          task_id: 'task-123',
+          task_status: 'failure',
+        }),
+        getResult: vi.fn().mockResolvedValue({
+          document: {},
+          status: 'failure',
+          processing_time: 0,
+          errors: [
+            { message: 'Page 3: OCR engine timeout' },
+            { message: 'Page 7: Image extraction failed' },
+          ],
+        }),
+      } as unknown as AsyncConversionTask;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-errors',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow(
+        'Task failed: Page 3: OCR engine timeout; Page 7: Image extraction failed',
+      );
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Page 3: OCR engine timeout'),
+      );
+    });
+
+    test('should return status when result has no errors', async () => {
+      const mockTask = {
+        taskId: 'task-123',
+        poll: vi.fn().mockResolvedValue({
+          task_id: 'task-123',
+          task_status: 'failure',
+        }),
+        getResult: vi.fn().mockResolvedValue({
+          document: {},
+          status: 'failure',
+          processing_time: 0,
+        }),
+      } as unknown as AsyncConversionTask;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-no-errors',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow('Task failed: status: failure');
+    });
+
+    test('should return fallback message when getResult throws', async () => {
+      const mockTask = {
+        taskId: 'task-123',
+        poll: vi.fn().mockResolvedValue({
+          task_id: 'task-123',
+          task_status: 'failure',
+        }),
+        getResult: vi.fn().mockRejectedValue(new Error('Network error')),
+      } as unknown as AsyncConversionTask;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-getresult-fail',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow('Task failed: unable to retrieve error details');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        '[PDFConverter] Failed to retrieve task result:',
+        expect.any(Error),
+      );
+    });
+
+    test('should log elapsed time in failure message', async () => {
+      vi.spyOn(Date, 'now')
+        .mockReturnValueOnce(1000000) // performConversion startTime
+        .mockReturnValueOnce(1000000) // trackTaskProgress conversionStartTime
+        .mockReturnValueOnce(1000000) // timeout check
+        .mockReturnValueOnce(1060000); // elapsed calculation (60s later)
+
+      const mockTask = createMockTask('failure');
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-elapsed',
+          vi.fn(),
+          false,
+          {},
+        ),
+      ).rejects.toThrow();
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Task failed after 60s'),
+      );
     });
   });
 
@@ -1089,7 +1095,7 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Task failed with status: failure');
+      ).rejects.toThrow('Task failed: Processing failed');
 
       expect(ImagePdfConverter).not.toHaveBeenCalled();
     });
@@ -1188,10 +1194,7 @@ describe('PDFConverter', () => {
     });
 
     test('should cleanup image PDF even when fallback conversion fails', async () => {
-      let callCount = 0;
-
       vi.mocked(client.convertSourceAsync).mockImplementation(() => {
-        callCount++;
         const failTask = createMockTask('failure');
         return Promise.resolve(failTask);
       });
@@ -1271,34 +1274,71 @@ describe('PDFConverter', () => {
       );
     });
   });
-});
 
-describe('ValidationUtils monkey-patch', () => {
-  test('should strip pipeline field before delegating to original validation', () => {
-    const options = {
-      pipeline: 'vlm',
-      to_formats: ['json'],
-    } as unknown as Parameters<
-      typeof ValidationUtils.assertValidConversionOptions
-    >[0];
+  describe('forceImagePdf', () => {
+    test('should convert via image PDF when forceImagePdf is true', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
 
-    // The patched assertValidConversionOptions should not throw
-    // even though "vlm" is not in the original ProcessingPipelineSchema
-    expect(() =>
-      ValidationUtils.assertValidConversionOptions(options),
-    ).not.toThrow();
-  });
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-force-img',
+        vi.fn(),
+        false,
+        { forceImagePdf: true },
+      );
 
-  test('should still validate other fields normally', () => {
-    const options = {
-      to_formats: ['json'],
-    } as unknown as Parameters<
-      typeof ValidationUtils.assertValidConversionOptions
-    >[0];
+      expect(logger.info).toHaveBeenCalledWith(
+        '[PDFConverter] Force image PDF mode: converting to image PDF first...',
+      );
+      expect(ImagePdfConverter).toHaveBeenCalled();
+    });
 
-    expect(() =>
-      ValidationUtils.assertValidConversionOptions(options),
-    ).not.toThrow();
+    test('should not convert via image PDF when forceImagePdf is false', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      vi.mocked(ImagePdfConverter).mockClear();
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-std-no-force',
+        vi.fn(),
+        false,
+        { forceImagePdf: false },
+      );
+
+      expect(ImagePdfConverter).not.toHaveBeenCalled();
+    });
+
+    test('should skip cleanup when imagePdfConverter.convert throws before producing a path', async () => {
+      vi.mocked(ImagePdfConverter).mockImplementation(function () {
+        return {
+          convert: vi.fn().mockRejectedValue(new Error('convert failed')),
+          cleanup: vi.fn(),
+        } as any;
+      });
+
+      await expect(
+        converter.convert(
+          'http://test.com/doc.pdf',
+          'report-force-err',
+          vi.fn(),
+          false,
+          { forceImagePdf: true },
+        ),
+      ).rejects.toThrow('convert failed');
+    });
   });
 });
 
@@ -1313,6 +1353,15 @@ function createMockTask(
     poll: vi.fn().mockResolvedValue({
       task_id: 'task-123',
       task_status: finalStatus,
+    }),
+    getResult: vi.fn().mockResolvedValue({
+      document: {},
+      status: finalStatus,
+      processing_time: 0,
+      errors:
+        finalStatus === 'failure'
+          ? [{ message: 'Processing failed' }]
+          : undefined,
     }),
   };
   return task as unknown as AsyncConversionTask;
@@ -1335,9 +1384,20 @@ function createMockTaskWithPollSequence(
     pollMock.mockResolvedValueOnce(response);
   });
 
+  const lastStatus = responses[responses.length - 1]?.task_status ?? 'success';
+
   const task = {
     taskId: 'task-123',
     poll: pollMock,
+    getResult: vi.fn().mockResolvedValue({
+      document: {},
+      status: lastStatus,
+      processing_time: 0,
+      errors:
+        lastStatus === 'failure'
+          ? [{ message: 'Processing failed' }]
+          : undefined,
+    }),
   };
   return task as unknown as AsyncConversionTask;
 }

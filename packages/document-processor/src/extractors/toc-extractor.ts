@@ -32,18 +32,37 @@ const VALIDATION_CODE_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
- * Zod schema for recursive TocEntry structure
+ * Build a fixed-depth TocEntry schema to avoid z.lazy() recursion.
+ *
+ * Some LLM providers (e.g., Together AI) cannot resolve lazy Zod schemas
+ * when converting to JSON Schema. This builder creates an eagerly-evaluated
+ * schema with a maximum nesting depth.
  */
-export const TocEntrySchema: z.ZodType<TocEntry> = z.lazy(() =>
-  z.object({
+function buildTocEntrySchema(maxDepth: number): z.ZodObject<any> {
+  const base = {
     title: z.string().describe('Chapter or section title'),
     level: z.number().int().min(1).describe('Hierarchy depth (1 = top level)'),
     pageNo: z.number().int().min(1).describe('Starting page number'),
+  };
+
+  if (maxDepth <= 0) {
+    return z.object(base);
+  }
+
+  return z.object({
+    ...base,
     children: z
-      .array(TocEntrySchema)
+      .array(buildTocEntrySchema(maxDepth - 1))
       .describe('Child sections (use empty array [] if none)'),
-  }),
-);
+  });
+}
+
+/**
+ * Zod schema for TocEntry structure with fixed 4-level depth
+ */
+export const TocEntrySchema: z.ZodType<TocEntry> = buildTocEntrySchema(
+  4,
+) as unknown as z.ZodType<TocEntry>;
 
 /**
  * Schema for LLM response
@@ -306,9 +325,9 @@ Re-extract the TOC structure from the original markdown above. Fix all validatio
 
 5. **IMPORTANT - Extract Main TOC Only**: Only extract the main document table of contents. EXCLUDE the following:
    - **Front matter with Roman numeral pages**: Entries whose page numbers are Roman numerals (i, ii, xxi, etc.) such as 일러두기, 발간사, 서문, 범례, Preface, Foreword, Editorial Notes. These use a separate page numbering system and are not part of the main content.
-   - Photo/image indices (사진 목차, 사진목차, 화보 목차, Photo Index, List of Photos, List of Figures)
-   - Drawing/diagram indices (도면 목차, 도면목차, 삽도 목차, Drawing Index, List of Drawings)
-   - Table indices (표 목차, 표목차, Table Index, List of Tables)
+   - Photo/image indices (사진 목차, 사진목차, 화보 목차, 寫眞 目次, 寫眞目次, Photo Index, List of Photos, List of Figures)
+   - Drawing/diagram indices (도면 목차, 도면목차, 삽도 목차, 圖面 目次, 圖面目次, Drawing Index, List of Drawings)
+   - Table indices (표 목차, 표목차, 表 目次, 表目次, Table Index, List of Tables)
    - Appendix indices (부록 목차, Appendix Index)
    - Any other supplementary material indices
 

@@ -1,16 +1,13 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { use, useEffect, useState } from 'react';
-
-import { featureFlags } from '~/lib/config/feature-flags';
-
-// TEMP:vlm-flag
+import { use, useState } from 'react';
 
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
 import { ConfirmDialog } from '~/components/ui/confirm-dialog';
 import {
+  LiveTokenUsageCard,
   LogViewer,
   ProcessErrorAlert,
   ProcessErrorDialog,
@@ -18,7 +15,6 @@ import {
   ProcessHeader,
   ProcessInfoCard,
   ProcessTimeline,
-  VlmFallbackDialog,
   useAutoNavigate,
   useTask,
   useTaskStream,
@@ -37,30 +33,12 @@ export default function ProcessPage({ params }: PageProps) {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [errorDialogDismissed, setErrorDialogDismissed] = useState(false);
   const [showEntryGuide, setShowEntryGuide] = useState(true);
-  const [showVlmFallback, setShowVlmFallback] = useState(false);
   const disableAutoNavigate = searchParams.get('stay') === 'true';
 
   const { data: task } = useTask(taskId);
-  const {
-    status,
-    progress,
-    currentStep,
-    logs,
-    error,
-    resultUrl,
-    vlmFallbackTriggered,
-  } = useTaskStream(taskId);
+  const { status, progress, currentStep, logs, error, resultUrl, tokenUsage } =
+    useTaskStream(taskId);
   const isProcessing = status === 'queued' || status === 'running';
-  const pipeline = task?.options?.pipeline ?? 'standard';
-  // TEMP:vlm-flag — delete line, unwrap enableVlm guards
-  const enableVlm = featureFlags.enableVlm || (task?.isOtpBypass ?? false);
-
-  useEffect(() => {
-    if (enableVlm && vlmFallbackTriggered) {
-      // TEMP:vlm-flag — remove enableVlm guard
-      setShowVlmFallback(true);
-    }
-  }, [enableVlm, vlmFallbackTriggered]);
 
   useAutoNavigate({ status, resultUrl, taskId, disabled: disableAutoNavigate });
 
@@ -104,6 +82,7 @@ export default function ProcessPage({ params }: PageProps) {
             <LogViewer logs={logs} />
           </div>
         </div>
+        <LiveTokenUsageCard tokenUsage={tokenUsage} />
         <ProcessInfoCard />
 
         <ProcessErrorDialog
@@ -129,16 +108,7 @@ export default function ProcessPage({ params }: PageProps) {
         <ProcessGuideDialog
           open={isProcessing && showEntryGuide}
           onOpenChange={setShowEntryGuide}
-          pipeline={pipeline}
         />
-
-        {/* TEMP:vlm-flag — unwrap this conditional */}
-        {enableVlm && (
-          <VlmFallbackDialog
-            open={showVlmFallback}
-            onOpenChange={setShowVlmFallback}
-          />
-        )}
       </div>
     </div>
   );

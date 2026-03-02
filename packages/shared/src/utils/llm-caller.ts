@@ -1,6 +1,15 @@
 import type { z } from 'zod';
 
-import { type LanguageModel, Output, generateText } from 'ai';
+import {
+  type LanguageModel,
+  NoObjectGeneratedError,
+  Output,
+  generateText,
+  hasToolCall,
+  tool,
+} from 'ai';
+
+import { detectProvider } from './provider-detector';
 
 /**
  * Configuration for LLM API call with retry and fallback support
@@ -212,9 +221,137 @@ export class LLMCaller {
   }
 
   /**
+   * Maximum number of retries when structured output generation fails.
+   * Total attempts = MAX_STRUCTURED_OUTPUT_RETRIES + 1.
+   *
+   * Applied to both:
+   * - `Output.object()` path: retries on NoObjectGeneratedError (schema mismatch)
+   * - Tool call path: retries when model does not produce a tool call
+   */
+  private static readonly MAX_STRUCTURED_OUTPUT_RETRIES = 10;
+
+  /**
+   * Generate structured output via forced tool call.
+   *
+   * Used for providers (Together AI, unknown) that do not reliably support
+   * `Output.object()`. Forces the model to call a tool whose inputSchema
+   * is the target Zod schema, then extracts the parsed input.
+   *
+   * Retries up to MAX_STRUCTURED_OUTPUT_RETRIES times when the model does not
+   * produce a tool call, for a total of MAX_STRUCTURED_OUTPUT_RETRIES + 1 attempts.
+   *
+   * @throws NoObjectGeneratedError when all attempts fail to produce a tool call
+   */
+  private static async generateViaToolCall<TOutput>(
+    model: LanguageModel,
+    schema: z.ZodType<TOutput>,
+    promptParams: Record<string, unknown>,
+  ): Promise<{
+    output: TOutput;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+  }> {
+    const submitTool = tool({
+      description: 'Submit the structured result',
+      inputSchema: schema,
+    });
+
+    let lastResult: any;
+
+    for (
+      let attempt = 0;
+      attempt <= this.MAX_STRUCTURED_OUTPUT_RETRIES;
+      attempt++
+    ) {
+      lastResult = await (generateText as any)({
+        ...promptParams,
+        model,
+        tools: { submitResult: submitTool },
+        toolChoice: { type: 'tool', toolName: 'submitResult' },
+        stopWhen: hasToolCall('submitResult'),
+      });
+
+      const toolCall = lastResult.toolCalls?.[0] as
+        | { input: unknown }
+        | undefined;
+      if (toolCall) {
+        return {
+          output: toolCall.input as TOutput,
+          usage: lastResult.usage,
+        };
+      }
+    }
+
+    throw new NoObjectGeneratedError({
+      message: 'Model did not produce a tool call for structured output',
+      text: lastResult.text ?? '',
+      response: lastResult.response,
+      usage: lastResult.usage,
+      finishReason: lastResult.finishReason,
+    });
+  }
+
+  /**
+   * Generate structured output with provider-aware strategy.
+   *
+   * Strategy per provider:
+   * - OpenAI / Anthropic / Google Gemini: `Output.object()` with schema retry
+   * - Together AI / unknown: forced tool call pattern
+   *
+   * Retries up to MAX_STRUCTURED_OUTPUT_RETRIES times on NoObjectGeneratedError
+   * (schema mismatch), re-throwing the last error if all attempts fail.
+   */
+  private static async generateStructuredOutput<TOutput>(
+    model: LanguageModel,
+    schema: z.ZodType<TOutput>,
+    promptParams: Record<string, unknown>,
+  ): Promise<{
+    output: TOutput;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+  }> {
+    const providerType = detectProvider(model);
+
+    if (providerType === 'togetherai' || providerType === 'unknown') {
+      return this.generateViaToolCall(model, schema, promptParams);
+    }
+
+    let lastError: unknown;
+
+    for (
+      let attempt = 0;
+      attempt <= this.MAX_STRUCTURED_OUTPUT_RETRIES;
+      attempt++
+    ) {
+      try {
+        return await (generateText as any)({
+          model,
+          output: Output.object({ schema }),
+          ...promptParams,
+        });
+      } catch (error) {
+        if (NoObjectGeneratedError.isInstance(error)) {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
    * Execute LLM call with fallback support
    *
    * Common execution logic for both text and vision calls.
+   * Logs additional details when NoObjectGeneratedError occurs.
    */
   private static async executeWithFallback<TOutput>(
     config: ExecutionConfig,
@@ -269,6 +406,8 @@ export class LLMCaller {
    * 2. If all fail and fallbackModel provided, try fallback up to maxRetries times
    * 3. Throw error if all attempts exhausted
    *
+   * Provider-aware strategy is automatically applied based on the model's provider field.
+   *
    * @template TOutput - Output type from schema validation
    * @param config - LLM call configuration
    * @returns Result with parsed object and usage information
@@ -278,11 +417,7 @@ export class LLMCaller {
     config: LLMCallConfig<z.ZodType<TOutput>>,
   ): Promise<LLMCallResult<TOutput>> {
     return this.executeWithFallback(config, (model) =>
-      generateText({
-        model,
-        output: Output.object({
-          schema: config.schema,
-        }),
+      this.generateStructuredOutput(model, config.schema, {
         system: config.systemPrompt,
         prompt: config.userPrompt,
         temperature: config.temperature,
@@ -296,6 +431,7 @@ export class LLMCaller {
    * Call LLM for vision tasks with message format support
    *
    * Same retry and fallback logic as call(), but using message format instead of system/user prompts.
+   * Provider-aware strategy is automatically applied based on the model's provider field.
    *
    * @template TOutput - Output type from schema validation
    * @param config - LLM vision call configuration
@@ -306,11 +442,7 @@ export class LLMCaller {
     config: LLMVisionCallConfig<z.ZodType<TOutput>>,
   ): Promise<LLMCallResult<TOutput>> {
     return this.executeWithFallback(config, (model) =>
-      generateText({
-        model,
-        output: Output.object({
-          schema: config.schema,
-        }),
+      this.generateStructuredOutput(model, config.schema, {
         messages: config.messages,
         temperature: config.temperature,
         maxRetries: config.maxRetries,

@@ -36,20 +36,20 @@ Each stage:
 
 ### ✅ Implemented
 
-### ⚠️ Known Limitations
+### ℹ️ Current Notes
 
-| Limitation           | Description                                                                                                                                                                                                                                                     | Status         |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| **Hanja OCR**        | Chinese characters may not be recognized correctly in mixed Korean-Chinese documents                                                                                                                                                                            | 🔧 In Progress |
-| **TOC Extraction**   | May fail if TOC is missing or has unusual structure. Some seemingly normal TOCs also fail occasionally                                                                                                                                                          | 🔧 In Progress |
-| **Vertical Text**    | Old documents with vertical text and Chinese numeral page numbers (long-term goal, not currently scheduled)                                                                                                                                                     | 📅 Long-term   |
-| **Automation Scope** | Does not aim for full automation. Goal: 90% automation of previously 100% manual work. Page mapping/TOC extraction are pipeline foundation but 100% impossible—focusing on common patterns. Subsequent stages aim for near-100%. Edge cases via hybrid approach | 🔧 In Progress |
+| Item                 | Description                                                                                                      | Status         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------- |
+| **Mixed Script OCR** | Korean-Hanja mixed documents are automatically detected and corrected via VLM                                    | ✅ Resolved    |
+| **TOC Dependency**   | Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention | 📋 As designed |
+| **Vertical Text**    | Old documents with vertical text and Chinese numeral page numbers (long-term goal, not currently scheduled)      | 📅 Long-term   |
 
 **PDF Parsing and OCR**
 
 - PDF parsing using Docling SDK
-- Apple Silicon GPU-accelerated OCR
+- Apple Silicon GPU-accelerated OCR (ocrmac / Apple Vision Framework)
 - High-quality Korean document recognition
+- Mixed script auto-detection and VLM correction — ocrmac is excellent for large-scale processing (free, GPU-accelerated, high quality), but cannot handle mixed character systems (e.g., Korean-Hanja); affected pages are automatically detected and corrected via VLM
 - Automatic image extraction
 
 **Document Structure Extraction**

@@ -14,6 +14,7 @@ import { TocNotFoundError } from './toc-extract-error';
 import {
   CONTINUATION_MARKERS,
   PAGE_NUMBER_PATTERN,
+  RESOURCE_INDEX_PATTERNS,
   TOC_KEYWORDS,
   TocFinder,
 } from './toc-finder';
@@ -1430,6 +1431,602 @@ describe('TocFinder', () => {
         // Should find TOC despite null child - the valid children have page numbers
         const result = finder.find(doc);
         expect(result.itemRefs).toContain('#/groups/0');
+      });
+    });
+
+    describe('RESOURCE_INDEX_PATTERNS', () => {
+      test('matches Korean drawing index pattern [도면 N]', () => {
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('[도면 1] 유구배치도')),
+        ).toBe(true);
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('[도면 23] 토층도')),
+        ).toBe(true);
+      });
+
+      test('matches Korean photo index pattern [사진 N]', () => {
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('[사진 1] 전경사진')),
+        ).toBe(true);
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('[사진 45] 출토유물')),
+        ).toBe(true);
+      });
+
+      test('matches English resource index patterns', () => {
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('Fig. 1 Site plan')),
+        ).toBe(true);
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('Photo 3 Excavation')),
+        ).toBe(true);
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('Plate 2 Artifacts')),
+        ).toBe(true);
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('Map 1 Location')),
+        ).toBe(true);
+      });
+
+      test('does not match main TOC entries', () => {
+        expect(RESOURCE_INDEX_PATTERNS.some((p) => p.test('제1장 서론'))).toBe(
+          false,
+        );
+        expect(RESOURCE_INDEX_PATTERNS.some((p) => p.test('Chapter 1'))).toBe(
+          false,
+        );
+        expect(
+          RESOURCE_INDEX_PATTERNS.some((p) => p.test('Ⅲ. 조사내용 및 결과')),
+        ).toBe(false);
+      });
+    });
+
+    describe('isResourceIndexTable', () => {
+      test('detects Korean drawing index table', () => {
+        const grid = [
+          [
+            createMockTableCell('[도면 1] 유구배치도', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('[도면 2] 토층도', 1, 0),
+            createMockTableCell('2', 1, 1),
+          ],
+          [
+            createMockTableCell('[도면 3] 유구실측도', 2, 0),
+            createMockTableCell('3', 2, 1),
+          ],
+        ];
+        const tables = [createMockTableItem(0, grid, 6, 'document_index')];
+        const doc = createMockDocument([], [], tables);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // Resource index table should still be found by structure but penalized
+        // When it's the only table, it should still be found
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/tables/0');
+      });
+
+      test('detects Korean photo index table', () => {
+        const grid = [
+          [
+            createMockTableCell('[사진 1] 전경사진', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('[사진 2] 출토유물', 1, 0),
+            createMockTableCell('2', 1, 1),
+          ],
+          [
+            createMockTableCell('[사진 3] 유구사진', 2, 0),
+            createMockTableCell('3', 2, 1),
+          ],
+        ];
+        const tables = [createMockTableItem(0, grid, 7, 'document_index')];
+        const doc = createMockDocument([], [], tables);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/tables/0');
+      });
+
+      test('returns false for main TOC table', () => {
+        const grid = [
+          [
+            createMockTableCell('제1장 서론', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('제2장 본론', 1, 0),
+            createMockTableCell('10', 1, 1),
+          ],
+          [
+            createMockTableCell('제3장 결론', 2, 0),
+            createMockTableCell('50', 2, 1),
+          ],
+        ];
+        const mainTocTable = createMockTableItem(0, grid, 5, 'document_index');
+
+        // Resource index table for comparison
+        const resourceGrid = [
+          [
+            createMockTableCell('[도면 1] 유구배치도', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('[도면 2] 토층도', 1, 0),
+            createMockTableCell('2', 1, 1),
+          ],
+          [
+            createMockTableCell('[도면 3] 유구실측도', 2, 0),
+            createMockTableCell('3', 2, 1),
+          ],
+        ];
+        const resourceTable = createMockTableItem(
+          1,
+          resourceGrid,
+          6,
+          'document_index',
+        );
+
+        const doc = createMockDocument([], [], [mainTocTable, resourceTable]);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // Main TOC should win over resource index
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/tables/0');
+      });
+
+      test('returns false when resource ratio is below 50%', () => {
+        const grid = [
+          [
+            createMockTableCell('[도면 1] 유구배치도', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('제1장 서론', 1, 0),
+            createMockTableCell('10', 1, 1),
+          ],
+          [
+            createMockTableCell('제2장 본론', 2, 0),
+            createMockTableCell('20', 2, 1),
+          ],
+          [
+            createMockTableCell('제3장 결론', 3, 0),
+            createMockTableCell('30', 3, 1),
+          ],
+        ];
+        const tables = [createMockTableItem(0, grid, 5, 'document_index')];
+        const doc = createMockDocument([], [], tables);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // Only 1/4 = 25% resource entries, not a resource index
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/tables/0');
+      });
+
+      test('returns false when no first-column cells exist', () => {
+        // Table with no table_cells (only grid)
+        const grid = [
+          [
+            createMockTableCell('Title', 0, 0),
+            createMockTableCell('Page', 0, 1),
+          ],
+          [
+            createMockTableCell('Chapter 1', 1, 0),
+            createMockTableCell('1', 1, 1),
+          ],
+          [
+            createMockTableCell('Chapter 2', 2, 0),
+            createMockTableCell('10', 2, 1),
+          ],
+        ];
+        const table = createMockTableItem(0, grid, 5, 'document_index');
+        // Override table_cells to only have non-zero col cells
+        table.data.table_cells = table.data.table_cells.filter(
+          (c) => c.start_col_offset_idx !== 0,
+        );
+
+        const doc = createMockDocument([], [], [table]);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // No first-column cells means isResourceIndexTable returns false
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/tables/0');
+      });
+    });
+
+    describe('findSiblingTocItem', () => {
+      test('finds adjacent TOC table when keyword parent is #/body', () => {
+        const tocKeyword = createMockTextItem(0, '目次', 5, {
+          label: 'section_header',
+          parent: { $ref: '#/body' },
+        });
+        const grid = [
+          [
+            createMockTableCell('제1장 서론', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('제2장 본론', 1, 0),
+            createMockTableCell('10', 1, 1),
+          ],
+          [
+            createMockTableCell('제3장 결론', 2, 0),
+            createMockTableCell('50', 2, 1),
+          ],
+        ];
+        const mainTocTable = createMockTableItem(0, grid, 5, 'document_index');
+
+        const doc = createMockDocument([tocKeyword], [], [mainTocTable]);
+        // Set body.children to have keyword text followed by table
+        doc.body.children = [{ $ref: '#/texts/0' }, { $ref: '#/tables/0' }];
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/tables/0');
+        expect(result.startPage).toBe(5);
+      });
+
+      test('finds adjacent TOC group when keyword parent is #/body', () => {
+        const tocKeyword = createMockTextItem(0, '목차', 3, {
+          label: 'section_header',
+          parent: { $ref: '#/body' },
+        });
+        const tocEntries = [
+          createMockTextItem(1, 'Chapter 1 ..... 1', 3, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Chapter 2 ..... 10', 3, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(3, 'Chapter 3 ..... 20', 3, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        const groups = [
+          createMockGroupItem(0, ['#/texts/1', '#/texts/2', '#/texts/3']),
+        ];
+
+        const doc = createMockDocument([tocKeyword, ...tocEntries], groups);
+        doc.body.children = [{ $ref: '#/texts/0' }, { $ref: '#/groups/0' }];
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/groups/0');
+        expect(result.startPage).toBe(3);
+      });
+
+      test('skips siblings on different page', () => {
+        const tocKeyword = createMockTextItem(0, '목차', 5, {
+          label: 'section_header',
+          parent: { $ref: '#/body' },
+        });
+        const grid = [
+          [
+            createMockTableCell('Chapter 1', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('Chapter 2', 1, 0),
+            createMockTableCell('10', 1, 1),
+          ],
+          [
+            createMockTableCell('Chapter 3', 2, 0),
+            createMockTableCell('20', 2, 1),
+          ],
+        ];
+        // Table is on page 6, not page 5
+        const table = createMockTableItem(0, grid, 6, 'document_index');
+
+        const doc = createMockDocument([tocKeyword], [], [table]);
+        doc.body.children = [{ $ref: '#/texts/0' }, { $ref: '#/tables/0' }];
+
+        // Add TOC-like group on page 5 for structure analysis fallback
+        const tocTexts = [
+          createMockTextItem(1, 'Part A ..... 1', 5, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Part B ..... 10', 5, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(3, 'Part C ..... 20', 5, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        doc.texts.push(...tocTexts);
+        doc.groups = [
+          createMockGroupItem(0, ['#/texts/1', '#/texts/2', '#/texts/3']),
+        ];
+
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // Should not find the table via sibling search (different page),
+        // falls back to structure analysis
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/groups/0');
+      });
+
+      test('skips sibling group on different page', () => {
+        const tocKeyword = createMockTextItem(0, '목차', 5, {
+          label: 'section_header',
+          parent: { $ref: '#/body' },
+        });
+        // Group sibling is on page 6, not page 5
+        const groupEntries = [
+          createMockTextItem(1, 'Chapter 1 ..... 1', 6, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Chapter 2 ..... 10', 6, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(3, 'Chapter 3 ..... 20', 6, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        const groups = [
+          createMockGroupItem(0, ['#/texts/1', '#/texts/2', '#/texts/3']),
+        ];
+
+        const doc = createMockDocument([tocKeyword, ...groupEntries], groups);
+        doc.body.children = [{ $ref: '#/texts/0' }, { $ref: '#/groups/0' }];
+
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // Sibling group is on different page, falls to structure analysis
+        const result = finder.find(doc);
+        // Found via structure analysis, not sibling search
+        expect(result.itemRefs).toContain('#/groups/0');
+        expect(result.startPage).toBe(6);
+      });
+
+      test('returns null when no TOC sibling within range', () => {
+        const tocKeyword = createMockTextItem(0, '목차', 5, {
+          label: 'section_header',
+          parent: { $ref: '#/body' },
+        });
+
+        const doc = createMockDocument([tocKeyword]);
+        // Keyword is at index 0, but no siblings after it
+        doc.body.children = [{ $ref: '#/texts/0' }];
+
+        // Add fallback TOC-like group
+        const tocTexts = [
+          createMockTextItem(1, 'Part A ..... 1', 5, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(2, 'Part B ..... 10', 5, {
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(3, 'Part C ..... 20', 5, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        doc.texts.push(...tocTexts);
+        doc.groups = [
+          createMockGroupItem(0, ['#/texts/1', '#/texts/2', '#/texts/3']),
+        ];
+
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        // Should fall back to structure analysis
+        const result = finder.find(doc);
+        expect(result.itemRefs).toContain('#/groups/0');
+      });
+    });
+
+    describe('resource index expansion filtering', () => {
+      test('excludes resource index tables during expansion', () => {
+        const texts = [
+          createMockTextItem(0, '목차', 5, {
+            label: 'section_header',
+            parent: { $ref: '#/groups/0' },
+          }),
+          createMockTextItem(1, 'Chapter 1 ..... 1', 5, {
+            parent: { $ref: '#/groups/0' },
+          }),
+        ];
+        const groups = [createMockGroupItem(0, ['#/texts/0', '#/texts/1'])];
+
+        // Resource index table on page 6
+        const resourceGrid = [
+          [
+            createMockTableCell('[도면 1] 유구배치도', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('[도면 2] 토층도', 1, 0),
+            createMockTableCell('2', 1, 1),
+          ],
+          [
+            createMockTableCell('[도면 3] 유구실측도', 2, 0),
+            createMockTableCell('3', 2, 1),
+          ],
+        ];
+        const resourceTable = createMockTableItem(
+          0,
+          resourceGrid,
+          6,
+          'document_index',
+        );
+
+        const doc = createMockDocument(texts, groups, [resourceTable]);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+        // Should not expand to page 6 (resource index table excluded)
+        expect(result.startPage).toBe(5);
+        expect(result.endPage).toBe(5);
+        expect(result.itemRefs).not.toContain('#/tables/0');
+      });
+    });
+
+    describe('resource index scoring penalty', () => {
+      test('penalizes resource index tables in scoring', () => {
+        // Main TOC table on page 5 (fewer rows)
+        const mainGrid = [
+          [
+            createMockTableCell('제1장 서론', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('제2장 본론', 1, 0),
+            createMockTableCell('10', 1, 1),
+          ],
+          [
+            createMockTableCell('제3장 결론', 2, 0),
+            createMockTableCell('50', 2, 1),
+          ],
+          [createMockTableCell('부록', 3, 0), createMockTableCell('80', 3, 1)],
+          [
+            createMockTableCell('참고문헌', 4, 0),
+            createMockTableCell('90', 4, 1),
+          ],
+          [
+            createMockTableCell('Abstract', 5, 0),
+            createMockTableCell('100', 5, 1),
+          ],
+        ];
+        const mainTocTable = createMockTableItem(
+          0,
+          mainGrid,
+          5,
+          'document_index',
+        );
+
+        // Resource index table on page 6 (more rows)
+        const resourceGrid: DoclingTableCell[][] = [];
+        for (let i = 0; i < 33; i++) {
+          resourceGrid.push([
+            createMockTableCell(`[도면 ${i + 1}] 유구도 ${i + 1}`, i, 0),
+            createMockTableCell(`${i + 1}`, i, 1),
+          ]);
+        }
+        const resourceTable = createMockTableItem(
+          1,
+          resourceGrid,
+          6,
+          'document_index',
+        );
+
+        const doc = createMockDocument([], [], [mainTocTable, resourceTable]);
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+        // Main TOC should win despite fewer rows
+        expect(result.itemRefs).toContain('#/tables/0');
+      });
+    });
+
+    describe('integration: real document structure', () => {
+      test('selects main TOC over resource indices when keyword + multiple document_index tables exist', () => {
+        // Simulates the real bug scenario:
+        // Page 5: "目次" text + tables/0 (main TOC, 6 rows)
+        // Page 6: tables/1 (drawing index, ~33 rows)
+        // Page 7: tables/2 (photo index, ~37 rows)
+        const tocKeyword = createMockTextItem(0, '目次', 5, {
+          label: 'section_header',
+          parent: { $ref: '#/body' },
+        });
+
+        // Main TOC table (page 5)
+        const mainGrid = [
+          [
+            createMockTableCell('Ⅰ. 조사개요', 0, 0),
+            createMockTableCell('1', 0, 1),
+          ],
+          [
+            createMockTableCell('Ⅱ. 유적환경', 1, 0),
+            createMockTableCell('5', 1, 1),
+          ],
+          [
+            createMockTableCell('Ⅲ. 조사내용 및 결과', 2, 0),
+            createMockTableCell('10', 2, 1),
+          ],
+          [
+            createMockTableCell('Ⅳ. 고찰', 3, 0),
+            createMockTableCell('50', 3, 1),
+          ],
+          [
+            createMockTableCell('Ⅴ. 결론', 4, 0),
+            createMockTableCell('80', 4, 1),
+          ],
+          [createMockTableCell('부록', 5, 0), createMockTableCell('90', 5, 1)],
+        ];
+        const mainTocTable = createMockTableItem(
+          0,
+          mainGrid,
+          5,
+          'document_index',
+        );
+
+        // Drawing index table (page 6, ~33 rows)
+        const drawingGrid: DoclingTableCell[][] = [];
+        for (let i = 0; i < 33; i++) {
+          drawingGrid.push([
+            createMockTableCell(`[도면 ${i + 1}] 유구도`, i, 0),
+            createMockTableCell(`${i + 1}`, i, 1),
+          ]);
+        }
+        const drawingTable = createMockTableItem(
+          1,
+          drawingGrid,
+          6,
+          'document_index',
+        );
+
+        // Photo index table (page 7, ~37 rows)
+        const photoGrid: DoclingTableCell[][] = [];
+        for (let i = 0; i < 37; i++) {
+          photoGrid.push([
+            createMockTableCell(`[사진 ${i + 1}] 유구사진`, i, 0),
+            createMockTableCell(`${i + 1}`, i, 1),
+          ]);
+        }
+        const photoTable = createMockTableItem(
+          2,
+          photoGrid,
+          7,
+          'document_index',
+        );
+
+        const doc = createMockDocument(
+          [tocKeyword],
+          [],
+          [mainTocTable, drawingTable, photoTable],
+        );
+        // Set body children: keyword text followed by main TOC table
+        doc.body.children = [
+          { $ref: '#/texts/0' },
+          { $ref: '#/tables/0' },
+          { $ref: '#/tables/1' },
+          { $ref: '#/tables/2' },
+        ];
+
+        const resolver = new RefResolver(mockLogger, doc);
+        const finder = new TocFinder(mockLogger, resolver);
+
+        const result = finder.find(doc);
+
+        // Should find main TOC via keyword + sibling search
+        expect(result.itemRefs).toContain('#/tables/0');
+        expect(result.startPage).toBe(5);
+        // Should NOT expand to include resource index tables
+        expect(result.itemRefs).not.toContain('#/tables/1');
+        expect(result.itemRefs).not.toContain('#/tables/2');
+        expect(result.endPage).toBe(5);
       });
     });
 

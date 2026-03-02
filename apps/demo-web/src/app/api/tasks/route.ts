@@ -111,12 +111,8 @@ export async function POST(request: NextRequest) {
 
     let options: ProcessingOptions;
     if (isPublicMode) {
-      // Use default options, but allow user-provided ocrLanguages
       const { file: _, ...defaultOptions } = DEFAULT_FORM_VALUES;
-      options = {
-        ...defaultOptions,
-        ocrLanguages: optionsValidation.data.ocrLanguages,
-      };
+      options = defaultOptions;
     } else {
       options = optionsValidation.data;
     }

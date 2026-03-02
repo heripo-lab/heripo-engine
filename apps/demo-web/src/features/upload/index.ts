@@ -1,10 +1,7 @@
 // Components
 export { PdfDropzone } from './components/pdf-dropzone';
 export { StartProcessingButton } from './components/start-processing-button';
-export {
-  ProcessingOptionsCard,
-  OCR_LANGUAGES,
-} from './components/processing-options-card';
+export { ProcessingOptionsCard } from './components/processing-options-card';
 export { LLMModelSettingsCard } from './components/llm-model-settings-card';
 export { AdvancedOptionsCard } from './components/advanced-options-card';
 export { RateLimitBanner } from './components/rate-limit-banner';
@@ -25,17 +22,10 @@ export type {
   ChunkedUploadStatus,
 } from './hooks/use-chunked-upload';
 // Constants
-export { LLM_MODELS, VISION_MODELS } from './constants/llm-models';
+export { LLM_MODELS } from './constants/llm-models';
 export type { LLMModel } from './constants/llm-models';
 export { KNOWN_LIMITATIONS } from './constants/known-limitations';
 export type { KnownLimitation } from './constants/known-limitations';
-export {
-  VLM_MODEL_OPTIONS,
-  VLM_MODEL_KEYS,
-  DEFAULT_VLM_MODEL_KEY,
-} from './constants/vlm-models';
-export type { VlmModelOption } from './constants/vlm-models';
-
 // Types
 export type {
   ProcessingFormValues,

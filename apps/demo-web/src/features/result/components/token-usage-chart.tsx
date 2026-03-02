@@ -1,15 +1,16 @@
 'use client';
 
-import type {
-  ComponentUsageReport,
-  PhaseUsageReport,
-  TokenUsageReport,
-} from '@heripo/model';
+import type { TokenUsageReport } from '@heripo/model';
 
 import { Fragment, useMemo } from 'react';
 
 import { FALLBACK_RATE } from '~/lib/cost/exchange-rate';
-import { calculateCost } from '~/lib/cost/model-pricing';
+import {
+  calculateComponentCost,
+  calculatePhaseCost,
+  calculateTotalCostUsd,
+  getModelName,
+} from '~/lib/cost/token-usage-utils';
 
 import {
   Card,
@@ -25,39 +26,6 @@ interface TokenUsageChartProps {
   tokenUsage?: unknown;
 }
 
-function getModelName(phase: PhaseUsageReport): string {
-  if (phase.primary && phase.fallback) {
-    return `${phase.primary.modelName} → ${phase.fallback.modelName}`;
-  }
-  if (phase.fallback) {
-    return `${phase.fallback.modelName} (fallback)`;
-  }
-  return phase.primary?.modelName ?? '-';
-}
-
-function calculatePhaseCost(phase: PhaseUsageReport): number {
-  let cost = 0;
-  if (phase.primary) {
-    cost += calculateCost(
-      phase.primary.modelName,
-      phase.primary.inputTokens,
-      phase.primary.outputTokens,
-    );
-  }
-  if (phase.fallback) {
-    cost += calculateCost(
-      phase.fallback.modelName,
-      phase.fallback.inputTokens,
-      phase.fallback.outputTokens,
-    );
-  }
-  return cost;
-}
-
-function calculateComponentCost(comp: ComponentUsageReport): number {
-  return comp.phases.reduce((sum, phase) => sum + calculatePhaseCost(phase), 0);
-}
-
 export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
   const usage = tokenUsage as TokenUsageReport | null;
   const { data: exchangeRateResult } = useExchangeRate();
@@ -67,10 +35,7 @@ export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
 
   const totalCostUsd = useMemo(() => {
     if (!usage?.components) return 0;
-    return usage.components.reduce(
-      (sum, comp) => sum + calculateComponentCost(comp),
-      0,
-    );
+    return calculateTotalCostUsd(usage.components);
   }, [usage]);
 
   const totalCostKrw = Math.round(totalCostUsd * exchangeRate);

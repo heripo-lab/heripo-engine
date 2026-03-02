@@ -20,6 +20,7 @@
 - [사전 요구사항](#사전-요구사항)
 - [설치](#설치)
 - [사용법](#사용법)
+- [OCR 전략 시스템](#ocr-전략-시스템)
 - [왜 macOS 전용인가?](#왜-macos-전용인가)
 - [시스템 의존성 상세](#시스템-의존성-상세)
 - [API 문서](#api-문서)
@@ -28,7 +29,8 @@
 
 ## 주요 기능
 
-- **고품질 OCR**: Docling SDK를 활용한 문서 인식
+- **고품질 OCR**: Docling SDK를 활용한 문서 인식 (ocrmac / Apple Vision Framework)
+- **혼합 문자 자동 감지 및 보정**: 한글·한자 혼용 페이지를 자동 감지하여 VLM으로 보정
 - **Apple Silicon 최적화**: M1/M2/M3/M4/M5 칩에서 GPU 가속 지원
 - **자동 환경 설정**: Python 가상환경 및 docling-serve 자동 설치
 - **이미지 추출**: PDF 내 이미지 자동 추출 및 저장
@@ -68,13 +70,21 @@ brew install python@3.11
 python3.11 --version
 ```
 
-#### 4. jq (JSON 처리 도구)
+#### 4. poppler (PDF 텍스트 추출)
+
+OCR 전략 시스템의 텍스트 레이어 사전 검사(`pdftotext`)에 필요합니다.
+
+```bash
+brew install poppler
+```
+
+#### 5. jq (JSON 처리 도구)
 
 ```bash
 brew install jq
 ```
 
-#### 5. lsof (포트 관리)
+#### 6. lsof (포트 관리)
 
 macOS에 기본적으로 설치되어 있습니다. 확인:
 
@@ -190,6 +200,51 @@ const outputPath = await pdfParser.parse(
 await pdfParser.shutdown();
 ```
 
+## OCR 전략 시스템
+
+### 왜 이 전략인가?
+
+**ocrmac(Apple Vision Framework)은 매우 우수한 OCR 엔진입니다** — 무료이고, GPU 가속을 지원하며, 고품질 결과를 제공합니다. 수천~수백만 권의 고고학 보고서를 처리할 때 이만한 솔루션이 없습니다.
+
+**그러나 ocrmac은 혼합 문자 체계를 처리하지 못합니다.** 한글·한자 혼용 문서(그리고 잠재적으로 다른 혼합 문자 조합)에서 보조 문자가 깨진 텍스트로 변환됩니다. 전체 파이프라인을 비용이 높은 VLM으로 전환하는 대신, **문제가 있는 페이지만 타겟팅**하여 VLM으로 보정합니다.
+
+### 2단계 감지 (`OcrStrategySampler`)
+
+1. **텍스트 레이어 사전 검사** (비용 없음): `pdftotext`로 문서의 텍스트 레이어를 추출하여 한글과 CJK 문자가 모두 존재하는지 확인합니다. 둘 다 존재하면 즉시 혼합 문자 문서로 판별합니다.
+2. **VLM 샘플링** (필요 시에만): 최대 15페이지를 샘플링(앞뒤 10%는 표지·부록으로 제외)하여 Vision LLM으로 분석합니다. 최초 한글·한자 혼용 감지 시 즉시 종료하여 API 비용을 최소화합니다.
+
+### 페이지별 보정 (`VlmTextCorrector`)
+
+혼합 문자 페이지가 감지되면, 해당 페이지만 VLM에 전송하여 보정합니다:
+
+- 각 페이지의 OCR 텍스트 요소와 표 셀을 추출
+- `pdftotext` 참조 텍스트를 품질 기준으로 활용
+- VLM이 치환 기반 보정(find → replace)을 반환
+- 실패한 페이지는 원본 OCR 텍스트를 유지하며 건너뜀
+
+### 전략 옵션
+
+```typescript
+const outputPath = await pdfParser.parse(
+  'input.pdf',
+  'output',
+  (result) => console.log(result),
+  {
+    // OCR 전략 샘플링 활성화 (Vision LLM 모델 제공)
+    strategySamplerModel: openai('gpt-5.1'),
+
+    // VLM 텍스트 보정 모델 (혼합 문자 감지 시 필요)
+    vlmProcessorModel: openai('gpt-5.1'),
+
+    // VLM 페이지 처리 동시성 (기본값: 1)
+    vlmConcurrency: 3,
+
+    // 샘플링을 건너뛰고 특정 OCR 방식 강제
+    forcedMethod: 'ocrmac', // 또는 'vlm'
+  },
+);
+```
+
 ## 왜 macOS 전용인가?
 
 `@heripo/pdf-parser`는 **의도적으로 macOS에 강하게 의존**합니다. 이 결정의 핵심 이유는 **Docling SDK의 로컬 OCR 성능**입니다.
@@ -226,11 +281,12 @@ await pdfParser.shutdown();
 
 `@heripo/pdf-parser`는 다음 시스템 레벨 의존성이 필요합니다:
 
-| 의존성 | 필수 버전  | 설치 방법                  | 용도                       |
-| ------ | ---------- | -------------------------- | -------------------------- |
-| Python | 3.9 - 3.12 | `brew install python@3.11` | Docling SDK 실행 환경      |
-| jq     | Any        | `brew install jq`          | JSON 처리 (변환 결과 파싱) |
-| lsof   | Any        | macOS 기본 설치됨          | docling-serve 포트 관리    |
+| 의존성  | 필수 버전  | 설치 방법                  | 용도                                      |
+| ------- | ---------- | -------------------------- | ----------------------------------------- |
+| Python  | 3.9 - 3.12 | `brew install python@3.11` | Docling SDK 실행 환경                     |
+| poppler | Any        | `brew install poppler`     | OCR 전략용 텍스트 레이어 추출 (pdftotext) |
+| jq      | Any        | `brew install jq`          | JSON 처리 (변환 결과 파싱)                |
+| lsof    | Any        | macOS 기본 설치됨          | docling-serve 포트 관리                   |
 
 > ⚠️ **Python 3.13+는 지원하지 않습니다.** Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
 
@@ -311,6 +367,18 @@ interface ConversionOptions {
   doOcr?: boolean; // OCR 활성화 (기본값: true)
   formats?: string[]; // 출력 형식 (기본값: ['docling_json'])
   pdfBackend?: string; // PDF 백엔드 (기본값: 'dlparse_v2')
+}
+```
+
+### PDFConvertOptions (확장)
+
+```typescript
+interface PDFConvertOptions extends ConversionOptions {
+  strategySamplerModel?: LanguageModel; // OCR 전략 샘플링용 Vision LLM
+  vlmProcessorModel?: LanguageModel; // 텍스트 보정용 Vision LLM
+  vlmConcurrency?: number; // 병렬 페이지 처리 (기본값: 1)
+  skipSampling?: boolean; // 전략 샘플링 건너뛰기
+  forcedMethod?: 'ocrmac' | 'vlm'; // 특정 OCR 방식 강제
 }
 ```
 

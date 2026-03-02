@@ -1,10 +1,6 @@
 import { z } from 'zod';
 
-import {
-  LLM_MODELS,
-  VISION_MODELS,
-} from '~/features/upload/constants/llm-models';
-import { VLM_MODEL_KEYS } from '~/features/upload/constants/vlm-models';
+import { LLM_MODELS } from '~/features/upload/constants/llm-models';
 
 import {
   imageIdSchema,
@@ -16,32 +12,13 @@ import { paginationSchema } from './pagination';
 
 // Valid LLM model IDs
 const llmModelIds = LLM_MODELS.map((m) => m.id);
-const visionModelIds = VISION_MODELS.map((m) => m.id);
 
 /**
- * LLM model ID validator (any model)
+ * LLM model ID validator
  */
 const llmModelSchema = z.string().refine((val) => llmModelIds.includes(val), {
   message: 'Invalid LLM model ID',
 });
-
-/**
- * Vision-capable model ID validator
- */
-const visionModelSchema = z
-  .string()
-  .refine((val) => visionModelIds.includes(val), {
-    message: 'Model does not support vision',
-  });
-
-/**
- * VLM model key validator (local vision model presets)
- */
-const vlmModelKeySchema = z
-  .string()
-  .refine((val) => VLM_MODEL_KEYS.includes(val), {
-    message: 'Invalid VLM model key',
-  });
 
 /**
  * Processing options schema for PDF processing.
@@ -49,28 +26,26 @@ const vlmModelKeySchema = z
  */
 export const processingOptionsSchema = z.object({
   // Processing options
-  ocrLanguages: z.array(z.string().min(1)).min(1).default(['ko-KR', 'en-US']),
   threadCount: z.number().int().positive().max(16).default(4),
 
-  // Pipeline selection
-  pipeline: z
-    .enum(['standard', 'vlm'])
-    .default('standard')
-    .describe(
-      'Processing pipeline: standard (OCR) or vlm (Vision Language Model)',
-    ),
+  // Force image PDF pre-conversion
+  forceImagePdf: z.boolean().default(false),
+
+  // OCR Strategy — VLM sampling-based strategy selection
+  strategySamplerModel: llmModelSchema.optional(),
+  vlmProcessorModel: llmModelSchema.optional(),
+  forcedMethod: z.enum(['ocrmac', 'vlm']).optional(),
 
   // LLM Models
   fallbackModel: llmModelSchema,
-  pageRangeParserModel: visionModelSchema,
+  pageRangeParserModel: llmModelSchema,
   tocExtractorModel: llmModelSchema,
   validatorModel: llmModelSchema,
-  visionTocExtractorModel: visionModelSchema,
+  visionTocExtractorModel: llmModelSchema,
   captionParserModel: llmModelSchema,
-  hanjaQualitySamplerModel: visionModelSchema.optional(),
 
-  // VLM Model (local vision model for VLM pipeline and hanja auto-fallback)
-  vlmModel: vlmModelKeySchema.optional(),
+  // VLM Processing
+  vlmConcurrency: z.number().int().positive().max(50).default(1),
 
   // Batch & Retry
   textCleanerBatchSize: z.number().int().nonnegative().default(20),

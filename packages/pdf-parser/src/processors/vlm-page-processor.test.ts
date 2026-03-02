@@ -1,0 +1,1323 @@
+import { ConcurrentPool, LLMCaller } from '@heripo/shared';
+import { readFileSync } from 'node:fs';
+import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
+
+import { VlmPageProcessor } from './vlm-page-processor';
+
+vi.mock('@heripo/shared', () => ({
+  LLMCaller: {
+    callVision: vi.fn(),
+  },
+  ConcurrentPool: {
+    run: vi.fn(
+      async <T, R>(
+        items: T[],
+        _concurrency: number,
+        processFn: (item: T, index: number) => Promise<R>,
+        onItemComplete?: (result: R, index: number) => void,
+      ): Promise<R[]> => {
+        const results: R[] = [];
+        for (let i = 0; i < items.length; i++) {
+          const result = await processFn(items[i], i);
+          results.push(result);
+          onItemComplete?.(result, i);
+        }
+        return results;
+      },
+    ),
+  },
+}));
+
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn(),
+}));
+
+const mockLogger = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+};
+
+const mockCallVision = LLMCaller.callVision as Mock;
+const mockReadFileSync = readFileSync as Mock;
+const mockConcurrentPoolRun = ConcurrentPool.run as Mock;
+
+/** Minimal mock LanguageModel for testing */
+const mockModel = { modelId: 'test-vision-model' } as any;
+const mockFallbackModel = { modelId: 'test-fallback-model' } as any;
+
+/** Helper to create a mock VLM call result */
+function createMockVlmResult(
+  elements: Array<{
+    t: string;
+    c: string;
+    o: number;
+    l?: number;
+    m?: string;
+    b?: { l: number; t: number; r: number; b: number };
+  }>,
+) {
+  return {
+    output: { e: elements },
+    usage: {
+      component: 'VlmPageProcessor',
+      phase: 'page-analysis',
+      model: 'primary' as const,
+      modelName: 'test-vision-model',
+      inputTokens: 1000,
+      outputTokens: 200,
+      totalTokens: 1200,
+    },
+    usedFallback: false,
+  };
+}
+
+describe('VlmPageProcessor', () => {
+  let processor: VlmPageProcessor;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    processor = new VlmPageProcessor(mockLogger);
+    mockReadFileSync.mockReturnValue(Buffer.from('fake-image-data'));
+    // Restore default ConcurrentPool.run implementation after clearAllMocks
+    mockConcurrentPoolRun.mockImplementation(
+      async <T, R>(
+        items: T[],
+        _concurrency: number,
+        processFn: (item: T, index: number) => Promise<R>,
+        onItemComplete?: (result: R, index: number) => void,
+      ): Promise<R[]> => {
+        const results: R[] = [];
+        for (let i = 0; i < items.length; i++) {
+          const result = await processFn(items[i], i);
+          results.push(result);
+          onItemComplete?.(result, i);
+        }
+        return results;
+      },
+    );
+  });
+
+  describe('processPages', () => {
+    test('returns empty array for empty page files', async () => {
+      const results = await processor.processPages([], mockModel);
+
+      expect(results).toEqual([]);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[VlmPageProcessor] No pages to process',
+      );
+      expect(mockCallVision).not.toHaveBeenCalled();
+    });
+
+    test('processes single page and returns VlmPageResult', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([
+          { t: 'tx', c: 'Hello world', o: 0 },
+          { t: 'sh', c: 'Introduction', o: 1, l: 1 },
+        ]),
+      );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(results).toHaveLength(1);
+      expect(results[0].pageNo).toBe(1);
+      expect(results[0].elements).toHaveLength(2);
+      expect(results[0].elements[0]).toEqual({
+        type: 'text',
+        content: 'Hello world',
+        order: 0,
+      });
+      expect(results[0].elements[1]).toEqual({
+        type: 'section_header',
+        content: 'Introduction',
+        order: 1,
+        level: 1,
+      });
+    });
+
+    test('processes multiple pages with correct page numbers', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'Page 1 content', o: 0 }]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'Page 2 content', o: 0 }]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'Page 3 content', o: 0 }]),
+        );
+
+      const results = await processor.processPages(
+        [
+          '/tmp/pages/page_0.png',
+          '/tmp/pages/page_1.png',
+          '/tmp/pages/page_2.png',
+        ],
+        mockModel,
+      );
+
+      expect(results).toHaveLength(3);
+      expect(results[0].pageNo).toBe(1);
+      expect(results[1].pageNo).toBe(2);
+      expect(results[2].pageNo).toBe(3);
+    });
+
+    test('uses default concurrency of 1', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockConcurrentPoolRun).toHaveBeenCalledWith(
+        expect.any(Array),
+        1,
+        expect.any(Function),
+        expect.any(Function),
+      );
+    });
+
+    test('uses custom concurrency when specified', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        concurrency: 2,
+      });
+
+      expect(mockConcurrentPoolRun).toHaveBeenCalledWith(
+        expect.any(Array),
+        2,
+        expect.any(Function),
+        expect.any(Function),
+      );
+    });
+
+    test('processes all pages via ConcurrentPool', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const results = await processor.processPages(
+        ['/tmp/p0.png', '/tmp/p1.png', '/tmp/p2.png'],
+        mockModel,
+        { concurrency: 2 },
+      );
+
+      expect(results).toHaveLength(3);
+      expect(mockCallVision).toHaveBeenCalledTimes(3);
+    });
+
+    test('logs processing start and completion', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(
+        ['/tmp/pages/page_0.png', '/tmp/pages/page_1.png'],
+        mockModel,
+      );
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[VlmPageProcessor] Processing 2 pages (concurrency: 1)...',
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[VlmPageProcessor] Completed processing 2 pages',
+      );
+    });
+
+    test('logs custom concurrency value', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        concurrency: 3,
+      });
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[VlmPageProcessor] Processing 1 pages (concurrency: 3)...',
+      );
+    });
+
+    test('propagates error when VLM call fails', async () => {
+      mockCallVision.mockRejectedValue(new Error('VLM API error'));
+
+      await expect(
+        processor.processPages(['/tmp/pages/page_0.png'], mockModel),
+      ).rejects.toThrow('VLM API error');
+    });
+  });
+
+  describe('processPage (via processPages)', () => {
+    test('reads image file and encodes as base64', async () => {
+      const imageBuffer = Buffer.from('test-image-bytes');
+      mockReadFileSync.mockReturnValue(imageBuffer);
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockReadFileSync).toHaveBeenCalledWith('/tmp/pages/page_0.png');
+    });
+
+    test('sends correct message format to LLMCaller.callVision', async () => {
+      const imageBuffer = Buffer.from('test-image');
+      const expectedBase64 = imageBuffer.toString('base64');
+      mockReadFileSync.mockReturnValue(imageBuffer);
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: expect.stringContaining('Analyze the page image'),
+                },
+                {
+                  type: 'image',
+                  image: `data:image/png;base64,${expectedBase64}`,
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    });
+
+    test('passes primary model to LLMCaller.callVision', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          primaryModel: mockModel,
+        }),
+      );
+    });
+
+    test('passes fallback model when provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        fallbackModel: mockFallbackModel,
+      });
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fallbackModel: mockFallbackModel,
+        }),
+      );
+    });
+
+    test('uses default maxRetries of 3 when not specified', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          maxRetries: 3,
+        }),
+      );
+    });
+
+    test('uses custom maxRetries when specified', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        maxRetries: 5,
+      });
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          maxRetries: 5,
+        }),
+      );
+    });
+
+    test('uses default temperature of 0 when not specified', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          temperature: 0,
+        }),
+      );
+    });
+
+    test('uses custom temperature when specified', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        temperature: 0.5,
+      });
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          temperature: 0.5,
+        }),
+      );
+    });
+
+    test('passes abort signal when provided', async () => {
+      const abortController = new AbortController();
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        abortSignal: abortController.signal,
+      });
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          abortSignal: abortController.signal,
+        }),
+      );
+    });
+
+    test('passes undefined for fallback model when not provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fallbackModel: undefined,
+        }),
+      );
+    });
+
+    test('passes undefined for abort signal when not provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          abortSignal: undefined,
+        }),
+      );
+    });
+
+    test('sets correct component and phase for tracking', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: 'VlmPageProcessor',
+          phase: 'page-analysis',
+        }),
+      );
+    });
+
+    test('tracks token usage with aggregator when provided', async () => {
+      const mockAggregator = { track: vi.fn() };
+      const mockResult = createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]);
+      mockCallVision.mockResolvedValue(mockResult);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        aggregator: mockAggregator as any,
+      });
+
+      expect(mockAggregator.track).toHaveBeenCalledWith(mockResult.usage);
+    });
+
+    test('tracks token usage for each page separately', async () => {
+      const mockAggregator = { track: vi.fn() };
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'Page 1', o: 0 }]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'Page 2', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/p0.png', '/tmp/p1.png'], mockModel, {
+        aggregator: mockAggregator as any,
+      });
+
+      expect(mockAggregator.track).toHaveBeenCalledTimes(2);
+    });
+
+    test('does not track usage when aggregator is not provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      // Should not throw when no aggregator
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      // No aggregator to check, but verify it didn't error
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
+    });
+
+    test('converts short-field output to full VlmPageResult', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([
+          { t: 'li', c: 'Item 1', o: 0, m: '1.' },
+          { t: 'pi', c: '', o: 1, b: { l: 0.1, t: 0.2, r: 0.9, b: 0.8 } },
+          { t: 'tb', c: 'Col1|Col2', o: 2 },
+        ]),
+      );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(results[0].elements[0]).toEqual({
+        type: 'list_item',
+        content: 'Item 1',
+        order: 0,
+        marker: '1.',
+      });
+      expect(results[0].elements[1]).toEqual({
+        type: 'picture',
+        content: '',
+        order: 1,
+        bbox: { l: 0.1, t: 0.2, r: 0.9, b: 0.8 },
+      });
+      expect(results[0].elements[2]).toEqual({
+        type: 'table',
+        content: 'Col1|Col2',
+        order: 2,
+      });
+    });
+
+    test('logs debug message for each page processed', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([
+          { t: 'tx', c: 'text 1', o: 0 },
+          { t: 'tx', c: 'text 2', o: 1 },
+        ]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[VlmPageProcessor] Processing page 1...',
+      );
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[VlmPageProcessor] Page 1: 2 elements extracted',
+      );
+    });
+
+    test('handles page with no elements after retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(createMockVlmResult([]));
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(results[0].elements).toEqual([]);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('0 elements extracted, retrying'),
+      );
+    });
+  });
+
+  describe('empty page retry', () => {
+    test('retries with higher temperature when first attempt returns 0 elements', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'Recovered text', o: 0 }]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(results[0].elements).toHaveLength(1);
+      expect(results[0].elements[0].content).toBe('Recovered text');
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+    });
+
+    test('uses higher temperature (0.3) on retry attempt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ temperature: 0 }),
+      );
+      expect(mockCallVision).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ temperature: 0.3 }),
+      );
+    });
+
+    test('uses "page-analysis-retry" phase on retry attempt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ phase: 'page-analysis-retry' }),
+      );
+    });
+
+    test('does not retry when elements are found on first attempt', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
+    });
+
+    test('returns empty result if retry also returns 0 elements', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(createMockVlmResult([]));
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(results[0].elements).toEqual([]);
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+    });
+
+    test('logs warning when page returns 0 elements', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Page 1: 0 elements extracted, retrying'),
+      );
+    });
+
+    test('logs warning when retry also returns 0 elements', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(createMockVlmResult([]));
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('still 0 elements after retry'),
+      );
+    });
+
+    test('tracks token usage for both original and retry attempts', async () => {
+      const mockAggregator = { track: vi.fn() };
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        aggregator: mockAggregator as any,
+      });
+
+      expect(mockAggregator.track).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('quality validation retry', () => {
+    test('performs quality retry when placeholder text detected', async () => {
+      // First call returns Lorem ipsum → triggers validation failure → retry
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: '정상적인 한국어 텍스트입니다.', o: 0 },
+          ]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      expect(results[0].quality).toEqual({
+        isValid: true,
+        retried: true,
+        issueTypes: [],
+      });
+    });
+
+    test('performs quality retry when script anomaly detected with documentLanguages ko-KR', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'At the outset of the proceedings, the claimant presented evidence.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: '아산 지산공원 수목식재사업부지내 문화유적', o: 0 },
+          ]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+        { documentLanguages: ['ko-KR'] },
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(2);
+      expect(results[0].quality).toEqual({
+        isValid: true,
+        retried: true,
+        issueTypes: [],
+      });
+    });
+
+    test('does not perform quality retry when validation passes', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+      );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+        { documentLanguages: ['ko-KR'] },
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
+      expect(results[0].quality).toBeUndefined();
+    });
+
+    test('does not perform quality retry when documentLanguages is not set and text is Latin', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([
+          {
+            t: 'tx',
+            c: 'Normal English text that is not placeholder content at all.',
+            o: 0,
+          },
+        ]),
+      );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(1);
+      expect(results[0].quality).toBeUndefined();
+    });
+
+    test('uses temperature 0.5 on quality retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ temperature: 0.5 }),
+      );
+    });
+
+    test('uses phase "page-analysis-quality-retry" on quality retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockCallVision).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ phase: 'page-analysis-quality-retry' }),
+      );
+    });
+
+    test('returns quality isValid=false retried=true when retry does not fix issue', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Sed do eiusmod tempor incididunt.', o: 0 },
+          ]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(results[0].quality).toEqual({
+        isValid: false,
+        retried: true,
+        issueTypes: ['placeholder_text'],
+      });
+    });
+
+    test('tracks token usage for quality retry attempt', async () => {
+      const mockAggregator = { track: vi.fn() };
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        aggregator: mockAggregator as any,
+      });
+
+      // Original call + quality retry = 2 track calls
+      expect(mockAggregator.track).toHaveBeenCalledTimes(2);
+    });
+
+    test('logs warning when quality issues detected', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('quality issues detected: placeholder_text'),
+      );
+    });
+
+    test('logs debug when quality issues resolved after retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('quality issues resolved after retry'),
+      );
+    });
+
+    test('logs warning when quality issues persist after retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Sed do eiusmod tempor incididunt.', o: 0 },
+          ]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('quality issues persist after retry'),
+      );
+    });
+
+    test('quality retry runs after empty-page retry when both conditions met', async () => {
+      // First: 0 elements → empty retry → Lorem ipsum → quality retry → ok
+      mockCallVision
+        .mockResolvedValueOnce(createMockVlmResult([]))
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      const results = await processor.processPages(
+        ['/tmp/pages/page_0.png'],
+        mockModel,
+      );
+
+      expect(mockCallVision).toHaveBeenCalledTimes(3);
+      expect(results[0].quality?.retried).toBe(true);
+    });
+
+    test('uses enhanced prompt with quality warnings on retry', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const retryCall = mockCallVision.mock.calls[1][0];
+      const retryPromptText = retryCall.messages[0].content[0].text;
+      expect(retryPromptText).toContain('quality issues');
+      expect(retryPromptText).toContain('placeholder text');
+      expect(retryPromptText).toContain('Analyze the page image');
+    });
+  });
+
+  describe('document language prompt', () => {
+    test('prepends language context to prompt when documentLanguages is set', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguages: ['ko-KR'],
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('LANGUAGE CONTEXT');
+      expect(promptText).toContain('Korean');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('includes multiple languages in prompt when documentLanguages has multiple entries', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguages: ['ko-KR', 'en-US'],
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('primarily written in Korean');
+      expect(promptText).toContain('with English also present');
+    });
+
+    test('uses default prompt when documentLanguages is not set', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('LANGUAGE CONTEXT');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('includes both placeholder and script anomaly warnings when both detected', async () => {
+      // Lorem ipsum with documentLanguages ['ko-KR'] triggers both placeholder_text and script_anomaly
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguages: ['ko-KR'],
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('placeholder text');
+      expect(retryPromptText).toContain('wrong language/script');
+    });
+
+    test('includes script anomaly warning in quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'At the outset of the proceedings, the claimant presented evidence.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguages: ['ko-KR'],
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('wrong language/script');
+      expect(retryPromptText).toContain('Korean');
+    });
+
+    test('includes language context in quality retry prompt when documentLanguages set', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: 'At the outset of the proceedings, the claimant presented evidence.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        documentLanguages: ['ko-KR'],
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('LANGUAGE CONTEXT');
+      expect(retryPromptText).toContain('Korean');
+    });
+
+    test('includes meta_description warning in quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: '이미지 해상도가 낮아 판독하기 어렵습니다.',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain(
+        'described the image instead of transcribing text',
+      );
+    });
+
+    test('includes repetitive_pattern warning in quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            {
+              t: 'tx',
+              c: ': : : : : : : : : : : : : : : : : : : :',
+              o: 0,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('repetitive character patterns');
+    });
+  });
+
+  describe('text context injection', () => {
+    test('injects TEXT REFERENCE block when pageTexts has text for the page', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, '한국어 텍스트 from pdftotext']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('TEXT REFERENCE');
+      expect(promptText).toContain('한국어 텍스트 from pdftotext');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('does not inject TEXT REFERENCE when pageTexts is not provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel);
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+      expect(promptText).toContain('Analyze the page image');
+    });
+
+    test('does not inject TEXT REFERENCE when page text is empty string', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, '']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+    });
+
+    test('does not inject TEXT REFERENCE when page text is whitespace only', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, '   \n\n  ']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+    });
+
+    test('does not inject TEXT REFERENCE when page number is not in pageTexts', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[2, 'Text for page 2']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).not.toContain('TEXT REFERENCE');
+    });
+
+    test('combines text context with language context when both provided', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: '한국어 텍스트', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, 'PDF text layer content']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+        documentLanguages: ['ko-KR'],
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('TEXT REFERENCE');
+      expect(promptText).toContain('PDF text layer content');
+      expect(promptText).toContain('LANGUAGE CONTEXT');
+      expect(promptText).toContain('Korean');
+    });
+
+    test('injects text context into quality retry prompt', async () => {
+      mockCallVision
+        .mockResolvedValueOnce(
+          createMockVlmResult([
+            { t: 'tx', c: 'Lorem ipsum dolor sit amet.', o: 0 },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          createMockVlmResult([{ t: 'tx', c: '한국어 텍스트입니다.', o: 0 }]),
+        );
+
+      const pageTexts = new Map([[1, 'Actual PDF text']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const retryPromptText =
+        mockCallVision.mock.calls[1][0].messages[0].content[0].text;
+      expect(retryPromptText).toContain('TEXT REFERENCE');
+      expect(retryPromptText).toContain('Actual PDF text');
+      expect(retryPromptText).toContain('quality issues');
+    });
+
+    test('wraps page text in code fences', async () => {
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      const pageTexts = new Map([[1, 'Line 1\nLine 2']]);
+
+      await processor.processPages(['/tmp/pages/page_0.png'], mockModel, {
+        pageTexts,
+      });
+
+      const promptText =
+        mockCallVision.mock.calls[0][0].messages[0].content[0].text;
+      expect(promptText).toContain('```\nLine 1\nLine 2\n```');
+    });
+  });
+
+  describe('onTokenUsage callback', () => {
+    test('calls onTokenUsage after each page completes', async () => {
+      const mockAggregator = {
+        track: vi.fn(),
+        getReport: vi.fn().mockReturnValue({
+          components: [{ component: 'VlmPageProcessor' }],
+          total: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 },
+        }),
+      };
+      const onTokenUsage = vi.fn();
+
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(
+        ['/tmp/p0.png', '/tmp/p1.png', '/tmp/p2.png'],
+        mockModel,
+        { concurrency: 2, aggregator: mockAggregator as any, onTokenUsage },
+      );
+
+      // Worker pool calls onItemComplete per page, so 3 pages = 3 calls
+      expect(onTokenUsage).toHaveBeenCalledTimes(3);
+      expect(onTokenUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          total: expect.objectContaining({ inputTokens: 1000 }),
+        }),
+      );
+    });
+
+    test('does not call onTokenUsage when aggregator is not provided', async () => {
+      const onTokenUsage = vi.fn();
+
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      await processor.processPages(['/tmp/p0.png'], mockModel, {
+        onTokenUsage,
+      });
+
+      expect(onTokenUsage).not.toHaveBeenCalled();
+    });
+
+    test('does not call onTokenUsage when only aggregator is provided', async () => {
+      const mockAggregator = { track: vi.fn() };
+
+      mockCallVision.mockResolvedValue(
+        createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
+      );
+
+      // No onTokenUsage callback — should not throw
+      await processor.processPages(['/tmp/p0.png'], mockModel, {
+        aggregator: mockAggregator as any,
+      });
+
+      expect(mockAggregator.track).toHaveBeenCalledTimes(1);
+    });
+  });
+});

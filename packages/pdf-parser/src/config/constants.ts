@@ -67,21 +67,3 @@ export const IMAGE_PDF_CONVERTER = {
    */
   QUALITY: 100,
 } as const;
-
-/**
- * Configuration constants for VLM environment
- */
-export const VLM_ENVIRONMENT = {
-  /**
-   * Timeout for VLM dependency installation (pip install) in milliseconds (3 hours).
-   * VLM packages can be very large and may require extended download times
-   * depending on network conditions.
-   */
-  SETUP_TIMEOUT_MS: 10_800_000,
-
-  /**
-   * Timeout for VLM model download in milliseconds (3 hours).
-   * Large VLM models (e.g., multi-GB weights) need sufficient time to download.
-   */
-  MODEL_DOWNLOAD_TIMEOUT_MS: 10_800_000,
-} as const;

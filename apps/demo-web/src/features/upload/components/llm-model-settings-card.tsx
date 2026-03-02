@@ -27,7 +27,7 @@ import {
   TooltipTrigger,
 } from '~/components/ui/tooltip';
 
-import { LLM_MODELS, VISION_MODELS } from '../constants/llm-models';
+import { LLM_MODELS } from '../constants/llm-models';
 import { useProcessingForm } from '../contexts/processing-form-context';
 
 interface StringFieldApi {
@@ -61,7 +61,7 @@ function ModelSelect({
   optional = false,
   disabled = false,
 }: ModelSelectProps) {
-  const models = requiresVision ? VISION_MODELS : LLM_MODELS;
+  const models = LLM_MODELS;
 
   // Group models by provider
   const modelsByProvider = models.reduce(
@@ -148,7 +148,6 @@ type ModelFieldName = Extract<
   | 'visionTocExtractorModel'
   | 'validatorModel'
   | 'captionParserModel'
-  | 'hanjaQualitySamplerModel'
 >;
 
 interface ModelFieldConfig {
@@ -186,13 +185,6 @@ const MODEL_FIELDS: ModelFieldConfig[] = [
     name: 'captionParserModel',
     label: 'Caption Parser',
     description: 'Parses captions to extract numbers',
-  },
-  {
-    name: 'hanjaQualitySamplerModel',
-    label: 'Hanja Quality Sampler',
-    description: 'Assesses KCJ character quality for auto VLM fallback',
-    requiresVision: true,
-    optional: true,
   },
 ];
 

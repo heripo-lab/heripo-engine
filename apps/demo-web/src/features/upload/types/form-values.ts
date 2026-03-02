@@ -18,10 +18,13 @@ export interface ProcessingFormValues extends ProcessingOptions {
  */
 export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
-  ocrLanguages: ['ko-KR', 'zh-Hant', 'en-US'],
   threadCount: 4,
-  // Pipeline selection
-  pipeline: 'standard',
+  // Force image PDF pre-conversion
+  forceImagePdf: false,
+  // OCR Strategy
+  strategySamplerModel: 'openai/gpt-5.2',
+  vlmProcessorModel: 'openai/gpt-5.1',
+  forcedMethod: undefined,
   // LLM Models
   fallbackModel: 'openai/gpt-5.2',
   validatorModel: 'openai/gpt-5.2',
@@ -29,9 +32,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   tocExtractorModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
   visionTocExtractorModel: 'google/gemini-3-flash-preview',
   captionParserModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
-  // Optional models (undefined = use defaults)
-  hanjaQualitySamplerModel: 'openai/gpt-5.2',
-  vlmModel: undefined,
+  // VLM Processing
+  vlmConcurrency: 10,
   // Batch & Retry
   textCleanerBatchSize: 20,
   captionParserBatchSize: 0,
