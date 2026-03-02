@@ -754,15 +754,33 @@ export class PDFConverter {
     this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
 
     if (zipResult.fileStream) {
-      // Stream-based download (v1.x behavior)
       const writeStream = createWriteStream(zipPath);
       await pipeline(zipResult.fileStream, writeStream);
-    } else if (zipResult.data) {
-      // Buffer-based download (v2.x behavior)
-      await writeFile(zipPath, zipResult.data);
-    } else {
-      throw new Error('Failed to get ZIP file result');
+      return;
     }
+
+    if (zipResult.data) {
+      await writeFile(zipPath, zipResult.data);
+      return;
+    }
+
+    // Fallback: direct HTTP download when SDK stream/data unavailable
+    this.logger.warn(
+      '[PDFConverter] SDK file result unavailable, falling back to direct download...',
+    );
+    const baseUrl = this.client.getConfig().baseUrl;
+    const response = await fetch(`${baseUrl}/v1/result/${taskId}`, {
+      headers: { Accept: 'application/zip' },
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download ZIP file: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    await writeFile(zipPath, buffer);
   }
 
   private async processConvertedFiles(

@@ -64,6 +64,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     client = {
       convertSourceAsync: vi.fn(),
       getTaskResultFile: vi.fn(),
+      getConfig: vi.fn().mockReturnValue({ baseUrl: 'http://localhost:5001' }),
     } as unknown as DoclingAPIClient;
 
     converter = new PDFConverter(logger, client);
