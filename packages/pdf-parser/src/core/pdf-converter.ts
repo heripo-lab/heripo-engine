@@ -16,6 +16,7 @@ import {
   readFileSync,
   rmSync,
 } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -749,15 +750,37 @@ export class PDFConverter {
 
     const zipResult = await this.client.getTaskResultFile(taskId);
 
-    if (!zipResult.success || !zipResult.fileStream) {
-      throw new Error('Failed to get ZIP file result');
+    const zipPath = join(process.cwd(), 'result.zip');
+    this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
+
+    if (zipResult.fileStream) {
+      const writeStream = createWriteStream(zipPath);
+      await pipeline(zipResult.fileStream, writeStream);
+      return;
     }
 
-    const zipPath = join(process.cwd(), 'result.zip');
+    if (zipResult.data) {
+      await writeFile(zipPath, zipResult.data);
+      return;
+    }
 
-    this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
-    const writeStream = createWriteStream(zipPath);
-    await pipeline(zipResult.fileStream, writeStream);
+    // Fallback: direct HTTP download when SDK stream/data unavailable
+    this.logger.warn(
+      '[PDFConverter] SDK file result unavailable, falling back to direct download...',
+    );
+    const baseUrl = this.client.getConfig().baseUrl;
+    const response = await fetch(`${baseUrl}/v1/result/${taskId}`, {
+      headers: { Accept: 'application/zip' },
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download ZIP file: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    await writeFile(zipPath, buffer);
   }
 
   private async processConvertedFiles(

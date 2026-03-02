@@ -4,6 +4,7 @@ import type { Readable } from 'node:stream';
 
 import { omit } from 'es-toolkit';
 import { createWriteStream, existsSync, rmSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -31,6 +32,10 @@ vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
   rmSync: vi.fn(),
   createWriteStream: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  writeFile: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
@@ -63,6 +68,7 @@ describe('PDFConverter', () => {
     client = {
       convertSourceAsync: vi.fn(),
       getTaskResultFile: vi.fn(),
+      getConfig: vi.fn().mockReturnValue({ baseUrl: 'http://localhost:5001' }),
     } as unknown as DoclingAPIClient;
 
     converter = new PDFConverter(logger, client);
@@ -745,7 +751,7 @@ describe('PDFConverter', () => {
   });
 
   describe('downloadResult', () => {
-    test('should download result file successfully', async () => {
+    test('should download via stream when fileStream is present', async () => {
       const mockTask = createMockTask();
       const mockFileStream = {} as Readable;
       const writeStream = { write: vi.fn(), end: vi.fn() };
@@ -778,7 +784,72 @@ describe('PDFConverter', () => {
       expect(pipeline).toHaveBeenCalledWith(mockFileStream, writeStream);
     });
 
-    test('should throw error when success is false', async () => {
+    test('should download via writeFile when data is present', async () => {
+      const mockTask = createMockTask();
+      const mockData = new Uint8Array([1, 2, 3]);
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        data: mockData,
+      });
+      vi.mocked(writeFile).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      expect(writeFile).toHaveBeenCalledWith('/test/cwd/result.zip', mockData);
+      expect(createWriteStream).not.toHaveBeenCalled();
+      expect(pipeline).not.toHaveBeenCalled();
+    });
+
+    test('should fallback to direct fetch when neither fileStream nor data is present', async () => {
+      const mockTask = createMockTask();
+      const mockZipData = new Uint8Array([80, 75, 3, 4]);
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: false,
+      } as any);
+      vi.mocked(writeFile).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: vi.fn().mockResolvedValue(mockZipData.buffer),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-fallback',
+        vi.fn(),
+        false,
+        {},
+      );
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:5001/v1/result/task-123',
+        { headers: { Accept: 'application/zip' } },
+      );
+      expect(writeFile).toHaveBeenCalledWith(
+        '/test/cwd/result.zip',
+        expect.any(Uint8Array),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFConverter] SDK file result unavailable, falling back to direct download...',
+      );
+
+      vi.unstubAllGlobals();
+    });
+
+    test('should throw error when direct fetch fallback fails', async () => {
       const mockTask = createMockTask();
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
@@ -786,25 +857,12 @@ describe('PDFConverter', () => {
         success: false,
       } as any);
 
-      await expect(
-        converter.convert(
-          'http://test.com/doc.pdf',
-          'report-fail',
-          vi.fn(),
-          false,
-          {},
-        ),
-      ).rejects.toThrow('Failed to get ZIP file result');
-    });
-
-    test('should throw error when fileStream is missing', async () => {
-      const mockTask = createMockTask();
-
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: undefined,
-      } as any);
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      });
+      vi.stubGlobal('fetch', fetchMock);
 
       await expect(
         converter.convert(
@@ -814,7 +872,9 @@ describe('PDFConverter', () => {
           false,
           {},
         ),
-      ).rejects.toThrow('Failed to get ZIP file result');
+      ).rejects.toThrow('Failed to download ZIP file: 404 Not Found');
+
+      vi.unstubAllGlobals();
     });
   });
 
