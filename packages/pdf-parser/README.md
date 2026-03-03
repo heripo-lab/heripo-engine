@@ -72,7 +72,7 @@ python3.11 --version
 
 #### 4. poppler (PDF text extraction)
 
-Required for the OCR strategy system's text layer pre-check (`pdftotext`).
+Required for PDF page counting (`pdfinfo`) and text layer extraction (`pdftotext`), used by the OCR strategy system's text layer pre-check.
 
 ```bash
 brew install poppler
@@ -281,12 +281,12 @@ Archaeological excavation report PDFs have the following characteristics:
 
 `@heripo/pdf-parser` requires the following system-level dependencies:
 
-| Dependency | Required Version | Installation               | Purpose                                            |
-| ---------- | ---------------- | -------------------------- | -------------------------------------------------- |
-| Python     | 3.9 - 3.12       | `brew install python@3.11` | Docling SDK runtime                                |
-| poppler    | Any              | `brew install poppler`     | Text layer extraction for OCR strategy (pdftotext) |
-| jq         | Any              | `brew install jq`          | JSON processing (conversion result parsing)        |
-| lsof       | Any              | Included with macOS        | docling-serve port management                      |
+| Dependency | Required Version | Installation               | Purpose                                                           |
+| ---------- | ---------------- | -------------------------- | ----------------------------------------------------------------- |
+| Python     | 3.9 - 3.12       | `brew install python@3.11` | Docling SDK runtime                                               |
+| poppler    | Any              | `brew install poppler`     | PDF page counting (pdfinfo) and text layer extraction (pdftotext) |
+| jq         | Any              | `brew install jq`          | JSON processing (conversion result parsing)                       |
+| lsof       | Any              | Included with macOS        | docling-serve port management                                     |
 
 > ⚠️ **Python 3.13+ is not supported.** Some Docling SDK dependencies are not compatible with Python 3.13.
 
@@ -409,6 +409,16 @@ const pdfParser = new PDFParser({
 
 ```bash
 brew install jq
+```
+
+### poppler Not Found
+
+**Symptom**: `poppler is not installed. Please install poppler using: brew install poppler`
+
+**Solution**:
+
+```bash
+brew install poppler
 ```
 
 ### Port Conflict

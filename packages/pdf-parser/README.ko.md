@@ -72,7 +72,7 @@ python3.11 --version
 
 #### 4. poppler (PDF 텍스트 추출)
 
-OCR 전략 시스템의 텍스트 레이어 사전 검사(`pdftotext`)에 필요합니다.
+PDF 페이지 수 확인(`pdfinfo`)과 텍스트 레이어 추출(`pdftotext`)에 필요하며, OCR 전략 시스템의 텍스트 레이어 사전 검사에 사용됩니다.
 
 ```bash
 brew install poppler
@@ -281,12 +281,12 @@ const outputPath = await pdfParser.parse(
 
 `@heripo/pdf-parser`는 다음 시스템 레벨 의존성이 필요합니다:
 
-| 의존성  | 필수 버전  | 설치 방법                  | 용도                                      |
-| ------- | ---------- | -------------------------- | ----------------------------------------- |
-| Python  | 3.9 - 3.12 | `brew install python@3.11` | Docling SDK 실행 환경                     |
-| poppler | Any        | `brew install poppler`     | OCR 전략용 텍스트 레이어 추출 (pdftotext) |
-| jq      | Any        | `brew install jq`          | JSON 처리 (변환 결과 파싱)                |
-| lsof    | Any        | macOS 기본 설치됨          | docling-serve 포트 관리                   |
+| 의존성  | 필수 버전  | 설치 방법                  | 용도                                                           |
+| ------- | ---------- | -------------------------- | -------------------------------------------------------------- |
+| Python  | 3.9 - 3.12 | `brew install python@3.11` | Docling SDK 실행 환경                                          |
+| poppler | Any        | `brew install poppler`     | PDF 페이지 수 확인 (pdfinfo) 및 텍스트 레이어 추출 (pdftotext) |
+| jq      | Any        | `brew install jq`          | JSON 처리 (변환 결과 파싱)                                     |
+| lsof    | Any        | macOS 기본 설치됨          | docling-serve 포트 관리                                        |
 
 > ⚠️ **Python 3.13+는 지원하지 않습니다.** Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
 
@@ -409,6 +409,16 @@ const pdfParser = new PDFParser({
 
 ```bash
 brew install jq
+```
+
+### poppler를 찾을 수 없음
+
+**증상**: `poppler is not installed. Please install poppler using: brew install poppler`
+
+**해결**:
+
+```bash
+brew install poppler
 ```
 
 ### 포트 충돌
