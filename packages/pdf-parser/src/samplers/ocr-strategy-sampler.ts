@@ -1,10 +1,11 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { OcrStrategy } from '@heripo/model';
+import type { Bcp47LanguageTag, OcrStrategy } from '@heripo/model';
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { PageRenderer } from '../processors/page-renderer';
 
+import { normalizeToBcp47 } from '@heripo/model';
 import { LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod/v4';
@@ -151,7 +152,7 @@ export class OcrStrategySampler {
 
     // Step 4: Check each sample page for Korean-Hanja mix (early exit on detection)
     let sampledCount = 0;
-    let detectedLanguages: string[] | undefined;
+    const languageFrequency = new Map<Bcp47LanguageTag, number>();
     for (const idx of sampleIndices) {
       sampledCount++;
       const pageFile = renderResult.pageFiles[idx];
@@ -162,12 +163,15 @@ export class OcrStrategySampler {
         options,
       );
 
-      detectedLanguages = pageAnalysis.detectedLanguages;
+      for (const lang of pageAnalysis.detectedLanguages) {
+        languageFrequency.set(lang, (languageFrequency.get(lang) ?? 0) + 1);
+      }
 
       if (pageAnalysis.hasKoreanHanjaMix) {
         this.logger.info(
           `[OcrStrategySampler] Korean-Hanja mix detected on page ${idx + 1} → VLM strategy`,
         );
+        const detectedLanguages = this.aggregateLanguages(languageFrequency);
         return {
           method: 'vlm',
           detectedLanguages,
@@ -182,6 +186,7 @@ export class OcrStrategySampler {
     this.logger.info(
       '[OcrStrategySampler] No Korean-Hanja mix detected → ocrmac strategy',
     );
+    const detectedLanguages = this.aggregateLanguages(languageFrequency);
     return {
       method: 'ocrmac',
       detectedLanguages,
@@ -307,15 +312,19 @@ export class OcrStrategySampler {
 
   /**
    * Analyze a single sample page for Korean-Hanja mixed script and primary language.
+   * Normalizes raw VLM language responses to valid BCP 47 tags, filtering out invalid ones.
    *
-   * @returns Object with Korean-Hanja detection result and detected languages
+   * @returns Object with Korean-Hanja detection result and normalized detected languages
    */
   private async analyzeSamplePage(
     pageFile: string,
     pageNo: number,
     model: LanguageModel,
     options?: OcrStrategySamplerOptions,
-  ): Promise<{ hasKoreanHanjaMix: boolean; detectedLanguages: string[] }> {
+  ): Promise<{
+    hasKoreanHanjaMix: boolean;
+    detectedLanguages: Bcp47LanguageTag[];
+  }> {
     this.logger.debug(
       `[OcrStrategySampler] Analyzing page ${pageNo} for Korean-Hanja mix and language...`,
     );
@@ -356,13 +365,31 @@ export class OcrStrategySampler {
       detectedLanguages: string[];
     };
 
+    const normalizedLanguages = output.detectedLanguages
+      .map(normalizeToBcp47)
+      .filter((tag): tag is Bcp47LanguageTag => tag !== null);
+
     this.logger.debug(
-      `[OcrStrategySampler] Page ${pageNo}: hasKoreanHanjaMix=${output.hasKoreanHanjaMix}, detectedLanguages=${output.detectedLanguages.join(',')}`,
+      `[OcrStrategySampler] Page ${pageNo}: hasKoreanHanjaMix=${output.hasKoreanHanjaMix}, detectedLanguages=${normalizedLanguages.join(',')}`,
     );
 
     return {
       hasKoreanHanjaMix: output.hasKoreanHanjaMix,
-      detectedLanguages: output.detectedLanguages,
+      detectedLanguages: normalizedLanguages,
     };
+  }
+
+  /**
+   * Aggregate language frequency map into a sorted array.
+   * Returns languages sorted by frequency (descending), or undefined if empty.
+   */
+  private aggregateLanguages(
+    frequencyMap: Map<Bcp47LanguageTag, number>,
+  ): Bcp47LanguageTag[] | undefined {
+    if (frequencyMap.size === 0) return undefined;
+
+    return [...frequencyMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([lang]) => lang);
   }
 }
