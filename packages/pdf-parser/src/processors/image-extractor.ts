@@ -170,29 +170,29 @@ export class ImageExtractor {
     // Save JSON with extracted images (using jq for large files)
     const jsonPath = join(outputDir, `${baseName}.json`);
     try {
-      // Create pages directory for JSON images
-      const pagesDir = join(outputDir, 'pages');
-      if (!existsSync(pagesDir)) {
-        mkdirSync(pagesDir, { recursive: true });
+      // Create images directory for picture images from JSON
+      const imagesDir = join(outputDir, 'images');
+      if (!existsSync(imagesDir)) {
+        mkdirSync(imagesDir, { recursive: true });
       }
 
       // Step 1: Extract base64 images using jq (doesn't load full JSON into memory)
       const base64Images =
         await ImageExtractor.extractBase64ImagesFromJsonWithJq(jsonSourcePath);
 
-      // Step 2: Save each image to file
+      // Step 2: Save each picture image to file
       base64Images.forEach((base64Data, index) => {
         ImageExtractor.extractBase64ImageToFile(
           base64Data,
-          pagesDir,
+          imagesDir,
           index,
-          'page',
-          'pages',
+          'pic',
+          'images',
         );
       });
 
       logger.info(
-        `[PDFConverter] Extracted ${base64Images.length} images from JSON to ${pagesDir}`,
+        `[PDFConverter] Extracted ${base64Images.length} picture images from JSON to ${imagesDir}`,
       );
 
       // Step 3: Replace base64 images with file paths using jq
@@ -200,8 +200,8 @@ export class ImageExtractor {
         await ImageExtractor.replaceBase64ImagesInJsonWithJq(
           jsonSourcePath,
           jsonPath,
-          'pages',
-          'page',
+          'images',
+          'pic',
         );
 
       logger.info(

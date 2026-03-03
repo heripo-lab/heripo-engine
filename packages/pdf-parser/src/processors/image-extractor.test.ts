@@ -81,6 +81,16 @@ describe('ImageExtractor', () => {
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Extracting ZIP file'),
       );
+
+      // Verify JSON images use 'images' directory and 'pic' prefix
+      expect(jqReplaceBase64WithPaths).toHaveBeenCalledWith(
+        expect.any(String),
+        'images',
+        'pic',
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('picture images from JSON'),
+      );
     });
 
     test('should handle directory entries in zip', async () => {
@@ -507,6 +517,16 @@ describe('ImageExtractor', () => {
 
       expect(bufferFromSpy).toHaveBeenCalledWith('abc123', 'base64');
       expect(bufferFromSpy).toHaveBeenCalledWith('def456', 'base64');
+
+      // Verify images are saved to 'images' dir with 'pic' prefix
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('images/pic_0.png'),
+        expect.any(Buffer),
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('images/pic_1.png'),
+        expect.any(Buffer),
+      );
     });
 
     test('should handle zipfile error event', async () => {
