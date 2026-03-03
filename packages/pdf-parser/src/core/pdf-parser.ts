@@ -44,6 +44,8 @@ type Options = {
  *   - Install specific version: `pyenv install 3.12.0 && pyenv global 3.12.0`
  * - `jq` - JSON processor
  *   - Install: `brew install jq`
+ * - `poppler` - PDF text extraction tools (pdftotext, pdfinfo)
+ *   - Install: `brew install poppler`
  * - `lsof` - List open files (usually pre-installed on macOS)
  *
  * ## Initialization Process
@@ -119,6 +121,7 @@ export class PDFParser {
 
     this.checkOperatingSystem();
     this.checkJqInstalled();
+    this.checkPopplerInstalled();
     this.checkMacOSVersion();
 
     // Check ImageMagick/Ghostscript only for local server mode with fallback enabled
@@ -181,6 +184,16 @@ export class PDFParser {
     } catch {
       throw new Error(
         'jq is not installed. Please install jq using: brew install jq',
+      );
+    }
+  }
+
+  private checkPopplerInstalled(): void {
+    try {
+      execSync('which pdftotext', { stdio: 'ignore' });
+    } catch {
+      throw new Error(
+        'poppler is not installed. Please install poppler using: brew install poppler',
       );
     }
   }

@@ -192,6 +192,20 @@ describe('PDFParser', () => {
     );
   });
 
+  test('throws when poppler is not installed', async () => {
+    vi.mocked(platform).mockReturnValue('darwin');
+    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
+      if (cmd.startsWith('which jq')) return '';
+      if (cmd.startsWith('which pdftotext')) throw new Error('not found');
+      return '';
+    });
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await expect(parser.init()).rejects.toThrow(
+      'poppler is not installed. Please install poppler using: brew install poppler',
+    );
+  });
+
   test('throws when macOS version is below 10.15', async () => {
     vi.mocked(platform).mockReturnValue('darwin');
     vi.mocked(execSync as any).mockImplementation((cmd: string) => {

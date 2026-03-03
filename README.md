@@ -155,6 +155,7 @@ For detailed architecture explanation, see [docs/architecture.md](./docs/archite
 - **pnpm** >= 9.0.0
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+ is not supported)
 - **jq** (JSON processing tool)
+- **poppler** (PDF text extraction tools)
 
 ```bash
 # Install Python 3.11 (recommended)
@@ -162,6 +163,9 @@ brew install python@3.11
 
 # Install jq
 brew install jq
+
+# Install poppler
+brew install poppler
 
 # Install Node.js and pnpm
 brew install node

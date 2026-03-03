@@ -155,6 +155,7 @@ heripo-engine/
 - **pnpm** >= 9.0.0
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+는 지원하지 않음)
 - **jq** (JSON 처리 도구)
+- **poppler** (PDF 텍스트 추출 도구)
 
 ```bash
 # Python 3.11 설치 (권장)
@@ -162,6 +163,9 @@ brew install python@3.11
 
 # jq 설치
 brew install jq
+
+# poppler 설치
+brew install poppler
 
 # Node.js 및 pnpm 설치
 brew install node
