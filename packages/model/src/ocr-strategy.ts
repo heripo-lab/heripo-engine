@@ -1,3 +1,5 @@
+import type { Bcp47LanguageTag } from './bcp47-language-tag';
+
 /**
  * Result of the OCR strategy sampling phase.
  * Determines whether to use ocrmac (standard Docling pipeline)
@@ -10,8 +12,8 @@ export interface OcrStrategy {
   /** OCR language weights for ocrmac (e.g., ['ko-KR', 'en-US'] or ['zh-Hant', 'ko-KR']) */
   ocrLanguages?: string[];
 
-  /** BCP 47 language tags detected during sampling (e.g., ['ko-KR', 'en-US']) */
-  detectedLanguages?: string[];
+  /** BCP 47 language tags detected during sampling, ordered by frequency (e.g., ['ko-KR', 'en-US']) */
+  detectedLanguages?: Bcp47LanguageTag[];
 
   /** Human-readable explanation of the decision */
   reason: string;

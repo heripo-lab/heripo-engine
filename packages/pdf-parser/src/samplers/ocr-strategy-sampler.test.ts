@@ -776,7 +776,105 @@ describe('OcrStrategySampler', () => {
       expect(result.detectedLanguages).toEqual(['en-US']);
     });
 
-    test('uses last sampled page languages when no Korean-Hanja mix', async () => {
+    test('aggregates languages by frequency across all sampled pages', async () => {
+      mockPageRenderer = createMockPageRenderer(20);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      // 14 pages return ko-KR, 1 page returns en-US
+      for (let i = 0; i < 14; i++) {
+        mockCallVision.mockResolvedValueOnce(
+          createMockKoreanHanjaMixResult(false, ['ko-KR']),
+        );
+      }
+      mockCallVision.mockResolvedValueOnce(
+        createMockKoreanHanjaMixResult(false, ['en-US']),
+      );
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      // ko-KR should come first (14 occurrences vs 1 for en-US)
+      expect(result.detectedLanguages).toEqual(['ko-KR', 'en-US']);
+    });
+
+    test('filters out invalid language tags like und', async () => {
+      mockPageRenderer = createMockPageRenderer(3);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      mockCallVision
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['en-US']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['en-US']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['und']));
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      // und should be filtered out, only en-US remains
+      expect(result.detectedLanguages).toEqual(['en-US']);
+    });
+
+    test('normalizes bare language codes to BCP 47 tags', async () => {
+      mockPageRenderer = createMockPageRenderer(3);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      mockCallVision
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['en']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko']))
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['en']));
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      // en → en-US (2 times), ko → ko-KR (1 time)
+      expect(result.detectedLanguages).toEqual(['en-US', 'ko-KR']);
+    });
+
+    test('returns undefined detectedLanguages when all pages return invalid tags', async () => {
+      mockPageRenderer = createMockPageRenderer(3);
+      sampler = new OcrStrategySampler(
+        mockLogger,
+        mockPageRenderer as any,
+        mockTextExtractor as any,
+      );
+
+      mockCallVision
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['und']))
+        .mockResolvedValueOnce(
+          createMockKoreanHanjaMixResult(false, ['unknown']),
+        )
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['und']));
+
+      const result = await sampler.sample(
+        '/tmp/test.pdf',
+        '/tmp/output',
+        mockModel,
+      );
+
+      expect(result.detectedLanguages).toBeUndefined();
+    });
+
+    test('aggregates languages on early exit (Korean-Hanja mix detected)', async () => {
       mockPageRenderer = createMockPageRenderer(20);
       sampler = new OcrStrategySampler(
         mockLogger,
@@ -785,23 +883,10 @@ describe('OcrStrategySampler', () => {
       );
 
       mockCallVision
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
-        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(false, ['ko-KR']))
         .mockResolvedValueOnce(
-          createMockKoreanHanjaMixResult(false, ['en-US']),
-        );
+          createMockKoreanHanjaMixResult(false, ['ko-KR', 'en-US']),
+        )
+        .mockResolvedValueOnce(createMockKoreanHanjaMixResult(true, ['ko-KR']));
 
       const result = await sampler.sample(
         '/tmp/test.pdf',
@@ -809,7 +894,9 @@ describe('OcrStrategySampler', () => {
         mockModel,
       );
 
-      expect(result.detectedLanguages).toEqual(['en-US']);
+      expect(result.method).toBe('vlm');
+      // ko-KR appears on both pages (2 times), en-US on first page (1 time)
+      expect(result.detectedLanguages).toEqual(['ko-KR', 'en-US']);
     });
 
     test('detectedLanguages is undefined when no pages found', async () => {
