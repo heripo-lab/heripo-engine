@@ -1,6 +1,6 @@
 # Demo Web - heripo engine Web Demo
 
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 
 > Next.js web application for visualizing heripo engine's PDF processing capabilities
@@ -70,7 +70,7 @@ This application depends on `@heripo/pdf-parser`, which has specific system requ
 
 ### Node.js and Package Manager
 
-- **Node.js** >= 22.0.0
+- **Node.js** >= 24.0.0
 - **pnpm** >= 9.0.0
 
 ### LLM API Keys

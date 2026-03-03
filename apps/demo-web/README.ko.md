@@ -1,6 +1,6 @@
 # Demo Web - heripo engine 웹 데모
 
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 
 > heripo engine의 PDF 처리 기능을 시각화하는 Next.js 웹 애플리케이션
@@ -70,7 +70,7 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 
 ### Node.js 및 패키지 관리자
 
-- **Node.js** >= 22.0.0
+- **Node.js** >= 24.0.0
 - **pnpm** >= 9.0.0
 
 ### LLM API 키
