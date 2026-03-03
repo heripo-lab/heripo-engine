@@ -49,6 +49,7 @@ export type PDFConvertOptions = Omit<
   | 'accelerator_options'
   | 'ocr_options'
   | 'generate_picture_images'
+  | 'generate_page_images'
   | 'images_scale'
   | 'force_ocr'
   | 'pipeline'
@@ -530,6 +531,9 @@ export class PDFConverter {
     try {
       await this.processConvertedFiles(zipPath, extractDir, outputDir);
 
+      // Render page images using ImageMagick (replaces Docling's page image generation)
+      await this.renderPageImages(url, outputDir);
+
       // Check abort before callback
       if (abortSignal?.aborted) {
         this.logger.info('[PDFConverter] Conversion aborted before callback');
@@ -596,6 +600,7 @@ export class PDFConverter {
         framework: 'livetext',
       },
       generate_picture_images: true,
+      generate_page_images: false, // Page images are rendered by PageRenderer (ImageMagick) after conversion
       images_scale: 2.0,
       /**
        * While disabling this option yields the most accurate text extraction for readable PDFs,
@@ -794,6 +799,50 @@ export class PDFConverter {
       zipPath,
       extractDir,
       outputDir,
+    );
+  }
+
+  /**
+   * Render page images from the source PDF using ImageMagick and update result.json.
+   * Replaces Docling's generate_page_images which fails on large PDFs
+   * due to memory limits when embedding all page images as base64.
+   */
+  private async renderPageImages(
+    url: string,
+    outputDir: string,
+  ): Promise<void> {
+    if (!url.startsWith('file://')) {
+      this.logger.warn(
+        '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
+      );
+      return;
+    }
+
+    const pdfPath = url.slice(7);
+    this.logger.info(
+      '[PDFConverter] Rendering page images with ImageMagick...',
+    );
+
+    const renderer = new PageRenderer(this.logger);
+    const renderResult = await renderer.renderPages(pdfPath, outputDir);
+
+    // Update result.json with page image URIs
+    const resultPath = join(outputDir, 'result.json');
+    const doc = JSON.parse(readFileSync(resultPath, 'utf-8'));
+
+    for (const page of Object.values(doc.pages) as any[]) {
+      const pageNo = page.page_no as number;
+      const fileIndex = pageNo - 1;
+      if (fileIndex >= 0 && fileIndex < renderResult.pageCount) {
+        page.image.uri = `pages/page_${fileIndex}.png`;
+        page.image.mimetype = 'image/png';
+        page.image.dpi = 300;
+      }
+    }
+
+    await writeFile(resultPath, JSON.stringify(doc, null, 2));
+    this.logger.info(
+      `[PDFConverter] Rendered ${renderResult.pageCount} page images`,
     );
   }
 }

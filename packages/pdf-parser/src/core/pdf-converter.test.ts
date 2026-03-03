@@ -3,7 +3,7 @@ import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
 import type { Readable } from 'node:stream';
 
 import { omit } from 'es-toolkit';
-import { createWriteStream, existsSync, rmSync } from 'node:fs';
+import { createWriteStream, existsSync, readFileSync, rmSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
+import { PageRenderer } from '../processors/page-renderer';
 import { LocalFileServer } from '../utils/local-file-server';
 import { ImagePdfConverter } from './image-pdf-converter';
 import { PDFConverter } from './pdf-converter';
@@ -30,6 +31,7 @@ vi.mock('../utils/local-file-server', () => ({
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
+  readFileSync: vi.fn(),
   rmSync: vi.fn(),
   createWriteStream: vi.fn(),
 }));
@@ -50,6 +52,10 @@ vi.mock('../processors/image-extractor', () => ({
   ImageExtractor: {
     extractAndSaveDocumentsFromZip: vi.fn(),
   },
+}));
+
+vi.mock('../processors/page-renderer', () => ({
+  PageRenderer: vi.fn(),
 }));
 
 describe('PDFConverter', () => {
@@ -98,6 +104,15 @@ describe('PDFConverter', () => {
       return {
         convert: vi.fn().mockResolvedValue('/tmp/image.pdf'),
         cleanup: vi.fn(),
+      } as any;
+    });
+
+    // Mock PageRenderer (used by renderPageImages)
+    vi.mocked(PageRenderer).mockImplementation(function () {
+      return {
+        renderPages: vi
+          .fn()
+          .mockResolvedValue({ pageCount: 3, pagesDir: '', pageFiles: [] }),
       } as any;
     });
   });
@@ -149,6 +164,7 @@ describe('PDFConverter', () => {
             framework: 'livetext',
           },
           generate_picture_images: true,
+          generate_page_images: false,
           images_scale: 2.0,
           force_ocr: true,
           accelerator_options: {
@@ -189,6 +205,7 @@ describe('PDFConverter', () => {
           framework: 'livetext',
         },
         generate_picture_images: true,
+        generate_page_images: false,
         images_scale: 2.0,
         force_ocr: true,
         accelerator_options: {
@@ -1193,6 +1210,9 @@ describe('PDFConverter', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
       vi.mocked(existsSync).mockReturnValue(false);
+      vi.mocked(readFileSync).mockReturnValue(
+        JSON.stringify({ pages: { '1': { page_no: 1, image: {} } } }),
+      );
 
       const converterWithFallback = new PDFConverter(logger, client, true);
 
@@ -1318,6 +1338,9 @@ describe('PDFConverter', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
       vi.mocked(existsSync).mockReturnValue(false);
+      vi.mocked(readFileSync).mockReturnValue(
+        JSON.stringify({ pages: { '1': { page_no: 1, image: {} } } }),
+      );
 
       const converterWithFallback = new PDFConverter(logger, client, true);
 
@@ -1335,6 +1358,214 @@ describe('PDFConverter', () => {
     });
   });
 
+  describe('renderPageImages', () => {
+    test('should render page images and update result.json for file:// URLs', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockDoc = {
+        pages: {
+          '1': { page_no: 1, image: { uri: '', mimetype: '', dpi: 0 } },
+          '2': { page_no: 2, image: { uri: '', mimetype: '', dpi: 0 } },
+        },
+      };
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(mockDoc));
+
+      const mockRenderPages = vi
+        .fn()
+        .mockResolvedValue({ pageCount: 2, pagesDir: '', pageFiles: [] });
+      vi.mocked(PageRenderer).mockImplementation(function () {
+        return { renderPages: mockRenderPages } as any;
+      });
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report-render',
+        onComplete,
+        false,
+        {},
+      );
+
+      expect(mockRenderPages).toHaveBeenCalledWith(
+        '/test/doc.pdf',
+        '/test/cwd/output/report-render',
+      );
+
+      expect(writeFile).toHaveBeenCalledWith(
+        '/test/cwd/output/report-render/result.json',
+        expect.stringContaining('"pages/page_0.png"'),
+      );
+
+      expect(logger.info).toHaveBeenCalledWith(
+        '[PDFConverter] Rendered 2 page images',
+      );
+    });
+
+    test('should skip rendering and log warning for http:// URLs', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      vi.mocked(PageRenderer).mockClear();
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report-skip-render',
+        onComplete,
+        false,
+        {},
+      );
+
+      expect(PageRenderer).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
+      );
+    });
+
+    test('should update page image URIs with correct indices', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const mockDoc = {
+        pages: {
+          '1': { page_no: 1, image: { uri: '', mimetype: '', dpi: 0 } },
+          '2': { page_no: 2, image: { uri: '', mimetype: '', dpi: 0 } },
+          '3': { page_no: 3, image: { uri: '', mimetype: '', dpi: 0 } },
+        },
+      };
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(mockDoc));
+
+      vi.mocked(PageRenderer).mockImplementation(function () {
+        return {
+          renderPages: vi
+            .fn()
+            .mockResolvedValue({ pageCount: 3, pagesDir: '', pageFiles: [] }),
+        } as any;
+      });
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report-uris',
+        onComplete,
+        false,
+        {},
+      );
+
+      const writeCall = vi
+        .mocked(writeFile)
+        .mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' && call[0].includes('result.json'),
+        );
+      expect(writeCall).toBeDefined();
+
+      const savedDoc = JSON.parse(writeCall![1] as string);
+      expect(savedDoc.pages['1'].image.uri).toBe('pages/page_0.png');
+      expect(savedDoc.pages['1'].image.mimetype).toBe('image/png');
+      expect(savedDoc.pages['1'].image.dpi).toBe(300);
+      expect(savedDoc.pages['2'].image.uri).toBe('pages/page_1.png');
+      expect(savedDoc.pages['3'].image.uri).toBe('pages/page_2.png');
+    });
+
+    test('should skip pages with page_no exceeding rendered page count', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      // Page 3 has page_no=3 but only 2 pages were rendered
+      const mockDoc = {
+        pages: {
+          '1': { page_no: 1, image: { uri: 'old', mimetype: 'old', dpi: 0 } },
+          '2': { page_no: 2, image: { uri: 'old', mimetype: 'old', dpi: 0 } },
+          '3': { page_no: 3, image: { uri: 'old', mimetype: 'old', dpi: 0 } },
+        },
+      };
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(mockDoc));
+
+      vi.mocked(PageRenderer).mockImplementation(function () {
+        return {
+          renderPages: vi
+            .fn()
+            .mockResolvedValue({ pageCount: 2, pagesDir: '', pageFiles: [] }),
+        } as any;
+      });
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report-skip-excess',
+        onComplete,
+        false,
+        {},
+      );
+
+      const writeCall = vi
+        .mocked(writeFile)
+        .mock.calls.find(
+          (call) =>
+            typeof call[0] === 'string' && call[0].includes('result.json'),
+        );
+      expect(writeCall).toBeDefined();
+
+      const savedDoc = JSON.parse(writeCall![1] as string);
+      // Pages 1-2 should be updated
+      expect(savedDoc.pages['1'].image.uri).toBe('pages/page_0.png');
+      expect(savedDoc.pages['2'].image.uri).toBe('pages/page_1.png');
+      // Page 3 should remain unchanged (exceeds rendered count)
+      expect(savedDoc.pages['3'].image.uri).toBe('old');
+      expect(savedDoc.pages['3'].image.mimetype).toBe('old');
+    });
+  });
+
   describe('forceImagePdf', () => {
     test('should convert via image PDF when forceImagePdf is true', async () => {
       const mockTask = createMockTask();
@@ -1344,6 +1575,9 @@ describe('PDFConverter', () => {
         fileStream: {} as Readable,
       });
       vi.mocked(existsSync).mockReturnValue(false);
+      vi.mocked(readFileSync).mockReturnValue(
+        JSON.stringify({ pages: { '1': { page_no: 1, image: {} } } }),
+      );
 
       await converter.convert(
         'http://test.com/doc.pdf',
