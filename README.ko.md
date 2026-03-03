@@ -3,7 +3,7 @@
 > 고고학 발굴조사보고서 PDF에서 구조화된 데이터를 추출하는 TypeScript 라이브러리
 
 [![CI](https://github.com/heripo-lab/heripo-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/heripo-lab/heripo-engine/actions/workflows/ci.yml)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/Python-3.9--3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![pnpm](https://img.shields.io/badge/pnpm-%3E%3D9-orange)](https://pnpm.io)
 ![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
@@ -151,7 +151,7 @@ heripo-engine/
 ### 시스템 요구사항
 
 - **macOS** (Apple Silicon 또는 Intel)
-- **Node.js** >= 22.0.0
+- **Node.js** >= 24.0.0
 - **pnpm** >= 9.0.0
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+는 지원하지 않음)
 - **jq** (JSON 처리 도구)

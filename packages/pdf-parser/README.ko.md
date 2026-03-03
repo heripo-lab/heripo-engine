@@ -3,7 +3,7 @@
 > PDF 파싱 라이브러리 - Docling SDK를 활용한 OCR 지원
 
 [![npm version](https://img.shields.io/npm/v/@heripo/pdf-parser.svg)](https://www.npmjs.com/package/@heripo/pdf-parser)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Python](https://img.shields.io/badge/Python-3.9--3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 ![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
@@ -46,7 +46,7 @@
 
 ### 필수 의존성
 
-#### 1. Node.js >= 22.0.0
+#### 1. Node.js >= 24.0.0
 
 ```bash
 brew install node
