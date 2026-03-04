@@ -6,8 +6,8 @@ import { join } from 'node:path';
 
 import { PAGE_RENDERING } from '../config/constants.js';
 
-/** Interval for progress polling in milliseconds */
-const PROGRESS_POLL_INTERVAL_MS = 2000;
+/** Minimum percentage increment between progress log messages */
+const PROGRESS_LOG_PERCENT_STEP = 10;
 
 /** Result of page rendering */
 export interface PageRenderResult {
@@ -33,10 +33,15 @@ export interface PageRendererOptions {
  * - Ghostscript (`brew install ghostscript`)
  */
 export class PageRenderer {
+  private lastLoggedPercent = 0;
+
   constructor(private readonly logger: LoggerMethods) {}
 
   /**
    * Render all pages of a PDF to individual PNG files.
+   *
+   * Uses per-page rendering (`magick 'input.pdf[N]'`) when page count is known,
+   * limiting peak memory to ~15MB/page instead of loading all pages at once.
    *
    * @param pdfPath - Absolute path to the source PDF file
    * @param outputDir - Directory where pages/ subdirectory will be created
@@ -61,55 +66,59 @@ export class PageRenderer {
       this.logger.info(
         `[PageRenderer] Rendering ${totalPages} pages at ${dpi} DPI...`,
       );
-    } else {
-      this.logger.info(`[PageRenderer] Rendering PDF at ${dpi} DPI...`);
-    }
+      this.lastLoggedPercent = 0;
 
-    const outputPattern = join(pagesDir, 'page_%d.png');
+      for (let i = 0; i < totalPages; i++) {
+        const result = await spawnAsync(
+          'magick',
+          [
+            '-density',
+            dpi.toString(),
+            `${pdfPath}[${i}]`,
+            '-background',
+            'white',
+            '-alpha',
+            'remove',
+            '-alpha',
+            'off',
+            join(pagesDir, `page_${i}.png`),
+          ],
+          { captureStdout: false },
+        );
 
-    // Poll output directory for progress during rendering
-    let progressInterval: ReturnType<typeof setInterval> | null = null;
-    if (totalPages > 0) {
-      let lastLoggedCount = 0;
-      progressInterval = setInterval(() => {
-        try {
-          const rendered = readdirSync(pagesDir).filter(
-            (f) => f.startsWith('page_') && f.endsWith('.png'),
-          ).length;
-          if (rendered > 0 && rendered !== lastLoggedCount) {
-            lastLoggedCount = rendered;
-            this.logger.info(
-              `[PageRenderer] Rendering pages: ${rendered}/${totalPages}`,
-            );
-          }
-        } catch {
-          /* ignore read errors during rendering */
+        if (result.code !== 0) {
+          throw new Error(
+            `[PageRenderer] Failed to render page ${i + 1}/${totalPages}: ${result.stderr || 'Unknown error'}`,
+          );
         }
-      }, PROGRESS_POLL_INTERVAL_MS);
-    }
 
-    try {
-      const result = await spawnAsync('magick', [
-        '-density',
-        dpi.toString(),
-        pdfPath,
-        '-background',
-        'white',
-        '-alpha',
-        'remove',
-        '-alpha',
-        'off',
-        outputPattern,
-      ]);
+        this.logProgress(i + 1, totalPages);
+      }
+    } else {
+      // Fallback: render all pages at once when pdfinfo is unavailable
+      this.logger.info(`[PageRenderer] Rendering PDF at ${dpi} DPI...`);
+
+      const result = await spawnAsync(
+        'magick',
+        [
+          '-density',
+          dpi.toString(),
+          pdfPath,
+          '-background',
+          'white',
+          '-alpha',
+          'remove',
+          '-alpha',
+          'off',
+          join(pagesDir, 'page_%d.png'),
+        ],
+        { captureStdout: false },
+      );
 
       if (result.code !== 0) {
         throw new Error(
           `[PageRenderer] Failed to render PDF pages: ${result.stderr || 'Unknown error'}`,
         );
-      }
-    } finally {
-      if (progressInterval) {
-        clearInterval(progressInterval);
       }
     }
 
@@ -131,6 +140,22 @@ export class PageRenderer {
       pagesDir,
       pageFiles,
     };
+  }
+
+  /**
+   * Log rendering progress at appropriate intervals (every 10%).
+   */
+  private logProgress(current: number, total: number): void {
+    const percent = Math.floor((current / total) * 100);
+    if (
+      percent >= this.lastLoggedPercent + PROGRESS_LOG_PERCENT_STEP ||
+      current === total
+    ) {
+      this.lastLoggedPercent = percent;
+      this.logger.info(
+        `[PageRenderer] Rendering pages: ${current}/${total} (${percent}%)`,
+      );
+    }
   }
 
   /**
