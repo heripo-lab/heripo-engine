@@ -1,17 +1,36 @@
 import type { ChildProcess } from 'node:child_process';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 
 import { spawn } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
+import { rename } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import {
   jqExtractBase64PngStrings,
+  jqExtractBase64PngStringsStreaming,
   jqReplaceBase64WithPaths,
+  jqReplaceBase64WithPathsToFile,
   runJqFileJson,
+  runJqFileLines,
+  runJqFileToFile,
 } from './jq';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
+}));
+
+vi.mock('node:fs', () => ({
+  createWriteStream: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  rename: vi.fn(),
+}));
+
+vi.mock('node:stream/promises', () => ({
+  pipeline: vi.fn(),
 }));
 
 describe('jq utils', () => {
@@ -19,12 +38,14 @@ describe('jq utils', () => {
     stdout: {
       setEncoding: ReturnType<typeof vi.fn>;
       on: ReturnType<typeof vi.fn>;
+      pipe?: ReturnType<typeof vi.fn>;
     };
     stderr: {
       setEncoding: ReturnType<typeof vi.fn>;
       on: ReturnType<typeof vi.fn>;
     };
     on: ReturnType<typeof vi.fn>;
+    exitCode: number | null;
   };
   let stdoutHandlers: Map<string, (chunk: string) => void>;
   let stderrHandlers: Map<string, (chunk: string) => void>;
@@ -38,19 +59,20 @@ describe('jq utils', () => {
     mockChild = {
       stdout: {
         setEncoding: vi.fn(),
-        on: vi.fn((event, handler) => {
+        on: vi.fn((event: string, handler: (chunk: string) => void) => {
           stdoutHandlers.set(event, handler);
         }),
       },
       stderr: {
         setEncoding: vi.fn(),
-        on: vi.fn((event, handler) => {
+        on: vi.fn((event: string, handler: (chunk: string) => void) => {
           stderrHandlers.set(event, handler);
         }),
       },
-      on: vi.fn((event, handler) => {
+      on: vi.fn((event: string, handler: (arg: any) => void) => {
         childHandlers.set(event, handler);
       }),
+      exitCode: null,
     };
 
     vi.mocked(spawn).mockReturnValue(
@@ -237,6 +259,231 @@ describe('jq utils', () => {
     });
   });
 
+  describe('runJqFileToFile', () => {
+    test('should pipe jq stdout to output file', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      // Simulate jq exiting successfully
+      mockChild.exitCode = 0;
+      childHandlers.get('close')?.(0);
+
+      await promise;
+
+      expect(spawn).toHaveBeenCalledWith(
+        'jq',
+        ['.data', '/input.json'],
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
+      );
+      expect(createWriteStream).toHaveBeenCalledWith('/output.json');
+      expect(pipeline).toHaveBeenCalledWith(mockChild.stdout, mockWs);
+    });
+
+    test('should reject when jq exits with non-zero code', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile(
+        '.invalid',
+        '/input.json',
+        '/output.json',
+      );
+
+      stderrHandlers.get('data')?.('jq error\n');
+      childHandlers.get('close')?.(1);
+
+      await expect(promise).rejects.toThrow(
+        'jq exited with code 1. Stderr: jq error\n',
+      );
+    });
+
+    test('should reject when spawn emits error', async () => {
+      const mockWs = { destroy: vi.fn() } as unknown as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockImplementation(() => new Promise(() => {}));
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      childHandlers.get('error')?.(new Error('spawn ENOENT'));
+
+      await expect(promise).rejects.toThrow('spawn ENOENT');
+    });
+
+    test('should reject when pipeline fails', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockRejectedValue(new Error('pipe error'));
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      await expect(promise).rejects.toThrow('pipe error');
+    });
+
+    test('should resolve via pipeline when exitCode is already 0', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+
+      // Simulate jq already exited before pipeline resolves
+      mockChild.exitCode = 0;
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      // The close handler also fires
+      childHandlers.get('close')?.(0);
+
+      await promise;
+    });
+
+    test('should reject via pipeline when exitCode is non-zero', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+
+      mockChild.exitCode = 1;
+      stderrHandlers.get('data')?.('error msg');
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      childHandlers.get('close')?.(1);
+
+      await expect(promise).rejects.toThrow('jq exited with code 1');
+    });
+
+    test('should reject via pipeline when exitCode is non-zero without stderr', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      // Set exitCode after handlers are registered, no stderr data sent
+      mockChild.exitCode = 1;
+
+      await expect(promise).rejects.toThrow('jq exited with code 1. ');
+    });
+
+    test('should reject via pipeline with stderr when exitCode is non-zero', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      // Send stderr data and set exitCode AFTER handlers are registered
+      stderrHandlers.get('data')?.('pipeline stderr');
+      mockChild.exitCode = 2;
+
+      await expect(promise).rejects.toThrow(
+        'jq exited with code 2. Stderr: pipeline stderr',
+      );
+    });
+  });
+
+  describe('runJqFileLines', () => {
+    test('should process each line via onLine callback', async () => {
+      const lines: string[] = [];
+      const promise = runJqFileLines('.[]', '/input.json', (line) => {
+        lines.push(line);
+      });
+
+      stdoutHandlers.get('data')?.('line1\nline2\nline3\n');
+      childHandlers.get('close')?.(0);
+
+      await promise;
+
+      expect(lines).toEqual(['line1', 'line2', 'line3']);
+      expect(spawn).toHaveBeenCalledWith(
+        'jq',
+        ['-r', '.[]', '/input.json'],
+        expect.objectContaining({ stdio: ['ignore', 'pipe', 'pipe'] }),
+      );
+    });
+
+    test('should handle data arriving across chunk boundaries', async () => {
+      const lines: string[] = [];
+      const promise = runJqFileLines('.[]', '/input.json', (line) => {
+        lines.push(line);
+      });
+
+      stdoutHandlers.get('data')?.('par');
+      stdoutHandlers.get('data')?.('tial_line\nsecond');
+      stdoutHandlers.get('data')?.('_line\n');
+      childHandlers.get('close')?.(0);
+
+      await promise;
+
+      expect(lines).toEqual(['partial_line', 'second_line']);
+    });
+
+    test('should process remaining buffer on close', async () => {
+      const lines: string[] = [];
+      const promise = runJqFileLines('.[]', '/input.json', (line) => {
+        lines.push(line);
+      });
+
+      stdoutHandlers.get('data')?.('no_trailing_newline');
+      childHandlers.get('close')?.(0);
+
+      await promise;
+
+      expect(lines).toEqual(['no_trailing_newline']);
+    });
+
+    test('should skip empty lines', async () => {
+      const lines: string[] = [];
+      const promise = runJqFileLines('.[]', '/input.json', (line) => {
+        lines.push(line);
+      });
+
+      stdoutHandlers.get('data')?.('a\n\nb\n');
+      childHandlers.get('close')?.(0);
+
+      await promise;
+
+      expect(lines).toEqual(['a', 'b']);
+    });
+
+    test('should reject when jq exits with non-zero code', async () => {
+      const lines: string[] = [];
+      const promise = runJqFileLines('.[]', '/input.json', (line) => {
+        lines.push(line);
+      });
+
+      stderrHandlers.get('data')?.('parse error');
+      childHandlers.get('close')?.(1);
+
+      await expect(promise).rejects.toThrow(
+        'jq exited with code 1. Stderr: parse error',
+      );
+    });
+
+    test('should reject when jq exits with non-zero code without stderr', async () => {
+      const lines: string[] = [];
+      const promise = runJqFileLines('.[]', '/input.json', (line) => {
+        lines.push(line);
+      });
+
+      childHandlers.get('close')?.(1);
+
+      await expect(promise).rejects.toThrow('jq exited with code 1. ');
+    });
+
+    test('should reject when spawn emits error', async () => {
+      const promise = runJqFileLines('.[]', '/input.json', vi.fn());
+
+      childHandlers.get('error')?.(new Error('spawn failed'));
+
+      await expect(promise).rejects.toThrow('spawn failed');
+    });
+  });
+
   describe('jqExtractBase64PngStrings', () => {
     test('should extract base64 PNG strings from JSON file', async () => {
       const promise = jqExtractBase64PngStrings('/path/to/file.json');
@@ -268,6 +515,57 @@ describe('jq utils', () => {
       const jqProgram = vi.mocked(spawn).mock.calls[0][1][1];
       expect(jqProgram).toContain('select(type == "string"');
       expect(jqProgram).toContain('startswith("data:image/png;base64")');
+    });
+  });
+
+  describe('jqExtractBase64PngStringsStreaming', () => {
+    test('should stream each base64 image to onImage callback with index', async () => {
+      const images: Array<{ data: string; index: number }> = [];
+      const promise = jqExtractBase64PngStringsStreaming(
+        '/path/to/file.json',
+        (data, index) => {
+          images.push({ data, index });
+        },
+      );
+
+      const stdoutHandler = stdoutHandlers.get('data');
+      const closeHandler = childHandlers.get('close');
+
+      stdoutHandler?.('data:image/png;base64,abc123\n');
+      stdoutHandler?.('data:image/png;base64,def456\n');
+      closeHandler?.(0);
+
+      const count = await promise;
+
+      expect(count).toBe(2);
+      expect(images).toEqual([
+        { data: 'data:image/png;base64,abc123', index: 0 },
+        { data: 'data:image/png;base64,def456', index: 1 },
+      ]);
+
+      // Should use -r flag for raw output
+      expect(spawn).toHaveBeenCalledWith(
+        'jq',
+        expect.arrayContaining(['-r', expect.any(String)]),
+        expect.any(Object),
+      );
+    });
+
+    test('should return 0 when no images found', async () => {
+      const images: Array<{ data: string; index: number }> = [];
+      const promise = jqExtractBase64PngStringsStreaming(
+        '/path/to/file.json',
+        (data, index) => {
+          images.push({ data, index });
+        },
+      );
+
+      childHandlers.get('close')?.(0);
+
+      const count = await promise;
+
+      expect(count).toBe(0);
+      expect(images).toEqual([]);
     });
   });
 
@@ -305,6 +603,53 @@ describe('jq utils', () => {
       expect(jqProgram).toContain('reduce paths');
       expect(jqProgram).toContain('images/img_');
       expect(jqProgram).toContain('.counter');
+    });
+  });
+
+  describe('jqReplaceBase64WithPathsToFile', () => {
+    test('should pipe jq output to temp file and rename to target', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
+
+      const promise = jqReplaceBase64WithPathsToFile(
+        '/input.json',
+        '/output.json',
+        'images',
+        'pic',
+      );
+
+      mockChild.exitCode = 0;
+      childHandlers.get('close')?.(0);
+
+      await promise;
+
+      expect(createWriteStream).toHaveBeenCalledWith('/output.json.tmp');
+      expect(rename).toHaveBeenCalledWith('/output.json.tmp', '/output.json');
+
+      const jqProgram = vi.mocked(spawn).mock.calls[0][1][0];
+      expect(jqProgram).toContain('reduce paths');
+      expect(jqProgram).toContain('images/pic_');
+      expect(jqProgram).toContain('.data');
+    });
+
+    test('should reject when jq fails', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = jqReplaceBase64WithPathsToFile(
+        '/input.json',
+        '/output.json',
+        'images',
+        'pic',
+      );
+
+      stderrHandlers.get('data')?.('error');
+      childHandlers.get('close')?.(1);
+
+      await expect(promise).rejects.toThrow('jq exited with code 1');
     });
   });
 });

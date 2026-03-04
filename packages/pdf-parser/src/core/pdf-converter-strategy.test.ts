@@ -2,25 +2,30 @@ import type { LoggerMethods } from '@heripo/logger';
 import type { DoclingAPIClient } from 'docling-sdk';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
-import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, rmSync } from 'node:fs';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
+import { runJqFileJson } from '../utils/jq';
 import { PDFConverter } from './pdf-converter';
 
 vi.mock('node:fs', () => ({
   copyFileSync: vi.fn(),
   existsSync: vi.fn(),
-  readFileSync: vi.fn(),
   rmSync: vi.fn(),
   createWriteStream: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
   join: vi.fn((...args: string[]) => args.join('/')),
+}));
+
+vi.mock('../utils/jq', () => ({
+  runJqFileToFile: vi.fn(),
+  runJqFileJson: vi.fn(),
 }));
 
 vi.mock('../samplers/ocr-strategy-sampler', () => ({
@@ -110,10 +115,8 @@ describe('PDFConverter.convertWithStrategy', () => {
       return mockTextExtractorInstance as any;
     });
 
-    // Default: readFileSync returns a doc with 1 page for wrappedCallback
-    vi.mocked(readFileSync).mockReturnValue(
-      Buffer.from(JSON.stringify({ pages: { '1': { page_no: 1 } } })),
-    );
+    // Default: runJqFileJson returns page count of 1 for wrappedCallback
+    vi.mocked(runJqFileJson).mockResolvedValue(1);
   });
 
   describe('strategy determination', () => {
@@ -1090,13 +1093,7 @@ describe('PDFConverter.convertWithStrategy', () => {
       pageTexts.set(1, 'extracted text page 1');
       mockTextExtractorInstance.extractText.mockResolvedValue(pageTexts);
 
-      vi.mocked(readFileSync).mockReturnValue(
-        Buffer.from(
-          JSON.stringify({
-            pages: { '1': { page_no: 1 }, '2': { page_no: 2 } },
-          }),
-        ),
-      );
+      vi.mocked(runJqFileJson).mockResolvedValue(2);
 
       const convertSpy = vi
         .spyOn(converter, 'convert')
@@ -1166,9 +1163,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     });
 
     test('proceeds without pageTexts when result.json read fails', async () => {
-      vi.mocked(readFileSync).mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
+      vi.mocked(runJqFileJson).mockRejectedValue(new Error('ENOENT'));
 
       const convertSpy = vi
         .spyOn(converter, 'convert')

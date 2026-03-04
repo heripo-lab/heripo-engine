@@ -9,14 +9,8 @@ import type {
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { omit } from 'es-toolkit';
-import {
-  copyFileSync,
-  createWriteStream,
-  existsSync,
-  readFileSync,
-  rmSync,
-} from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { copyFileSync, createWriteStream, existsSync, rmSync } from 'node:fs';
+import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -27,6 +21,7 @@ import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
+import { runJqFileJson, runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { ImagePdfConverter } from './image-pdf-converter';
 
@@ -316,8 +311,11 @@ export class PDFConverter {
       let pageTexts: Map<number, string> | undefined;
       try {
         const resultPath = join(outputDir, 'result.json');
-        const doc = JSON.parse(readFileSync(resultPath, 'utf-8'));
-        const totalPages = Object.keys(doc.pages).length;
+        // Use jq to extract only page count — avoids loading full JSON into memory
+        const totalPages = await runJqFileJson<number>(
+          '.pages | length',
+          resultPath,
+        );
         const textExtractor = new PdfTextExtractor(this.logger);
         pageTexts = await textExtractor.extractText(pdfPath, totalPages);
       } catch {
@@ -804,6 +802,7 @@ export class PDFConverter {
 
   /**
    * Render page images from the source PDF using ImageMagick and update result.json.
+   * Uses jq to update the JSON file without loading it into Node.js memory.
    * Replaces Docling's generate_page_images which fails on large PDFs
    * due to memory limits when embedding all page images as base64.
    */
@@ -826,21 +825,21 @@ export class PDFConverter {
     const renderer = new PageRenderer(this.logger);
     const renderResult = await renderer.renderPages(pdfPath, outputDir);
 
-    // Update result.json with page image URIs
+    // Update result.json with page image URIs using jq to avoid loading large JSON
     const resultPath = join(outputDir, 'result.json');
-    const doc = JSON.parse(readFileSync(resultPath, 'utf-8'));
+    const tmpPath = resultPath + '.tmp';
+    const jqProgram = `
+      .pages |= with_entries(
+        if (.value.page_no - 1) >= 0 and (.value.page_no - 1) < ${renderResult.pageCount} then
+          .value.image.uri = "pages/page_\\(.value.page_no - 1).png" |
+          .value.image.mimetype = "image/png" |
+          .value.image.dpi = 300
+        else . end
+      )
+    `;
+    await runJqFileToFile(jqProgram, resultPath, tmpPath);
+    await rename(tmpPath, resultPath);
 
-    for (const page of Object.values(doc.pages) as any[]) {
-      const pageNo = page.page_no as number;
-      const fileIndex = pageNo - 1;
-      if (fileIndex >= 0 && fileIndex < renderResult.pageCount) {
-        page.image.uri = `pages/page_${fileIndex}.png`;
-        page.image.mimetype = 'image/png';
-        page.image.dpi = 300;
-      }
-    }
-
-    await writeFile(resultPath, JSON.stringify(doc, null, 2));
     this.logger.info(
       `[PDFConverter] Rendered ${renderResult.pageCount} page images`,
     );

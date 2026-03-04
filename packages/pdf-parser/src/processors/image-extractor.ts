@@ -1,21 +1,22 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { DoclingDocument } from '@heripo/model';
 
 import {
+  createReadStream,
   createWriteStream,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { extname, join } from 'node:path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import * as yauzl from 'yauzl';
 
 import {
-  jqExtractBase64PngStrings,
-  jqReplaceBase64WithPaths,
+  jqExtractBase64PngStringsStreaming,
+  jqReplaceBase64WithPathsToFile,
 } from '../utils/jq';
 
 /**
@@ -81,38 +82,6 @@ export class ImageExtractor {
   }
 
   /**
-   * Extract base64 images from JSON file using jq (for large files)
-   * Returns array of base64 data strings
-   */
-  private static async extractBase64ImagesFromJsonWithJq(
-    jsonPath: string,
-  ): Promise<string[]> {
-    return jqExtractBase64PngStrings(jsonPath);
-  }
-
-  /**
-   * Replace base64 images with file paths in JSON using jq (for large files)
-   * Uses reduce to maintain counter state while walking the JSON
-   */
-  private static async replaceBase64ImagesInJsonWithJq(
-    jsonPath: string,
-    outputPath: string,
-    dirName: string,
-    prefix: string,
-  ): Promise<number> {
-    const { data, count } = (await jqReplaceBase64WithPaths(
-      jsonPath,
-      dirName,
-      prefix,
-    )) as { data: DoclingDocument; count: number };
-
-    // Write transformed JSON to output file
-    writeFileSync(outputPath, JSON.stringify(data, null, 2), 'utf-8');
-
-    return count;
-  }
-
-  /**
    * Extract a base64-encoded image to a file and return the relative path
    */
   private static extractBase64ImageToFile(
@@ -138,8 +107,89 @@ export class ImageExtractor {
   }
 
   /**
-   * Save JSON and HTML documents with base64 images extracted to separate files
-   * Uses jq for JSON processing to handle large files
+   * Extract base64 images from HTML using streaming.
+   * Reads HTML file as a stream, extracts base64 images from src attributes,
+   * saves them as PNG files, and replaces with file paths in the output HTML.
+   * Returns the number of images extracted.
+   */
+  static async extractImagesFromHtmlStream(
+    htmlInputPath: string,
+    htmlOutputPath: string,
+    imagesDir: string,
+  ): Promise<number> {
+    let imageIndex = 0;
+    let pending = '';
+    const MARKER = 'src="data:image/png;base64,';
+
+    const transform = new Transform({
+      decodeStrings: false,
+      encoding: 'utf-8',
+      transform(chunk: string, _encoding, callback) {
+        pending += chunk;
+        let result = '';
+
+        while (true) {
+          const markerIdx = pending.indexOf(MARKER);
+
+          if (markerIdx === -1) {
+            // Keep a tail that could be a partial marker match
+            const safeEnd = Math.max(0, pending.length - MARKER.length);
+            result += pending.slice(0, safeEnd);
+            pending = pending.slice(safeEnd);
+            break;
+          }
+
+          // Flush everything before the marker
+          result += pending.slice(0, markerIdx);
+
+          // Find the closing quote after base64 data
+          const dataStart = markerIdx + MARKER.length;
+          const quoteIdx = pending.indexOf('"', dataStart);
+
+          if (quoteIdx === -1) {
+            // Closing quote not in buffer yet — keep everything from marker onward
+            pending = pending.slice(markerIdx);
+            break;
+          }
+
+          // Extract base64 content and save as image file
+          const base64Content = pending.slice(dataStart, quoteIdx);
+          const filename = `image_${imageIndex}.png`;
+          const filepath = join(imagesDir, filename);
+          const buf = Buffer.from(base64Content, 'base64');
+          writeFileSync(filepath, buf);
+
+          const relativePath = `images/${filename}`;
+          result += `src="${relativePath}"`;
+          imageIndex++;
+
+          pending = pending.slice(quoteIdx + 1);
+        }
+
+        if (result.length > 0) {
+          this.push(result);
+        }
+        callback();
+      },
+      flush(callback) {
+        if (pending.length > 0) {
+          this.push(pending);
+        }
+        callback();
+      },
+    });
+
+    const rs = createReadStream(htmlInputPath, { encoding: 'utf-8' });
+    const ws = createWriteStream(htmlOutputPath, { encoding: 'utf-8' });
+
+    await pipeline(rs, transform, ws);
+
+    return imageIndex;
+  }
+
+  /**
+   * Save JSON and HTML documents with base64 images extracted to separate files.
+   * Uses jq for JSON processing and streaming for HTML to handle large files.
    *
    * This method:
    * 1. Extracts base64-encoded images from JSON and HTML content
@@ -152,7 +202,7 @@ export class ImageExtractor {
     outputDir: string,
     filename: string,
     jsonSourcePath: string,
-    htmlContent: string,
+    htmlSourcePath: string,
   ): Promise<void> {
     // Clear output directory completely at the start, then recreate it
     try {
@@ -167,7 +217,7 @@ export class ImageExtractor {
     // Get filename without extension
     const baseName = filename.replace(extname(filename), '');
 
-    // Save JSON with extracted images (using jq for large files)
+    // Save JSON with extracted images (using jq streaming for large files)
     const jsonPath = join(outputDir, `${baseName}.json`);
     try {
       // Create images directory for picture images from JSON
@@ -176,36 +226,34 @@ export class ImageExtractor {
         mkdirSync(imagesDir, { recursive: true });
       }
 
-      // Step 1: Extract base64 images using jq (doesn't load full JSON into memory)
-      const base64Images =
-        await ImageExtractor.extractBase64ImagesFromJsonWithJq(jsonSourcePath);
-
-      // Step 2: Save each picture image to file
-      base64Images.forEach((base64Data, index) => {
-        ImageExtractor.extractBase64ImageToFile(
-          base64Data,
-          imagesDir,
-          index,
-          'pic',
-          'images',
-        );
-      });
-
-      logger.info(
-        `[PDFConverter] Extracted ${base64Images.length} picture images from JSON to ${imagesDir}`,
+      // Step 1: Extract base64 images using streaming jq (one at a time, no accumulation)
+      const imageCount = await jqExtractBase64PngStringsStreaming(
+        jsonSourcePath,
+        (base64Data, index) => {
+          ImageExtractor.extractBase64ImageToFile(
+            base64Data,
+            imagesDir,
+            index,
+            'pic',
+            'images',
+          );
+        },
       );
 
-      // Step 3: Replace base64 images with file paths using jq
-      const replacedCount =
-        await ImageExtractor.replaceBase64ImagesInJsonWithJq(
-          jsonSourcePath,
-          jsonPath,
-          'images',
-          'pic',
-        );
+      logger.info(
+        `[PDFConverter] Extracted ${imageCount} picture images from JSON to ${imagesDir}`,
+      );
+
+      // Step 2: Replace base64 images with file paths using jq, pipe directly to file
+      await jqReplaceBase64WithPathsToFile(
+        jsonSourcePath,
+        jsonPath,
+        'images',
+        'pic',
+      );
 
       logger.info(
-        `[PDFConverter] Replaced ${replacedCount} base64 images with file paths`,
+        `[PDFConverter] Replaced ${imageCount} base64 images with file paths`,
       );
     } catch (e) {
       logger.warn(
@@ -216,7 +264,7 @@ export class ImageExtractor {
     }
     logger.info('[PDFConverter] Saved JSON:', jsonPath);
 
-    // Save HTML with extracted images
+    // Save HTML with extracted images using streaming
     const htmlPath = join(outputDir, `${baseName}.html`);
     try {
       // Create images directory for HTML images
@@ -225,49 +273,39 @@ export class ImageExtractor {
         mkdirSync(imagesDir, { recursive: true });
       }
 
-      // Extract base64 images from HTML src attributes, save them as PNG files, and replace with file paths
-      let imageIndex = 0;
-      const transformedHtml = htmlContent.replace(
-        /src="data:image\/png;base64,([^"]+)"/g,
-        (_, base64Content) => {
-          const filename = `image_${imageIndex}.png`;
-          const filepath = join(imagesDir, filename);
-
-          // Convert base64 to buffer and write to file
-          const buffer = Buffer.from(base64Content, 'base64');
-          writeFileSync(filepath, buffer);
-
-          const relativePath = `images/${filename}`;
-          imageIndex += 1;
-
-          return `src="${relativePath}"`;
-        },
+      const htmlImageCount = await ImageExtractor.extractImagesFromHtmlStream(
+        htmlSourcePath,
+        htmlPath,
+        imagesDir,
       );
 
       logger.info(
-        `[PDFConverter] Extracted ${imageIndex} images from HTML to ${imagesDir}`,
+        `[PDFConverter] Extracted ${htmlImageCount} images from HTML to ${imagesDir}`,
       );
-      writeFileSync(htmlPath, transformedHtml, 'utf-8');
     } catch (e) {
       logger.warn(
-        '[PDFConverter] Failed to extract images from HTML, writing original. Error:',
+        '[PDFConverter] Failed to extract images from HTML, copying original. Error:',
         e,
       );
-      writeFileSync(htmlPath, htmlContent, 'utf-8');
+      // Fallback: copy original HTML using streaming
+      const rs = createReadStream(htmlSourcePath);
+      const ws = createWriteStream(htmlPath);
+      await pipeline(rs, ws);
     }
     logger.info('[PDFConverter] Saved HTML:', htmlPath);
   }
 
   /**
    * Extract documents from ZIP and save with extracted images
-   * Uses jq for JSON processing to handle large files without loading into Node.js memory
+   * Uses jq for JSON processing and streaming for HTML to handle large files
+   * without loading into Node.js memory
    *
    * Complete workflow:
    * 1. Extract ZIP file to temporary directory
    * 2. Find JSON and HTML files from extracted files
-   * 3. Use jq to extract base64 images from JSON and save as separate files
-   * 4. Use jq to replace base64 with file paths in JSON
-   * 5. Process HTML with regex to extract and replace images
+   * 3. Use jq to stream-extract base64 images from JSON and save as separate files
+   * 4. Use jq to replace base64 with file paths in JSON (piped to file)
+   * 5. Process HTML with streaming Transform to extract and replace images
    * 6. Save transformed documents to output directory (as result.json and result.html)
    */
   static async extractAndSaveDocumentsFromZip(
@@ -295,18 +333,15 @@ export class ImageExtractor {
     const jsonPath = join(extractDir, jsonFile);
     const htmlPath = join(extractDir, htmlFile);
 
-    // Read HTML content (HTML is typically smaller, safe to read into memory)
-    const htmlContent = readFileSync(htmlPath, 'utf-8');
-
     // Save converted files to output directory with extracted images
-    // JSON is processed with jq to avoid loading large files into memory
+    // Both JSON and HTML are processed with streaming to avoid loading large files into memory
     logger.info('[PDFConverter] Saving converted files to output...');
     await ImageExtractor.saveDocumentsWithExtractedImages(
       logger,
       outputDir,
       'result',
       jsonPath,
-      htmlContent,
+      htmlPath,
     );
 
     logger.info('[PDFConverter] Files saved to:', outputDir);
