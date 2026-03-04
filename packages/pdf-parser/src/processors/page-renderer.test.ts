@@ -30,8 +30,10 @@ describe('PageRenderer', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     renderer = new PageRenderer(mockLogger);
     mockExistsSync.mockReturnValue(false);
+    // Default: pdfinfo returns empty (page count unknown), magick succeeds
     mockSpawnAsync.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
   });
 
@@ -63,7 +65,7 @@ describe('PageRenderer', () => {
 
       expect(mockSpawnAsync).toHaveBeenCalledWith('magick', [
         '-density',
-        '300',
+        '200',
         '/tmp/input.pdf',
         '-background',
         'white',
@@ -180,17 +182,240 @@ describe('PageRenderer', () => {
       );
     });
 
-    test('logs rendering start and completion', async () => {
+    test('logs rendering start and completion when page count is unknown', async () => {
       mockReaddirSync.mockReturnValue(['page_0.png', 'page_1.png']);
 
       await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        '[PageRenderer] Rendering PDF at 300 DPI...',
+        '[PageRenderer] Rendering PDF at 200 DPI...',
       );
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[PageRenderer] Rendered 2 pages to /tmp/output/pages',
       );
+    });
+  });
+
+  describe('page count detection', () => {
+    test('calls pdfinfo to get page count before rendering', async () => {
+      mockReaddirSync.mockReturnValue([]);
+
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      expect(mockSpawnAsync).toHaveBeenCalledWith('pdfinfo', [
+        '/tmp/input.pdf',
+      ]);
+    });
+
+    test('logs page count when pdfinfo returns valid count', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'Pages:          244',
+            stderr: '',
+          });
+        }
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+      });
+      mockReaddirSync.mockReturnValue([]);
+
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PageRenderer] Rendering 244 pages at 200 DPI...',
+      );
+    });
+
+    test('falls back to generic log when pdfinfo fails', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 1,
+            stdout: '',
+            stderr: 'pdfinfo not found',
+          });
+        }
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+      });
+      mockReaddirSync.mockReturnValue([]);
+
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PageRenderer] Rendering PDF at 200 DPI...',
+      );
+    });
+
+    test('falls back to generic log when pdfinfo throws', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.reject(new Error('spawn ENOENT'));
+        }
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+      });
+      mockReaddirSync.mockReturnValue([]);
+
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PageRenderer] Rendering PDF at 200 DPI...',
+      );
+    });
+  });
+
+  describe('progress logging', () => {
+    test('logs rendering progress during magick execution', async () => {
+      vi.useFakeTimers();
+
+      let readdirCallCount = 0;
+      mockReaddirSync.mockImplementation(() => {
+        readdirCallCount++;
+        // 1st call (progress poll at 2s): 1 file rendered
+        if (readdirCallCount === 1) return ['page_0.png'];
+        // 2nd call (progress poll at 4s): 2 files rendered
+        if (readdirCallCount === 2) return ['page_0.png', 'page_1.png'];
+        // 3rd+ call (final listing after render): all 3 files
+        return ['page_0.png', 'page_1.png', 'page_2.png'];
+      });
+
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'Pages:          3',
+            stderr: '',
+          });
+        }
+        // magick takes 5 seconds
+        return new Promise((resolve) => {
+          setTimeout(() => resolve({ code: 0, stdout: '', stderr: '' }), 5000);
+        });
+      });
+
+      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      // First progress poll at 2s
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PageRenderer] Rendering pages: 1/3',
+      );
+
+      // Second progress poll at 4s
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PageRenderer] Rendering pages: 2/3',
+      );
+
+      // magick completes at 5s
+      await vi.advanceTimersByTimeAsync(1000);
+      await promise;
+    });
+
+    test('skips duplicate progress logs when count has not changed', async () => {
+      vi.useFakeTimers();
+
+      // Always return same count during progress polls
+      mockReaddirSync.mockReturnValue(['page_0.png']);
+
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'Pages:          5',
+            stderr: '',
+          });
+        }
+        return new Promise((resolve) => {
+          setTimeout(() => resolve({ code: 0, stdout: '', stderr: '' }), 5000);
+        });
+      });
+
+      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      // Two polls, same file count
+      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      // Should only log "1/5" once (deduplication)
+      const progressCalls = mockLogger.info.mock.calls.filter(
+        (args: string[]) =>
+          typeof args[0] === 'string' && args[0].includes('Rendering pages:'),
+      );
+      expect(progressCalls).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await promise;
+    });
+
+    test('cleans up progress interval when magick fails', async () => {
+      vi.useFakeTimers();
+
+      mockReaddirSync.mockReturnValue([]);
+
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'Pages:          5',
+            stderr: '',
+          });
+        }
+        return new Promise((resolve) => {
+          setTimeout(
+            () => resolve({ code: 1, stdout: '', stderr: 'render error' }),
+            3000,
+          );
+        });
+      });
+
+      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+      // Attach a no-op catch to prevent PromiseRejectionHandledWarning
+      // (the rejection is still asserted below via rejects.toThrow)
+      promise.catch(() => {});
+
+      await vi.advanceTimersByTimeAsync(3000);
+      await expect(promise).rejects.toThrow(
+        '[PageRenderer] Failed to render PDF pages: render error',
+      );
+
+      // Verify no more interval callbacks after error (interval was cleared)
+      mockLogger.info.mockClear();
+      await vi.advanceTimersByTimeAsync(4000);
+      const progressCalls = mockLogger.info.mock.calls.filter(
+        (args: string[]) =>
+          typeof args[0] === 'string' && args[0].includes('Rendering pages:'),
+      );
+      expect(progressCalls).toHaveLength(0);
+    });
+
+    test('does not start progress interval when page count is unknown', async () => {
+      vi.useFakeTimers();
+
+      mockReaddirSync.mockReturnValue([]);
+
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+        }
+        return new Promise((resolve) => {
+          setTimeout(() => resolve({ code: 0, stdout: '', stderr: '' }), 3000);
+        });
+      });
+
+      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      // No progress log when page count is 0
+      const progressCalls = mockLogger.info.mock.calls.filter(
+        (args: string[]) =>
+          typeof args[0] === 'string' && args[0].includes('Rendering pages:'),
+      );
+      expect(progressCalls).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await promise;
     });
   });
 });

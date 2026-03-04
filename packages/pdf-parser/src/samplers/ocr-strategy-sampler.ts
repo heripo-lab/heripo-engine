@@ -10,10 +10,8 @@ import { LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod/v4';
 
+import { PAGE_RENDERING } from '../config/constants.js';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
-
-/** DPI for sampling pages */
-const SAMPLE_DPI = 150;
 
 /** Ratio of pages to trim from front and back (covers, TOC, appendices) */
 const EDGE_TRIM_RATIO = 0.1;
@@ -127,7 +125,7 @@ export class OcrStrategySampler {
     const renderResult = await this.pageRenderer.renderPages(
       pdfPath,
       outputDir,
-      { dpi: SAMPLE_DPI },
+      { dpi: PAGE_RENDERING.SAMPLE_DPI },
     );
 
     if (renderResult.pageCount === 0) {

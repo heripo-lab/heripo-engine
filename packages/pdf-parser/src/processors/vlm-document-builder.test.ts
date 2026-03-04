@@ -23,7 +23,7 @@ function createTestDoc(
       size: { width: 1000, height: 1400 },
       image: {
         mimetype: 'image/png',
-        dpi: 300,
+        dpi: 200,
         size: { width: 1000, height: 1400 },
         uri: '', // Empty, to be filled by builder
       },
@@ -262,7 +262,7 @@ describe('VlmDocumentBuilder', () => {
       expect(page.page_no).toBe(1);
       expect(page.size).toEqual({ width: 1000, height: 1400 });
       expect(page.image.mimetype).toBe('image/png');
-      expect(page.image.dpi).toBe(300);
+      expect(page.image.dpi).toBe(200);
       expect(page.image.size).toEqual({ width: 1000, height: 1400 });
       expect(page.image.uri).toBe('pages/page_0.png');
     });

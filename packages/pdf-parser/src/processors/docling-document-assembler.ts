@@ -16,6 +16,8 @@ import type {
   VlmPageResult,
 } from '../types/vlm-page-result';
 
+import { PAGE_RENDERING } from '../config/constants.js';
+
 /** Metadata for document assembly */
 export interface AssemblerMetadata {
   /** Document name (e.g., filename without extension) */
@@ -24,7 +26,7 @@ export interface AssemblerMetadata {
   filename: string;
   /** Page dimensions in pixels (width x height at render DPI) */
   pageDimensions: Map<number, { width: number; height: number }>;
-  /** DPI used for page rendering (default: 300) */
+  /** DPI used for page rendering (default: 200) */
   dpi?: number;
 }
 
@@ -131,7 +133,7 @@ export class DoclingDocumentAssembler {
       label: 'unspecified',
     };
 
-    const dpi = metadata.dpi ?? 300;
+    const dpi = metadata.dpi ?? PAGE_RENDERING.DEFAULT_DPI;
     const pages = this.buildPages(sortedPages, metadata.pageDimensions, dpi);
 
     return {

@@ -54,13 +54,23 @@ export const DOCLING_ENVIRONMENT = {
 } as const;
 
 /**
+ * Configuration constants for page rendering DPI
+ */
+export const PAGE_RENDERING = {
+  /** Default rendering DPI for VLM text recognition quality */
+  DEFAULT_DPI: 200,
+  /** Low-resolution DPI for OCR strategy sampling */
+  SAMPLE_DPI: 150,
+} as const;
+
+/**
  * Configuration constants for ImagePdfConverter
  */
 export const IMAGE_PDF_CONVERTER = {
   /**
    * ImageMagick density option (DPI) for PDF to image conversion
    */
-  DENSITY: 300,
+  DENSITY: PAGE_RENDERING.DEFAULT_DPI,
 
   /**
    * ImageMagick quality option (1-100)
