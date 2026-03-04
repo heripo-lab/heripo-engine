@@ -166,7 +166,7 @@ function createTestDoc(
         size: { width: 595, height: 842 },
         image: {
           mimetype: 'image/png',
-          dpi: 300,
+          dpi: 200,
           size: { width: 2480, height: 3508 },
           uri: 'pages/page_0.png',
         },
@@ -686,7 +686,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_0.png',
             },
@@ -696,7 +696,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_1.png',
             },
@@ -706,7 +706,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_2.png',
             },
@@ -754,7 +754,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_0.png',
             },
@@ -764,7 +764,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_1.png',
             },
@@ -814,7 +814,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_0.png',
             },
@@ -824,7 +824,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_1.png',
             },
@@ -834,7 +834,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_2.png',
             },
@@ -844,7 +844,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_3.png',
             },
@@ -854,7 +854,7 @@ describe('VlmTextCorrector', () => {
             size: { width: 595, height: 842 },
             image: {
               mimetype: 'image/png',
-              dpi: 300,
+              dpi: 200,
               size: { width: 2480, height: 3508 },
               uri: 'pages/page_4.png',
             },
@@ -1045,7 +1045,7 @@ describe('VlmTextCorrector', () => {
         size: { width: 595, height: 842 },
         image: {
           mimetype: 'image/png',
-          dpi: 300,
+          dpi: 200,
           size: { width: 2480, height: 3508 },
           uri: 'pages/page_1.png',
         },
@@ -1122,7 +1122,7 @@ describe('VlmTextCorrector', () => {
         size: { width: 595, height: 842 },
         image: {
           mimetype: 'image/png',
-          dpi: 300,
+          dpi: 200,
           size: { width: 2480, height: 3508 },
           uri: 'pages/page_1.png',
         },
@@ -1181,7 +1181,7 @@ describe('VlmTextCorrector', () => {
         size: { width: 595, height: 842 },
         image: {
           mimetype: 'image/png',
-          dpi: 300,
+          dpi: 200,
           size: { width: 2480, height: 3508 },
           uri: 'pages/page_1.png',
         },
@@ -2112,7 +2112,7 @@ describe('VlmTextCorrector', () => {
         size: { width: 595, height: 842 },
         image: {
           mimetype: 'image/png',
-          dpi: 300,
+          dpi: 200,
           size: { width: 2480, height: 3508 },
           uri: 'pages/page_1.png',
         },

@@ -14,7 +14,7 @@ import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { PDF_CONVERTER } from '../config/constants';
+import { PAGE_RENDERING, PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
@@ -833,7 +833,7 @@ export class PDFConverter {
         if (.value.page_no - 1) >= 0 and (.value.page_no - 1) < ${renderResult.pageCount} then
           .value.image.uri = "pages/page_\\(.value.page_no - 1).png" |
           .value.image.mimetype = "image/png" |
-          .value.image.dpi = 300
+          .value.image.dpi = ${PAGE_RENDERING.DEFAULT_DPI}
         else . end
       )
     `;

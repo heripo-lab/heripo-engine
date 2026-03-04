@@ -4,8 +4,10 @@ import { spawnAsync } from '@heripo/shared';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Default rendering DPI for VLM text recognition quality */
-const DEFAULT_DPI = 300;
+import { PAGE_RENDERING } from '../config/constants.js';
+
+/** Interval for progress polling in milliseconds */
+const PROGRESS_POLL_INTERVAL_MS = 2000;
 
 /** Result of page rendering */
 export interface PageRenderResult {
@@ -19,7 +21,7 @@ export interface PageRenderResult {
 
 /** Options for page rendering */
 export interface PageRendererOptions {
-  /** DPI for rendered images (default: 300) */
+  /** DPI for rendered images (default: 200) */
   dpi?: number;
 }
 
@@ -46,34 +48,69 @@ export class PageRenderer {
     outputDir: string,
     options?: PageRendererOptions,
   ): Promise<PageRenderResult> {
-    const dpi = options?.dpi ?? DEFAULT_DPI;
+    const dpi = options?.dpi ?? PAGE_RENDERING.DEFAULT_DPI;
     const pagesDir = join(outputDir, 'pages');
 
     if (!existsSync(pagesDir)) {
       mkdirSync(pagesDir, { recursive: true });
     }
 
-    this.logger.info(`[PageRenderer] Rendering PDF at ${dpi} DPI...`);
+    const totalPages = await this.getPageCount(pdfPath);
+
+    if (totalPages > 0) {
+      this.logger.info(
+        `[PageRenderer] Rendering ${totalPages} pages at ${dpi} DPI...`,
+      );
+    } else {
+      this.logger.info(`[PageRenderer] Rendering PDF at ${dpi} DPI...`);
+    }
 
     const outputPattern = join(pagesDir, 'page_%d.png');
 
-    const result = await spawnAsync('magick', [
-      '-density',
-      dpi.toString(),
-      pdfPath,
-      '-background',
-      'white',
-      '-alpha',
-      'remove',
-      '-alpha',
-      'off',
-      outputPattern,
-    ]);
+    // Poll output directory for progress during rendering
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
+    if (totalPages > 0) {
+      let lastLoggedCount = 0;
+      progressInterval = setInterval(() => {
+        try {
+          const rendered = readdirSync(pagesDir).filter(
+            (f) => f.startsWith('page_') && f.endsWith('.png'),
+          ).length;
+          if (rendered > 0 && rendered !== lastLoggedCount) {
+            lastLoggedCount = rendered;
+            this.logger.info(
+              `[PageRenderer] Rendering pages: ${rendered}/${totalPages}`,
+            );
+          }
+        } catch {
+          /* ignore read errors during rendering */
+        }
+      }, PROGRESS_POLL_INTERVAL_MS);
+    }
 
-    if (result.code !== 0) {
-      throw new Error(
-        `[PageRenderer] Failed to render PDF pages: ${result.stderr || 'Unknown error'}`,
-      );
+    try {
+      const result = await spawnAsync('magick', [
+        '-density',
+        dpi.toString(),
+        pdfPath,
+        '-background',
+        'white',
+        '-alpha',
+        'remove',
+        '-alpha',
+        'off',
+        outputPattern,
+      ]);
+
+      if (result.code !== 0) {
+        throw new Error(
+          `[PageRenderer] Failed to render PDF pages: ${result.stderr || 'Unknown error'}`,
+        );
+      }
+    } finally {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
     }
 
     const pageFiles = readdirSync(pagesDir)
@@ -94,5 +131,20 @@ export class PageRenderer {
       pagesDir,
       pageFiles,
     };
+  }
+
+  /**
+   * Get total page count using pdfinfo.
+   * Returns 0 on failure (progress logging will be skipped).
+   */
+  private async getPageCount(pdfPath: string): Promise<number> {
+    try {
+      const result = await spawnAsync('pdfinfo', [pdfPath]);
+      if (result.code !== 0) return 0;
+      const match = result.stdout.match(/^Pages:\s+(\d+)/m);
+      return match ? parseInt(match[1], 10) : 0;
+    } catch {
+      return 0;
+    }
   }
 }

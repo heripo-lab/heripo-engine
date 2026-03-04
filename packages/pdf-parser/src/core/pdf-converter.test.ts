@@ -1490,6 +1490,11 @@ describe('PDFConverter', () => {
         resultPath,
         resultPath + '.tmp',
       );
+      expect(runJqFileToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.value.image.dpi = 200'),
+        resultPath,
+        resultPath + '.tmp',
+      );
       expect(rename).toHaveBeenCalledWith(resultPath + '.tmp', resultPath);
     });
 

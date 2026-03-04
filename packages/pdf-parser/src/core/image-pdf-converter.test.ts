@@ -64,7 +64,7 @@ describe('ImagePdfConverter', () => {
       // Verify magick call
       expect(sharedMock.spawnAsync).toHaveBeenNthCalledWith(2, 'magick', [
         '-density',
-        '300',
+        '200',
         join('/tmp', `report-123-${fixedTimestamp}-input.pdf`),
         '-quality',
         '100',
