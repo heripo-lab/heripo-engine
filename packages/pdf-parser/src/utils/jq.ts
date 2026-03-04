@@ -93,6 +93,10 @@ export function runJqFileToFile(
     });
 
     let stderr = '';
+    let exitCode: number | null = null;
+    let pipelineDone = false;
+    let settled = false;
+
     child.stderr.setEncoding('utf-8');
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
@@ -100,38 +104,42 @@ export function runJqFileToFile(
 
     const ws = createWriteStream(outputPath);
 
+    function trySettle() {
+      if (settled) return;
+      if (!pipelineDone || exitCode === null) return;
+      settled = true;
+      if (exitCode !== 0) {
+        reject(
+          new Error(
+            `jq exited with code ${exitCode}. ${stderr ? 'Stderr: ' + stderr : ''}`,
+          ),
+        );
+      } else {
+        resolve();
+      }
+    }
+
     child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
       ws.destroy();
       reject(err);
     });
 
     pipeline(child.stdout, ws)
       .then(() => {
-        // Wait for jq to exit after pipeline completes
-        if (child.exitCode !== null) {
-          if (child.exitCode !== 0) {
-            reject(
-              new Error(
-                `jq exited with code ${child.exitCode}. ${stderr ? 'Stderr: ' + stderr : ''}`,
-              ),
-            );
-          } else {
-            resolve();
-          }
-        }
+        pipelineDone = true;
+        trySettle();
       })
-      .catch(reject);
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        reject(err);
+      });
 
     child.on('close', (code) => {
-      if (code !== 0) {
-        reject(
-          new Error(
-            `jq exited with code ${code}. ${stderr ? 'Stderr: ' + stderr : ''}`,
-          ),
-        );
-      } else {
-        resolve();
-      }
+      exitCode = code ?? 1;
+      trySettle();
     });
   });
 }
@@ -156,9 +164,21 @@ export function runJqFileLines(
 
     let stderr = '';
     let buffer = '';
+    let callbackError = false;
 
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
+
+    function safeOnLine(line: string): void {
+      if (callbackError) return;
+      try {
+        onLine(line);
+      } catch (err) {
+        callbackError = true;
+        child.kill();
+        reject(err);
+      }
+    }
 
     child.stdout.on('data', (chunk: string) => {
       buffer += chunk;
@@ -167,7 +187,7 @@ export function runJqFileLines(
         const line = buffer.slice(0, newlineIdx);
         buffer = buffer.slice(newlineIdx + 1);
         if (line.length > 0) {
-          onLine(line);
+          safeOnLine(line);
         }
       }
     });
@@ -177,14 +197,16 @@ export function runJqFileLines(
     });
 
     child.on('error', (err) => {
-      reject(err);
+      if (!callbackError) reject(err);
     });
 
     child.on('close', (code) => {
+      if (callbackError) return;
       // Process any remaining data in buffer
       if (buffer.length > 0) {
-        onLine(buffer);
+        safeOnLine(buffer);
       }
+      if (callbackError) return;
 
       if (code !== 0) {
         reject(

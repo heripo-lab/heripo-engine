@@ -45,6 +45,7 @@ describe('jq utils', () => {
       on: ReturnType<typeof vi.fn>;
     };
     on: ReturnType<typeof vi.fn>;
+    kill: ReturnType<typeof vi.fn>;
     exitCode: number | null;
   };
   let stdoutHandlers: Map<string, (chunk: string) => void>;
@@ -72,6 +73,7 @@ describe('jq utils', () => {
       on: vi.fn((event: string, handler: (arg: any) => void) => {
         childHandlers.set(event, handler);
       }),
+      kill: vi.fn(),
       exitCode: null,
     };
 
@@ -260,15 +262,14 @@ describe('jq utils', () => {
   });
 
   describe('runJqFileToFile', () => {
-    test('should pipe jq stdout to output file', async () => {
+    test('should pipe jq stdout to output file when both pipeline and close complete', async () => {
       const mockWs = {} as Writable;
       vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
       vi.mocked(pipeline).mockResolvedValue(undefined);
 
       const promise = runJqFileToFile('.data', '/input.json', '/output.json');
 
-      // Simulate jq exiting successfully
-      mockChild.exitCode = 0;
+      // Both pipeline (resolved via mock) and close must fire
       childHandlers.get('close')?.(0);
 
       await promise;
@@ -280,6 +281,46 @@ describe('jq utils', () => {
       );
       expect(createWriteStream).toHaveBeenCalledWith('/output.json');
       expect(pipeline).toHaveBeenCalledWith(mockChild.stdout, mockWs);
+    });
+
+    test('should resolve when close fires before pipeline completes', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+
+      // Pipeline resolves asynchronously after close
+      let resolvePipeline!: () => void;
+      vi.mocked(pipeline).mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolvePipeline = resolve;
+          }),
+      );
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      // close fires first
+      childHandlers.get('close')?.(0);
+      // then pipeline completes
+      resolvePipeline();
+
+      await promise;
+    });
+
+    test('should resolve when pipeline completes before close fires', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      // pipeline resolves immediately (before close)
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      // Allow pipeline microtask to resolve first
+      await vi.waitFor(() => {
+        // close fires after pipeline is done
+        childHandlers.get('close')?.(0);
+      });
+
+      await promise;
     });
 
     test('should reject when jq exits with non-zero code', async () => {
@@ -301,6 +342,18 @@ describe('jq utils', () => {
       );
     });
 
+    test('should reject when jq exits with non-zero code without stderr', async () => {
+      const mockWs = {} as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      childHandlers.get('close')?.(1);
+
+      await expect(promise).rejects.toThrow('jq exited with code 1. ');
+    });
+
     test('should reject when spawn emits error', async () => {
       const mockWs = { destroy: vi.fn() } as unknown as Writable;
       vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
@@ -311,6 +364,7 @@ describe('jq utils', () => {
       childHandlers.get('error')?.(new Error('spawn ENOENT'));
 
       await expect(promise).rejects.toThrow('spawn ENOENT');
+      expect((mockWs as any).destroy).toHaveBeenCalled();
     });
 
     test('should reject when pipeline fails', async () => {
@@ -323,66 +377,60 @@ describe('jq utils', () => {
       await expect(promise).rejects.toThrow('pipe error');
     });
 
-    test('should resolve via pipeline when exitCode is already 0', async () => {
+    test('should use null exit code as 1', async () => {
       const mockWs = {} as Writable;
       vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
-
-      // Simulate jq already exited before pipeline resolves
-      mockChild.exitCode = 0;
       vi.mocked(pipeline).mockResolvedValue(undefined);
 
       const promise = runJqFileToFile('.data', '/input.json', '/output.json');
 
-      // The close handler also fires
-      childHandlers.get('close')?.(0);
-
-      await promise;
-    });
-
-    test('should reject via pipeline when exitCode is non-zero', async () => {
-      const mockWs = {} as Writable;
-      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
-
-      mockChild.exitCode = 1;
-      stderrHandlers.get('data')?.('error msg');
-      vi.mocked(pipeline).mockResolvedValue(undefined);
-
-      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
-
-      childHandlers.get('close')?.(1);
+      childHandlers.get('close')?.(null);
 
       await expect(promise).rejects.toThrow('jq exited with code 1');
     });
 
-    test('should reject via pipeline when exitCode is non-zero without stderr', async () => {
-      const mockWs = {} as Writable;
+    test('should not reject twice when both error and pipeline rejection fire', async () => {
+      const mockWs = { destroy: vi.fn() } as unknown as Writable;
       vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
-
-      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(pipeline).mockRejectedValue(new Error('pipe error'));
 
       const promise = runJqFileToFile('.data', '/input.json', '/output.json');
 
-      // Set exitCode after handlers are registered, no stderr data sent
-      mockChild.exitCode = 1;
+      // error handler fires synchronously before pipeline microtask
+      childHandlers.get('error')?.(new Error('spawn ENOENT'));
 
-      await expect(promise).rejects.toThrow('jq exited with code 1. ');
+      // First rejection wins (error event), pipeline rejection is ignored
+      await expect(promise).rejects.toThrow('spawn ENOENT');
     });
 
-    test('should reject via pipeline with stderr when exitCode is non-zero', async () => {
+    test('should ignore close event after error has already settled', async () => {
+      const mockWs = { destroy: vi.fn() } as unknown as Writable;
+      vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
+      vi.mocked(pipeline).mockImplementation(() => new Promise(() => {}));
+
+      const promise = runJqFileToFile('.data', '/input.json', '/output.json');
+
+      // error settles first
+      childHandlers.get('error')?.(new Error('spawn ENOENT'));
+      // close fires after — trySettle should bail out via settled guard
+      childHandlers.get('close')?.(0);
+
+      await expect(promise).rejects.toThrow('spawn ENOENT');
+    });
+
+    test('should ignore error event after already settled via trySettle', async () => {
       const mockWs = {} as Writable;
       vi.mocked(createWriteStream).mockReturnValue(mockWs as any);
-
       vi.mocked(pipeline).mockResolvedValue(undefined);
 
       const promise = runJqFileToFile('.data', '/input.json', '/output.json');
 
-      // Send stderr data and set exitCode AFTER handlers are registered
-      stderrHandlers.get('data')?.('pipeline stderr');
-      mockChild.exitCode = 2;
+      // Both pipeline (resolved) and close fire — settles via trySettle
+      childHandlers.get('close')?.(0);
+      await promise;
 
-      await expect(promise).rejects.toThrow(
-        'jq exited with code 2. Stderr: pipeline stderr',
-      );
+      // error fires after already settled — should be ignored
+      childHandlers.get('error')?.(new Error('late error'));
     });
   });
 
@@ -481,6 +529,72 @@ describe('jq utils', () => {
       childHandlers.get('error')?.(new Error('spawn failed'));
 
       await expect(promise).rejects.toThrow('spawn failed');
+    });
+
+    test('should reject and kill child when onLine throws during data event', async () => {
+      const callbackErr = new Error('disk write failed');
+      const promise = runJqFileLines('.[]', '/input.json', () => {
+        throw callbackErr;
+      });
+
+      stdoutHandlers.get('data')?.('line1\n');
+
+      await expect(promise).rejects.toThrow('disk write failed');
+      expect(mockChild.kill).toHaveBeenCalled();
+    });
+
+    test('should reject and kill child when onLine throws during close buffer flush', async () => {
+      const callbackErr = new Error('callback error on close');
+      const promise = runJqFileLines('.[]', '/input.json', () => {
+        throw callbackErr;
+      });
+
+      // No newline, so data stays in buffer until close
+      stdoutHandlers.get('data')?.('remaining');
+      childHandlers.get('close')?.(0);
+
+      await expect(promise).rejects.toThrow('callback error on close');
+      expect(mockChild.kill).toHaveBeenCalled();
+    });
+
+    test('should stop processing lines after callback error', async () => {
+      let callCount = 0;
+      const promise = runJqFileLines('.[]', '/input.json', () => {
+        callCount++;
+        if (callCount === 2) {
+          throw new Error('fail on second');
+        }
+      });
+
+      stdoutHandlers.get('data')?.('line1\nline2\nline3\n');
+
+      await expect(promise).rejects.toThrow('fail on second');
+      expect(callCount).toBe(2);
+    });
+
+    test('should not reject from error event after callback error', async () => {
+      const callbackErr = new Error('callback error');
+      const promise = runJqFileLines('.[]', '/input.json', () => {
+        throw callbackErr;
+      });
+
+      stdoutHandlers.get('data')?.('line1\n');
+      // error event fires after callback already rejected
+      childHandlers.get('error')?.(new Error('spawn error'));
+
+      await expect(promise).rejects.toThrow('callback error');
+    });
+
+    test('should ignore close event after callback error in data handler', async () => {
+      const promise = runJqFileLines('.[]', '/input.json', () => {
+        throw new Error('callback fail');
+      });
+
+      stdoutHandlers.get('data')?.('line1\n');
+      // close fires after callback already rejected — should be ignored
+      childHandlers.get('close')?.(0);
+
+      await expect(promise).rejects.toThrow('callback fail');
     });
   });
 
