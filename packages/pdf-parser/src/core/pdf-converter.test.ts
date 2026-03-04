@@ -3,8 +3,8 @@ import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
 import type { Readable } from 'node:stream';
 
 import { omit } from 'es-toolkit';
-import { createWriteStream, existsSync, readFileSync, rmSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { createWriteStream, existsSync, rmSync } from 'node:fs';
+import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -13,6 +13,7 @@ import { PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
+import { runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { ImagePdfConverter } from './image-pdf-converter';
 import { PDFConverter } from './pdf-converter';
@@ -31,13 +32,14 @@ vi.mock('../utils/local-file-server', () => ({
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
-  readFileSync: vi.fn(),
+  copyFileSync: vi.fn(),
   rmSync: vi.fn(),
   createWriteStream: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
   writeFile: vi.fn(),
+  rename: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
@@ -56,6 +58,11 @@ vi.mock('../processors/image-extractor', () => ({
 
 vi.mock('../processors/page-renderer', () => ({
   PageRenderer: vi.fn(),
+}));
+
+vi.mock('../utils/jq', () => ({
+  runJqFileToFile: vi.fn(),
+  runJqFileJson: vi.fn(),
 }));
 
 describe('PDFConverter', () => {
@@ -1210,9 +1217,8 @@ describe('PDFConverter', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
       vi.mocked(existsSync).mockReturnValue(false);
-      vi.mocked(readFileSync).mockReturnValue(
-        JSON.stringify({ pages: { '1': { page_no: 1, image: {} } } }),
-      );
+      vi.mocked(runJqFileToFile).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
 
       const converterWithFallback = new PDFConverter(logger, client, true);
 
@@ -1338,9 +1344,8 @@ describe('PDFConverter', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
       vi.mocked(existsSync).mockReturnValue(false);
-      vi.mocked(readFileSync).mockReturnValue(
-        JSON.stringify({ pages: { '1': { page_no: 1, image: {} } } }),
-      );
+      vi.mocked(runJqFileToFile).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
 
       const converterWithFallback = new PDFConverter(logger, client, true);
 
@@ -1375,14 +1380,8 @@ describe('PDFConverter', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
       vi.mocked(existsSync).mockReturnValue(false);
-
-      const mockDoc = {
-        pages: {
-          '1': { page_no: 1, image: { uri: '', mimetype: '', dpi: 0 } },
-          '2': { page_no: 2, image: { uri: '', mimetype: '', dpi: 0 } },
-        },
-      };
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(mockDoc));
+      vi.mocked(runJqFileToFile).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
 
       const mockRenderPages = vi
         .fn()
@@ -1404,10 +1403,13 @@ describe('PDFConverter', () => {
         '/test/cwd/output/report-render',
       );
 
-      expect(writeFile).toHaveBeenCalledWith(
-        '/test/cwd/output/report-render/result.json',
-        expect.stringContaining('"pages/page_0.png"'),
+      const resultPath = '/test/cwd/output/report-render/result.json';
+      expect(runJqFileToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.pages |= with_entries('),
+        resultPath,
+        resultPath + '.tmp',
       );
+      expect(rename).toHaveBeenCalledWith(resultPath + '.tmp', resultPath);
 
       expect(logger.info).toHaveBeenCalledWith(
         '[PDFConverter] Rendered 2 page images',
@@ -1463,15 +1465,8 @@ describe('PDFConverter', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
       vi.mocked(existsSync).mockReturnValue(false);
-
-      const mockDoc = {
-        pages: {
-          '1': { page_no: 1, image: { uri: '', mimetype: '', dpi: 0 } },
-          '2': { page_no: 2, image: { uri: '', mimetype: '', dpi: 0 } },
-          '3': { page_no: 3, image: { uri: '', mimetype: '', dpi: 0 } },
-        },
-      };
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(mockDoc));
+      vi.mocked(runJqFileToFile).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
 
       vi.mocked(PageRenderer).mockImplementation(function () {
         return {
@@ -1489,20 +1484,13 @@ describe('PDFConverter', () => {
         {},
       );
 
-      const writeCall = vi
-        .mocked(writeFile)
-        .mock.calls.find(
-          (call) =>
-            typeof call[0] === 'string' && call[0].includes('result.json'),
-        );
-      expect(writeCall).toBeDefined();
-
-      const savedDoc = JSON.parse(writeCall![1] as string);
-      expect(savedDoc.pages['1'].image.uri).toBe('pages/page_0.png');
-      expect(savedDoc.pages['1'].image.mimetype).toBe('image/png');
-      expect(savedDoc.pages['1'].image.dpi).toBe(300);
-      expect(savedDoc.pages['2'].image.uri).toBe('pages/page_1.png');
-      expect(savedDoc.pages['3'].image.uri).toBe('pages/page_2.png');
+      const resultPath = '/test/cwd/output/report-uris/result.json';
+      expect(runJqFileToFile).toHaveBeenCalledWith(
+        expect.stringContaining('< 3'),
+        resultPath,
+        resultPath + '.tmp',
+      );
+      expect(rename).toHaveBeenCalledWith(resultPath + '.tmp', resultPath);
     });
 
     test('should skip pages with page_no exceeding rendered page count', async () => {
@@ -1521,16 +1509,8 @@ describe('PDFConverter', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
       vi.mocked(existsSync).mockReturnValue(false);
-
-      // Page 3 has page_no=3 but only 2 pages were rendered
-      const mockDoc = {
-        pages: {
-          '1': { page_no: 1, image: { uri: 'old', mimetype: 'old', dpi: 0 } },
-          '2': { page_no: 2, image: { uri: 'old', mimetype: 'old', dpi: 0 } },
-          '3': { page_no: 3, image: { uri: 'old', mimetype: 'old', dpi: 0 } },
-        },
-      };
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(mockDoc));
+      vi.mocked(runJqFileToFile).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
 
       vi.mocked(PageRenderer).mockImplementation(function () {
         return {
@@ -1548,21 +1528,14 @@ describe('PDFConverter', () => {
         {},
       );
 
-      const writeCall = vi
-        .mocked(writeFile)
-        .mock.calls.find(
-          (call) =>
-            typeof call[0] === 'string' && call[0].includes('result.json'),
-        );
-      expect(writeCall).toBeDefined();
-
-      const savedDoc = JSON.parse(writeCall![1] as string);
-      // Pages 1-2 should be updated
-      expect(savedDoc.pages['1'].image.uri).toBe('pages/page_0.png');
-      expect(savedDoc.pages['2'].image.uri).toBe('pages/page_1.png');
-      // Page 3 should remain unchanged (exceeds rendered count)
-      expect(savedDoc.pages['3'].image.uri).toBe('old');
-      expect(savedDoc.pages['3'].image.mimetype).toBe('old');
+      // The jq program uses pageCount (2) so pages with page_no > 2 are skipped
+      const resultPath = '/test/cwd/output/report-skip-excess/result.json';
+      expect(runJqFileToFile).toHaveBeenCalledWith(
+        expect.stringContaining('< 2'),
+        resultPath,
+        resultPath + '.tmp',
+      );
+      expect(rename).toHaveBeenCalledWith(resultPath + '.tmp', resultPath);
     });
   });
 
@@ -1575,9 +1548,8 @@ describe('PDFConverter', () => {
         fileStream: {} as Readable,
       });
       vi.mocked(existsSync).mockReturnValue(false);
-      vi.mocked(readFileSync).mockReturnValue(
-        JSON.stringify({ pages: { '1': { page_no: 1, image: {} } } }),
-      );
+      vi.mocked(runJqFileToFile).mockResolvedValue(undefined);
+      vi.mocked(rename).mockResolvedValue(undefined);
 
       await converter.convert(
         'http://test.com/doc.pdf',

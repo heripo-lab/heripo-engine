@@ -2,17 +2,20 @@ import type { LoggerMethods } from '@heripo/logger';
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { Transform } from 'node:stream';
+import * as streamPromises from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import * as yauzl from 'yauzl';
 
 import {
-  jqExtractBase64PngStrings,
-  jqReplaceBase64WithPaths,
+  jqExtractBase64PngStringsStreaming,
+  jqReplaceBase64WithPathsToFile,
 } from '../utils/jq';
 import { ImageExtractor } from './image-extractor';
 
 vi.mock('node:fs');
 vi.mock('node:path');
+vi.mock('node:stream/promises');
 vi.mock('yauzl');
 vi.mock('../utils/jq');
 
@@ -50,19 +53,12 @@ describe('ImageExtractor', () => {
         'test.html',
       ] as any);
 
-      vi.mocked(fs.readFileSync).mockReturnValue(
-        '<html><img src="data:image/png;base64,iVBORw0KGgo="/></html>',
-      );
+      vi.mocked(jqExtractBase64PngStringsStreaming).mockResolvedValue(2);
 
-      vi.mocked(jqExtractBase64PngStrings).mockResolvedValue([
-        'data:image/png;base64,abc123',
-        'data:image/png;base64,def456',
-      ]);
+      vi.mocked(jqReplaceBase64WithPathsToFile).mockResolvedValue(undefined);
 
-      vi.mocked(jqReplaceBase64WithPaths).mockResolvedValue({
-        data: { pages: [] },
-        count: 2,
-      });
+      // Mock extractImagesFromHtmlStream via pipeline
+      vi.mocked(streamPromises.pipeline).mockResolvedValue(undefined);
 
       await ImageExtractor.extractAndSaveDocumentsFromZip(
         mockLogger,
@@ -77,13 +73,17 @@ describe('ImageExtractor', () => {
         expect.any(Function),
       );
       expect(fs.mkdirSync).toHaveBeenCalled();
-      expect(fs.writeFileSync).toHaveBeenCalled();
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('Extracting ZIP file'),
       );
 
-      // Verify JSON images use 'images' directory and 'pic' prefix
-      expect(jqReplaceBase64WithPaths).toHaveBeenCalledWith(
+      // Verify jq streaming functions called with correct args
+      expect(jqExtractBase64PngStringsStreaming).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Function),
+      );
+      expect(jqReplaceBase64WithPathsToFile).toHaveBeenCalledWith(
+        expect.any(String),
         expect.any(String),
         'images',
         'pic',
@@ -109,14 +109,9 @@ describe('ImageExtractor', () => {
         'test.html',
       ] as any);
 
-      vi.mocked(fs.readFileSync).mockReturnValue('<html></html>');
-
-      vi.mocked(jqExtractBase64PngStrings).mockResolvedValue([]);
-
-      vi.mocked(jqReplaceBase64WithPaths).mockResolvedValue({
-        data: { pages: [] },
-        count: 0,
-      });
+      vi.mocked(jqExtractBase64PngStringsStreaming).mockResolvedValue(0);
+      vi.mocked(jqReplaceBase64WithPathsToFile).mockResolvedValue(undefined);
+      vi.mocked(streamPromises.pipeline).mockResolvedValue(undefined);
 
       await ImageExtractor.extractAndSaveDocumentsFromZip(
         mockLogger,
@@ -293,14 +288,9 @@ describe('ImageExtractor', () => {
         'test.HTML',
       ] as any);
 
-      vi.mocked(fs.readFileSync).mockReturnValue('<html></html>');
-
-      vi.mocked(jqExtractBase64PngStrings).mockResolvedValue([]);
-
-      vi.mocked(jqReplaceBase64WithPaths).mockResolvedValue({
-        data: { pages: [] },
-        count: 0,
-      });
+      vi.mocked(jqExtractBase64PngStringsStreaming).mockResolvedValue(0);
+      vi.mocked(jqReplaceBase64WithPathsToFile).mockResolvedValue(undefined);
+      vi.mocked(streamPromises.pipeline).mockResolvedValue(undefined);
 
       await ImageExtractor.extractAndSaveDocumentsFromZip(
         mockLogger,
@@ -309,7 +299,7 @@ describe('ImageExtractor', () => {
         outputDir,
       );
 
-      expect(fs.readFileSync).toHaveBeenCalled();
+      expect(jqExtractBase64PngStringsStreaming).toHaveBeenCalled();
     });
 
     test('should handle jq extraction failure and rethrow', async () => {
@@ -327,9 +317,7 @@ describe('ImageExtractor', () => {
         'test.html',
       ] as any);
 
-      vi.mocked(fs.readFileSync).mockReturnValue('<html></html>');
-
-      vi.mocked(jqExtractBase64PngStrings).mockRejectedValue(
+      vi.mocked(jqExtractBase64PngStringsStreaming).mockRejectedValue(
         new Error('jq extraction failed'),
       );
 
@@ -348,7 +336,7 @@ describe('ImageExtractor', () => {
       );
     });
 
-    test('should handle HTML image extraction with multiple images', async () => {
+    test('should invoke extractBase64ImageToFile via streaming callback', async () => {
       const zipPath = '/test/input.zip';
       const extractDir = '/test/extract';
       const outputDir = '/test/output';
@@ -363,148 +351,17 @@ describe('ImageExtractor', () => {
         'test.html',
       ] as any);
 
-      vi.mocked(fs.readFileSync).mockReturnValue(
-        '<html><img src="data:image/png;base64,abc123"/><img src="data:image/png;base64,def456"/></html>',
+      // Capture the onImage callback and invoke it with test data
+      vi.mocked(jqExtractBase64PngStringsStreaming).mockImplementation(
+        async (_filePath, onImage) => {
+          onImage('data:image/png;base64,abc123', 0);
+          onImage('def456', 1);
+          return 2;
+        },
       );
 
-      vi.mocked(jqExtractBase64PngStrings).mockResolvedValue([]);
-
-      vi.mocked(jqReplaceBase64WithPaths).mockResolvedValue({
-        data: { pages: [] },
-        count: 0,
-      });
-
-      await ImageExtractor.extractAndSaveDocumentsFromZip(
-        mockLogger,
-        zipPath,
-        extractDir,
-        outputDir,
-      );
-
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
-        expect.stringContaining('.html'),
-        expect.stringContaining('images/image_'),
-        'utf-8',
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Extracted 2 images from HTML'),
-      );
-    });
-
-    test('should handle HTML image extraction failure gracefully', async () => {
-      const zipPath = '/test/input.zip';
-      const extractDir = '/test/extract';
-      const outputDir = '/test/output';
-
-      setupSuccessfulZipExtraction([
-        { fileName: 'test.json', isDirectory: false },
-        { fileName: 'test.html', isDirectory: false },
-      ]);
-
-      vi.mocked(fs.readdirSync).mockReturnValue([
-        'test.json',
-        'test.html',
-      ] as any);
-
-      vi.mocked(fs.readFileSync).mockReturnValue('<html></html>');
-
-      vi.mocked(jqExtractBase64PngStrings).mockResolvedValue([]);
-
-      vi.mocked(jqReplaceBase64WithPaths).mockResolvedValue({
-        data: { pages: [] },
-        count: 0,
-      });
-
-      let htmlWriteAttempted = false;
-      vi.mocked(fs.writeFileSync).mockImplementation((filepath) => {
-        if (filepath.toString().includes('.html') && !htmlWriteAttempted) {
-          htmlWriteAttempted = true;
-          throw new Error('HTML write failed');
-        }
-      });
-
-      await ImageExtractor.extractAndSaveDocumentsFromZip(
-        mockLogger,
-        zipPath,
-        extractDir,
-        outputDir,
-      );
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to extract images from HTML'),
-        expect.any(Error),
-      );
-    });
-
-    test('should handle output directory removal failure gracefully', async () => {
-      const zipPath = '/test/input.zip';
-      const extractDir = '/test/extract';
-      const outputDir = '/test/output';
-
-      setupSuccessfulZipExtraction([
-        { fileName: 'test.json', isDirectory: false },
-        { fileName: 'test.html', isDirectory: false },
-      ]);
-
-      vi.mocked(fs.readdirSync).mockReturnValue([
-        'test.json',
-        'test.html',
-      ] as any);
-
-      vi.mocked(fs.readFileSync).mockReturnValue('<html></html>');
-
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-
-      vi.mocked(fs.rmSync).mockImplementation(() => {
-        throw new Error('Permission denied');
-      });
-
-      vi.mocked(jqExtractBase64PngStrings).mockResolvedValue([]);
-
-      vi.mocked(jqReplaceBase64WithPaths).mockResolvedValue({
-        data: { pages: [] },
-        count: 0,
-      });
-
-      await ImageExtractor.extractAndSaveDocumentsFromZip(
-        mockLogger,
-        zipPath,
-        extractDir,
-        outputDir,
-      );
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to clear output directory'),
-        expect.any(Error),
-      );
-    });
-
-    test('should handle base64 images with and without prefix', async () => {
-      const zipPath = '/test/input.zip';
-      const extractDir = '/test/extract';
-      const outputDir = '/test/output';
-
-      setupSuccessfulZipExtraction([
-        { fileName: 'test.json', isDirectory: false },
-        { fileName: 'test.html', isDirectory: false },
-      ]);
-
-      vi.mocked(fs.readdirSync).mockReturnValue([
-        'test.json',
-        'test.html',
-      ] as any);
-
-      vi.mocked(fs.readFileSync).mockReturnValue('<html></html>');
-
-      vi.mocked(jqExtractBase64PngStrings).mockResolvedValue([
-        'data:image/png;base64,abc123',
-        'def456',
-      ]);
-
-      vi.mocked(jqReplaceBase64WithPaths).mockResolvedValue({
-        data: { pages: [] },
-        count: 2,
-      });
+      vi.mocked(jqReplaceBase64WithPathsToFile).mockResolvedValue(undefined);
+      vi.mocked(streamPromises.pipeline).mockResolvedValue(undefined);
 
       const bufferFromSpy = vi.spyOn(Buffer, 'from');
 
@@ -529,6 +386,90 @@ describe('ImageExtractor', () => {
       );
     });
 
+    test('should handle output directory removal failure gracefully', async () => {
+      const zipPath = '/test/input.zip';
+      const extractDir = '/test/extract';
+      const outputDir = '/test/output';
+
+      setupSuccessfulZipExtraction([
+        { fileName: 'test.json', isDirectory: false },
+        { fileName: 'test.html', isDirectory: false },
+      ]);
+
+      vi.mocked(fs.readdirSync).mockReturnValue([
+        'test.json',
+        'test.html',
+      ] as any);
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      vi.mocked(fs.rmSync).mockImplementation(() => {
+        throw new Error('Permission denied');
+      });
+
+      vi.mocked(jqExtractBase64PngStringsStreaming).mockResolvedValue(0);
+      vi.mocked(jqReplaceBase64WithPathsToFile).mockResolvedValue(undefined);
+      vi.mocked(streamPromises.pipeline).mockResolvedValue(undefined);
+
+      await ImageExtractor.extractAndSaveDocumentsFromZip(
+        mockLogger,
+        zipPath,
+        extractDir,
+        outputDir,
+      );
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to clear output directory'),
+        expect.any(Error),
+      );
+    });
+
+    test('should fallback to streaming copy when HTML extraction fails', async () => {
+      const zipPath = '/test/input.zip';
+      const extractDir = '/test/extract';
+      const outputDir = '/test/output';
+
+      setupSuccessfulZipExtraction([
+        { fileName: 'test.json', isDirectory: false },
+        { fileName: 'test.html', isDirectory: false },
+      ]);
+
+      vi.mocked(fs.readdirSync).mockReturnValue([
+        'test.json',
+        'test.html',
+      ] as any);
+
+      vi.mocked(jqExtractBase64PngStringsStreaming).mockResolvedValue(0);
+      vi.mocked(jqReplaceBase64WithPathsToFile).mockResolvedValue(undefined);
+
+      // First call to pipeline (for extractImagesFromHtmlStream) throws error
+      // Second call (for fallback streaming copy) succeeds
+      let pipelineCallCount = 0;
+      vi.mocked(streamPromises.pipeline).mockImplementation(async () => {
+        pipelineCallCount++;
+        if (pipelineCallCount === 1) {
+          throw new Error('HTML stream processing failed');
+        }
+      });
+
+      await ImageExtractor.extractAndSaveDocumentsFromZip(
+        mockLogger,
+        zipPath,
+        extractDir,
+        outputDir,
+      );
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Failed to extract images from HTML, copying original',
+        ),
+        expect.any(Error),
+      );
+      // Verify fallback used streaming copy (createReadStream + createWriteStream + pipeline)
+      expect(fs.createReadStream).toHaveBeenCalled();
+      expect(fs.createWriteStream).toHaveBeenCalled();
+    });
+
     test('should handle zipfile error event', async () => {
       const zipPath = '/test/input.zip';
       const extractDir = '/test/extract';
@@ -544,6 +485,230 @@ describe('ImageExtractor', () => {
           outputDir,
         ),
       ).rejects.toThrow('Zipfile error');
+    });
+  });
+
+  describe('extractImagesFromHtmlStream', () => {
+    test('should extract base64 images and replace with file paths', async () => {
+      // Use real pipeline for streaming test
+      vi.mocked(streamPromises.pipeline).mockRestore();
+      const { pipeline: realPipeline } = await vi.importActual<
+        typeof streamPromises
+      >('node:stream/promises');
+      vi.mocked(streamPromises.pipeline).mockImplementation(realPipeline);
+
+      const htmlInput =
+        '<html><img src="data:image/png;base64,iVBOR"/><img src="data:image/png;base64,AAAA"/></html>';
+
+      // Mock createReadStream to return a readable stream with our test data
+      const { Readable } = (await vi.importActual('node:stream')) as any;
+      vi.mocked(fs.createReadStream).mockReturnValue(
+        Readable.from([htmlInput]) as any,
+      );
+
+      const chunks: string[] = [];
+      const mockWs = new Transform({
+        transform(chunk, _enc, cb) {
+          chunks.push(chunk.toString());
+          cb();
+        },
+      });
+      vi.mocked(fs.createWriteStream).mockReturnValue(mockWs as any);
+
+      const count = await ImageExtractor.extractImagesFromHtmlStream(
+        '/input.html',
+        '/output.html',
+        '/images',
+      );
+
+      expect(count).toBe(2);
+      const output = chunks.join('');
+      expect(output).toContain('src="images/image_0.png"');
+      expect(output).toContain('src="images/image_1.png"');
+      expect(output).not.toContain('data:image/png;base64');
+
+      expect(fs.writeFileSync).toHaveBeenCalledTimes(2);
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/images/image_0.png',
+        expect.any(Buffer),
+      );
+    });
+
+    test('should handle data split across chunk boundaries', async () => {
+      vi.mocked(streamPromises.pipeline).mockRestore();
+      const { pipeline: realPipeline } = await vi.importActual<
+        typeof streamPromises
+      >('node:stream/promises');
+      vi.mocked(streamPromises.pipeline).mockImplementation(realPipeline);
+
+      const { Readable } = (await vi.importActual('node:stream')) as any;
+
+      // Split the marker across two chunks
+      vi.mocked(fs.createReadStream).mockReturnValue(
+        Readable.from([
+          '<img src="data:image/png;base',
+          '64,AAAA" />rest',
+        ]) as any,
+      );
+
+      const chunks: string[] = [];
+      const mockWs = new Transform({
+        transform(chunk, _enc, cb) {
+          chunks.push(chunk.toString());
+          cb();
+        },
+      });
+      vi.mocked(fs.createWriteStream).mockReturnValue(mockWs as any);
+
+      const count = await ImageExtractor.extractImagesFromHtmlStream(
+        '/input.html',
+        '/output.html',
+        '/images',
+      );
+
+      expect(count).toBe(1);
+      const output = chunks.join('');
+      expect(output).toContain('src="images/image_0.png"');
+      expect(output).toContain('rest');
+    });
+
+    test('should handle closing quote split across chunks', async () => {
+      vi.mocked(streamPromises.pipeline).mockRestore();
+      const { pipeline: realPipeline } = await vi.importActual<
+        typeof streamPromises
+      >('node:stream/promises');
+      vi.mocked(streamPromises.pipeline).mockImplementation(realPipeline);
+
+      const { Readable } = (await vi.importActual('node:stream')) as any;
+
+      // First chunk has the marker and base64 data start but no closing quote
+      // Second chunk has more base64 data with the closing quote
+      vi.mocked(fs.createReadStream).mockReturnValue(
+        Readable.from([
+          '<img src="data:image/png;base64,AAAA',
+          'BBBB" />done',
+        ]) as any,
+      );
+
+      const chunks: string[] = [];
+      const mockWs = new Transform({
+        transform(chunk, _enc, cb) {
+          chunks.push(chunk.toString());
+          cb();
+        },
+      });
+      vi.mocked(fs.createWriteStream).mockReturnValue(mockWs as any);
+
+      const count = await ImageExtractor.extractImagesFromHtmlStream(
+        '/input.html',
+        '/output.html',
+        '/images',
+      );
+
+      expect(count).toBe(1);
+      const output = chunks.join('');
+      expect(output).toContain('src="images/image_0.png"');
+      expect(output).toContain('done');
+    });
+
+    test('should pass through HTML without images unchanged', async () => {
+      vi.mocked(streamPromises.pipeline).mockRestore();
+      const { pipeline: realPipeline } = await vi.importActual<
+        typeof streamPromises
+      >('node:stream/promises');
+      vi.mocked(streamPromises.pipeline).mockImplementation(realPipeline);
+
+      const { Readable } = (await vi.importActual('node:stream')) as any;
+
+      vi.mocked(fs.createReadStream).mockReturnValue(
+        Readable.from(['<html><body>Hello</body></html>']) as any,
+      );
+
+      const chunks: string[] = [];
+      const mockWs = new Transform({
+        transform(chunk, _enc, cb) {
+          chunks.push(chunk.toString());
+          cb();
+        },
+      });
+      vi.mocked(fs.createWriteStream).mockReturnValue(mockWs as any);
+
+      const count = await ImageExtractor.extractImagesFromHtmlStream(
+        '/input.html',
+        '/output.html',
+        '/images',
+      );
+
+      expect(count).toBe(0);
+      const output = chunks.join('');
+      expect(output).toContain('Hello');
+    });
+
+    test('should handle very short chunks without pushing empty result', async () => {
+      vi.mocked(streamPromises.pipeline).mockRestore();
+      const { pipeline: realPipeline } = await vi.importActual<
+        typeof streamPromises
+      >('node:stream/promises');
+      vi.mocked(streamPromises.pipeline).mockImplementation(realPipeline);
+
+      const { Readable } = (await vi.importActual('node:stream')) as any;
+
+      // Send data as individual characters — each chunk is shorter than the marker length,
+      // so safeEnd=0 and result='' (covers result.length > 0 false branch)
+      vi.mocked(fs.createReadStream).mockReturnValue(
+        Readable.from(['a', 'b', 'c']) as any,
+      );
+
+      const chunks: string[] = [];
+      const mockWs = new Transform({
+        transform(chunk, _enc, cb) {
+          chunks.push(chunk.toString());
+          cb();
+        },
+      });
+      vi.mocked(fs.createWriteStream).mockReturnValue(mockWs as any);
+
+      const count = await ImageExtractor.extractImagesFromHtmlStream(
+        '/input.html',
+        '/output.html',
+        '/images',
+      );
+
+      expect(count).toBe(0);
+      const output = chunks.join('');
+      expect(output).toBe('abc');
+    });
+
+    test('should handle empty input with nothing to flush', async () => {
+      vi.mocked(streamPromises.pipeline).mockRestore();
+      const { pipeline: realPipeline } = await vi.importActual<
+        typeof streamPromises
+      >('node:stream/promises');
+      vi.mocked(streamPromises.pipeline).mockImplementation(realPipeline);
+
+      const { Readable } = (await vi.importActual('node:stream')) as any;
+
+      // Empty input — no data passed to transform, flush is called with empty pending
+      // (covers pending.length > 0 false branch in flush)
+      vi.mocked(fs.createReadStream).mockReturnValue(Readable.from([]) as any);
+
+      const chunks: string[] = [];
+      const mockWs = new Transform({
+        transform(chunk, _enc, cb) {
+          chunks.push(chunk.toString());
+          cb();
+        },
+      });
+      vi.mocked(fs.createWriteStream).mockReturnValue(mockWs as any);
+
+      const count = await ImageExtractor.extractImagesFromHtmlStream(
+        '/input.html',
+        '/output.html',
+        '/images',
+      );
+
+      expect(count).toBe(0);
+      expect(chunks.join('')).toBe('');
     });
   });
 });
