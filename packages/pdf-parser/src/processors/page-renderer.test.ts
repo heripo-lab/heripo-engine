@@ -30,10 +30,9 @@ describe('PageRenderer', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useRealTimers();
     renderer = new PageRenderer(mockLogger);
     mockExistsSync.mockReturnValue(false);
-    // Default: pdfinfo returns empty (page count unknown), magick succeeds
+    // Default: pdfinfo returns 0 pages, magick succeeds
     mockSpawnAsync.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
   });
 
@@ -56,36 +55,6 @@ describe('PageRenderer', () => {
       await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
       expect(mkdirSync).not.toHaveBeenCalled();
-    });
-
-    test('calls magick with correct default DPI arguments', async () => {
-      mockReaddirSync.mockReturnValue([]);
-
-      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
-
-      expect(mockSpawnAsync).toHaveBeenCalledWith('magick', [
-        '-density',
-        '200',
-        '/tmp/input.pdf',
-        '-background',
-        'white',
-        '-alpha',
-        'remove',
-        '-alpha',
-        'off',
-        '/tmp/output/pages/page_%d.png',
-      ]);
-    });
-
-    test('uses custom DPI when specified', async () => {
-      mockReaddirSync.mockReturnValue([]);
-
-      await renderer.renderPages('/tmp/input.pdf', '/tmp/output', { dpi: 72 });
-
-      expect(mockSpawnAsync).toHaveBeenCalledWith(
-        'magick',
-        expect.arrayContaining(['-density', '72']),
-      );
     });
 
     test('returns sorted page files', async () => {
@@ -154,80 +123,136 @@ describe('PageRenderer', () => {
       expect(result.pageFiles).toEqual([]);
     });
 
-    test('throws error when magick command fails', async () => {
-      mockSpawnAsync.mockResolvedValue({
-        code: 1,
-        stdout: '',
-        stderr: 'magick: unable to open image',
-      });
-
-      await expect(
-        renderer.renderPages('/tmp/input.pdf', '/tmp/output'),
-      ).rejects.toThrow(
-        '[PageRenderer] Failed to render PDF pages: magick: unable to open image',
-      );
-    });
-
-    test('throws error with fallback message when stderr is empty', async () => {
-      mockSpawnAsync.mockResolvedValue({
-        code: 1,
-        stdout: '',
-        stderr: '',
-      });
-
-      await expect(
-        renderer.renderPages('/tmp/input.pdf', '/tmp/output'),
-      ).rejects.toThrow(
-        '[PageRenderer] Failed to render PDF pages: Unknown error',
-      );
-    });
-
-    test('logs rendering start and completion when page count is unknown', async () => {
+    test('logs rendering completion', async () => {
       mockReaddirSync.mockReturnValue(['page_0.png', 'page_1.png']);
 
       await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '[PageRenderer] Rendering PDF at 200 DPI...',
-      );
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[PageRenderer] Rendered 2 pages to /tmp/output/pages',
       );
     });
   });
 
-  describe('page count detection', () => {
-    test('calls pdfinfo to get page count before rendering', async () => {
-      mockReaddirSync.mockReturnValue([]);
-
-      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
-
-      expect(mockSpawnAsync).toHaveBeenCalledWith('pdfinfo', [
-        '/tmp/input.pdf',
-      ]);
-    });
-
-    test('logs page count when pdfinfo returns valid count', async () => {
+  describe('per-page rendering (page count known)', () => {
+    beforeEach(() => {
       mockSpawnAsync.mockImplementation((cmd: string) => {
         if (cmd === 'pdfinfo') {
           return Promise.resolve({
             code: 0,
-            stdout: 'Pages:          244',
+            stdout: 'Pages:          3',
             stderr: '',
           });
         }
+        // magick per-page call
         return Promise.resolve({ code: 0, stdout: '', stderr: '' });
       });
-      mockReaddirSync.mockReturnValue([]);
+      mockReaddirSync.mockReturnValue([
+        'page_0.png',
+        'page_1.png',
+        'page_2.png',
+      ]);
+    });
 
+    test('renders each page individually with correct magick arguments', async () => {
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      // pdfinfo + 3 magick calls
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(4);
+
+      for (let i = 0; i < 3; i++) {
+        expect(mockSpawnAsync).toHaveBeenCalledWith(
+          'magick',
+          [
+            '-density',
+            '200',
+            `/tmp/input.pdf[${i}]`,
+            '-background',
+            'white',
+            '-alpha',
+            'remove',
+            '-alpha',
+            'off',
+            `/tmp/output/pages/page_${i}.png`,
+          ],
+          { captureStdout: false },
+        );
+      }
+    });
+
+    test('uses custom DPI for per-page rendering', async () => {
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output', { dpi: 72 });
+
+      // Check that magick calls use custom DPI
+      const magickCalls = mockSpawnAsync.mock.calls.filter(
+        (call: string[]) => call[0] === 'magick',
+      );
+      expect(magickCalls).toHaveLength(3);
+      for (const call of magickCalls) {
+        expect(call[1]).toContain('72');
+      }
+    });
+
+    test('logs page count at start', async () => {
       await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        '[PageRenderer] Rendering 244 pages at 200 DPI...',
+        '[PageRenderer] Rendering 3 pages at 200 DPI...',
       );
     });
 
-    test('falls back to generic log when pdfinfo fails', async () => {
+    test('throws error with page number when magick fails', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'Pages:          3',
+            stderr: '',
+          });
+        }
+        // First page succeeds, second fails
+        if (
+          mockSpawnAsync.mock.calls.filter((c: string[]) => c[0] === 'magick')
+            .length <= 1
+        ) {
+          return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+        }
+        return Promise.resolve({
+          code: 1,
+          stdout: '',
+          stderr: 'magick: unable to open image',
+        });
+      });
+
+      await expect(
+        renderer.renderPages('/tmp/input.pdf', '/tmp/output'),
+      ).rejects.toThrow(
+        '[PageRenderer] Failed to render page 2/3: magick: unable to open image',
+      );
+    });
+
+    test('throws error with Unknown error when stderr is empty', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'Pages:          1',
+            stderr: '',
+          });
+        }
+        return Promise.resolve({ code: 1, stdout: '', stderr: '' });
+      });
+
+      await expect(
+        renderer.renderPages('/tmp/input.pdf', '/tmp/output'),
+      ).rejects.toThrow(
+        '[PageRenderer] Failed to render page 1/1: Unknown error',
+      );
+    });
+  });
+
+  describe('fallback rendering (page count unknown)', () => {
+    test('calls magick with batch pattern when pdfinfo fails', async () => {
       mockSpawnAsync.mockImplementation((cmd: string) => {
         if (cmd === 'pdfinfo') {
           return Promise.resolve({
@@ -242,12 +267,25 @@ describe('PageRenderer', () => {
 
       await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '[PageRenderer] Rendering PDF at 200 DPI...',
+      expect(mockSpawnAsync).toHaveBeenCalledWith(
+        'magick',
+        [
+          '-density',
+          '200',
+          '/tmp/input.pdf',
+          '-background',
+          'white',
+          '-alpha',
+          'remove',
+          '-alpha',
+          'off',
+          '/tmp/output/pages/page_%d.png',
+        ],
+        { captureStdout: false },
       );
     });
 
-    test('falls back to generic log when pdfinfo throws', async () => {
+    test('calls magick with batch pattern when pdfinfo throws', async () => {
       mockSpawnAsync.mockImplementation((cmd: string) => {
         if (cmd === 'pdfinfo') {
           return Promise.reject(new Error('spawn ENOENT'));
@@ -262,23 +300,87 @@ describe('PageRenderer', () => {
         '[PageRenderer] Rendering PDF at 200 DPI...',
       );
     });
+
+    test('throws error when fallback magick fails', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+        }
+        return Promise.resolve({
+          code: 1,
+          stdout: '',
+          stderr: 'magick: unable to open image',
+        });
+      });
+
+      await expect(
+        renderer.renderPages('/tmp/input.pdf', '/tmp/output'),
+      ).rejects.toThrow(
+        '[PageRenderer] Failed to render PDF pages: magick: unable to open image',
+      );
+    });
+
+    test('throws fallback error with Unknown error when stderr is empty', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+        }
+        return Promise.resolve({ code: 1, stdout: '', stderr: '' });
+      });
+
+      await expect(
+        renderer.renderPages('/tmp/input.pdf', '/tmp/output'),
+      ).rejects.toThrow(
+        '[PageRenderer] Failed to render PDF pages: Unknown error',
+      );
+    });
+  });
+
+  describe('page count detection', () => {
+    test('calls pdfinfo to get page count before rendering', async () => {
+      mockReaddirSync.mockReturnValue([]);
+
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      expect(mockSpawnAsync).toHaveBeenCalledWith('pdfinfo', [
+        '/tmp/input.pdf',
+      ]);
+    });
   });
 
   describe('progress logging', () => {
-    test('logs rendering progress during magick execution', async () => {
-      vi.useFakeTimers();
-
-      let readdirCallCount = 0;
-      mockReaddirSync.mockImplementation(() => {
-        readdirCallCount++;
-        // 1st call (progress poll at 2s): 1 file rendered
-        if (readdirCallCount === 1) return ['page_0.png'];
-        // 2nd call (progress poll at 4s): 2 files rendered
-        if (readdirCallCount === 2) return ['page_0.png', 'page_1.png'];
-        // 3rd+ call (final listing after render): all 3 files
-        return ['page_0.png', 'page_1.png', 'page_2.png'];
+    test('logs progress at 10% intervals', async () => {
+      mockSpawnAsync.mockImplementation((cmd: string) => {
+        if (cmd === 'pdfinfo') {
+          return Promise.resolve({
+            code: 0,
+            stdout: 'Pages:          20',
+            stderr: '',
+          });
+        }
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
       });
+      mockReaddirSync.mockReturnValue(
+        Array.from({ length: 20 }, (_, i) => `page_${i}.png`),
+      );
 
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+
+      // Should log at 10%, 20%, ..., 100%
+      const progressCalls = mockLogger.info.mock.calls.filter(
+        (args: string[]) =>
+          typeof args[0] === 'string' && args[0].includes('Rendering pages:'),
+      );
+      expect(progressCalls.length).toBeGreaterThanOrEqual(10);
+      expect(progressCalls[0][0]).toBe(
+        '[PageRenderer] Rendering pages: 2/20 (10%)',
+      );
+      expect(progressCalls[progressCalls.length - 1][0]).toBe(
+        '[PageRenderer] Rendering pages: 20/20 (100%)',
+      );
+    });
+
+    test('always logs the final page', async () => {
       mockSpawnAsync.mockImplementation((cmd: string) => {
         if (cmd === 'pdfinfo') {
           return Promise.resolve({
@@ -287,135 +389,38 @@ describe('PageRenderer', () => {
             stderr: '',
           });
         }
-        // magick takes 5 seconds
-        return new Promise((resolve) => {
-          setTimeout(() => resolve({ code: 0, stdout: '', stderr: '' }), 5000);
-        });
+        return Promise.resolve({ code: 0, stdout: '', stderr: '' });
       });
+      mockReaddirSync.mockReturnValue([
+        'page_0.png',
+        'page_1.png',
+        'page_2.png',
+      ]);
 
-      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
-      // First progress poll at 2s
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '[PageRenderer] Rendering pages: 1/3',
-      );
-
-      // Second progress poll at 4s
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        '[PageRenderer] Rendering pages: 2/3',
-      );
-
-      // magick completes at 5s
-      await vi.advanceTimersByTimeAsync(1000);
-      await promise;
-    });
-
-    test('skips duplicate progress logs when count has not changed', async () => {
-      vi.useFakeTimers();
-
-      // Always return same count during progress polls
-      mockReaddirSync.mockReturnValue(['page_0.png']);
-
-      mockSpawnAsync.mockImplementation((cmd: string) => {
-        if (cmd === 'pdfinfo') {
-          return Promise.resolve({
-            code: 0,
-            stdout: 'Pages:          5',
-            stderr: '',
-          });
-        }
-        return new Promise((resolve) => {
-          setTimeout(() => resolve({ code: 0, stdout: '', stderr: '' }), 5000);
-        });
-      });
-
-      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
-
-      // Two polls, same file count
-      await vi.advanceTimersByTimeAsync(2000);
-      await vi.advanceTimersByTimeAsync(2000);
-
-      // Should only log "1/5" once (deduplication)
       const progressCalls = mockLogger.info.mock.calls.filter(
         (args: string[]) =>
           typeof args[0] === 'string' && args[0].includes('Rendering pages:'),
       );
-      expect(progressCalls).toHaveLength(1);
-
-      await vi.advanceTimersByTimeAsync(1000);
-      await promise;
+      // For 3 pages: page 1 = 33%, page 2 = 66%, page 3 = 100%
+      // 33% >= 10% → log; 66% >= 43% → log; 100% is final → log
+      expect(progressCalls.length).toBeGreaterThanOrEqual(1);
+      expect(progressCalls[progressCalls.length - 1][0]).toBe(
+        '[PageRenderer] Rendering pages: 3/3 (100%)',
+      );
     });
 
-    test('cleans up progress interval when magick fails', async () => {
-      vi.useFakeTimers();
-
+    test('does not log progress when page count is unknown', async () => {
       mockReaddirSync.mockReturnValue([]);
 
-      mockSpawnAsync.mockImplementation((cmd: string) => {
-        if (cmd === 'pdfinfo') {
-          return Promise.resolve({
-            code: 0,
-            stdout: 'Pages:          5',
-            stderr: '',
-          });
-        }
-        return new Promise((resolve) => {
-          setTimeout(
-            () => resolve({ code: 1, stdout: '', stderr: 'render error' }),
-            3000,
-          );
-        });
-      });
+      await renderer.renderPages('/tmp/input.pdf', '/tmp/output');
 
-      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
-      // Attach a no-op catch to prevent PromiseRejectionHandledWarning
-      // (the rejection is still asserted below via rejects.toThrow)
-      promise.catch(() => {});
-
-      await vi.advanceTimersByTimeAsync(3000);
-      await expect(promise).rejects.toThrow(
-        '[PageRenderer] Failed to render PDF pages: render error',
-      );
-
-      // Verify no more interval callbacks after error (interval was cleared)
-      mockLogger.info.mockClear();
-      await vi.advanceTimersByTimeAsync(4000);
       const progressCalls = mockLogger.info.mock.calls.filter(
         (args: string[]) =>
           typeof args[0] === 'string' && args[0].includes('Rendering pages:'),
       );
       expect(progressCalls).toHaveLength(0);
-    });
-
-    test('does not start progress interval when page count is unknown', async () => {
-      vi.useFakeTimers();
-
-      mockReaddirSync.mockReturnValue([]);
-
-      mockSpawnAsync.mockImplementation((cmd: string) => {
-        if (cmd === 'pdfinfo') {
-          return Promise.resolve({ code: 0, stdout: '', stderr: '' });
-        }
-        return new Promise((resolve) => {
-          setTimeout(() => resolve({ code: 0, stdout: '', stderr: '' }), 3000);
-        });
-      });
-
-      const promise = renderer.renderPages('/tmp/input.pdf', '/tmp/output');
-
-      await vi.advanceTimersByTimeAsync(2000);
-
-      // No progress log when page count is 0
-      const progressCalls = mockLogger.info.mock.calls.filter(
-        (args: string[]) =>
-          typeof args[0] === 'string' && args[0].includes('Rendering pages:'),
-      );
-      expect(progressCalls).toHaveLength(0);
-
-      await vi.advanceTimersByTimeAsync(1000);
-      await promise;
     });
   });
 });
