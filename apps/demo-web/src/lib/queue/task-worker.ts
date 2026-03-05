@@ -260,7 +260,6 @@ export async function runTaskWorker(
     // Register task logger to receive PDF parser logs
     pdfParserManager.setTaskLogger(taskId, logger);
 
-    const pdfParser = await pdfParserManager.getParser();
     const pdfUrl = `file://${filePath}`;
 
     let doclingDocument: DoclingDocument;
@@ -289,8 +288,18 @@ export async function runTaskWorker(
     };
 
     try {
-      const parseResult = await pdfParserManager.runInTaskContext(taskId, () =>
-        parsePdf(pdfParser, pdfUrl, taskId, pdfConvertOptions, abortSignal),
+      const parseResult = await pdfParserManager.runInTaskContext(
+        taskId,
+        async () => {
+          const pdfParser = await pdfParserManager.getParser();
+          return parsePdf(
+            pdfParser,
+            pdfUrl,
+            taskId,
+            pdfConvertOptions,
+            abortSignal,
+          );
+        },
       );
 
       doclingDocument = parseResult.doclingDocument;
