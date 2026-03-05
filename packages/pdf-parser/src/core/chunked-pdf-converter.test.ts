@@ -324,8 +324,11 @@ describe('ChunkedPDFConverter', () => {
         expect.objectContaining({ page_range: [21, 25] }),
       );
 
-      // Merger called with 3 documents
-      expect(mockMergerInstance.merge).toHaveBeenCalledWith([doc1, doc2, doc3]);
+      // Merger called with 3 documents and picFileOffsets
+      expect(mockMergerInstance.merge).toHaveBeenCalledWith(
+        [doc1, doc2, doc3],
+        [0, 0, 0],
+      );
 
       // onComplete callback called
       expect(mockOnComplete).toHaveBeenCalledWith('/test/cwd/output/report-1');
@@ -1035,6 +1038,129 @@ describe('ChunkedPDFConverter', () => {
           mockBuildOptions,
         ),
       ).rejects.toThrow('Failed to detect page count from PDF');
+    });
+
+    test('throws on non-positive chunkSize', () => {
+      const zeroChunkConverter = new ChunkedPDFConverter(logger, client, {
+        chunkSize: 0,
+        maxRetries: 0,
+      });
+      expect(() => zeroChunkConverter.calculateChunks(10)).toThrow(
+        'chunkSize must be positive',
+      );
+
+      const negativeChunkConverter = new ChunkedPDFConverter(logger, client, {
+        chunkSize: -5,
+        maxRetries: 0,
+      });
+      expect(() => negativeChunkConverter.calculateChunks(10)).toThrow(
+        'chunkSize must be positive',
+      );
+    });
+
+    test('_chunks directory is cleaned up even when renderPageImages throws', async () => {
+      vi.mocked(spawnAsync).mockResolvedValue({
+        code: 0,
+        stdout: 'Pages:          5\n',
+        stderr: '',
+      });
+
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      mockRendererInstance.renderPages.mockRejectedValue(
+        new Error('ImageMagick crashed'),
+      );
+
+      await expect(
+        converter.convertChunked(
+          'file:///test/input.pdf',
+          'report-1',
+          mockOnComplete,
+          false,
+          {},
+          mockBuildOptions,
+        ),
+      ).rejects.toThrow('ImageMagick crashed');
+
+      // _chunks dir still cleaned up despite error
+      expect(rmSync).toHaveBeenCalledWith(
+        expect.stringContaining('_chunks'),
+        expect.objectContaining({ recursive: true }),
+      );
+    });
+
+    test('_chunks directory is cleaned up even when onComplete throws', async () => {
+      vi.mocked(spawnAsync).mockResolvedValue({
+        code: 0,
+        stdout: 'Pages:          5\n',
+        stderr: '',
+      });
+
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      mockOnComplete.mockRejectedValue(new Error('Callback error'));
+
+      await expect(
+        converter.convertChunked(
+          'file:///test/input.pdf',
+          'report-1',
+          mockOnComplete,
+          false,
+          {},
+          mockBuildOptions,
+        ),
+      ).rejects.toThrow('Callback error');
+
+      // _chunks dir still cleaned up despite callback error
+      expect(rmSync).toHaveBeenCalledWith(
+        expect.stringContaining('_chunks'),
+        expect.objectContaining({ recursive: true }),
+      );
+    });
+
+    test('picFileOffsets are passed to merger based on chunk pic_ file counts', async () => {
+      vi.mocked(spawnAsync).mockResolvedValue({
+        code: 0,
+        stdout: 'Pages:          20\n',
+        stderr: '',
+      });
+
+      // Simulate pic_ files in chunk directories for buildPicFileOffsets
+      vi.mocked(existsSync).mockImplementation((path) => {
+        const p = String(path);
+        return (
+          p.includes('_chunk_0/output/images') ||
+          p.includes('_chunk_1/output/images')
+        );
+      });
+
+      vi.mocked(readdirSync).mockImplementation((path) => {
+        const p = String(path);
+        // buildPicFileOffsets reads chunk dirs
+        if (p.includes('_chunk_0/output/images')) {
+          return ['pic_0.png', 'pic_1.png', 'pic_2.png'] as any;
+        }
+        if (p.includes('_chunk_1/output/images')) {
+          return ['pic_0.png', 'pic_1.png'] as any;
+        }
+        return [] as any;
+      });
+
+      await converter.convertChunked(
+        'file:///test/input.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {},
+        mockBuildOptions,
+      );
+
+      // Merger should have been called with picFileOffsets [0, 3]
+      // (chunk 0 has 3 pic files, so chunk 1 offset = 3)
+      expect(mockMergerInstance.merge).toHaveBeenCalledWith(
+        expect.any(Array),
+        [0, 3],
+      );
     });
   });
 });

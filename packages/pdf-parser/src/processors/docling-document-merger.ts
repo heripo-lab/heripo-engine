@@ -26,9 +26,12 @@ export class DoclingDocumentMerger {
    * The first chunk's metadata (schema_name, version, name, origin) is used as the base.
    *
    * @param chunks - Array of DoclingDocument objects to merge (must have at least 1)
+   * @param picFileOffsets - Optional cumulative pic_ file counts per chunk.
+   *   When provided, picFileOffsets[i] is used for pic_ URI remapping instead of
+   *   the pictures array length, aligning URIs with relocated file indices.
    * @returns Merged DoclingDocument
    */
-  merge(chunks: DoclingDocument[]): DoclingDocument {
+  merge(chunks: DoclingDocument[], picFileOffsets?: number[]): DoclingDocument {
     if (chunks.length === 0) {
       throw new Error('Cannot merge zero chunks');
     }
@@ -48,6 +51,9 @@ export class DoclingDocumentMerger {
         tables: base.tables.length,
         groups: base.groups.length,
       };
+      const picFileOffset = picFileOffsets
+        ? picFileOffsets[i]
+        : offsets.pictures;
 
       // Merge texts
       for (const text of chunk.texts) {
@@ -75,8 +81,8 @@ export class DoclingDocumentMerger {
         remapped.captions = remapped.captions.map((c) => ({
           $ref: this.remapRef(c.$ref, offsets),
         }));
-        // Remap image URI
-        this.remapPictureImageUri(remapped, offsets);
+        // Remap image URI using file-based offset for correct alignment
+        this.remapPictureImageUri(remapped, picFileOffset);
         base.pictures.push(remapped);
       }
 
@@ -150,12 +156,12 @@ export class DoclingDocumentMerger {
   }
 
   /**
-   * Remap image URI in a picture item by applying the pictures offset.
+   * Remap image URI in a picture item by applying the pic file offset.
    * Transforms "images/pic_N.png" → "images/pic_{N+offset}.png"
    */
   private remapPictureImageUri(
     picture: DoclingPictureItem,
-    offsets: RefOffsets,
+    picFileOffset: number,
   ): void {
     // DoclingPictureItem may have an `image` field at runtime from Docling output
     const rec = picture as unknown as { image?: { uri?: string } };
@@ -165,7 +171,7 @@ export class DoclingDocumentMerger {
     const match = IMAGE_URI_PATTERN.exec(image.uri);
     if (match) {
       const index = parseInt(match[1], 10);
-      image.uri = `images/pic_${index + offsets.pictures}.png`;
+      image.uri = `images/pic_${index + picFileOffset}.png`;
     }
   }
 }

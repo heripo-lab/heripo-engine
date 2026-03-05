@@ -137,7 +137,11 @@ export class ChunkedPDFConverter {
       `[ChunkedPDFConverter] All ${chunks.length} chunks completed, merging...`,
     );
     const merger = new DoclingDocumentMerger();
-    const merged = merger.merge(chunkDocuments);
+    const picFileOffsets = this.buildPicFileOffsets(
+      chunksBaseDir,
+      chunks.length,
+    );
+    const merged = merger.merge(chunkDocuments, picFileOffsets);
 
     this.logger.info(
       `[ChunkedPDFConverter] Merged: ${merged.texts.length} texts, ${merged.pictures.length} pictures, ${merged.tables.length} tables, ${Object.keys(merged.pages).length} pages`,
@@ -155,33 +159,40 @@ export class ChunkedPDFConverter {
     const resultPath = join(outputDir, 'result.json');
     writeFileSync(resultPath, JSON.stringify(merged));
 
-    // Step 7: Render page images (ImageMagick, same as non-chunked)
-    await this.renderPageImages(pdfPath, outputDir);
+    try {
+      // Step 7: Render page images (ImageMagick, same as non-chunked)
+      await this.renderPageImages(pdfPath, outputDir);
 
-    // Step 7.5: Clean up orphaned pic_ files
-    this.cleanupOrphanedPicFiles(resultPath, imagesDir);
+      // Step 7.5: Clean up orphaned pic_ files
+      this.cleanupOrphanedPicFiles(resultPath, imagesDir);
 
-    this.checkAbort(abortSignal);
+      this.checkAbort(abortSignal);
 
-    // Step 8: Execute completion callback
-    this.logger.info('[ChunkedPDFConverter] Executing completion callback...');
-    await onComplete(outputDir);
-
-    // Step 9: Cleanup
-    if (existsSync(chunksBaseDir)) {
-      rmSync(chunksBaseDir, { recursive: true, force: true });
-    }
-
-    if (cleanupAfterCallback) {
+      // Step 8: Execute completion callback
       this.logger.info(
-        '[ChunkedPDFConverter] Cleaning up output directory:',
-        outputDir,
+        '[ChunkedPDFConverter] Executing completion callback...',
       );
-      if (existsSync(outputDir)) {
-        rmSync(outputDir, { recursive: true, force: true });
+      await onComplete(outputDir);
+    } finally {
+      // Step 9: Cleanup (always runs)
+      if (existsSync(chunksBaseDir)) {
+        rmSync(chunksBaseDir, { recursive: true, force: true });
       }
-    } else {
-      this.logger.info('[ChunkedPDFConverter] Output preserved at:', outputDir);
+
+      if (cleanupAfterCallback) {
+        this.logger.info(
+          '[ChunkedPDFConverter] Cleaning up output directory:',
+          outputDir,
+        );
+        if (existsSync(outputDir)) {
+          rmSync(outputDir, { recursive: true, force: true });
+        }
+      } else {
+        this.logger.info(
+          '[ChunkedPDFConverter] Output preserved at:',
+          outputDir,
+        );
+      }
     }
 
     return null;
@@ -288,6 +299,10 @@ export class ChunkedPDFConverter {
 
   /** Calculate page ranges for chunks */
   calculateChunks(totalPages: number): PageRange[] {
+    if (this.config.chunkSize <= 0) {
+      throw new Error('[ChunkedPDFConverter] chunkSize must be positive');
+    }
+
     const ranges: PageRange[] = [];
     for (let start = 1; start <= totalPages; start += this.config.chunkSize) {
       const end = Math.min(start + this.config.chunkSize - 1, totalPages);
@@ -513,6 +528,29 @@ export class ChunkedPDFConverter {
         `[ChunkedPDFConverter] Cleaned up ${removedCount} orphaned pic_ files (${referencedPics.size} referenced, kept)`,
       );
     }
+  }
+
+  /**
+   * Build cumulative pic_ file offsets per chunk for correct URI remapping.
+   * Each offset[i] is the total number of pic_ files in chunks 0..i-1.
+   */
+  private buildPicFileOffsets(
+    chunksBaseDir: string,
+    totalChunks: number,
+  ): number[] {
+    const offsets: number[] = [];
+    let cumulative = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      offsets.push(cumulative);
+      const dir = join(chunksBaseDir, `_chunk_${i}`, 'output', 'images');
+      const count = existsSync(dir)
+        ? readdirSync(dir).filter(
+            (f) => f.startsWith('pic_') && f.endsWith('.png'),
+          ).length
+        : 0;
+      cumulative += count;
+    }
+    return offsets;
   }
 
   /** Check if abort has been signalled and throw if so */

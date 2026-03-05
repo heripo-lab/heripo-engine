@@ -988,6 +988,57 @@ describe('DoclingDocumentMerger', () => {
     expect(result.texts[3].parent?.$ref).toBe('#/texts/2');
   });
 
+  test('image URI remapping with picFileOffsets uses file-based offset', () => {
+    const chunk1 = makeChunk({
+      pictures: [
+        {
+          self_ref: '#/pictures/0',
+          children: [],
+          content_layer: 'body',
+          label: 'picture',
+          prov: [],
+          captions: [],
+          references: [],
+          footnotes: [],
+          annotations: [],
+          image: { uri: 'images/pic_5.png' },
+        } as any,
+      ],
+    });
+    const chunk2 = makeChunk({
+      pictures: [
+        {
+          self_ref: '#/pictures/0',
+          children: [],
+          content_layer: 'body',
+          label: 'picture',
+          prov: [],
+          captions: [],
+          references: [],
+          footnotes: [],
+          annotations: [],
+          image: { uri: 'images/pic_3.png' },
+        } as any,
+      ],
+    });
+
+    // Without picFileOffsets: uses pictures count (1) as offset
+    const resultDefault = merger.merge([
+      structuredClone(chunk1),
+      structuredClone(chunk2),
+    ]);
+    const pic1Default = resultDefault.pictures[1] as any;
+    expect(pic1Default.image.uri).toBe('images/pic_4.png'); // 3 + 1
+
+    // With picFileOffsets: uses file-based offset (10) for chunk 1
+    const resultWithOffsets = merger.merge(
+      [structuredClone(chunk1), structuredClone(chunk2)],
+      [0, 10],
+    );
+    const pic1WithOffsets = resultWithOffsets.pictures[1] as any;
+    expect(pic1WithOffsets.image.uri).toBe('images/pic_13.png'); // 3 + 10
+  });
+
   test('picture with non-matching image URI is not remapped', () => {
     const chunk1 = makeChunk({
       pictures: [
