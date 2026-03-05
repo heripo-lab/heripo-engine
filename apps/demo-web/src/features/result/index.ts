@@ -2,6 +2,7 @@
 export { ChapterContentCard } from './components/chapter-content-card';
 export { ChapterTree } from './components/chapter-tree';
 export { NextStageBanner } from './components/next-stage-banner';
+export { PreprocessingInfoBanner } from './components/preprocessing-info-banner';
 export { ContentViewerModal } from './components/content-viewer-modal';
 export { ResultError } from './components/result-error';
 export { ResultHeader } from './components/result-header';
