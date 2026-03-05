@@ -17,6 +17,7 @@ import {
   ContentViewerModal,
   ContentViewerProvider,
   NextStageBanner,
+  PreprocessingInfoBanner,
   ResultError,
   ResultHeader,
   ResultLoading,
@@ -86,6 +87,7 @@ function ResultContent({ taskId }: { taskId: string }) {
             isDownloading={isDownloading}
           />
           {task.isSample && <SampleDataBanner />}
+          <PreprocessingInfoBanner />
           <ResultSummaryCards
             pages={task.totalPages ?? 0}
             chapters={task.chaptersCount ?? 0}

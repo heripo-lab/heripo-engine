@@ -11,6 +11,7 @@ import type { ApiResponseError } from '~/lib/api/tasks';
 import { publicModeConfig } from '~/lib/config/public-mode';
 
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
+import { SampleResultsBanner } from '~/components/layout/sample-results-banner';
 import { PipelineStepper } from '~/components/pipeline/pipeline-stepper';
 import { Card, CardContent } from '~/components/ui/card';
 import {
@@ -274,6 +275,9 @@ function HomePageContent() {
                   resetsAt={rateLimit.resetsAt}
                 />
               )}
+
+              {/* Sample Results Banner - Official demo only */}
+              {publicModeConfig.isOfficialDemo && <SampleResultsBanner />}
 
               {/* Upload Section */}
               <PdfDropzone />
