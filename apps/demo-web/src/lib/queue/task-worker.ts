@@ -289,12 +289,8 @@ export async function runTaskWorker(
     };
 
     try {
-      const parseResult = await parsePdf(
-        pdfParser,
-        pdfUrl,
-        taskId,
-        pdfConvertOptions,
-        abortSignal,
+      const parseResult = await pdfParserManager.runInTaskContext(taskId, () =>
+        parsePdf(pdfParser, pdfUrl, taskId, pdfConvertOptions, abortSignal),
       );
 
       doclingDocument = parseResult.doclingDocument;

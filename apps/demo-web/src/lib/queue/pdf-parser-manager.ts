@@ -2,6 +2,7 @@ import type { LoggerMethods } from '@heripo/logger';
 
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { TaskQueueManager } from './task-queue-manager';
 
@@ -20,6 +21,7 @@ class PDFParserManager {
 
   // Task-specific loggers for forwarding PDF parser logs to frontend
   private taskLoggers: Map<string, LoggerMethods> = new Map();
+  private taskContext = new AsyncLocalStorage<string>();
 
   private constructor() {
     this.setupShutdownHandlers();
@@ -44,6 +46,14 @@ class PDFParserManager {
    */
   clearTaskLogger(taskId: string): void {
     this.taskLoggers.delete(taskId);
+  }
+
+  /**
+   * Run a function within a task context so PDF parser logs are forwarded
+   * only to the logger registered for this task.
+   */
+  runInTaskContext<T>(taskId: string, fn: () => T): T {
+    return this.taskContext.run(taskId, fn);
   }
 
   async getParser(): Promise<PDFParser> {
@@ -74,9 +84,12 @@ class PDFParserManager {
       level: 'debug' | 'info' | 'warn' | 'error',
       ...args: unknown[]
     ) => {
-      // Forward to all active task loggers
-      for (const taskLogger of this.taskLoggers.values()) {
-        taskLogger[level](...args);
+      const currentTaskId = this.taskContext.getStore();
+      if (currentTaskId) {
+        const taskLogger = this.taskLoggers.get(currentTaskId);
+        if (taskLogger) {
+          taskLogger[level](...args);
+        }
       }
     };
 
