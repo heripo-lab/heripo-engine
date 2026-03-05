@@ -14,7 +14,11 @@ import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { PAGE_RENDERING, PDF_CONVERTER } from '../config/constants';
+import {
+  CHUNKED_CONVERSION,
+  PAGE_RENDERING,
+  PDF_CONVERTER,
+} from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
@@ -23,6 +27,7 @@ import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { runJqFileJson, runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
+import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { ImagePdfConverter } from './image-pdf-converter';
 
 /**
@@ -71,6 +76,12 @@ export type PDFConvertOptions = Omit<
   aggregator?: LLMTokenUsageAggregator;
   /** Callback fired after each batch of VLM pages completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
+  /** Enable chunked conversion for large PDFs (local files only) */
+  chunkedConversion?: boolean;
+  /** Pages per chunk (default: CHUNKED_CONVERSION.DEFAULT_CHUNK_SIZE) */
+  chunkSize?: number;
+  /** Max retry attempts per failed chunk (default: CHUNKED_CONVERSION.DEFAULT_MAX_RETRIES) */
+  chunkMaxRetries?: number;
 };
 
 /** Result of strategy-based conversion */
@@ -98,6 +109,29 @@ export class PDFConverter {
     abortSignal?: AbortSignal,
   ): Promise<TokenUsageReport | null> {
     this.logger.info('[PDFConverter] Converting:', url);
+
+    // Chunked conversion for large local PDFs
+    if (options.chunkedConversion && url.startsWith('file://')) {
+      const chunked = new ChunkedPDFConverter(
+        this.logger,
+        this.client,
+        {
+          chunkSize: options.chunkSize ?? CHUNKED_CONVERSION.DEFAULT_CHUNK_SIZE,
+          maxRetries:
+            options.chunkMaxRetries ?? CHUNKED_CONVERSION.DEFAULT_MAX_RETRIES,
+        },
+        this.timeout,
+      );
+      return chunked.convertChunked(
+        url,
+        reportId,
+        onComplete,
+        cleanupAfterCallback,
+        options,
+        (opts) => this.buildConversionOptions(opts),
+        abortSignal,
+      );
+    }
 
     // Force image PDF pre-conversion when explicitly requested
     if (options.forceImagePdf) {
@@ -587,6 +621,9 @@ export class PDFConverter {
         'forcedMethod',
         'aggregator',
         'onTokenUsage',
+        'chunkedConversion',
+        'chunkSize',
+        'chunkMaxRetries',
       ]),
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',
