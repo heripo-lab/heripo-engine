@@ -66,6 +66,19 @@ export const PAGE_RENDERING = {
 /**
  * Configuration constants for ImagePdfConverter
  */
+/**
+ * Configuration constants for chunked PDF conversion
+ */
+export const CHUNKED_CONVERSION = {
+  /** Number of pages per chunk */
+  DEFAULT_CHUNK_SIZE: 10,
+  /** Maximum retry attempts per failed chunk */
+  DEFAULT_MAX_RETRIES: 2,
+} as const;
+
+/**
+ * Configuration constants for ImagePdfConverter
+ */
 export const IMAGE_PDF_CONVERTER = {
   /**
    * ImageMagick density option (DPI) for PDF to image conversion

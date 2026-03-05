@@ -15,11 +15,16 @@ import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
 import { runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
+import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { ImagePdfConverter } from './image-pdf-converter';
 import { PDFConverter } from './pdf-converter';
 
 vi.mock('es-toolkit', () => ({
   omit: vi.fn(),
+}));
+
+vi.mock('./chunked-pdf-converter', () => ({
+  ChunkedPDFConverter: vi.fn(),
 }));
 
 vi.mock('./image-pdf-converter', () => ({
@@ -137,6 +142,99 @@ describe('PDFConverter', () => {
         5_000_000,
       );
       expect(customConverter).toBeInstanceOf(PDFConverter);
+    });
+
+    describe('chunked conversion', () => {
+      let mockConvertChunked: ReturnType<typeof vi.fn>;
+
+      beforeEach(() => {
+        mockConvertChunked = vi.fn().mockResolvedValue(null);
+        vi.mocked(ChunkedPDFConverter).mockImplementation(function () {
+          return { convertChunked: mockConvertChunked } as any;
+        });
+      });
+
+      test('delegates to ChunkedPDFConverter when chunkedConversion is true and url is file://', async () => {
+        await converter.convert(
+          'file:///test/input.pdf',
+          'report-1',
+          vi.fn(),
+          false,
+          { chunkedConversion: true },
+        );
+
+        expect(ChunkedPDFConverter).toHaveBeenCalledWith(
+          logger,
+          client,
+          expect.objectContaining({ chunkSize: 10, maxRetries: 2 }),
+          expect.any(Number),
+        );
+        expect(mockConvertChunked).toHaveBeenCalledWith(
+          'file:///test/input.pdf',
+          'report-1',
+          expect.any(Function),
+          false,
+          expect.objectContaining({ chunkedConversion: true }),
+          expect.any(Function),
+          undefined,
+        );
+      });
+
+      test('uses custom chunkSize and chunkMaxRetries', async () => {
+        await converter.convert(
+          'file:///test/input.pdf',
+          'report-1',
+          vi.fn(),
+          false,
+          { chunkedConversion: true, chunkSize: 20, chunkMaxRetries: 5 },
+        );
+
+        expect(ChunkedPDFConverter).toHaveBeenCalledWith(
+          logger,
+          client,
+          { chunkSize: 20, maxRetries: 5 },
+          expect.any(Number),
+        );
+      });
+
+      test('passes a working buildConversionOptions callback to ChunkedPDFConverter', async () => {
+        await converter.convert(
+          'file:///test/input.pdf',
+          'report-1',
+          vi.fn(),
+          false,
+          { chunkedConversion: true },
+        );
+
+        // Capture the buildConversionOptions callback (6th argument)
+        const buildFn = mockConvertChunked.mock.calls[0][5] as (
+          opts: any,
+        ) => any;
+        expect(typeof buildFn).toBe('function');
+
+        // Invoke it and verify it returns conversion options
+        const result = buildFn({ page_range: [1, 10] });
+        expect(result).toBeDefined();
+      });
+
+      test('does not use chunked conversion for non-file:// URLs', async () => {
+        const mockTask = createMockTask();
+        vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+        vi.mocked(client.getTaskResultFile).mockResolvedValue({
+          data: Buffer.from('zip'),
+          success: true,
+        } as any);
+
+        await converter.convert(
+          'http://example.com/test.pdf',
+          'report-1',
+          vi.fn(),
+          true,
+          { chunkedConversion: true },
+        );
+
+        expect(ChunkedPDFConverter).not.toHaveBeenCalled();
+      });
     });
   });
 
