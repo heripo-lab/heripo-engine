@@ -327,7 +327,7 @@ export class OcrStrategySampler {
       `[OcrStrategySampler] Analyzing page ${pageNo} for Korean-Hanja mix and language...`,
     );
 
-    const base64Image = readFileSync(pageFile).toString('base64');
+    const imageData = new Uint8Array(readFileSync(pageFile));
 
     const messages = [
       {
@@ -336,7 +336,8 @@ export class OcrStrategySampler {
           { type: 'text' as const, text: KOREAN_HANJA_MIX_PROMPT },
           {
             type: 'image' as const,
-            image: `data:image/png;base64,${base64Image}`,
+            image: imageData,
+            mediaType: 'image/png' as const,
           },
         ],
       },

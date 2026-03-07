@@ -509,11 +509,16 @@ describe('VisionTocExtractor', () => {
 
       await extractor.extract(2);
 
-      const expectedBase64 = fakeImageBuffer.toString('base64');
+      const expectedUint8Array = new Uint8Array(fakeImageBuffer);
       const callArgs = mockCallVision.mock.calls[0][0];
       const messages = callArgs.messages as Array<{
         role: string;
-        content: Array<{ type: string; image?: string; text?: string }>;
+        content: Array<{
+          type: string;
+          image?: Uint8Array;
+          mediaType?: string;
+          text?: string;
+        }>;
       }>;
       const content = messages[0].content;
 
@@ -522,10 +527,12 @@ describe('VisionTocExtractor', () => {
 
       // Following contents should be images
       expect(content[1].type).toBe('image');
-      expect(content[1].image).toBe(`data:image/png;base64,${expectedBase64}`);
+      expect(content[1].image).toEqual(expectedUint8Array);
+      expect(content[1].mediaType).toBe('image/png');
 
       expect(content[2].type).toBe('image');
-      expect(content[2].image).toBe(`data:image/png;base64,${expectedBase64}`);
+      expect(content[2].image).toEqual(expectedUint8Array);
+      expect(content[2].mediaType).toBe('image/png');
     });
 
     test('tracks token usage', async () => {

@@ -68,13 +68,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Reject large files (>= 50MB) - they should use chunked upload
-    const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024; // 50MB
+    // Reject large files (>= 5MB) - they should use chunked upload
+    const CHUNKED_UPLOAD_THRESHOLD = 5 * 1024 * 1024; // 5MB
     if (file.size >= CHUNKED_UPLOAD_THRESHOLD) {
       return NextResponse.json(
         {
           error:
-            'Files 50MB or larger must use chunked upload. Please use /api/upload/session to initiate a chunked upload.',
+            'Files 5MB or larger must use chunked upload. Please use /api/upload/session to initiate a chunked upload.',
           code: 'FILE_TOO_LARGE_FOR_DIRECT_UPLOAD',
           fileSize: file.size,
           threshold: CHUNKED_UPLOAD_THRESHOLD,

@@ -327,7 +327,8 @@ export class VlmTextCorrector {
               },
               {
                 type: 'image' as const,
-                image: `data:image/png;base64,${imageBase64}`,
+                image: imageBase64,
+                mediaType: 'image/png' as const,
               },
             ],
           },
@@ -603,9 +604,9 @@ export class VlmTextCorrector {
    * Read page image as base64.
    * Page images are 0-indexed: page_no N → pages/page_{N-1}.png
    */
-  private readPageImage(outputDir: string, pageNo: number): string {
+  private readPageImage(outputDir: string, pageNo: number): Uint8Array {
     const imagePath = join(outputDir, 'pages', `page_${pageNo - 1}.png`);
-    return readFileSync(imagePath).toString('base64');
+    return new Uint8Array(readFileSync(imagePath));
   }
 
   /**

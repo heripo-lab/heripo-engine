@@ -323,7 +323,11 @@ export class PageRangeParser extends VisionLLMComponent {
     this.log('info', `Extracting ${pageNos.length} pages in single LLM call`);
 
     // Build image content array
-    const imageContents: Array<{ type: 'image'; image: string }> = [];
+    const imageContents: Array<{
+      type: 'image';
+      image: Uint8Array;
+      mediaType: string;
+    }> = [];
 
     for (const pageNo of pageNos) {
       const page = pages[pageNo - 1];
@@ -332,13 +336,13 @@ export class PageRangeParser extends VisionLLMComponent {
         this.outputPath,
         `pages/page_${pageNo - 1}.png`,
       );
-      const imageBuffer = fs.readFileSync(imagePath);
-      const base64Image = imageBuffer.toString('base64');
+      const imageData = new Uint8Array(fs.readFileSync(imagePath));
       const mimeType = page.image.mimetype || 'image/png';
 
       imageContents.push({
         type: 'image',
-        image: `data:${mimeType};base64,${base64Image}`,
+        image: imageData,
+        mediaType: mimeType,
       });
     }
 
