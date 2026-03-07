@@ -34,8 +34,8 @@ import {
 } from '~/features/upload';
 import type { ProcessingFormValues } from '~/features/upload';
 
-// 50MB threshold for chunked upload
-const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024;
+// 5MB threshold for chunked upload
+const CHUNKED_UPLOAD_THRESHOLD = 5 * 1024 * 1024;
 
 function HomePageContent() {
   const [selectedStage, setSelectedStage] = useState('raw-data');
