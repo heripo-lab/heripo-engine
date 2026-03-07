@@ -656,7 +656,6 @@ describe('OcrStrategySampler', () => {
 
     test('sends correct image format in messages', async () => {
       const imageBuffer = Buffer.from('test-image');
-      const expectedBase64 = imageBuffer.toString('base64');
       mockReadFileSync.mockReturnValue(imageBuffer);
       mockCallVision.mockResolvedValue(createMockKoreanHanjaMixResult(false));
       mockPageRenderer = createMockPageRenderer(1);
@@ -680,7 +679,8 @@ describe('OcrStrategySampler', () => {
                 },
                 {
                   type: 'image',
-                  image: `data:image/png;base64,${expectedBase64}`,
+                  image: new Uint8Array(imageBuffer),
+                  mediaType: 'image/png',
                 },
               ],
             },

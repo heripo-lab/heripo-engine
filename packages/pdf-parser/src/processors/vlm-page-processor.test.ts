@@ -269,7 +269,6 @@ describe('VlmPageProcessor', () => {
 
     test('sends correct message format to LLMCaller.callVision', async () => {
       const imageBuffer = Buffer.from('test-image');
-      const expectedBase64 = imageBuffer.toString('base64');
       mockReadFileSync.mockReturnValue(imageBuffer);
       mockCallVision.mockResolvedValue(
         createMockVlmResult([{ t: 'tx', c: 'text', o: 0 }]),
@@ -289,7 +288,8 @@ describe('VlmPageProcessor', () => {
                 },
                 {
                   type: 'image',
-                  image: `data:image/png;base64,${expectedBase64}`,
+                  image: new Uint8Array(imageBuffer),
+                  mediaType: 'image/png',
                 },
               ],
             },

@@ -229,8 +229,12 @@ export class VisionTocExtractor extends VisionLLMComponent {
   private loadPageImages(
     startPage: number,
     endPage: number,
-  ): Array<{ type: 'image'; image: string }> {
-    const imageContents: Array<{ type: 'image'; image: string }> = [];
+  ): Array<{ type: 'image'; image: Uint8Array; mediaType: string }> {
+    const imageContents: Array<{
+      type: 'image';
+      image: Uint8Array;
+      mediaType: string;
+    }> = [];
 
     for (let pageNo = startPage; pageNo <= endPage; pageNo++) {
       // Page files are 0-indexed: page_0.png, page_1.png, etc.
@@ -238,12 +242,12 @@ export class VisionTocExtractor extends VisionLLMComponent {
         this.outputPath,
         `pages/page_${pageNo - 1}.png`,
       );
-      const imageBuffer = fs.readFileSync(imagePath);
-      const base64Image = imageBuffer.toString('base64');
+      const imageData = new Uint8Array(fs.readFileSync(imagePath));
 
       imageContents.push({
         type: 'image',
-        image: `data:image/png;base64,${base64Image}`,
+        image: imageData,
+        mediaType: 'image/png',
       });
     }
 

@@ -198,7 +198,7 @@ export class VlmPageProcessor {
   ): Promise<VlmPageResult> {
     this.logger.debug(`[VlmPageProcessor] Processing page ${pageNo}...`);
 
-    const base64Image = readFileSync(filePath).toString('base64');
+    const imageData = new Uint8Array(readFileSync(filePath));
 
     const basePrompt = options?.documentLanguages?.length
       ? this.buildLanguageAwarePrompt(options.documentLanguages)
@@ -216,7 +216,8 @@ export class VlmPageProcessor {
           { type: 'text' as const, text: initialPrompt },
           {
             type: 'image' as const,
-            image: `data:image/png;base64,${base64Image}`,
+            image: imageData,
+            mediaType: 'image/png' as const,
           },
         ],
       },
@@ -287,7 +288,7 @@ export class VlmPageProcessor {
     if (!validation.isValid) {
       return this.retryForQuality(
         pageNo,
-        base64Image,
+        imageData,
         model,
         validation,
         options,
@@ -306,7 +307,7 @@ export class VlmPageProcessor {
    */
   private async retryForQuality(
     pageNo: number,
-    base64Image: string,
+    imageData: Uint8Array,
     model: LanguageModel,
     validation: { issues: VlmQualityIssue[] },
     options?: VlmPageProcessorOptions,
@@ -334,7 +335,8 @@ export class VlmPageProcessor {
           { type: 'text' as const, text: retryPrompt },
           {
             type: 'image' as const,
-            image: `data:image/png;base64,${base64Image}`,
+            image: imageData,
+            mediaType: 'image/png' as const,
           },
         ],
       },

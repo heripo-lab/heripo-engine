@@ -44,10 +44,6 @@ class TestVisionComponent extends VisionLLMComponent {
     return this.callVisionLLM(schema, messages, phase);
   }
 
-  public testLoadImageAsBase64(imagePath: string): string {
-    return this.loadImageAsBase64(imagePath);
-  }
-
   public testBuildImageContent(imagePath: string, mimeType?: string) {
     return this.buildImageContent(imagePath, mimeType);
   }
@@ -255,25 +251,6 @@ describe('VisionLLMComponent', () => {
     });
   });
 
-  describe('loadImageAsBase64()', () => {
-    test('should read file and encode as base64', () => {
-      const component = new TestVisionComponent(
-        mockLogger,
-        mockModel,
-        'TestComponent',
-        '/output',
-      );
-
-      const testBuffer = Buffer.from('test image data');
-      vi.mocked(fs.readFileSync).mockReturnValue(testBuffer);
-
-      const result = component.testLoadImageAsBase64('/path/to/image.png');
-
-      expect(fs.readFileSync).toHaveBeenCalledWith('/path/to/image.png');
-      expect(result).toBe(testBuffer.toString('base64'));
-    });
-  });
-
   describe('buildImageContent()', () => {
     test('should build image content with default mime type', () => {
       const component = new TestVisionComponent(
@@ -293,7 +270,8 @@ describe('VisionLLMComponent', () => {
       );
       expect(result).toEqual({
         type: 'image',
-        image: `data:image/png;base64,${testBuffer.toString('base64')}`,
+        image: new Uint8Array(testBuffer),
+        mediaType: 'image/png',
       });
     });
 
@@ -312,7 +290,8 @@ describe('VisionLLMComponent', () => {
 
       expect(result).toEqual({
         type: 'image',
-        image: `data:image/jpeg;base64,${testBuffer.toString('base64')}`,
+        image: new Uint8Array(testBuffer),
+        mediaType: 'image/jpeg',
       });
     });
 

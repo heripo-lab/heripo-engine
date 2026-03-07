@@ -27,7 +27,8 @@ export interface VisionLLMComponentOptions extends BaseLLMComponentOptions {
  */
 export interface ImageContent {
   type: 'image';
-  image: string;
+  image: Uint8Array;
+  mediaType: string;
 }
 
 /**
@@ -92,17 +93,6 @@ export abstract class VisionLLMComponent extends BaseLLMComponent {
   }
 
   /**
-   * Load an image file and encode it as base64
-   *
-   * @param imagePath - Absolute path to the image file
-   * @returns Base64 encoded image string
-   */
-  protected loadImageAsBase64(imagePath: string): string {
-    const imageBuffer = fs.readFileSync(imagePath);
-    return imageBuffer.toString('base64');
-  }
-
-  /**
    * Build image content object for vision LLM messages
    *
    * @param imagePath - Path to the image file (relative to outputPath or absolute)
@@ -116,10 +106,11 @@ export abstract class VisionLLMComponent extends BaseLLMComponent {
     const absolutePath = path.isAbsolute(imagePath)
       ? imagePath
       : path.resolve(this.outputPath, imagePath);
-    const base64Image = this.loadImageAsBase64(absolutePath);
+    const imageData = new Uint8Array(fs.readFileSync(absolutePath));
     return {
       type: 'image',
-      image: `data:${mimeType};base64,${base64Image}`,
+      image: imageData,
+      mediaType: mimeType,
     };
   }
 }
