@@ -22,12 +22,12 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   // Force image PDF pre-conversion
   forceImagePdf: false,
   // OCR Strategy
-  strategySamplerModel: 'openai/gpt-5.2',
+  strategySamplerModel: 'openai/gpt-5.4',
   vlmProcessorModel: 'openai/gpt-5.1',
   forcedMethod: undefined,
   // LLM Models
-  fallbackModel: 'openai/gpt-5.2',
-  validatorModel: 'openai/gpt-5.2',
+  fallbackModel: 'openai/gpt-5.4',
+  validatorModel: 'openai/gpt-5.4',
   pageRangeParserModel: 'google/gemini-3-flash-preview',
   tocExtractorModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
   visionTocExtractorModel: 'google/gemini-3-flash-preview',

@@ -11,6 +11,11 @@ export interface LLMModel {
 export const LLM_MODELS: LLMModel[] = [
   // OpenAI
   {
+    id: 'openai/gpt-5.4',
+    label: 'GPT-5.4',
+    provider: 'OpenAI',
+  },
+  {
     id: 'openai/gpt-5.2',
     label: 'GPT-5.2',
     provider: 'OpenAI',
@@ -52,6 +57,11 @@ export const LLM_MODELS: LLMModel[] = [
   {
     id: 'google/gemini-3-flash-preview',
     label: 'Gemini 3 Flash Preview',
+    provider: 'Google',
+  },
+  {
+    id: 'google/gemini-3.1-flash-lite-preview',
+    label: 'Gemini 3.1 Flash Lite Preview',
     provider: 'Google',
   },
 
