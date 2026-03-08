@@ -27,6 +27,7 @@ import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { runJqFileJson, runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
+import { getTaskFailureDetails } from '../utils/task-failure-details';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { ImagePdfConverter } from './image-pdf-converter';
 
@@ -767,20 +768,7 @@ export class PDFConverter {
   private async getTaskFailureDetails(
     task: AsyncConversionTask,
   ): Promise<string> {
-    try {
-      const result = await task.getResult();
-      if (result.errors?.length) {
-        return result.errors
-          .map((e: { message: string }) => e.message)
-          .join('; ');
-      }
-      /* v8 ignore start -- status is always present in ConvertDocumentResponse */
-      return `status: ${result.status ?? 'unknown'}`;
-      /* v8 ignore stop */
-    } catch (err) {
-      this.logger.error('[PDFConverter] Failed to retrieve task result:', err);
-      return 'unable to retrieve error details';
-    }
+    return getTaskFailureDetails(task, this.logger, '[PDFConverter]');
   }
 
   private async downloadResult(taskId: string): Promise<void> {
