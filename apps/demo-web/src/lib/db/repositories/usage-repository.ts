@@ -42,9 +42,10 @@ export function getUsageStatus(): UsageStatus {
     process.env.CONCURRENT_TASK_LIMIT || '1',
     10,
   );
-  const concurrentLimit = Number.isNaN(parsedConcurrentLimit)
-    ? 1
-    : parsedConcurrentLimit;
+  const concurrentLimit =
+    Number.isNaN(parsedConcurrentLimit) || parsedConcurrentLimit < 0
+      ? 1
+      : parsedConcurrentLimit;
 
   // Count today's completed tasks (UTC timezone)
   // OTP bypass tasks are excluded from the count
