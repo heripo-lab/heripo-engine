@@ -10,10 +10,7 @@ export interface RateLimitCheckResponse {
   dailyLimit: number;
   remaining: number;
   resetsAt: string;
-  activeTask: {
-    id: string;
-    status: 'queued' | 'running';
-  } | null;
+  activeTaskCount: number;
 }
 
 export function useRateLimitCheck() {

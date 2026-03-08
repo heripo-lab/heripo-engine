@@ -16,6 +16,6 @@ export async function GET() {
     dailyLimit: status.dailyLimit,
     remaining: status.remaining,
     resetsAt,
-    activeTask: status.activeTask,
+    activeTaskCount: status.activeTaskCount,
   });
 }
