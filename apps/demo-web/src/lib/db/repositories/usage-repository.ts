@@ -37,10 +37,14 @@ export function getUsageStatus(): UsageStatus {
   const db = readDatabase();
   const todayUTC = getTodayUTC();
   const limit = parseInt(process.env.DAILY_LIMIT || '1', 10);
-  const concurrentLimit = parseInt(
+  // 0 = no concurrent limit, 1+ = max concurrent tasks allowed
+  const parsedConcurrentLimit = parseInt(
     process.env.CONCURRENT_TASK_LIMIT || '1',
     10,
   );
+  const concurrentLimit = Number.isNaN(parsedConcurrentLimit)
+    ? 1
+    : parsedConcurrentLimit;
 
   // Count today's completed tasks (UTC timezone)
   // OTP bypass tasks are excluded from the count
