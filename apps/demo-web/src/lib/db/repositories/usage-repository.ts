@@ -6,10 +6,7 @@ export interface UsageStatus {
   todayCompleted: number;
   dailyLimit: number;
   remaining: number;
-  activeTask: {
-    id: string;
-    status: 'queued' | 'running';
-  } | null;
+  activeTaskCount: number;
 }
 
 function getTodayUTC(): string {
@@ -40,6 +37,10 @@ export function getUsageStatus(): UsageStatus {
   const db = readDatabase();
   const todayUTC = getTodayUTC();
   const limit = parseInt(process.env.DAILY_LIMIT || '1', 10);
+  const concurrentLimit = parseInt(
+    process.env.CONCURRENT_TASK_LIMIT || '1',
+    10,
+  );
 
   // Count today's completed tasks (UTC timezone)
   // OTP bypass tasks are excluded from the count
@@ -50,26 +51,26 @@ export function getUsageStatus(): UsageStatus {
       !t.is_otp_bypass,
   ).length;
 
-  // Find active task (queued or running)
-  const activeTask = db.tasks.find(
+  // Count active tasks (queued or running)
+  const activeTaskCount = db.tasks.filter(
     (t) => t.status === 'queued' || t.status === 'running',
-  );
+  ).length;
 
   const remaining = Math.max(0, limit - todayCompleted);
 
-  // Block if there's an active task
-  if (activeTask) {
+  // Block if concurrent task limit is exceeded
+  if (concurrentLimit > 0 && activeTaskCount >= concurrentLimit) {
+    const reason =
+      concurrentLimit === 1
+        ? 'A task is currently in progress. Please try again after it completes.'
+        : `Concurrent task limit (${concurrentLimit}) reached. Please try again after a running task completes.`;
     return {
       canCreate: false,
-      reason:
-        'A task is currently in progress. Please try again after it completes.',
+      reason,
       todayCompleted,
       dailyLimit: limit,
       remaining,
-      activeTask: {
-        id: activeTask.id,
-        status: activeTask.status as 'queued' | 'running',
-      },
+      activeTaskCount,
     };
   }
 
@@ -81,7 +82,7 @@ export function getUsageStatus(): UsageStatus {
       todayCompleted,
       dailyLimit: limit,
       remaining: 0,
-      activeTask: null,
+      activeTaskCount,
     };
   }
 
@@ -91,6 +92,6 @@ export function getUsageStatus(): UsageStatus {
     todayCompleted,
     dailyLimit: limit,
     remaining,
-    activeTask: null,
+    activeTaskCount,
   };
 }

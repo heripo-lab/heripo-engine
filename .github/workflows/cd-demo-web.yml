@@ -104,6 +104,7 @@ jobs:
           TOTP_SECRET=${{ secrets.DEMO_WEB_TOTP_SECRET }}
           DAILY_LIMIT=${{ vars.DEMO_WEB_DAILY_LIMIT }}
           OTP_MAX_ATTEMPTS=${{ vars.DEMO_WEB_OTP_MAX_ATTEMPTS }}
+          CONCURRENT_TASK_LIMIT=${{ vars.DEMO_WEB_CONCURRENT_TASK_LIMIT }}
 
           # Webhook Settings
           WEBHOOK_URL=${{ secrets.DEMO_WEB_WEBHOOK_URL }}
