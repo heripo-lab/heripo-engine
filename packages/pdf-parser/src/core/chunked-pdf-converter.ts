@@ -28,6 +28,7 @@ import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
 import { runJqFileJson, runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
+import { getTaskFailureDetails } from '../utils/task-failure-details';
 
 /** Configuration for chunked conversion */
 export interface ChunkedConversionConfig {
@@ -342,15 +343,11 @@ export class ChunkedPDFConverter {
       if (status.task_status === 'success') return;
 
       if (status.task_status === 'failure') {
-        let details = 'unknown';
-        try {
-          const result = await task.getResult();
-          if (result.errors?.length) {
-            details = result.errors.map((e) => e.message).join('; ');
-          }
-        } catch {
-          // ignore
-        }
+        const details = await getTaskFailureDetails(
+          task,
+          this.logger,
+          '[ChunkedPDFConverter]',
+        );
         throw new Error(`[ChunkedPDFConverter] Chunk task failed: ${details}`);
       }
 

@@ -689,10 +689,10 @@ describe('ChunkedPDFConverter', () => {
           {},
           mockBuildOptions,
         ),
-      ).rejects.toThrow('Chunk task failed: unknown');
+      ).rejects.toThrow('Chunk task failed: status: failure');
     });
 
-    test('task poll failure with getResult error falls back to unknown', async () => {
+    test('task poll failure with getResult error falls back to unable to retrieve error details', async () => {
       vi.mocked(spawnAsync).mockResolvedValue({
         code: 0,
         stdout: 'Pages:          5\n',
@@ -718,7 +718,12 @@ describe('ChunkedPDFConverter', () => {
           {},
           mockBuildOptions,
         ),
-      ).rejects.toThrow('Chunk task failed: unknown');
+      ).rejects.toThrow('Chunk task failed: unable to retrieve error details');
+
+      expect(logger.error).toHaveBeenCalledWith(
+        '[ChunkedPDFConverter] Failed to retrieve task result:',
+        expect.any(Error),
+      );
     });
 
     test('task poll timeout throws error', async () => {
