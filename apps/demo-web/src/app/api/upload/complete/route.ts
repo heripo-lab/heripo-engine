@@ -59,7 +59,7 @@ async function mergeChunks(
 function verifyPdfHeader(filePath: string): boolean {
   const buffer = readFileSync(filePath, { flag: 'r' });
   // PDF files start with "%PDF-"
-  const header = buffer.slice(0, 5).toString('ascii');
+  const header = buffer.subarray(0, 5).toString('ascii');
   return header === '%PDF-';
 }
 

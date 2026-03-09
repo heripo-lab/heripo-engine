@@ -1,6 +1,6 @@
 'use client';
 
-import type { FormEvent } from 'react';
+import type { SyntheticEvent } from 'react';
 
 import { useForm } from '@tanstack/react-form';
 import { Lock } from 'lucide-react';
@@ -186,7 +186,7 @@ function HomePageContent() {
   // Store form reset function in ref for use in callbacks
   formResetRef.current = form.reset;
 
-  const handleFormSubmit = (e: FormEvent) => {
+  const handleFormSubmit = (e: SyntheticEvent) => {
     e.preventDefault();
 
     // Always show consent dialog first
