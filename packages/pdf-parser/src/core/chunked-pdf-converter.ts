@@ -343,6 +343,10 @@ export class ChunkedPDFConverter {
       if (status.task_status === 'success') return;
 
       if (status.task_status === 'failure') {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        this.logger.error(
+          `[ChunkedPDFConverter] Task ${task.taskId} failed after ${elapsed}s`,
+        );
         const details = await getTaskFailureDetails(
           task,
           this.logger,

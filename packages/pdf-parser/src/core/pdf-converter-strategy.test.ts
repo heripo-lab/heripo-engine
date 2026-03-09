@@ -1201,7 +1201,7 @@ describe('PDFConverter.convertWithStrategy', () => {
         reason: 'Korean-Hanja mix detected',
         sampledPages: 2,
         totalPages: 10,
-        detectedLanguages: ['ko-KR', 'zh-CN'],
+        detectedLanguages: ['ko-KR', 'zh-Hans'],
       });
 
       const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
@@ -1222,7 +1222,7 @@ describe('PDFConverter.convertWithStrategy', () => {
         'report-1',
         expect.any(Function),
         false,
-        expect.objectContaining({ ocr_lang: ['ko-KR', 'zh-CN'] }),
+        expect.objectContaining({ ocr_lang: ['ko-KR', 'zh-Hans'] }),
         undefined,
       );
 

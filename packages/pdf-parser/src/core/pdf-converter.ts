@@ -77,6 +77,8 @@ export type PDFConvertOptions = Omit<
   aggregator?: LLMTokenUsageAggregator;
   /** Callback fired after each batch of VLM pages completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
+  /** Document processing timeout in seconds for the Docling server (default: server default) */
+  document_timeout?: number;
   /** Enable chunked conversion for large PDFs (local files only) */
   chunkedConversion?: boolean;
   /** Pages per chunk (default: CHUNKED_CONVERSION.DEFAULT_CHUNK_SIZE) */
@@ -615,6 +617,7 @@ export class PDFConverter {
     return {
       ...omit(options, [
         'num_threads',
+        'document_timeout',
         'forceImagePdf',
         'strategySamplerModel',
         'vlmProcessorModel',
@@ -650,6 +653,9 @@ export class PDFConverter {
         device: 'mps',
         num_threads: options.num_threads,
       },
+      ...(options.document_timeout !== undefined && {
+        document_timeout: options.document_timeout,
+      }),
     };
   }
 
