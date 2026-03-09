@@ -639,6 +639,8 @@ export class PDFConverter {
         framework: 'livetext',
       },
       generate_picture_images: true,
+      do_picture_classification: true,
+      do_picture_description: true,
       generate_page_images: false, // Page images are rendered by PageRenderer (ImageMagick) after conversion
       images_scale: 2.0,
       /**
