@@ -11,7 +11,7 @@ type SafeParseResult<T> =
 /**
  * Validate route parameters from Next.js dynamic routes.
  */
-export function parseRouteParams<T extends z.ZodTypeAny>(
+export function parseRouteParams<T extends z.ZodType>(
   params: unknown,
   schema: T,
 ): SafeParseResult<z.infer<T>> {
@@ -21,7 +21,7 @@ export function parseRouteParams<T extends z.ZodTypeAny>(
 /**
  * Parse and validate URL search parameters.
  */
-export function parseQueryParams<T extends z.ZodTypeAny>(
+export function parseQueryParams<T extends z.ZodType>(
   searchParams: URLSearchParams,
   schema: T,
 ): SafeParseResult<z.infer<T>> {
