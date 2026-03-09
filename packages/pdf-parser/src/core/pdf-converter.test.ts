@@ -269,6 +269,8 @@ describe('PDFConverter', () => {
             framework: 'livetext',
           },
           generate_picture_images: true,
+          do_picture_classification: true,
+          do_picture_description: true,
           generate_page_images: false,
           images_scale: 2.0,
           force_ocr: true,
@@ -310,6 +312,8 @@ describe('PDFConverter', () => {
           framework: 'livetext',
         },
         generate_picture_images: true,
+        do_picture_classification: true,
+        do_picture_description: true,
         generate_page_images: false,
         images_scale: 2.0,
         force_ocr: true,
@@ -318,6 +322,52 @@ describe('PDFConverter', () => {
           num_threads: 8,
         },
       });
+    });
+
+    test('should include document_timeout when provided', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { num_threads: 4, document_timeout: 600 },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options).toEqual(
+        expect.objectContaining({
+          document_timeout: 600,
+        }),
+      );
+    });
+
+    test('should not include document_timeout when not provided', async () => {
+      const mockTask = createMockTask();
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        { num_threads: 4 },
+      );
+
+      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
+      expect(callArgs.options).not.toHaveProperty('document_timeout');
     });
   });
 
@@ -1230,7 +1280,7 @@ describe('PDFConverter', () => {
       ).rejects.toThrow('Task failed: unable to retrieve error details');
 
       expect(logger.error).toHaveBeenCalledWith(
-        '[PDFConverter] Failed to retrieve task result:',
+        '[PDFConverter] Failed to retrieve task result after 3 attempts:',
         expect.any(Error),
       );
     });

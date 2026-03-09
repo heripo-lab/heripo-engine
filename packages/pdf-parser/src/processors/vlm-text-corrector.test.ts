@@ -1585,12 +1585,12 @@ describe('VlmTextCorrector', () => {
       );
 
       await corrector.correctAndSave('/output/report-1', mockModel, {
-        documentLanguages: ['ko-KR', 'vi-VN'],
+        documentLanguages: ['ko-KR', 'vi-VT'],
       });
 
       const promptText = getPromptText();
       expect(promptText).toContain('primarily written in Korean');
-      expect(promptText).toContain('with vi-VN also present');
+      expect(promptText).toContain('with vi-VT also present');
     });
 
     test('uses base prompt when documentLanguages is not provided', async () => {
@@ -1631,12 +1631,12 @@ describe('VlmTextCorrector', () => {
       );
 
       await corrector.correctAndSave('/output/report-1', mockModel, {
-        documentLanguages: ['vi-VN'],
+        documentLanguages: ['vi-VT'],
       });
 
       const promptText = getPromptText();
       expect(promptText).toContain('LANGUAGE CONTEXT');
-      expect(promptText).toContain('written in vi-VN');
+      expect(promptText).toContain('written in vi-VT');
     });
   });
 
