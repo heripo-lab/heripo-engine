@@ -6,7 +6,7 @@ import { rateLimitKeys } from '~/lib/query-keys';
 export interface RateLimitCheckResponse {
   canCreate: boolean;
   reason?: string;
-  todayCompleted: number;
+  todayUsed: number;
   dailyLimit: number;
   remaining: number;
   resetsAt: string;

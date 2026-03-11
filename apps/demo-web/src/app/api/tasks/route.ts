@@ -214,7 +214,7 @@ export async function POST(request: NextRequest) {
               ...clientInfo,
               filename: file.name,
               dailyLimit: usageStatus.dailyLimit,
-              todayCompleted: usageStatus.todayCompleted,
+              todayUsed: usageStatus.todayUsed,
             }),
           );
 

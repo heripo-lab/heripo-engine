@@ -12,7 +12,7 @@ export async function GET() {
   return NextResponse.json({
     canCreate: status.canCreate,
     reason: status.reason,
-    todayCompleted: status.todayCompleted,
+    todayUsed: status.todayUsed,
     dailyLimit: status.dailyLimit,
     remaining: status.remaining,
     resetsAt,
