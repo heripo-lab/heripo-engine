@@ -64,7 +64,9 @@ export function getUsageStatus(): UsageStatus {
   // Count active non-OTP tasks toward daily usage
   const activeNonOtpCount = db.tasks.filter(
     (t) =>
-      (t.status === 'queued' || t.status === 'running') && !t.is_otp_bypass,
+      (t.status === 'queued' || t.status === 'running') &&
+      !t.is_otp_bypass &&
+      t.created_at.startsWith(todayUTC),
   ).length;
 
   // Include both completed and in-progress tasks in daily usage
