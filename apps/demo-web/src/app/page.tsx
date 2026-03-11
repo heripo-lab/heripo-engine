@@ -261,7 +261,7 @@ function HomePageContent() {
               {/* Info Banner - Always visible in public mode when not blocked */}
               {isPublicMode && !isBlocked && rateLimit && (
                 <PublicModeInfoBanner
-                  todayCompleted={rateLimit.todayCompleted}
+                  todayUsed={rateLimit.todayUsed}
                   dailyLimit={rateLimit.dailyLimit}
                   remaining={rateLimit.remaining}
                   resetsAt={rateLimit.resetsAt}

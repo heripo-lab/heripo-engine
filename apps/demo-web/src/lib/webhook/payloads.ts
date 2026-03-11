@@ -148,7 +148,7 @@ export function createRateLimitExceededPayload(params: {
   userAgent: string;
   filename: string;
   dailyLimit: number;
-  todayCompleted: number;
+  todayUsed: number;
 }): RateLimitExceededPayload {
   return {
     event: 'rate_limit.exceeded',
@@ -157,7 +157,7 @@ export function createRateLimitExceededPayload(params: {
     userAgent: params.userAgent,
     filename: params.filename,
     dailyLimit: params.dailyLimit,
-    todayCompleted: params.todayCompleted,
+    todayUsed: params.todayUsed,
   };
 }
 

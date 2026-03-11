@@ -97,7 +97,7 @@ export interface RateLimitExceededPayload extends WebhookBasePayload {
   event: 'rate_limit.exceeded';
   filename: string;
   dailyLimit: number;
-  todayCompleted: number;
+  todayUsed: number;
 }
 
 /**

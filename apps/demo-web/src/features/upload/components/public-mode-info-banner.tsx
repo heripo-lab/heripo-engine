@@ -1,7 +1,7 @@
 import { Info } from 'lucide-react';
 
 interface PublicModeInfoBannerProps {
-  todayCompleted: number;
+  todayUsed: number;
   dailyLimit: number;
   remaining: number;
   resetsAt: string;
@@ -19,7 +19,7 @@ function formatResetTime(isoString: string): string {
 }
 
 export function PublicModeInfoBanner({
-  todayCompleted: _todayCompleted,
+  todayUsed: _todayUsed,
   dailyLimit,
   remaining,
   resetsAt,

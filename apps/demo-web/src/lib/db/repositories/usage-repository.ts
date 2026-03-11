@@ -3,7 +3,7 @@ import { readDatabase } from '../index';
 export interface UsageStatus {
   canCreate: boolean;
   reason?: string;
-  todayCompleted: number;
+  todayUsed: number;
   dailyLimit: number;
   remaining: number;
   activeTaskCount: number;
@@ -61,7 +61,15 @@ export function getUsageStatus(): UsageStatus {
     (t) => t.status === 'queued' || t.status === 'running',
   ).length;
 
-  const remaining = Math.max(0, limit - todayCompleted);
+  // Count active non-OTP tasks toward daily usage
+  const activeNonOtpCount = db.tasks.filter(
+    (t) =>
+      (t.status === 'queued' || t.status === 'running') && !t.is_otp_bypass,
+  ).length;
+
+  // Include both completed and in-progress tasks in daily usage
+  const todayUsed = todayCompleted + activeNonOtpCount;
+  const remaining = Math.max(0, limit - todayUsed);
 
   // Block if concurrent task limit is exceeded
   if (concurrentLimit > 0 && activeTaskCount >= concurrentLimit) {
@@ -72,7 +80,7 @@ export function getUsageStatus(): UsageStatus {
     return {
       canCreate: false,
       reason,
-      todayCompleted,
+      todayUsed,
       dailyLimit: limit,
       remaining,
       activeTaskCount,
@@ -80,11 +88,11 @@ export function getUsageStatus(): UsageStatus {
   }
 
   // Block if daily limit reached
-  if (todayCompleted >= limit) {
+  if (todayUsed >= limit) {
     return {
       canCreate: false,
       reason: `Daily limit (${limit} ${limit === 1 ? 'task' : 'tasks'}) reached. Please try again tomorrow.`,
-      todayCompleted,
+      todayUsed,
       dailyLimit: limit,
       remaining: 0,
       activeTaskCount,
@@ -94,7 +102,7 @@ export function getUsageStatus(): UsageStatus {
   // Allow
   return {
     canCreate: true,
-    todayCompleted,
+    todayUsed,
     dailyLimit: limit,
     remaining,
     activeTaskCount,
