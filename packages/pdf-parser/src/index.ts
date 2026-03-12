@@ -5,6 +5,7 @@ export type {
   PDFConvertOptions,
 } from './core/pdf-converter';
 export { ImagePdfFallbackError } from './errors/image-pdf-fallback-error';
+export { InvalidDocumentTypeError } from './errors/invalid-document-type-error';
 export { VlmResponseValidator } from './validators/vlm-response-validator';
 export type {
   VlmValidationResult,

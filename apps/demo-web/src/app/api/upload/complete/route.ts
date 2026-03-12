@@ -15,6 +15,7 @@ import {
   extractBearerToken,
   verifyUploadSessionToken,
 } from '~/lib/auth/upload-session';
+import { getWeeklyLockoutStatus } from '~/lib/db/repositories/success-session-repository';
 import { createTask } from '~/lib/db/repositories/task-repository';
 import {
   getUploadSessionById,
@@ -127,6 +128,26 @@ export async function POST(request: NextRequest) {
         },
         { status: 401 },
       );
+    }
+
+    // Re-validate weekly lockout at completion time (non-OTP only)
+    if (!uploadSession.isOtpBypass) {
+      const lockoutStatus = getWeeklyLockoutStatus(uploadSession.sessionId);
+      if (lockoutStatus.locked) {
+        updateUploadSessionStatus(payload.uploadId, 'expired');
+        const uploadPaths = paths.upload(payload.uploadId);
+        rmSync(uploadPaths.root, { recursive: true, force: true });
+
+        return NextResponse.json(
+          {
+            error:
+              'You have already completed a task this week. Please try again later.',
+            code: 'WEEKLY_SESSION_LOCKED',
+            lockedUntil: lockoutStatus.lockedUntil,
+          },
+          { status: 429 },
+        );
+      }
     }
 
     // Check all chunks are received

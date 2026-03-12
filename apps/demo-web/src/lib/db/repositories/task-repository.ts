@@ -261,6 +261,15 @@ export function updateTaskResult(
   record.completed_at = new Date().toISOString();
   record.progress_percent = 100;
 
+  // Record success session for weekly lockout (non-OTP bypass only)
+  if (!record.is_otp_bypass) {
+    db.successSessions.push({
+      session_id: record.session_id,
+      task_id: record.id,
+      completed_at: record.completed_at,
+    });
+  }
+
   writeDatabase(db);
 }
 

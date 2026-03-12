@@ -28,6 +28,9 @@ export const processingOptionsSchema = z.object({
   // Processing options
   threadCount: z.number().int().positive().max(16).default(4),
 
+  // Document type validation
+  documentValidationModel: llmModelSchema.optional(),
+
   // Force image PDF pre-conversion
   forceImagePdf: z.boolean().default(false),
 

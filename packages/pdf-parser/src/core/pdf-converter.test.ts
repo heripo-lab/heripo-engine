@@ -13,8 +13,10 @@ import { PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
+import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
+import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { ImagePdfConverter } from './image-pdf-converter';
 import { PDFConverter } from './pdf-converter';
@@ -59,6 +61,14 @@ vi.mock('../processors/image-extractor', () => ({
   ImageExtractor: {
     extractAndSaveDocumentsFromZip: vi.fn(),
   },
+}));
+
+vi.mock('../processors/pdf-text-extractor', () => ({
+  PdfTextExtractor: vi.fn(),
+}));
+
+vi.mock('../validators/document-type-validator', () => ({
+  DocumentTypeValidator: vi.fn(),
 }));
 
 vi.mock('../processors/page-renderer', () => ({
@@ -368,6 +378,168 @@ describe('PDFConverter', () => {
 
       const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
       expect(callArgs.options).not.toHaveProperty('document_timeout');
+    });
+  });
+
+  describe('validateDocumentType', () => {
+    let mockValidate: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockValidate = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(PdfTextExtractor).mockImplementation(function () {
+        return {} as any;
+      });
+      vi.mocked(DocumentTypeValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
+    });
+
+    test('should validate document type for file:// URL with documentValidationModel', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+      const mockModel = {} as any;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false);
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        onComplete,
+        false,
+        { documentValidationModel: mockModel },
+      );
+
+      expect(PdfTextExtractor).toHaveBeenCalledWith(logger);
+      expect(DocumentTypeValidator).toHaveBeenCalled();
+      expect(mockValidate).toHaveBeenCalledWith('/test/doc.pdf', mockModel, {
+        abortSignal: undefined,
+      });
+    });
+
+    test('should skip validation for non-file:// URLs', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+      const mockModel = {} as any;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false);
+
+      await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        onComplete,
+        false,
+        { documentValidationModel: mockModel },
+      );
+
+      expect(PdfTextExtractor).not.toHaveBeenCalled();
+      expect(DocumentTypeValidator).not.toHaveBeenCalled();
+    });
+
+    test('should only validate once per converter instance', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+      const mockModel = {} as any;
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      // First call triggers validation
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        onComplete,
+        false,
+        { documentValidationModel: mockModel },
+      );
+
+      expect(mockValidate).toHaveBeenCalledTimes(1);
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(createMockTask());
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+
+      // Second call skips validation (already validated)
+      await converter.convert(
+        'file:///test/doc2.pdf',
+        'report456',
+        onComplete,
+        false,
+        { documentValidationModel: mockModel },
+      );
+
+      expect(mockValidate).toHaveBeenCalledTimes(1);
+    });
+
+    test('should skip validation when documentValidationModel is not set', async () => {
+      const mockTask = createMockTask();
+      const onComplete = vi.fn().mockResolvedValue(undefined);
+      const writeStream = { write: vi.fn(), end: vi.fn() };
+
+      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
+      vi.mocked(client.getTaskResultFile).mockResolvedValue({
+        success: true,
+        fileStream: {} as Readable,
+      });
+      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
+      vi.mocked(pipeline).mockResolvedValue(undefined);
+      vi.mocked(
+        ImageExtractor.extractAndSaveDocumentsFromZip,
+      ).mockResolvedValue(undefined);
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false);
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        onComplete,
+        false,
+        {},
+      );
+
+      expect(PdfTextExtractor).not.toHaveBeenCalled();
+      expect(DocumentTypeValidator).not.toHaveBeenCalled();
     });
   });
 

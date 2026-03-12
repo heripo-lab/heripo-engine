@@ -288,6 +288,48 @@ export function ProcessingOptionsCard({
           )}
         </form.Field>
 
+        {/* Document Validation Model */}
+        <form.Field name="documentValidationModel">
+          {(field: OptionalStringFieldApi) => (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Document Validation Model
+              </label>
+              <p className="text-muted-foreground text-xs">
+                Validates if PDF is an archaeological report before processing
+              </p>
+              <DisabledWrapper disabled={disabled}>
+                <Select
+                  value={field.state.value ?? NONE_VALUE}
+                  onValueChange={(v) =>
+                    field.handleChange(v === NONE_VALUE ? undefined : v)
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_VALUE}>None (disabled)</SelectItem>
+                    {Object.entries(MODELS_BY_PROVIDER).map(
+                      ([provider, models]) => (
+                        <SelectGroup key={provider}>
+                          <SelectLabel>{provider}</SelectLabel>
+                          {models.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+              </DisabledWrapper>
+            </div>
+          )}
+        </form.Field>
+
         {/* VLM Concurrency */}
         <form.Field name="vlmConcurrency">
           {(field: NumberFieldApi) => (

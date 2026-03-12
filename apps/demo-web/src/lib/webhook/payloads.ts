@@ -1,9 +1,11 @@
 import type {
   CleanupCompletedPayload,
   CleanupFailedPayload,
+  DocumentValidationFailedPayload,
   OTPFailedPayload,
   OTPLockedPayload,
   RateLimitExceededPayload,
+  SessionWeeklyLockedPayload,
   TaskCancelledPayload,
   TaskCompletedPayload,
   TaskFailedPayload,
@@ -158,6 +160,44 @@ export function createRateLimitExceededPayload(params: {
     filename: params.filename,
     dailyLimit: params.dailyLimit,
     todayUsed: params.todayUsed,
+  };
+}
+
+export function createSessionWeeklyLockedPayload(params: {
+  ip: string;
+  userAgent: string;
+  sessionId: string;
+  filename: string;
+  lockedUntil: string;
+}): SessionWeeklyLockedPayload {
+  return {
+    event: 'session.weekly_locked',
+    timestamp: createTimestamp(),
+    ip: params.ip,
+    userAgent: params.userAgent,
+    sessionId: params.sessionId,
+    filename: params.filename,
+    lockedUntil: params.lockedUntil,
+  };
+}
+
+export function createDocumentValidationFailedPayload(params: {
+  ip: string;
+  userAgent: string;
+  taskId: string;
+  sessionId: string;
+  filename: string;
+  reason: string;
+}): DocumentValidationFailedPayload {
+  return {
+    event: 'document.validation_failed',
+    timestamp: createTimestamp(),
+    ip: params.ip,
+    userAgent: params.userAgent,
+    taskId: params.taskId,
+    sessionId: params.sessionId,
+    filename: params.filename,
+    reason: params.reason,
   };
 }
 

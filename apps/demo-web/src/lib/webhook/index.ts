@@ -2,9 +2,11 @@ export { sendWebhookAsync } from './client';
 export {
   createCleanupCompletedPayload,
   createCleanupFailedPayload,
+  createDocumentValidationFailedPayload,
   createOTPFailedPayload,
   createOTPLockedPayload,
   createRateLimitExceededPayload,
+  createSessionWeeklyLockedPayload,
   createTaskCancelledPayload,
   createTaskCompletedPayload,
   createTaskFailedPayload,
@@ -13,9 +15,11 @@ export {
 export type {
   CleanupCompletedPayload,
   CleanupFailedPayload,
+  DocumentValidationFailedPayload,
   OTPFailedPayload,
   OTPLockedPayload,
   RateLimitExceededPayload,
+  SessionWeeklyLockedPayload,
   TaskCancelledPayload,
   TaskCompletedPayload,
   TaskFailedPayload,

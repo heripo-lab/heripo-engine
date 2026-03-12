@@ -5,6 +5,7 @@ import type { EventEmitter } from 'events';
 import type { QueuedTask, SSEEvent } from './task-queue-manager';
 
 import { DocumentProcessor } from '@heripo/document-processor';
+import { InvalidDocumentTypeError } from '@heripo/pdf-parser';
 import { readFileSync, writeFileSync } from 'fs';
 
 import { calculateCost } from '../cost/model-pricing';
@@ -20,6 +21,7 @@ import {
   createProcessorOptions,
 } from '../processing/model-factory';
 import {
+  createDocumentValidationFailedPayload,
   createTaskCompletedPayload,
   createTaskFailedPayload,
   sendWebhookAsync,
@@ -267,6 +269,8 @@ export async function runTaskWorker(
     let vlmTokenUsage: TokenUsageReport | null = null;
 
     // Build PDF convert options with new strategy fields
+    const isPublicMode = process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true';
+
     const pdfConvertOptions: PDFConvertOptions = {
       chunkedConversion: true,
       num_threads: options.threadCount,
@@ -278,6 +282,13 @@ export async function runTaskWorker(
         ? { vlmProcessorModel: createModel(options.vlmProcessorModel) }
         : {}),
       ...(options.forcedMethod ? { forcedMethod: options.forcedMethod } : {}),
+      ...(isPublicMode && !task.isOtpBypass && options.documentValidationModel
+        ? {
+            documentValidationModel: createModel(
+              options.documentValidationModel,
+            ),
+          }
+        : {}),
       vlmConcurrency: options.vlmConcurrency,
       onTokenUsage: (report: TokenUsageReport) => {
         const tokenEvent: SSEEvent = {
@@ -398,21 +409,46 @@ export async function runTaskWorker(
       throw error;
     }
 
+    const isDocTypeError = error instanceof InvalidDocumentTypeError;
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
-    logger.error('Task failed:', errorMessage);
+    const errorCode = isDocTypeError
+      ? 'INVALID_DOCUMENT_TYPE'
+      : 'PROCESSING_ERROR';
+    if (isDocTypeError) {
+      logger.warn(
+        'Document type validation failed — this PDF does not appear to be an archaeological investigation report.',
+      );
+      logger.warn(`Reason: ${error.reason}`);
+    } else {
+      logger.error('Task failed:', errorMessage);
+    }
 
     updateTaskStatus(taskId, 'failed', {
-      errorCode: 'PROCESSING_ERROR',
+      errorCode,
       errorMessage,
       completedAt: new Date().toISOString(),
     });
 
     const errorEvent: SSEEvent = {
       type: 'error',
-      data: { code: 'PROCESSING_ERROR', message: errorMessage },
+      data: { code: errorCode, message: errorMessage },
     };
     emitter.emit(`task:${taskId}`, errorEvent);
+
+    // Send webhook for document validation failure
+    if (error instanceof InvalidDocumentTypeError) {
+      sendWebhookAsync(
+        createDocumentValidationFailedPayload({
+          ip: task.clientIP,
+          userAgent: task.userAgent,
+          taskId,
+          sessionId: task.sessionId,
+          filename: task.filename,
+          reason: error.reason,
+        }),
+      );
+    }
 
     // Send webhook for failed task
     const failedTaskRecord = getTaskById(taskId);
@@ -424,7 +460,7 @@ export async function runTaskWorker(
         sessionId: task.sessionId,
         filename: task.filename,
         startedAt: failedTaskRecord?.startedAt ?? null,
-        errorCode: 'PROCESSING_ERROR',
+        errorCode,
         errorMessage,
       }),
     );

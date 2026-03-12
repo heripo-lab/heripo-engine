@@ -10,7 +10,9 @@ export type WebhookEventType =
   | 'otp.locked'
   | 'rate_limit.exceeded'
   | 'cleanup.completed'
-  | 'cleanup.failed';
+  | 'cleanup.failed'
+  | 'session.weekly_locked'
+  | 'document.validation_failed';
 
 /**
  * Base payload included in all webhook events.
@@ -121,6 +123,27 @@ export interface CleanupFailedPayload extends WebhookBasePayload {
 }
 
 /**
+ * Payload for session.weekly_locked event.
+ */
+export interface SessionWeeklyLockedPayload extends WebhookBasePayload {
+  event: 'session.weekly_locked';
+  sessionId: string;
+  filename: string;
+  lockedUntil: string;
+}
+
+/**
+ * Payload for document.validation_failed event.
+ */
+export interface DocumentValidationFailedPayload extends WebhookBasePayload {
+  event: 'document.validation_failed';
+  taskId: string;
+  sessionId: string;
+  filename: string;
+  reason: string;
+}
+
+/**
  * Union type for all webhook payloads.
  */
 export type WebhookPayload =
@@ -132,4 +155,6 @@ export type WebhookPayload =
   | OTPLockedPayload
   | RateLimitExceededPayload
   | CleanupCompletedPayload
-  | CleanupFailedPayload;
+  | CleanupFailedPayload
+  | SessionWeeklyLockedPayload
+  | DocumentValidationFailedPayload;

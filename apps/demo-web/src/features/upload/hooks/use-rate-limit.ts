@@ -11,6 +11,8 @@ export interface RateLimitCheckResponse {
   remaining: number;
   resetsAt: string;
   activeTaskCount: number;
+  weeklyLocked: boolean;
+  weeklyLockedUntil: string | null;
 }
 
 export function useRateLimitCheck() {
