@@ -231,6 +231,8 @@ export class PageRangeParser extends VisionLLMComponent {
 
     // Larger groups: random sampling + pattern detection
     const sampledPages = new Set<number>();
+    let consecutiveAllNullAttempts = 0;
+    const MAX_ALL_NULL_ATTEMPTS = 3;
 
     for (let attempt = 0; attempt <= this.MAX_PATTERN_RETRIES; attempt++) {
       // Select 3 random pages (excluding previously sampled if possible)
@@ -259,6 +261,22 @@ export class PageRangeParser extends VisionLLMComponent {
       usageList.push(result.usage);
       const samples = result.samples;
 
+      // Early termination: if all samples return null consecutively,
+      // these pages likely have no page numbers (e.g., architectural drawings)
+      const allNull = samples.every((s) => s.startPageNo === null);
+      if (allNull) {
+        consecutiveAllNullAttempts++;
+        if (consecutiveAllNullAttempts >= MAX_ALL_NULL_ATTEMPTS) {
+          this.log(
+            'warn',
+            `All samples returned null for ${MAX_ALL_NULL_ATTEMPTS} consecutive attempts, pages likely have no page numbers`,
+          );
+          break;
+        }
+      } else {
+        consecutiveAllNullAttempts = 0;
+      }
+
       // Try to detect pattern
       const pattern = this.detectPattern(samples);
 
@@ -281,10 +299,16 @@ export class PageRangeParser extends VisionLLMComponent {
       );
     }
 
-    // All retries exhausted - throw error
-    throw new PageRangeParseError(
-      `Failed to detect page pattern after ${this.MAX_PATTERN_RETRIES + 1} attempts for size group with ${pageNos.length} pages`,
+    // All retries exhausted or early termination - return fallback map with 0,0
+    this.log(
+      'warn',
+      `Could not detect page pattern after ${consecutiveAllNullAttempts >= MAX_ALL_NULL_ATTEMPTS ? consecutiveAllNullAttempts : this.MAX_PATTERN_RETRIES + 1} attempts for group with ${pageNos.length} pages, marking as failed`,
     );
+    const fallbackMap: Record<number, PageRange> = {};
+    for (const pageNo of pageNos) {
+      fallbackMap[pageNo] = { startPageNo: 0, endPageNo: 0 };
+    }
+    return { pageRangeMap: fallbackMap, usage: usageList };
   }
 
   /**
