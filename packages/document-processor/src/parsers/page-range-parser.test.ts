@@ -6,7 +6,6 @@ import { LLMCaller } from '@heripo/shared';
 import * as fs from 'node:fs';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { PageRangeParseError } from './page-range-parse-error';
 import { PageRangeParser } from './page-range-parser';
 
 vi.mock('@heripo/shared', () => ({
@@ -325,7 +324,7 @@ describe('PageRangeParser', () => {
       expect(result.usage[0].totalTokens).toBe(165);
     });
 
-    test('throws error when pattern detection exhausts all retries', async () => {
+    test('returns fallback map with 0,0 when pattern detection exhausts all retries', async () => {
       const doc = createMockDocument(10);
 
       mockCallVision.mockResolvedValue({
@@ -348,8 +347,312 @@ describe('PageRangeParser', () => {
         usedFallback: false,
       });
 
-      await expect(parser.parse(doc)).rejects.toThrow(PageRangeParseError);
-      expect(mockCallVision.mock.calls.length).toBeGreaterThan(1);
+      const result = await parser.parse(doc);
+
+      // All pages should be mapped to 0,0 (failed)
+      for (let i = 1; i <= 10; i++) {
+        expect(result.pageRangeMap[i]).toEqual({
+          startPageNo: 0,
+          endPageNo: 0,
+        });
+      }
+      // Should have terminated early after 3 consecutive all-null attempts
+      expect(mockCallVision).toHaveBeenCalledTimes(3);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'All samples returned null for 3 consecutive attempts',
+        ),
+      );
+    });
+
+    test('terminates early after 3 consecutive all-null attempts', async () => {
+      const doc = createMockDocument(10);
+
+      mockCallVision.mockResolvedValue({
+        output: {
+          pages: [
+            { imageIndex: 0, startPageNo: null, endPageNo: null },
+            { imageIndex: 1, startPageNo: null, endPageNo: null },
+            { imageIndex: 2, startPageNo: null, endPageNo: null },
+          ],
+        },
+        usage: {
+          component: 'PageRangeParser',
+          phase: 'sampling',
+          model: 'primary',
+          modelName: 'test-model',
+          inputTokens: 100,
+          outputTokens: 10,
+          totalTokens: 110,
+        },
+        usedFallback: false,
+      });
+
+      const result = await parser.parse(doc);
+
+      // Should stop after exactly 3 LLM calls (not 20)
+      expect(mockCallVision).toHaveBeenCalledTimes(3);
+      expect(result.usage).toHaveLength(3);
+    });
+
+    test('resets consecutive all-null counter when non-null sample is found', async () => {
+      const doc = createMockDocument(10);
+
+      let callCount = 0;
+      mockCallVision.mockImplementation(async () => {
+        callCount++;
+        // Alternate: 2 all-null, then 1 with partial data, then all-null again
+        if (callCount <= 2 || callCount >= 4) {
+          return {
+            output: {
+              pages: [
+                { imageIndex: 0, startPageNo: null, endPageNo: null },
+                { imageIndex: 1, startPageNo: null, endPageNo: null },
+                { imageIndex: 2, startPageNo: null, endPageNo: null },
+              ],
+            },
+            usage: {
+              component: 'PageRangeParser',
+              phase: 'sampling',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 10,
+              totalTokens: 110,
+            },
+            usedFallback: false,
+          };
+        }
+        // Call 3: one non-null sample (resets counter)
+        return {
+          output: {
+            pages: [
+              { imageIndex: 0, startPageNo: 5, endPageNo: null },
+              { imageIndex: 1, startPageNo: null, endPageNo: null },
+              { imageIndex: 2, startPageNo: null, endPageNo: null },
+            ],
+          },
+          usage: {
+            component: 'PageRangeParser',
+            phase: 'sampling',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 100,
+            outputTokens: 10,
+            totalTokens: 110,
+          },
+          usedFallback: false,
+        };
+      });
+
+      const result = await parser.parse(doc);
+
+      // Counter resets at call 3, then needs 3 more all-null: calls 4, 5, 6
+      expect(mockCallVision).toHaveBeenCalledTimes(6);
+      expect(result.pageRangeMap).toBeDefined();
+    });
+
+    test('uses accumulated samples for pattern detection after early termination', async () => {
+      const doc = createMockDocument(10);
+
+      const extractSampledPages = (options: any): number[] => {
+        const textContent = options.messages?.[0]?.content?.find(
+          (c: any) => c.type === 'text',
+        );
+        const match = textContent?.text?.match(/PDF pages: ([\d, ]+)/);
+        return match ? match[1].split(', ').map(Number) : [1, 2, 3];
+      };
+
+      let callCount = 0;
+      mockCallVision.mockImplementation(async (options: any) => {
+        callCount++;
+        const sampledPages = extractSampledPages(options);
+
+        if (callCount <= 2) {
+          // First 2 calls: return 1 valid sample each (SIMPLE_INCREMENT: startPageNo = pdfPageNo)
+          // Each call alone has only 1 valid sample → pattern UNKNOWN
+          // But accumulated across calls → 2+ valid samples → pattern detectable
+          return {
+            output: {
+              pages: sampledPages.map((pageNo: number, idx: number) => ({
+                imageIndex: idx,
+                startPageNo: idx === 0 ? pageNo : null,
+                endPageNo: null,
+              })),
+            },
+            usage: {
+              component: 'PageRangeParser',
+              phase: 'sampling',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 10,
+              totalTokens: 110,
+            },
+            usedFallback: false,
+          };
+        }
+        // Calls 3, 4, 5: all-null (triggers early termination after 3 consecutive)
+        return {
+          output: {
+            pages: sampledPages.map((_: number, idx: number) => ({
+              imageIndex: idx,
+              startPageNo: null,
+              endPageNo: null,
+            })),
+          },
+          usage: {
+            component: 'PageRangeParser',
+            phase: 'sampling',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 100,
+            outputTokens: 10,
+            totalTokens: 110,
+          },
+          usedFallback: false,
+        };
+      });
+
+      const result = await parser.parse(doc);
+
+      // Early termination after 5 calls (2 with partial data + 3 all-null)
+      expect(mockCallVision).toHaveBeenCalledTimes(5);
+      // Accumulated samples from calls 1 and 2 should allow pattern detection
+      // Pages should NOT all be {0, 0} fallback
+      const values = Object.values(result.pageRangeMap);
+      const hasNonFallback = values.some(
+        (v) => v.startPageNo !== 0 || v.endPageNo !== 0,
+      );
+      expect(hasNonFallback).toBe(true);
+    });
+
+    test('falls back to 0,0 when retries exhausted with insufficient valid samples', async () => {
+      const doc = createMockDocument(10);
+
+      const extractSampledPages = (options: any): number[] => {
+        const textContent = options.messages?.[0]?.content?.find(
+          (c: any) => c.type === 'text',
+        );
+        const match = textContent?.text?.match(/PDF pages: ([\d, ]+)/);
+        return match ? match[1].split(', ').map(Number) : [1, 2, 3];
+      };
+
+      let callCount = 0;
+      mockCallVision.mockImplementation(async (options: any) => {
+        callCount++;
+        const sampledPages = extractSampledPages(options);
+
+        // Every call returns exactly 1 non-null sample (resets all-null counter)
+        // but only 1 valid per batch → pattern UNKNOWN each time
+        // Counter never reaches 3 consecutive all-null → retries exhaust normally
+        return {
+          output: {
+            pages: sampledPages.map((_: number, idx: number) => ({
+              imageIndex: idx,
+              // Only first sample is valid, with inconsistent values across calls
+              startPageNo: idx === 0 ? callCount * 100 : null,
+              endPageNo: null,
+            })),
+          },
+          usage: {
+            component: 'PageRangeParser',
+            phase: 'sampling',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 100,
+            outputTokens: 10,
+            totalTokens: 110,
+          },
+          usedFallback: false,
+        };
+      });
+
+      const result = await parser.parse(doc);
+
+      // All 20 attempts used (MAX_PATTERN_RETRIES=19, no early termination)
+      expect(mockCallVision).toHaveBeenCalledTimes(20);
+      // Accumulated valid samples exist but pattern is inconsistent → fallback 0,0
+      for (let i = 1; i <= 10; i++) {
+        expect(result.pageRangeMap[i]).toEqual({
+          startPageNo: 0,
+          endPageNo: 0,
+        });
+      }
+    });
+
+    test('falls back to 0,0 when accumulated samples have inconsistent pattern', async () => {
+      const doc = createMockDocument(10);
+
+      const extractSampledPages = (options: any): number[] => {
+        const textContent = options.messages?.[0]?.content?.find(
+          (c: any) => c.type === 'text',
+        );
+        const match = textContent?.text?.match(/PDF pages: ([\d, ]+)/);
+        return match ? match[1].split(', ').map(Number) : [1, 2, 3];
+      };
+
+      let callCount = 0;
+      mockCallVision.mockImplementation(async (options: any) => {
+        callCount++;
+        const sampledPages = extractSampledPages(options);
+
+        if (callCount <= 2) {
+          // Return 1 valid sample per call with inconsistent pattern
+          // (startPageNo does NOT follow SIMPLE_INCREMENT from pdfPageNo)
+          return {
+            output: {
+              pages: sampledPages.map((pageNo: number, idx: number) => ({
+                imageIndex: idx,
+                // Inconsistent: page 100 offset makes pattern detection fail
+                startPageNo: idx === 0 ? pageNo + 100 * callCount : null,
+                endPageNo: null,
+              })),
+            },
+            usage: {
+              component: 'PageRangeParser',
+              phase: 'sampling',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 10,
+              totalTokens: 110,
+            },
+            usedFallback: false,
+          };
+        }
+        // Calls 3, 4, 5: all-null (triggers early termination)
+        return {
+          output: {
+            pages: sampledPages.map((_: number, idx: number) => ({
+              imageIndex: idx,
+              startPageNo: null,
+              endPageNo: null,
+            })),
+          },
+          usage: {
+            component: 'PageRangeParser',
+            phase: 'sampling',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 100,
+            outputTokens: 10,
+            totalTokens: 110,
+          },
+          usedFallback: false,
+        };
+      });
+
+      const result = await parser.parse(doc);
+
+      // Accumulated samples exist but pattern is inconsistent → fallback 0,0
+      expect(mockCallVision).toHaveBeenCalledTimes(5);
+      for (let i = 1; i <= 10; i++) {
+        expect(result.pageRangeMap[i]).toEqual({
+          startPageNo: 0,
+          endPageNo: 0,
+        });
+      }
     });
 
     test('throws when LLMCaller.callVision fails', async () => {
@@ -1161,6 +1464,114 @@ describe('PageRangeParser', () => {
 
       expect(result.pageRangeMap).toBeDefined();
       expect(Object.keys(result.pageRangeMap).length).toBe(5);
+    });
+  });
+
+  describe('multi-group with failed group recovery via backfill', () => {
+    test('backfills failed group pages using successful group pattern', async () => {
+      // Simulate a PDF with two size groups:
+      // Group 1 (pages 1-8): normal text pages, double-sided
+      // Group 2 (pages 9-14): architectural drawings, no page numbers
+      // Group 3 (pages 15-20): normal text pages, double-sided
+      const pages: Record<string, DoclingPage> = {};
+      // Group 1: normal pages (595x842)
+      for (let i = 1; i <= 8; i++) {
+        pages[String(i)] = createMockPage(i, 595, 842);
+      }
+      // Group 2: drawing pages (different size: 841x595)
+      for (let i = 9; i <= 14; i++) {
+        pages[String(i)] = createMockPage(i, 841, 595);
+      }
+      // Group 3: normal pages again (595x842)
+      for (let i = 15; i <= 20; i++) {
+        pages[String(i)] = createMockPage(i, 595, 842);
+      }
+
+      const doc = {
+        ...createMockDocument(0),
+        pages,
+      };
+
+      mockCallVision.mockImplementation(async ({ messages }) => {
+        const textContent = messages[0].content.find(
+          (c: any) => c.type === 'text',
+        );
+        const match = textContent?.text?.match(/PDF pages: ([\d, ]+)/);
+        const sampledPages: number[] = match
+          ? match[1].split(', ').map(Number)
+          : [1, 2, 3];
+
+        // Check if any sampled page is in the drawing group (9-14)
+        const isDrawingGroup = sampledPages.some((p) => p >= 9 && p <= 14);
+
+        if (isDrawingGroup) {
+          // Drawing pages: no page numbers found
+          return {
+            output: {
+              pages: sampledPages.map((_: number, idx: number) => ({
+                imageIndex: idx,
+                startPageNo: null,
+                endPageNo: null,
+              })),
+            },
+            usage: {
+              component: 'PageRangeParser',
+              phase: 'sampling',
+              model: 'primary',
+              modelName: 'test-model',
+              inputTokens: 100,
+              outputTokens: 10,
+              totalTokens: 110,
+            },
+            usedFallback: false,
+          };
+        }
+
+        // Normal pages: double-sided pattern with offset -1
+        // startPageNo = pdfPage * 2 - 1
+        return {
+          output: {
+            pages: sampledPages.map((pageNo: number, idx: number) => ({
+              imageIndex: idx,
+              startPageNo: pageNo * 2 - 1,
+              endPageNo: pageNo * 2,
+            })),
+          },
+          usage: {
+            component: 'PageRangeParser',
+            phase: 'sampling',
+            model: 'primary',
+            modelName: 'test-model',
+            inputTokens: 200,
+            outputTokens: 20,
+            totalTokens: 220,
+          },
+          usedFallback: false,
+        };
+      });
+
+      const result = await parser.parse(doc);
+
+      // All 20 pages should be mapped
+      expect(Object.keys(result.pageRangeMap).length).toBe(20);
+
+      // Normal group pages should have correct double-sided values
+      expect(result.pageRangeMap[1]).toEqual({
+        startPageNo: 1,
+        endPageNo: 2,
+      });
+      expect(result.pageRangeMap[8]).toEqual({
+        startPageNo: 15,
+        endPageNo: 16,
+      });
+
+      // Drawing group pages (9-14) should be backfilled using the double-sided pattern
+      // Pattern: startPageNo = pdfPage * 2 + offset, offset = -1
+      for (let i = 9; i <= 14; i++) {
+        const expected = i * 2 - 1;
+        expect(result.pageRangeMap[i].startPageNo).toBe(expected);
+        expect(result.pageRangeMap[i].endPageNo).toBe(expected + 1);
+      }
     });
   });
 
