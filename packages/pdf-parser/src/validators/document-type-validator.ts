@@ -8,27 +8,32 @@ import { z } from 'zod';
 import { InvalidDocumentTypeError } from '../errors/invalid-document-type-error';
 
 const SYSTEM_PROMPT = `You are given text extracted from the first and last pages of a PDF document.
-Determine if this document is a Korean archaeological investigation report (고고학 조사 보고서).
+Determine if this document is an archaeological investigation report from any country.
 
-Valid types include:
-- 발굴조사보고서 (excavation investigation report)
-- 시굴조사보고서 (trial excavation report)
-- 지표조사보고서 (surface survey report)
-- 정밀발굴조사보고서 (detailed excavation report)
-- 수중발굴조사보고서 (underwater excavation report)
+Valid types include (in any language):
+- Excavation report (발굴조사보고서)
+- Trial excavation report (시굴조사보고서)
+- Surface survey report (지표조사보고서)
+- Detailed excavation report (정밀발굴조사보고서)
+- Underwater excavation report (수중발굴조사보고서)
+- Salvage excavation report
+- Archaeological assessment report
+- Any other archaeological fieldwork investigation report
 
 NOT valid (these are NOT archaeological investigation reports):
-- 수리보고서 (repair/restoration report)
-- 단순 실측 보고서 (simple measurement report)
-- 건축조사보고서 (architectural investigation report)
-- 학술조사보고서 (academic research report)
-- 환경영향평가 (environmental impact assessment)
-- General academic papers or textbooks about archaeology`;
+- Repair/restoration reports (수리보고서)
+- Simple measurement reports (단순 실측 보고서)
+- Architectural investigation reports (건축조사보고서)
+- Academic research reports (학술조사보고서)
+- Environmental impact assessments (환경영향평가)
+- General academic papers or textbooks about archaeology
+- Conservation/preservation reports
+- Museum catalogs or exhibition guides`;
 
 const documentTypeSchema = z.object({
   isValid: z
     .boolean()
-    .describe('Whether this is a Korean archaeological investigation report'),
+    .describe('Whether this is an archaeological investigation report'),
   reason: z.string().describe('Brief reason for the decision'),
 });
 
@@ -37,7 +42,7 @@ export interface DocumentTypeValidatorOptions {
 }
 
 /**
- * Validates whether a PDF is a Korean archaeological investigation report
+ * Validates whether a PDF is an archaeological investigation report
  * by extracting text from the first and last pages and using an LLM to classify it.
  */
 export class DocumentTypeValidator {
