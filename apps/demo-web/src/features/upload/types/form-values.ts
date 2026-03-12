@@ -19,6 +19,8 @@ export interface ProcessingFormValues extends ProcessingOptions {
 export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
   threadCount: 4,
+  // Document type validation
+  documentValidationModel: 'openai/gpt-5.4',
   // Force image PDF pre-conversion
   forceImagePdf: false,
   // OCR Strategy

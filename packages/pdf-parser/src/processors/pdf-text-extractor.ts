@@ -81,6 +81,39 @@ export class PdfTextExtractor {
   }
 
   /**
+   * Extract text from a range of PDF pages using a single pdftotext invocation.
+   * Returns empty string on failure (logged as warning).
+   *
+   * @param pdfPath - Absolute path to the source PDF file
+   * @param firstPage - First page number (1-based)
+   * @param lastPage - Last page number (1-based, inclusive)
+   */
+  async extractPageRange(
+    pdfPath: string,
+    firstPage: number,
+    lastPage: number,
+  ): Promise<string> {
+    const result = await spawnAsync('pdftotext', [
+      '-f',
+      firstPage.toString(),
+      '-l',
+      lastPage.toString(),
+      '-layout',
+      pdfPath,
+      '-',
+    ]);
+
+    if (result.code !== 0) {
+      this.logger.warn(
+        `[PdfTextExtractor] pdftotext failed for pages ${firstPage}-${lastPage}: ${result.stderr || 'Unknown error'}`,
+      );
+      return '';
+    }
+
+    return result.stdout;
+  }
+
+  /**
    * Extract text from a single PDF page using pdftotext.
    * Returns empty string on failure (logged as warning).
    */

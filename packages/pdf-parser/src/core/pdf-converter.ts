@@ -28,6 +28,7 @@ import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { runJqFileJson, runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { getTaskFailureDetails } from '../utils/task-failure-details';
+import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { ImagePdfConverter } from './image-pdf-converter';
 
@@ -85,6 +86,8 @@ export type PDFConvertOptions = Omit<
   chunkSize?: number;
   /** Max retry attempts per failed chunk (default: CHUNKED_CONVERSION.DEFAULT_MAX_RETRIES) */
   chunkMaxRetries?: number;
+  /** LLM model for document type validation (opt-in: skipped when not set) */
+  documentValidationModel?: LanguageModel;
 };
 
 /** Result of strategy-based conversion */
@@ -96,12 +99,39 @@ export interface ConvertWithStrategyResult {
 }
 
 export class PDFConverter {
+  private documentTypeValidated = false;
+
   constructor(
     private readonly logger: LoggerMethods,
     private readonly client: DoclingAPIClient,
     private readonly enableImagePdfFallback: boolean = false,
     private readonly timeout: number = PDF_CONVERTER.DEFAULT_TIMEOUT_MS,
   ) {}
+
+  /**
+   * Validate that the PDF is a Korean archaeological investigation report.
+   * Skipped when no documentValidationModel is configured or for non-local URLs.
+   * Only runs once per converter instance (flag prevents duplicate checks on recursive calls).
+   */
+  private async validateDocumentType(
+    url: string,
+    options: PDFConvertOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    if (this.documentTypeValidated) return;
+    this.documentTypeValidated = true;
+
+    if (!options.documentValidationModel) return;
+
+    const pdfPath = url.startsWith('file://') ? url.slice(7) : null;
+    if (!pdfPath) return;
+
+    const textExtractor = new PdfTextExtractor(this.logger);
+    const validator = new DocumentTypeValidator(textExtractor);
+    await validator.validate(pdfPath, options.documentValidationModel, {
+      abortSignal,
+    });
+  }
 
   async convert(
     url: string,
@@ -112,6 +142,9 @@ export class PDFConverter {
     abortSignal?: AbortSignal,
   ): Promise<TokenUsageReport | null> {
     this.logger.info('[PDFConverter] Converting:', url);
+
+    // Validate document type before processing
+    await this.validateDocumentType(url, options, abortSignal);
 
     // Chunked conversion for large local PDFs
     if (options.chunkedConversion && url.startsWith('file://')) {
@@ -185,6 +218,9 @@ export class PDFConverter {
     const trackedOptions: PDFConvertOptions = { ...options, aggregator };
 
     const pdfPath = url.startsWith('file://') ? url.slice(7) : null;
+
+    // Validate document type before processing
+    await this.validateDocumentType(url, trackedOptions, abortSignal);
 
     // Step 1: Determine OCR strategy
     const strategy = await this.determineStrategy(
@@ -628,6 +664,7 @@ export class PDFConverter {
         'chunkedConversion',
         'chunkSize',
         'chunkMaxRetries',
+        'documentValidationModel',
       ]),
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',

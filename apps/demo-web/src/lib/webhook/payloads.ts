@@ -1,6 +1,7 @@
 import type {
   CleanupCompletedPayload,
   CleanupFailedPayload,
+  DocumentValidationFailedPayload,
   OTPFailedPayload,
   OTPLockedPayload,
   RateLimitExceededPayload,

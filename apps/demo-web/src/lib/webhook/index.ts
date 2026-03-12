@@ -2,6 +2,7 @@ export { sendWebhookAsync } from './client';
 export {
   createCleanupCompletedPayload,
   createCleanupFailedPayload,
+  createDocumentValidationFailedPayload,
   createOTPFailedPayload,
   createOTPLockedPayload,
   createRateLimitExceededPayload,
@@ -14,6 +15,7 @@ export {
 export type {
   CleanupCompletedPayload,
   CleanupFailedPayload,
+  DocumentValidationFailedPayload,
   OTPFailedPayload,
   OTPLockedPayload,
   RateLimitExceededPayload,
