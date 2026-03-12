@@ -32,11 +32,20 @@ export function getWeeklyLockoutStatus(sessionId: string): WeeklyLockoutStatus {
   const now = Date.now();
   const lockoutMs = LOCKOUT_DAYS * 24 * 60 * 60 * 1000;
 
-  const recentSuccess = db.successSessions.find((record) => {
+  const recentSuccesses = db.successSessions.filter((record) => {
     if (record.session_id !== sessionId) return false;
     const completedAt = new Date(record.completed_at).getTime();
     return now - completedAt < lockoutMs;
   });
+
+  const recentSuccess = recentSuccesses.reduce<
+    (typeof recentSuccesses)[number] | undefined
+  >((latest, record) => {
+    if (!latest) return record;
+    return new Date(record.completed_at) > new Date(latest.completed_at)
+      ? record
+      : latest;
+  }, undefined);
 
   if (recentSuccess) {
     const completedAt = new Date(recentSuccess.completed_at).getTime();
