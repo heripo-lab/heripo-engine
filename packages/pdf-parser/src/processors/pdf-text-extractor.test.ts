@@ -291,6 +291,59 @@ describe('PdfTextExtractor', () => {
     });
   });
 
+  describe('extractPageRange', () => {
+    test('extracts text from a page range', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 0,
+        stdout: 'Pages 2-5 text',
+        stderr: '',
+      });
+
+      const result = await extractor.extractPageRange('/tmp/test.pdf', 2, 5);
+
+      expect(result).toBe('Pages 2-5 text');
+      expect(mockSpawnAsync).toHaveBeenCalledWith('pdftotext', [
+        '-f',
+        '2',
+        '-l',
+        '5',
+        '-layout',
+        '/tmp/test.pdf',
+        '-',
+      ]);
+    });
+
+    test('returns empty string on failure', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 1,
+        stdout: '',
+        stderr: 'pdftotext error',
+      });
+
+      const result = await extractor.extractPageRange('/tmp/test.pdf', 1, 3);
+
+      expect(result).toBe('');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdftotext failed for pages 1-3: pdftotext error',
+      );
+    });
+
+    test('logs warning with fallback message when stderr is empty', async () => {
+      mockSpawnAsync.mockResolvedValueOnce({
+        code: 1,
+        stdout: '',
+        stderr: '',
+      });
+
+      const result = await extractor.extractPageRange('/tmp/test.pdf', 1, 3);
+
+      expect(result).toBe('');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdftotext failed for pages 1-3: Unknown error',
+      );
+    });
+  });
+
   describe('getPageCount', () => {
     test('returns page count from pdfinfo output', async () => {
       mockSpawnAsync.mockResolvedValueOnce({
