@@ -17,7 +17,7 @@ export interface WebhookConfig {
 export function getWebhookConfig(): WebhookConfig {
   const isPublicMode = process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true';
   const url = process.env.WEBHOOK_URL || null;
-  const secret = process.env.WEBHOOK_SECRET || null;
+  const secret = process.env.WEBHOOK_SECRET?.trim() || null;
 
   // Only enabled in public mode with both URL and secret configured
   const enabled = isPublicMode && !!url && !!secret;
