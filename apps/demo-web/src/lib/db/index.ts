@@ -49,6 +49,12 @@ export interface OTPLockoutRecord {
   locked_at: string | null;
 }
 
+export interface SuccessSessionRecord {
+  session_id: string;
+  task_id: string;
+  completed_at: string;
+}
+
 export interface UploadSessionRecord {
   id: string; // upload_xxx
   session_id: string;
@@ -72,6 +78,7 @@ interface Database {
   nextLogId: number;
   otpLockouts: OTPLockoutRecord[];
   uploadSessions: UploadSessionRecord[];
+  successSessions: SuccessSessionRecord[];
 }
 
 const DB_PATH = paths.database.replace('.db', '.json');
@@ -88,6 +95,7 @@ function ensureDbExists(): void {
       nextLogId: 1,
       otpLockouts: [],
       uploadSessions: [],
+      successSessions: [],
     };
     writeFileSync(DB_PATH, JSON.stringify(initialDb, null, 2));
   }
@@ -106,6 +114,11 @@ export function readDatabase(): Database {
   // Migration: ensure uploadSessions exists
   if (!db.uploadSessions) {
     db.uploadSessions = [];
+  }
+
+  // Migration: ensure successSessions exists
+  if (!db.successSessions) {
+    db.successSessions = [];
   }
 
   // Migration: add session_id to existing tasks and convert legacy to sample

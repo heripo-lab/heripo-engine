@@ -272,7 +272,11 @@ function HomePageContent() {
               {isBlocked && rateLimit && (
                 <RateLimitBanner
                   message={rateLimit.reason}
-                  resetsAt={rateLimit.resetsAt}
+                  resetsAt={
+                    rateLimit.weeklyLocked
+                      ? (rateLimit.weeklyLockedUntil ?? undefined)
+                      : rateLimit.resetsAt
+                  }
                 />
               )}
 

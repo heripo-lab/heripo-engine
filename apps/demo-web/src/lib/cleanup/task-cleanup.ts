@@ -71,6 +71,14 @@ export function cleanupExpiredTasks(): TaskCleanupResult {
   // Remove expired tasks and their logs from database (atomic write)
   db.tasks = db.tasks.filter((t) => !expiredTaskIds.has(t.id));
   db.logs = db.logs.filter((l) => !expiredTaskIds.has(l.task_id));
+
+  // Remove expired success session records (older than 7 days)
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  db.successSessions = db.successSessions.filter(
+    (s) => new Date(s.completed_at) >= weekAgo,
+  );
+
   writeDatabase(db);
 
   return result;

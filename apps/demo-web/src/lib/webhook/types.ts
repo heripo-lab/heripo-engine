@@ -121,6 +121,16 @@ export interface CleanupFailedPayload extends WebhookBasePayload {
 }
 
 /**
+ * Payload for session.weekly_locked event.
+ */
+export interface SessionWeeklyLockedPayload extends WebhookBasePayload {
+  event: 'session.weekly_locked';
+  sessionId: string;
+  filename: string;
+  lockedUntil: string;
+}
+
+/**
  * Union type for all webhook payloads.
  */
 export type WebhookPayload =
@@ -132,4 +142,6 @@ export type WebhookPayload =
   | OTPLockedPayload
   | RateLimitExceededPayload
   | CleanupCompletedPayload
-  | CleanupFailedPayload;
+  | CleanupFailedPayload
+  | SessionWeeklyLockedPayload
+  | DocumentValidationFailedPayload;

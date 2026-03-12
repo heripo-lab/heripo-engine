@@ -9,6 +9,7 @@ import {
   canAttemptOTP,
   recordOTPAttempt,
 } from '~/lib/db/repositories/otp-lockout-repository';
+import { getWeeklyLockoutStatus } from '~/lib/db/repositories/success-session-repository';
 import { createTask, listTasks } from '~/lib/db/repositories/task-repository';
 import { getUsageStatus } from '~/lib/db/repositories/usage-repository';
 import { paths } from '~/lib/paths';
@@ -26,6 +27,7 @@ import {
   createOTPFailedPayload,
   createOTPLockedPayload,
   createRateLimitExceededPayload,
+  createSessionWeeklyLockedPayload,
   createTaskStartedPayload,
   sendWebhookAsync,
 } from '~/lib/webhook';
@@ -206,7 +208,30 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Step 3: Check rate limit (only for non-OTP users)
+        // Step 3: Check weekly session lockout (only for non-OTP users)
+        const lockoutStatus = getWeeklyLockoutStatus(sessionId);
+        if (lockoutStatus.locked) {
+          sendWebhookAsync(
+            createSessionWeeklyLockedPayload({
+              ...clientInfo,
+              sessionId,
+              filename: file.name,
+              lockedUntil: lockoutStatus.lockedUntil!,
+            }),
+          );
+
+          return NextResponse.json(
+            {
+              error:
+                'You have already completed a task this week. Please try again later.',
+              code: 'WEEKLY_SESSION_LOCKED',
+              lockedUntil: lockoutStatus.lockedUntil,
+            },
+            { status: 429 },
+          );
+        }
+
+        // Step 4: Check rate limit (only for non-OTP users)
         const usageStatus = getUsageStatus();
         if (!usageStatus.canCreate) {
           sendWebhookAsync(
