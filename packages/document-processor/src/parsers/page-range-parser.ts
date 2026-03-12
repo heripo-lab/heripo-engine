@@ -233,6 +233,7 @@ export class PageRangeParser extends VisionLLMComponent {
     const sampledPages = new Set<number>();
     let consecutiveAllNullAttempts = 0;
     const MAX_ALL_NULL_ATTEMPTS = 3;
+    const allSamples: SampleResult[] = [];
 
     for (let attempt = 0; attempt <= this.MAX_PATTERN_RETRIES; attempt++) {
       // Select 3 random pages (excluding previously sampled if possible)
@@ -260,6 +261,7 @@ export class PageRangeParser extends VisionLLMComponent {
       );
       usageList.push(result.usage);
       const samples = result.samples;
+      allSamples.push(...samples);
 
       // Early termination: if all samples return null consecutively,
       // these pages likely have no page numbers (e.g., architectural drawings)
@@ -297,6 +299,22 @@ export class PageRangeParser extends VisionLLMComponent {
         'warn',
         `Pattern detection failed, attempt ${attempt + 1}/${this.MAX_PATTERN_RETRIES + 1}`,
       );
+    }
+
+    // Try pattern detection from all accumulated samples before giving up
+    const allValidSamples = allSamples.filter((s) => s.startPageNo !== null);
+    if (allValidSamples.length >= 2) {
+      const finalPattern = this.detectPattern(allSamples);
+      if (finalPattern.pattern !== PagePattern.UNKNOWN) {
+        this.log(
+          'info',
+          `Pattern detected from accumulated samples: ${finalPattern.pattern}`,
+        );
+        return {
+          pageRangeMap: this.applyPattern(pageNos, finalPattern),
+          usage: usageList,
+        };
+      }
     }
 
     // All retries exhausted or early termination - return fallback map with 0,0
