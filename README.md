@@ -71,6 +71,8 @@ Archaeological excavation reports contain valuable cultural heritage information
 - **Structure Extraction**: Automatic identification of document structure including table of contents, chapters/sections, images, and tables
 - **Cost Efficiency**: Cost savings through local processing instead of cloud OCR (free)
 
+> **Beyond Archaeology**: While heripo engine is optimized for archaeological reports, its PDF structuring capabilities (text, tables, images, TOC extraction) work well with heavily damaged scanned PDFs and documents from other domains (architecture, history, etc.). Feel free to fork and adapt it to your needs.
+
 ### Data Pipeline
 
 ```
