@@ -4,8 +4,8 @@ Thank you for your interest in this project! This guide explains local developme
 
 ## Development Environment
 
-- Node.js: >= 22
-- Package manager: pnpm 9
+- Node.js: >= 24
+- Package manager: pnpm 10
 - Monorepo: pnpm workspaces with Turbo
 - Language/Runtime: TypeScript, ESM (ES2022)
 
@@ -182,7 +182,7 @@ git push origin main
 - Location: `.github/workflows/ci.yml`
 - Triggers: Pull Request, manual
 - Steps: Lint → Typecheck → Build → Test (coverage)
-- Node version: 22, pnpm version: 9
+- Node version: 24, pnpm version: 10
 
 ## Issues / Questions
 

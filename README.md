@@ -5,7 +5,7 @@
 [![CI](https://github.com/heripo-lab/heripo-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/heripo-lab/heripo-engine/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/Python-3.9--3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![pnpm](https://img.shields.io/badge/pnpm-%3E%3D9-orange)](https://pnpm.io)
+[![pnpm](https://img.shields.io/badge/pnpm-%3E%3D10-orange)](https://pnpm.io)
 ![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 
@@ -71,6 +71,8 @@ Archaeological excavation reports contain valuable cultural heritage information
 - **Structure Extraction**: Automatic identification of document structure including table of contents, chapters/sections, images, and tables
 - **Cost Efficiency**: Cost savings through local processing instead of cloud OCR (free)
 
+> **Beyond Archaeology**: While heripo engine is optimized for archaeological reports, its PDF structuring capabilities (text, tables, images, TOC extraction) work well with heavily damaged scanned PDFs and documents from other domains (architecture, history, etc.). Feel free to fork and adapt it to your needs.
+
 ### Data Pipeline
 
 ```
@@ -134,11 +136,11 @@ heripo-engine/
 │   ├── pdf-parser/        # PDF → DoclingDocument
 │   ├── document-processor/ # DoclingDocument → ProcessedDocument
 │   ├── model/             # Data models and type definitions
-│   ├── shared/            # Internal utilities (not published)
-│   └── logger/            # Logging utility (not published)
+│   └── shared/            # Internal utilities (not published)
 ├── apps/                  # Applications
 │   └── demo-web/          # Next.js web demo
 └── tools/                 # Build tool configurations
+    ├── logger/            # Logging utility (not published)
     ├── tsconfig/          # Shared TypeScript config
     ├── tsup-config/       # Build config
     └── vitest-config/     # Test config
@@ -152,7 +154,7 @@ For detailed architecture explanation, see [docs/architecture.md](./docs/archite
 
 - **macOS** (Apple Silicon or Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** >= 9.0.0
+- **pnpm** >= 10.0.0
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+ is not supported)
 - **jq** (JSON processing tool)
 - **poppler** (PDF text extraction tools)
@@ -209,39 +211,47 @@ const logger = Logger(...);
 
 // 1. PDF Parsing
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
+  port: 5001,
   logger,
 });
 
 await pdfParser.init();
 
-const outputPath = await pdfParser.parse(
+const tokenUsageReport = await pdfParser.parse(
   'path/to/report.pdf',
-  'output-dir',
-  (resultPath) => {
-    console.log('PDF conversion complete:', resultPath);
-  },
-);
-
-// 2. Document Processing
-const processor = new DocumentProcessor({
-  logger,
-  fallbackModel: anthropic('claude-opus-4-5'),
-  pageRangeParserModel: openai('gpt-5.2'),
-  tocExtractorModel: openai('gpt-5.1'),
-  captionParserModel: openai('gpt-5-mini'),
-});
-
-const processedDoc = await processor.process(
-  doclingDocument,
   'report-001',
-  outputPath,
+  async (outputPath) => {
+    // 2. Document Processing (inside callback)
+    const processor = new DocumentProcessor({
+      logger,
+      fallbackModel: anthropic('claude-opus-4-5'),
+      pageRangeParserModel: openai('gpt-5.2'),
+      tocExtractorModel: openai('gpt-5.1'),
+      captionParserModel: openai('gpt-5-mini'),
+      textCleanerBatchSize: 10,
+      captionParserBatchSize: 5,
+      captionValidatorBatchSize: 5,
+    });
+
+    const { document, usage } = await processor.process(
+      doclingDocument,
+      'report-001',
+      outputPath,
+    );
+
+    // 3. Use Results
+    console.log('TOC:', document.chapters);
+    console.log('Images:', document.images);
+    console.log('Tables:', document.tables);
+    console.log('Footnotes:', document.footnotes);
+    console.log('Token Usage:', usage.total);
+  },
+  true, // cleanupAfterCallback
+  {}, // PDFConvertOptions
 );
 
-// 3. Use Results
-console.log('TOC:', processedDoc.chapters);
-console.log('Images:', processedDoc.images);
-console.log('Tables:', processedDoc.tables);
+// Cleanup
+await pdfParser.dispose();
 ```
 
 ### Advanced Usage
@@ -260,7 +270,8 @@ const processor = new DocumentProcessor({
   captionParserBatchSize: 10,
   captionValidatorBatchSize: 10,
   maxRetries: 3,
-  enableFallbackRetry: true, // Automatically retry with fallbackModel on failure
+  enableFallbackRetry: true, // Automatically retry with fallbackModel on failure (default: false)
+  onTokenUsage: (report) => console.log('Token usage:', report.total),
 });
 ```
 

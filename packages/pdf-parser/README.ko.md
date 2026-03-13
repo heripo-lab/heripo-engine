@@ -21,6 +21,11 @@
 - [설치](#설치)
 - [사용법](#사용법)
 - [OCR 전략 시스템](#ocr-전략-시스템)
+- [문서 유형 검증](#문서-유형-검증)
+- [대용량 PDF 청크 변환](#대용량-pdf-청크-변환)
+- [이미지 PDF 폴백](#이미지-pdf-폴백)
+- [AbortSignal 지원](#abortsignal-지원)
+- [서버 크래시 복구](#서버-크래시-복구)
 - [왜 macOS 전용인가?](#왜-macos-전용인가)
 - [시스템 의존성 상세](#시스템-의존성-상세)
 - [API 문서](#api-문서)
@@ -34,7 +39,11 @@
 - **Apple Silicon 최적화**: M1/M2/M3/M4/M5 칩에서 GPU 가속 지원
 - **자동 환경 설정**: Python 가상환경 및 docling-serve 자동 설치
 - **이미지 추출**: PDF 내 이미지 자동 추출 및 저장
-- **유연한 설정**: OCR, 포맷, 스레딩 옵션 등 세부 설정 가능
+- **문서 유형 검증**: LLM 기반 고고학 보고서 여부 검증 (선택)
+- **청크 변환**: 대용량 PDF를 청크로 분할하여 안정적으로 처리
+- **이미지 PDF 폴백**: 변환 실패 시 이미지 기반 PDF로 자동 재시도
+- **AbortSignal 지원**: 진행 중인 파싱 작업 취소
+- **서버 크래시 복구**: ECONNREFUSED 발생 시 docling-serve 자동 재시작
 
 ## 사전 요구사항
 
@@ -60,7 +69,7 @@ npm install -g pnpm
 
 #### 3. Python 3.9 - 3.12
 
-⚠️ **중요**: Python 3.13+는 지원하지 않습니다. Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
+> **중요**: Python 3.13+는 지원하지 않습니다. Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
 
 ```bash
 # Python 3.11 설치 (권장)
@@ -92,11 +101,19 @@ macOS에 기본적으로 설치되어 있습니다. 확인:
 which lsof
 ```
 
+#### 7. ImageMagick + Ghostscript (선택)
+
+이미지 PDF 폴백 기능(`enableImagePdfFallback` 또는 `forceImagePdf`)을 사용할 때만 필요합니다.
+
+```bash
+brew install imagemagick ghostscript
+```
+
 ### 최초 실행 설정
 
 `@heripo/pdf-parser`를 처음 사용할 때 자동으로:
 
-1. `~/.heripo/pdf-parser/venv`에 Python 가상환경 생성
+1. 현재 작업 디렉토리의 `.venv`에 Python 가상환경 생성 (`venvPath`로 설정 가능)
 2. `docling-serve` 및 의존성 설치
 3. 로컬 포트에서 docling-serve 프로세스 시작
 
@@ -125,9 +142,9 @@ import { PDFParser } from '@heripo/pdf-parser';
 
 const logger = Logger(...);
 
-// PDFParser 인스턴스 생성
+// PDFParser 인스턴스 생성 (logger는 필수)
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11', // Python 실행 경로
+  port: 5001,
   logger,
 });
 
@@ -135,58 +152,68 @@ const pdfParser = new PDFParser({
 await pdfParser.init();
 
 // PDF 파싱
-const outputPath = await pdfParser.parse(
-  'path/to/report.pdf', // 입력 PDF 파일
-  'output-directory', // 출력 디렉토리
-  (resultPath) => {
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/report.pdf', // PDF URL (file:// 또는 http://)
+  'report-001',                 // 리포트 ID
+  async (outputPath) => {
     // 변환 완료 콜백
-    console.log('PDF 변환 완료:', resultPath);
+    console.log('PDF 변환 완료:', outputPath);
   },
+  false,                        // cleanupAfterCallback
+  {},                           // PDFConvertOptions
 );
 
-// 결과 사용
-console.log('출력 경로:', outputPath);
+// 토큰 사용량 리포트 (LLM 사용이 없으면 null)
+console.log('토큰 사용량:', tokenUsageReport);
 ```
 
 ### 고급 옵션
 
 ```typescript
+// 옵션 A: 로컬 서버 (포트 모드)
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
   logger,
-
-  // docling-serve 설정
-  port: 5001, // 사용할 포트 (기본값: 5001)
-  timeout: 10000000, // 타임아웃 (밀리초)
-
-  // 외부 docling-serve 사용
-  externalDoclingUrl: 'http://localhost:5000', // 외부 서버 사용 시
+  port: 5001,                      // 사용할 포트 (기본값: 5001)
+  timeout: 10000000,                // 타임아웃 (밀리초)
+  venvPath: '/custom/path/.venv',   // 커스텀 venv 경로 (기본값: CWD/.venv)
+  killExistingProcess: true,        // 포트의 기존 프로세스 종료 (기본값: false)
+  enableImagePdfFallback: true,     // 이미지 PDF 폴백 활성화 (기본값: false)
 });
 
-// 변환 옵션 지정
-await pdfParser.parse('input.pdf', 'output', (result) => console.log(result), {
-  // OCR 설정
-  doOcr: true, // OCR 활성화 (기본값: true)
-
-  // 출력 포맷
-  formats: ['docling_json', 'md'], // 출력 형식 선택
-
-  // 스레드 수
-  pdfBackend: 'dlparse_v2', // PDF 백엔드
+// 옵션 B: 외부 docling-serve 사용
+const pdfParser = new PDFParser({
+  logger,
+  baseUrl: 'http://localhost:5000', // 외부 서버 URL
 });
-```
 
-### 이미지 추출
+// 변환 옵션과 함께 파싱
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    // OCR 전략 옵션
+    strategySamplerModel: openai('gpt-5.1'),
+    vlmProcessorModel: openai('gpt-5.1'),
+    vlmConcurrency: 3,
 
-PDF에서 이미지를 자동으로 추출합니다:
+    // 문서 유형 검증
+    documentValidationModel: openai('gpt-5.1'),
 
-```typescript
-const outputPath = await pdfParser.parse(
-  'report.pdf',
-  'output',
-  (resultPath) => {
-    // 이미지는 output/images/ 디렉토리에 저장됨
-    console.log('이미지 추출 완료:', resultPath);
+    // 대용량 PDF 청크 변환
+    chunkedConversion: true,
+    chunkSize: 50,
+    chunkMaxRetries: 3,
+
+    // 이미지 PDF 사전 변환 강제
+    forceImagePdf: false,
+
+    // 문서 처리 타임아웃 (초)
+    document_timeout: 600,
+
+    // 토큰 사용량 추적
+    onTokenUsage: (report) => console.log('토큰 사용량:', report),
   },
 );
 ```
@@ -196,15 +223,15 @@ const outputPath = await pdfParser.parse(
 작업 완료 후 리소스를 정리합니다:
 
 ```typescript
-// docling-serve 프로세스 종료
-await pdfParser.shutdown();
+// docling-serve 프로세스 종료 및 리소스 해제
+await pdfParser.dispose();
 ```
 
 ## OCR 전략 시스템
 
 ### 왜 이 전략인가?
 
-**ocrmac(Apple Vision Framework)은 매우 우수한 OCR 엔진입니다** — 무료이고, GPU 가속을 지원하며, 고품질 결과를 제공합니다. 수천~수백만 권의 고고학 보고서를 처리할 때 이만한 솔루션이 없습니다.
+**ocrmac(Apple Vision Framework)은 매우 우수한 OCR 엔진입니다** -- 무료이고, GPU 가속을 지원하며, 고품질 결과를 제공합니다. 수천~수백만 권의 고고학 보고서를 처리할 때 이만한 솔루션이 없습니다.
 
 **그러나 ocrmac은 혼합 문자 체계를 처리하지 못합니다.** 한글·한자 혼용 문서(그리고 잠재적으로 다른 혼합 문자 조합)에서 보조 문자가 깨진 텍스트로 변환됩니다. 전체 파이프라인을 비용이 높은 VLM으로 전환하는 대신, **문제가 있는 페이지만 타겟팅**하여 VLM으로 보정합니다.
 
@@ -219,16 +246,17 @@ await pdfParser.shutdown();
 
 - 각 페이지의 OCR 텍스트 요소와 표 셀을 추출
 - `pdftotext` 참조 텍스트를 품질 기준으로 활용
-- VLM이 치환 기반 보정(find → replace)을 반환
+- VLM이 치환 기반 보정(find -> replace)을 반환
 - 실패한 페이지는 원본 OCR 텍스트를 유지하며 건너뜀
 
 ### 전략 옵션
 
 ```typescript
-const outputPath = await pdfParser.parse(
-  'input.pdf',
-  'output',
-  (result) => console.log(result),
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
   {
     // OCR 전략 샘플링 활성화 (Vision LLM 모델 제공)
     strategySamplerModel: openai('gpt-5.1'),
@@ -244,6 +272,114 @@ const outputPath = await pdfParser.parse(
   },
 );
 ```
+
+## 문서 유형 검증
+
+LLM 기반으로 PDF가 고고학 발굴조사보고서인지 검증하는 선택적 기능입니다. `documentValidationModel`을 제공하면 파서가 PDF에서 텍스트를 추출하고 LLM을 사용하여 문서 유형을 확인한 후 처리합니다. 검증에 실패하면 `InvalidDocumentTypeError`가 발생합니다.
+
+```typescript
+import { InvalidDocumentTypeError } from '@heripo/pdf-parser';
+
+try {
+  await pdfParser.parse(
+    'file:///path/to/input.pdf',
+    'report-001',
+    async (outputPath) => console.log(outputPath),
+    false,
+    {
+      documentValidationModel: openai('gpt-5.1'),
+    },
+  );
+} catch (error) {
+  if (error instanceof InvalidDocumentTypeError) {
+    console.error('고고학 보고서가 아닙니다:', error.message);
+  }
+}
+```
+
+## 대용량 PDF 청크 변환
+
+타임아웃이나 메모리 문제를 일으킬 수 있는 대용량 PDF의 경우, 청크 변환을 활성화하여 PDF를 작은 청크로 분할하고 개별적으로 처리할 수 있습니다. 로컬 파일(`file://` URL)에서만 동작합니다.
+
+```typescript
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/large-report.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    chunkedConversion: true,
+    chunkSize: 50, // 청크당 페이지 수 (기본값: 상수에서 설정)
+    chunkMaxRetries: 3, // 실패한 청크의 최대 재시도 횟수 (기본값: 상수에서 설정)
+  },
+);
+```
+
+## 이미지 PDF 폴백
+
+변환이 실패하면 파서가 PDF를 이미지 기반 PDF로 변환한 후 재시도할 수 있습니다. 복잡하거나 손상된 구조의 PDF에 유용합니다. ImageMagick과 Ghostscript가 필요합니다.
+
+### 자동 폴백 (실패 시)
+
+생성자 옵션으로 활성화합니다. 변환이 실패하면 파서가 자동으로 이미지 기반 PDF로 재시도합니다:
+
+```typescript
+const pdfParser = new PDFParser({
+  logger,
+  port: 5001,
+  enableImagePdfFallback: true, // 자동 폴백 활성화
+});
+```
+
+### 강제 이미지 PDF (항상)
+
+parse 옵션으로 이미지 기반 PDF 사전 변환을 강제합니다:
+
+```typescript
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    forceImagePdf: true, // 항상 이미지 PDF로 먼저 변환
+  },
+);
+```
+
+원본 변환과 폴백 변환 모두 실패하면 두 에러를 모두 포함하는 `ImagePdfFallbackError`가 발생합니다.
+
+## AbortSignal 지원
+
+`AbortSignal`을 전달하여 진행 중인 파싱 작업을 취소할 수 있습니다:
+
+```typescript
+const controller = new AbortController();
+
+// 5분 후 취소
+setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+try {
+  await pdfParser.parse(
+    'file:///path/to/input.pdf',
+    'report-001',
+    async (outputPath) => console.log(outputPath),
+    false,
+    {},
+    controller.signal, // AbortSignal
+  );
+} catch (error) {
+  if (error.name === 'AbortError') {
+    console.log('파싱이 취소되었습니다');
+  }
+}
+```
+
+## 서버 크래시 복구
+
+로컬 docling-serve 인스턴스(포트 모드)를 사용할 때, 파서가 서버 크래시(ECONNREFUSED 에러)를 자동으로 감지하고 서버를 재시작합니다. 이 과정은 `parse()` 호출 중에 투명하게 처리되며, 실패한 작업은 서버 재시작 후 재시도됩니다.
+
+> **참고**: 서버 크래시 복구는 로컬 서버 모드(`port` 옵션)에서만 사용 가능합니다. 외부 서버(`baseUrl` 옵션)를 사용할 때는 복구를 시도하지 않습니다.
 
 ## 왜 macOS 전용인가?
 
@@ -281,14 +417,16 @@ const outputPath = await pdfParser.parse(
 
 `@heripo/pdf-parser`는 다음 시스템 레벨 의존성이 필요합니다:
 
-| 의존성  | 필수 버전  | 설치 방법                  | 용도                                                           |
-| ------- | ---------- | -------------------------- | -------------------------------------------------------------- |
-| Python  | 3.9 - 3.12 | `brew install python@3.11` | Docling SDK 실행 환경                                          |
-| poppler | Any        | `brew install poppler`     | PDF 페이지 수 확인 (pdfinfo) 및 텍스트 레이어 추출 (pdftotext) |
-| jq      | Any        | `brew install jq`          | JSON 처리 (변환 결과 파싱)                                     |
-| lsof    | Any        | macOS 기본 설치됨          | docling-serve 포트 관리                                        |
+| 의존성      | 필수 버전  | 설치 방법                  | 용도                                                           |
+| ----------- | ---------- | -------------------------- | -------------------------------------------------------------- |
+| Python      | 3.9 - 3.12 | `brew install python@3.11` | Docling SDK 실행 환경                                          |
+| poppler     | Any        | `brew install poppler`     | PDF 페이지 수 확인 (pdfinfo) 및 텍스트 레이어 추출 (pdftotext) |
+| jq          | Any        | `brew install jq`          | JSON 처리 (변환 결과 파싱)                                     |
+| lsof        | Any        | macOS 기본 설치됨          | docling-serve 포트 관리                                        |
+| ImageMagick | Any (선택) | `brew install imagemagick` | 이미지 PDF 폴백 및 페이지 렌더링                               |
+| Ghostscript | Any (선택) | `brew install ghostscript` | 이미지 PDF 폴백 (PDF를 이미지로 변환)                          |
 
-> ⚠️ **Python 3.13+는 지원하지 않습니다.** Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
+> **Python 3.13+는 지원하지 않습니다.** Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
 
 ### Python 버전 확인
 
@@ -318,13 +456,16 @@ which jq
 #### 생성자 옵션
 
 ```typescript
-interface PDFParserOptions {
-  pythonPath?: string; // Python 실행 경로 (기본값: 'python3')
-  logger?: Logger; // 로거 인스턴스
-  port?: number; // docling-serve 포트 (기본값: 5001)
+type Options = {
+  logger: LoggerMethods; // 로거 인스턴스 (필수)
   timeout?: number; // 타임아웃 (밀리초, 기본값: 10000000)
-  externalDoclingUrl?: string; // 외부 docling-serve URL (선택)
-}
+  venvPath?: string; // Python venv 경로 (기본값: CWD/.venv)
+  killExistingProcess?: boolean; // 포트의 기존 프로세스 종료 (기본값: false)
+  enableImagePdfFallback?: boolean; // 이미지 PDF 폴백 활성화 (기본값: false, ImageMagick + Ghostscript 필요)
+} & (
+  | { port?: number } // 로컬 서버 모드 (기본 포트: 5001)
+  | { baseUrl: string } // 외부 서버 모드
+);
 ```
 
 #### 메서드
@@ -337,69 +478,101 @@ Python 환경을 설정하고 docling-serve를 시작합니다.
 await pdfParser.init();
 ```
 
-##### `parse(inputPath, outputDir, callback, options?): Promise<string>`
+##### `parse(url, reportId, onComplete, cleanupAfterCallback, options, abortSignal?): Promise<TokenUsageReport | null>`
 
 PDF 파일을 파싱합니다.
 
 **파라미터:**
 
-- `inputPath` (string): 입력 PDF 파일 경로
-- `outputDir` (string): 출력 디렉토리 경로
-- `callback` (function): 변환 완료 시 호출될 콜백 함수
-- `options` (ConversionOptions, 선택): 변환 옵션
+- `url` (string): PDF URL (로컬 파일은 `file://`, 원격은 `http://`)
+- `reportId` (string): 고유 리포트 식별자 (출력 디렉토리 이름에 사용)
+- `onComplete` (ConversionCompleteCallback): 변환 완료 시 출력 디렉토리 경로와 함께 호출되는 콜백 함수
+- `cleanupAfterCallback` (boolean): 콜백 완료 후 출력 디렉토리 삭제 여부
+- `options` (PDFConvertOptions): 변환 옵션
+- `abortSignal` (AbortSignal, 선택): 작업 취소를 위한 시그널
 
 **반환값:**
 
-- `Promise<string>`: 출력 파일 경로
+- `Promise<TokenUsageReport | null>`: LLM 작업의 토큰 사용량 리포트, LLM 사용이 없으면 `null`
 
-##### `shutdown(): Promise<void>`
+##### `dispose(): Promise<void>`
 
-docling-serve 프로세스를 종료합니다.
+파서 인스턴스를 해제하고, 로컬 docling-serve 프로세스를 종료(시작한 경우)하며, 리소스를 해제합니다.
 
 ```typescript
-await pdfParser.shutdown();
+await pdfParser.dispose();
 ```
 
-### ConversionOptions
+### PDFConvertOptions
 
 ```typescript
-interface ConversionOptions {
-  doOcr?: boolean; // OCR 활성화 (기본값: true)
-  formats?: string[]; // 출력 형식 (기본값: ['docling_json'])
-  pdfBackend?: string; // PDF 백엔드 (기본값: 'dlparse_v2')
-}
-```
-
-### PDFConvertOptions (확장)
-
-```typescript
-interface PDFConvertOptions extends ConversionOptions {
+type PDFConvertOptions = {
+  // OCR 전략 옵션
   strategySamplerModel?: LanguageModel; // OCR 전략 샘플링용 Vision LLM
   vlmProcessorModel?: LanguageModel; // 텍스트 보정용 Vision LLM
   vlmConcurrency?: number; // 병렬 페이지 처리 (기본값: 1)
   skipSampling?: boolean; // 전략 샘플링 건너뛰기
   forcedMethod?: 'ocrmac' | 'vlm'; // 특정 OCR 방식 강제
+
+  // 이미지 PDF 옵션
+  forceImagePdf?: boolean; // 이미지 기반 PDF 사전 변환 강제
+
+  // 토큰 사용량 추적
+  aggregator?: LLMTokenUsageAggregator; // 토큰 사용량 집계기
+  onTokenUsage?: (report: TokenUsageReport) => void; // 토큰 사용량 업데이트 콜백
+
+  // 문서 처리
+  document_timeout?: number; // 문서 처리 타임아웃 (초)
+  documentValidationModel?: LanguageModel; // 문서 유형 검증용 LLM
+
+  // 청크 변환 (대용량 PDF)
+  chunkedConversion?: boolean; // 청크 변환 활성화
+  chunkSize?: number; // 청크당 페이지 수
+  chunkMaxRetries?: number; // 실패한 청크의 최대 재시도 횟수
+
+  // Docling 변환 옵션 (상속)
+  num_threads?: number; // 처리 스레드 수
+  ocr_lang?: string[]; // OCR 언어
+  // ... 기타 Docling ConversionOptions 필드
+};
+```
+
+### ConvertWithStrategyResult
+
+```typescript
+interface ConvertWithStrategyResult {
+  /** 결정된 OCR 전략 */
+  strategy: OcrStrategy;
+  /** 샘플링 및/또는 VLM 처리의 토큰 사용량 리포트 (LLM 사용이 없으면 null) */
+  tokenUsageReport: TokenUsageReport | null;
 }
 ```
 
-## 문제 해결
+### ConversionCompleteCallback
 
-### Python 버전 오류
-
-**증상**: `Python version X.Y is not supported`
-
-**해결**:
-
-```bash
-# Python 3.11 설치
-brew install python@3.11
-
-# PDFParser에 명시적으로 지정
-const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
-  logger,
-});
+```typescript
+type ConversionCompleteCallback = (outputPath: string) => Promise<void> | void;
 ```
+
+### 에러 타입
+
+#### `InvalidDocumentTypeError`
+
+PDF가 문서 유형 검증에 실패할 때 발생합니다 (즉, 고고학 발굴조사보고서가 아닌 경우).
+
+```typescript
+import { InvalidDocumentTypeError } from '@heripo/pdf-parser';
+```
+
+#### `ImagePdfFallbackError`
+
+원본 변환과 이미지 PDF 폴백 변환이 모두 실패할 때 발생합니다. 두 에러에 대한 참조를 포함합니다.
+
+```typescript
+import { ImagePdfFallbackError } from '@heripo/pdf-parser';
+```
+
+## 문제 해결
 
 ### jq를 찾을 수 없음
 
@@ -427,11 +600,17 @@ brew install poppler
 
 **해결**:
 
-```bash
-# 다른 포트 사용
+```typescript
+// 다른 포트 사용
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
   port: 5002,  // 다른 포트 지정
+  logger,
+});
+
+// 또는 기존 프로세스 종료
+const pdfParser = new PDFParser({
+  port: 5001,
+  killExistingProcess: true,
   logger,
 });
 ```
@@ -443,21 +622,31 @@ const pdfParser = new PDFParser({
 **해결**:
 
 ```bash
-# 가상환경 재생성
-rm -rf ~/.heripo/pdf-parser/venv
+# 가상환경 재생성 (기본 위치)
+rm -rf .venv
 # 다시 init() 실행
+```
+
+### ImageMagick / Ghostscript를 찾을 수 없음
+
+**증상**: `ImageMagick is not installed but enableImagePdfFallback is enabled`
+
+**해결**:
+
+```bash
+brew install imagemagick ghostscript
 ```
 
 ## Linux 지원 현황
 
 현재 **macOS 전용**입니다. Linux 지원은 **완전히 배제한 것은 아니지만**, OCR 성능과 비용 효율성 문제로 **현재는 구체적인 계획이 없습니다**.
 
-| 플랫폼                | 상태    | 비고                            |
-| --------------------- | ------- | ------------------------------- |
-| macOS + Apple Silicon | ✅ 지원 | 최적 성능, GPU 가속             |
-| macOS + Intel         | ✅ 지원 | GPU 가속 없음                   |
-| Linux                 | ❓ 미정 | 성능/비용 문제로 현재 계획 없음 |
-| Windows               | ❓ 미정 | WSL2 통한 Linux 방식 고려 가능  |
+| 플랫폼                | 상태 | 비고                            |
+| --------------------- | ---- | ------------------------------- |
+| macOS + Apple Silicon | 지원 | 최적 성능, GPU 가속             |
+| macOS + Intel         | 지원 | GPU 가속 없음                   |
+| Linux                 | 미정 | 성능/비용 문제로 현재 계획 없음 |
+| Windows               | 미정 | WSL2 통한 Linux 방식 고려 가능  |
 
 ### Linux 미지원 사유
 

@@ -21,6 +21,11 @@
 - [Installation](#installation)
 - [Usage](#usage)
 - [OCR Strategy System](#ocr-strategy-system)
+- [Document Type Validation](#document-type-validation)
+- [Large PDF Chunked Conversion](#large-pdf-chunked-conversion)
+- [Image PDF Fallback](#image-pdf-fallback)
+- [AbortSignal Support](#abortsignal-support)
+- [Server Crash Recovery](#server-crash-recovery)
 - [Why macOS Only?](#why-macos-only)
 - [System Dependencies Details](#system-dependencies-details)
 - [API Documentation](#api-documentation)
@@ -34,7 +39,11 @@
 - **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
-- **Flexible Configuration**: OCR, format, threading options, and other detailed settings
+- **Document Type Validation**: Optional LLM-based validation that a PDF is an archaeological report
+- **Chunked Conversion**: Split large PDFs into chunks for reliable processing
+- **Image PDF Fallback**: Automatic fallback to image-based PDF when conversion fails
+- **AbortSignal Support**: Cancel ongoing parsing operations
+- **Server Crash Recovery**: Automatic restart of docling-serve on ECONNREFUSED
 
 ## Prerequisites
 
@@ -60,7 +69,7 @@ npm install -g pnpm
 
 #### 3. Python 3.9 - 3.12
 
-⚠️ **Important**: Python 3.13+ is not supported. Some Docling SDK dependencies are not compatible with Python 3.13.
+> **Important**: Python 3.13+ is not supported. Some Docling SDK dependencies are not compatible with Python 3.13.
 
 ```bash
 # Install Python 3.11 (recommended)
@@ -92,11 +101,19 @@ Installed by default on macOS. Verify:
 which lsof
 ```
 
+#### 7. ImageMagick + Ghostscript (optional)
+
+Required only when using the image PDF fallback feature (`enableImagePdfFallback` or `forceImagePdf`).
+
+```bash
+brew install imagemagick ghostscript
+```
+
 ### First Run Setup
 
 When using `@heripo/pdf-parser` for the first time, it automatically:
 
-1. Creates Python virtual environment at `~/.heripo/pdf-parser/venv`
+1. Creates Python virtual environment at `.venv` in the current working directory (configurable via `venvPath`)
 2. Installs `docling-serve` and dependencies
 3. Starts docling-serve process on local port
 
@@ -125,9 +142,9 @@ import { PDFParser } from '@heripo/pdf-parser';
 
 const logger = Logger(...);
 
-// Create PDFParser instance
+// Create PDFParser instance (logger is required)
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11', // Python executable path
+  port: 5001,
   logger,
 });
 
@@ -135,58 +152,68 @@ const pdfParser = new PDFParser({
 await pdfParser.init();
 
 // Parse PDF
-const outputPath = await pdfParser.parse(
-  'path/to/report.pdf', // Input PDF file
-  'output-directory', // Output directory
-  (resultPath) => {
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/report.pdf', // PDF URL (file:// or http://)
+  'report-001',                 // Report ID
+  async (outputPath) => {
     // Conversion complete callback
-    console.log('PDF conversion complete:', resultPath);
+    console.log('PDF conversion complete:', outputPath);
   },
+  false,                        // cleanupAfterCallback
+  {},                           // PDFConvertOptions
 );
 
-// Use results
-console.log('Output path:', outputPath);
+// Token usage report (null when no LLM usage)
+console.log('Token usage:', tokenUsageReport);
 ```
 
 ### Advanced Options
 
 ```typescript
+// Option A: Use local server with port
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
   logger,
-
-  // docling-serve configuration
-  port: 5001, // Port to use (default: 5001)
-  timeout: 10000000, // Timeout (milliseconds)
-
-  // Use external docling-serve
-  externalDoclingUrl: 'http://localhost:5000', // When using external server
+  port: 5001,                      // Port to use (default: 5001)
+  timeout: 10000000,                // Timeout (milliseconds)
+  venvPath: '/custom/path/.venv',   // Custom venv path (default: CWD/.venv)
+  killExistingProcess: true,        // Kill existing process on port (default: false)
+  enableImagePdfFallback: true,     // Enable image PDF fallback (default: false)
 });
 
-// Specify conversion options
-await pdfParser.parse('input.pdf', 'output', (result) => console.log(result), {
-  // OCR settings
-  doOcr: true, // Enable OCR (default: true)
-
-  // Output formats
-  formats: ['docling_json', 'md'], // Select output formats
-
-  // Thread count
-  pdfBackend: 'dlparse_v2', // PDF backend
+// Option B: Use external docling-serve
+const pdfParser = new PDFParser({
+  logger,
+  baseUrl: 'http://localhost:5000', // External server URL
 });
-```
 
-### Image Extraction
+// Parse with conversion options
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    // OCR strategy options
+    strategySamplerModel: openai('gpt-5.1'),
+    vlmProcessorModel: openai('gpt-5.1'),
+    vlmConcurrency: 3,
 
-Automatically extracts images from PDFs:
+    // Document validation
+    documentValidationModel: openai('gpt-5.1'),
 
-```typescript
-const outputPath = await pdfParser.parse(
-  'report.pdf',
-  'output',
-  (resultPath) => {
-    // Images are saved in output/images/ directory
-    console.log('Image extraction complete:', resultPath);
+    // Chunked conversion for large PDFs
+    chunkedConversion: true,
+    chunkSize: 50,
+    chunkMaxRetries: 3,
+
+    // Force image PDF pre-conversion
+    forceImagePdf: false,
+
+    // Document processing timeout (seconds)
+    document_timeout: 600,
+
+    // Token usage tracking
+    onTokenUsage: (report) => console.log('Token usage:', report),
   },
 );
 ```
@@ -196,15 +223,15 @@ const outputPath = await pdfParser.parse(
 Clean up resources after work is complete:
 
 ```typescript
-// Terminate docling-serve process
-await pdfParser.shutdown();
+// Terminate docling-serve process and release resources
+await pdfParser.dispose();
 ```
 
 ## OCR Strategy System
 
 ### Why This Strategy?
 
-**ocrmac (Apple Vision Framework) is an excellent OCR engine** — it's free, GPU-accelerated, and delivers high-quality results. For processing thousands to millions of archaeological reports, there's no better solution.
+**ocrmac (Apple Vision Framework) is an excellent OCR engine** -- it's free, GPU-accelerated, and delivers high-quality results. For processing thousands to millions of archaeological reports, there's no better solution.
 
 **However, ocrmac cannot handle mixed character systems.** Documents containing Korean-Hanja combinations (and potentially other mixed scripts) produce garbled text for the non-primary script. Rather than switching the entire pipeline to a costly VLM, the system **targets only the affected pages** for VLM correction, minimizing cost and processing time.
 
@@ -219,16 +246,17 @@ When mixed-script pages are detected, only those pages are sent to the VLM for c
 
 - Extracts OCR text elements and table cells from each page
 - Uses `pdftotext` reference text as a quality anchor
-- VLM returns substitution-based corrections (find → replace)
+- VLM returns substitution-based corrections (find -> replace)
 - Failed page corrections are gracefully skipped, preserving original OCR text
 
 ### Strategy Options
 
 ```typescript
-const outputPath = await pdfParser.parse(
-  'input.pdf',
-  'output',
-  (result) => console.log(result),
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
   {
     // Enable OCR strategy sampling (provide a Vision LLM model)
     strategySamplerModel: openai('gpt-5.1'),
@@ -244,6 +272,114 @@ const outputPath = await pdfParser.parse(
   },
 );
 ```
+
+## Document Type Validation
+
+Optional LLM-based validation that a PDF is an archaeological investigation report. When `documentValidationModel` is provided, the parser extracts text from the PDF and uses the LLM to verify the document type before processing. If validation fails, an `InvalidDocumentTypeError` is thrown.
+
+```typescript
+import { InvalidDocumentTypeError } from '@heripo/pdf-parser';
+
+try {
+  await pdfParser.parse(
+    'file:///path/to/input.pdf',
+    'report-001',
+    async (outputPath) => console.log(outputPath),
+    false,
+    {
+      documentValidationModel: openai('gpt-5.1'),
+    },
+  );
+} catch (error) {
+  if (error instanceof InvalidDocumentTypeError) {
+    console.error('Not an archaeological report:', error.message);
+  }
+}
+```
+
+## Large PDF Chunked Conversion
+
+For large PDFs that may cause timeouts or memory issues, enable chunked conversion to split the PDF into smaller chunks and process them individually. Only works with local files (`file://` URLs).
+
+```typescript
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/large-report.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    chunkedConversion: true,
+    chunkSize: 50, // Pages per chunk (default: configured in constants)
+    chunkMaxRetries: 3, // Max retry attempts per failed chunk (default: configured in constants)
+  },
+);
+```
+
+## Image PDF Fallback
+
+When conversion fails, the parser can automatically fall back to converting the PDF to an image-based PDF first, then retrying conversion. This is useful for PDFs with complex or corrupt structures. Requires ImageMagick and Ghostscript.
+
+### Automatic Fallback (on failure)
+
+Enable via constructor option. When a conversion fails, the parser automatically retries using an image-based PDF:
+
+```typescript
+const pdfParser = new PDFParser({
+  logger,
+  port: 5001,
+  enableImagePdfFallback: true, // Enable automatic fallback
+});
+```
+
+### Forced Image PDF (always)
+
+Force pre-conversion to image-based PDF via parse option:
+
+```typescript
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    forceImagePdf: true, // Always convert to image PDF first
+  },
+);
+```
+
+If both the original and fallback conversions fail, an `ImagePdfFallbackError` is thrown containing both errors.
+
+## AbortSignal Support
+
+Pass an `AbortSignal` to cancel ongoing parsing operations:
+
+```typescript
+const controller = new AbortController();
+
+// Cancel after 5 minutes
+setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+try {
+  await pdfParser.parse(
+    'file:///path/to/input.pdf',
+    'report-001',
+    async (outputPath) => console.log(outputPath),
+    false,
+    {},
+    controller.signal, // AbortSignal
+  );
+} catch (error) {
+  if (error.name === 'AbortError') {
+    console.log('Parsing was cancelled');
+  }
+}
+```
+
+## Server Crash Recovery
+
+When using a local docling-serve instance (port mode), the parser automatically detects server crashes (ECONNREFUSED errors) and restarts the server. This happens transparently during `parse()` calls -- the failed operation is retried after the server is restarted.
+
+> **Note**: Server crash recovery is only available in local server mode (using `port` option). When using an external server (`baseUrl` option), recovery is not attempted.
 
 ## Why macOS Only?
 
@@ -281,14 +417,16 @@ Archaeological excavation report PDFs have the following characteristics:
 
 `@heripo/pdf-parser` requires the following system-level dependencies:
 
-| Dependency | Required Version | Installation               | Purpose                                                           |
-| ---------- | ---------------- | -------------------------- | ----------------------------------------------------------------- |
-| Python     | 3.9 - 3.12       | `brew install python@3.11` | Docling SDK runtime                                               |
-| poppler    | Any              | `brew install poppler`     | PDF page counting (pdfinfo) and text layer extraction (pdftotext) |
-| jq         | Any              | `brew install jq`          | JSON processing (conversion result parsing)                       |
-| lsof       | Any              | Included with macOS        | docling-serve port management                                     |
+| Dependency  | Required Version | Installation               | Purpose                                                           |
+| ----------- | ---------------- | -------------------------- | ----------------------------------------------------------------- |
+| Python      | 3.9 - 3.12       | `brew install python@3.11` | Docling SDK runtime                                               |
+| poppler     | Any              | `brew install poppler`     | PDF page counting (pdfinfo) and text layer extraction (pdftotext) |
+| jq          | Any              | `brew install jq`          | JSON processing (conversion result parsing)                       |
+| lsof        | Any              | Included with macOS        | docling-serve port management                                     |
+| ImageMagick | Any (optional)   | `brew install imagemagick` | Image PDF fallback and page rendering                             |
+| Ghostscript | Any (optional)   | `brew install ghostscript` | Image PDF fallback (PDF to image conversion)                      |
 
-> ⚠️ **Python 3.13+ is not supported.** Some Docling SDK dependencies are not compatible with Python 3.13.
+> **Python 3.13+ is not supported.** Some Docling SDK dependencies are not compatible with Python 3.13.
 
 ### Checking Python Version
 
@@ -318,13 +456,16 @@ which jq
 #### Constructor Options
 
 ```typescript
-interface PDFParserOptions {
-  pythonPath?: string; // Python executable path (default: 'python3')
-  logger?: Logger; // Logger instance
-  port?: number; // docling-serve port (default: 5001)
-  timeout?: number; // Timeout (milliseconds, default: 10000000)
-  externalDoclingUrl?: string; // External docling-serve URL (optional)
-}
+type Options = {
+  logger: LoggerMethods; // Logger instance (REQUIRED)
+  timeout?: number; // Timeout in milliseconds (default: 10000000)
+  venvPath?: string; // Python venv path (default: CWD/.venv)
+  killExistingProcess?: boolean; // Kill existing process on port (default: false)
+  enableImagePdfFallback?: boolean; // Enable image PDF fallback (default: false, requires ImageMagick + Ghostscript)
+} & (
+  | { port?: number } // Local server mode (default port: 5001)
+  | { baseUrl: string } // External server mode
+);
 ```
 
 #### Methods
@@ -337,69 +478,101 @@ Sets up Python environment and starts docling-serve.
 await pdfParser.init();
 ```
 
-##### `parse(inputPath, outputDir, callback, options?): Promise<string>`
+##### `parse(url, reportId, onComplete, cleanupAfterCallback, options, abortSignal?): Promise<TokenUsageReport | null>`
 
 Parses a PDF file.
 
 **Parameters:**
 
-- `inputPath` (string): Input PDF file path
-- `outputDir` (string): Output directory path
-- `callback` (function): Callback function called on conversion complete
-- `options` (ConversionOptions, optional): Conversion options
+- `url` (string): PDF URL (`file://` for local files or `http://` for remote)
+- `reportId` (string): Unique report identifier (used for output directory naming)
+- `onComplete` (ConversionCompleteCallback): Callback function called with the output directory path on conversion complete
+- `cleanupAfterCallback` (boolean): Whether to delete the output directory after the callback completes
+- `options` (PDFConvertOptions): Conversion options
+- `abortSignal` (AbortSignal, optional): Signal to cancel the operation
 
 **Returns:**
 
-- `Promise<string>`: Output file path
+- `Promise<TokenUsageReport | null>`: Token usage report from LLM operations, or `null` when no LLM usage occurs
 
-##### `shutdown(): Promise<void>`
+##### `dispose(): Promise<void>`
 
-Terminates the docling-serve process.
+Disposes the parser instance, kills the local docling-serve process (if started), and releases resources.
 
 ```typescript
-await pdfParser.shutdown();
+await pdfParser.dispose();
 ```
 
-### ConversionOptions
+### PDFConvertOptions
 
 ```typescript
-interface ConversionOptions {
-  doOcr?: boolean; // Enable OCR (default: true)
-  formats?: string[]; // Output formats (default: ['docling_json'])
-  pdfBackend?: string; // PDF backend (default: 'dlparse_v2')
-}
-```
-
-### PDFConvertOptions (Extended)
-
-```typescript
-interface PDFConvertOptions extends ConversionOptions {
+type PDFConvertOptions = {
+  // OCR strategy options
   strategySamplerModel?: LanguageModel; // Vision LLM for OCR strategy sampling
   vlmProcessorModel?: LanguageModel; // Vision LLM for text correction
   vlmConcurrency?: number; // Parallel page processing (default: 1)
   skipSampling?: boolean; // Skip strategy sampling
   forcedMethod?: 'ocrmac' | 'vlm'; // Force specific OCR method
+
+  // Image PDF options
+  forceImagePdf?: boolean; // Force pre-conversion to image-based PDF
+
+  // Token usage tracking
+  aggregator?: LLMTokenUsageAggregator; // Token usage aggregator
+  onTokenUsage?: (report: TokenUsageReport) => void; // Callback for token usage updates
+
+  // Document processing
+  document_timeout?: number; // Document processing timeout in seconds
+  documentValidationModel?: LanguageModel; // LLM for document type validation
+
+  // Chunked conversion (large PDFs)
+  chunkedConversion?: boolean; // Enable chunked conversion
+  chunkSize?: number; // Pages per chunk
+  chunkMaxRetries?: number; // Max retry attempts per failed chunk
+
+  // Docling conversion options (inherited)
+  num_threads?: number; // Number of processing threads
+  ocr_lang?: string[]; // OCR languages
+  // ... other Docling ConversionOptions fields
+};
+```
+
+### ConvertWithStrategyResult
+
+```typescript
+interface ConvertWithStrategyResult {
+  /** The OCR strategy that was determined */
+  strategy: OcrStrategy;
+  /** Token usage report from sampling and/or VLM processing (null when no LLM usage occurs) */
+  tokenUsageReport: TokenUsageReport | null;
 }
 ```
 
-## Troubleshooting
+### ConversionCompleteCallback
 
-### Python Version Error
-
-**Symptom**: `Python version X.Y is not supported`
-
-**Solution**:
-
-```bash
-# Install Python 3.11
-brew install python@3.11
-
-# Explicitly specify in PDFParser
-const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
-  logger,
-});
+```typescript
+type ConversionCompleteCallback = (outputPath: string) => Promise<void> | void;
 ```
+
+### Error Types
+
+#### `InvalidDocumentTypeError`
+
+Thrown when the PDF fails document type validation (i.e., it is not an archaeological investigation report).
+
+```typescript
+import { InvalidDocumentTypeError } from '@heripo/pdf-parser';
+```
+
+#### `ImagePdfFallbackError`
+
+Thrown when both the original conversion and the image PDF fallback conversion fail. Contains references to both errors.
+
+```typescript
+import { ImagePdfFallbackError } from '@heripo/pdf-parser';
+```
+
+## Troubleshooting
 
 ### jq Not Found
 
@@ -427,11 +600,17 @@ brew install poppler
 
 **Solution**:
 
-```bash
-# Use different port
+```typescript
+// Use a different port
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
   port: 5002,  // Specify different port
+  logger,
+});
+
+// Or kill the existing process
+const pdfParser = new PDFParser({
+  port: 5001,
+  killExistingProcess: true,
   logger,
 });
 ```
@@ -443,21 +622,31 @@ const pdfParser = new PDFParser({
 **Solution**:
 
 ```bash
-# Recreate virtual environment
-rm -rf ~/.heripo/pdf-parser/venv
+# Recreate virtual environment (default location)
+rm -rf .venv
 # Run init() again
+```
+
+### ImageMagick / Ghostscript Not Found
+
+**Symptom**: `ImageMagick is not installed but enableImagePdfFallback is enabled`
+
+**Solution**:
+
+```bash
+brew install imagemagick ghostscript
 ```
 
 ## Linux Support Status
 
 Currently **macOS only**. Linux support is **not entirely ruled out**, but due to OCR performance and cost efficiency issues, **there are no specific plans at this time**.
 
-| Platform              | Status       | Notes                                           |
-| --------------------- | ------------ | ----------------------------------------------- |
-| macOS + Apple Silicon | ✅ Supported | Optimal performance, GPU acceleration           |
-| macOS + Intel         | ✅ Supported | No GPU acceleration                             |
-| Linux                 | ❓ TBD       | No current plans due to performance/cost issues |
-| Windows               | ❓ TBD       | WSL2 Linux approach possible                    |
+| Platform              | Status    | Notes                                           |
+| --------------------- | --------- | ----------------------------------------------- |
+| macOS + Apple Silicon | Supported | Optimal performance, GPU acceleration           |
+| macOS + Intel         | Supported | No GPU acceleration                             |
+| Linux                 | TBD       | No current plans due to performance/cost issues |
+| Windows               | TBD       | WSL2 Linux approach possible                    |
 
 ### Reason for No Linux Support
 

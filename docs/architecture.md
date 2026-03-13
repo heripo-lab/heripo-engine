@@ -187,14 +187,18 @@ flowchart LR
 
 #### Key Features
 
-| Feature                    | Description                                                          | AI Technology                |
-| -------------------------- | -------------------------------------------------------------------- | ---------------------------- |
-| **OCR Processing**         | Text extraction from scanned images (Korean/English)                 | Deep Learning (Apple Vision) |
-| **Mixed Script Detection** | Auto-detect Korean-Hanja mix via text layer pre-check + VLM sampling | VLM (Vision LLM)             |
-| **VLM Text Correction**    | Per-page correction of mixed script characters                       | VLM (Vision LLM)             |
-| **Structure Analysis**     | Automatic identification of text, table, image regions               | Docling (Rules + ML)         |
-| **Image Extraction**       | Save all images in document as files                                 | -                            |
-| **Page Images**            | Save each page as image (for LLM Vision)                             | -                            |
+| Feature                      | Description                                                          | AI Technology                |
+| ---------------------------- | -------------------------------------------------------------------- | ---------------------------- |
+| **OCR Processing**           | Text extraction from scanned images (Korean/English)                 | Deep Learning (Apple Vision) |
+| **Mixed Script Detection**   | Auto-detect Korean-Hanja mix via text layer pre-check + VLM sampling | VLM (Vision LLM)             |
+| **VLM Text Correction**      | Per-page correction of mixed script characters                       | VLM (Vision LLM)             |
+| **Document Type Validation** | Verify document is an archaeological report before processing        | LLM                          |
+| **Structure Analysis**       | Automatic identification of text, table, image regions               | Docling (Rules + ML)         |
+| **Chunked Conversion**       | Split large PDFs into chunks for reliable processing                 | -                            |
+| **Image PDF Fallback**       | Convert PDF to images when direct conversion fails                   | -                            |
+| **Image Extraction**         | Save all images in document as files                                 | -                            |
+| **Page Images**              | Save each page as image (for LLM Vision)                             | -                            |
+| **Server Crash Recovery**    | Automatic restart of docling-serve on connection failure             | -                            |
 
 #### OCR Strategy System
 
@@ -299,15 +303,18 @@ flowchart TB
 ```
 ProcessedDocument
 ├── reportId           # Report unique ID
-├── pageRangeMap       # PDF page → actual page mapping
+├── pageRangeMap       # PDF page → actual page mapping (Record<number, PageRange>)
 ├── chapters[]         # TOC-based chapter structure
-│   ├── title          # Chapter title
+│   ├── originTitle    # Original title from report
+│   ├── title          # Cleaned chapter title
 │   ├── textBlocks[]   # Texts within chapter
 │   ├── imageIds[]     # Linked image IDs
 │   ├── tableIds[]     # Linked table IDs
+│   ├── footnoteIds[]  # Linked footnote IDs
 │   └── children[]     # Sub-chapters
 ├── images[]           # Image info (captions, positions, etc.)
-└── tables[]           # Table info (captions, cell data, etc.)
+├── tables[]           # Table info (captions, cell data, etc.)
+└── footnotes[]        # Footnote info (text, page number)
 ```
 
 ---

@@ -72,10 +72,11 @@ import type { ProcessedDocument } from '@heripo/model';
 
 interface ProcessedDocument {
   reportId: string; // 리포트 ID
-  pageRangeMap: PageRange[]; // PDF 페이지 → 문서 페이지 매핑
+  pageRangeMap: Record<number, PageRange>; // PDF 페이지 → 문서 페이지 매핑
   chapters: Chapter[]; // 계층적 챕터 구조
   images: ProcessedImage[]; // 추출된 이미지 메타데이터
   tables: ProcessedTable[]; // 추출된 테이블 데이터
+  footnotes: ProcessedFootnote[]; // 추출된 각주
 }
 ```
 
@@ -89,12 +90,14 @@ import type { Chapter } from '@heripo/model';
 interface Chapter {
   id: string; // 챕터 ID
   title: string; // 챕터 제목
+  originTitle: string; // 원본 제목
   level: number; // 계층 레벨 (1, 2, 3, ...)
-  pageNo?: number; // 시작 페이지 번호
+  pageNo: number; // 시작 페이지 번호
   textBlocks: TextBlock[]; // 텍스트 블록
   imageIds: string[]; // 이미지 ID 참조
   tableIds: string[]; // 테이블 ID 참조
-  children: Chapter[]; // 하위 챕터
+  footnoteIds: string[]; // 각주 ID 참조
+  children?: Chapter[]; // 하위 챕터 (선택)
 }
 ```
 
@@ -107,7 +110,7 @@ import type { TextBlock } from '@heripo/model';
 
 interface TextBlock {
   text: string; // 텍스트 내용
-  pageNo?: number; // 페이지 번호
+  pdfPageNo: number; // PDF 페이지 번호
 }
 ```
 
@@ -121,8 +124,8 @@ import type { ProcessedImage } from '@heripo/model';
 interface ProcessedImage {
   id: string; // 이미지 ID
   caption?: Caption; // 캡션 (선택)
-  pdfPageNo?: number; // PDF 페이지 번호
-  filePath: string; // 이미지 파일 경로
+  pdfPageNo: number; // PDF 페이지 번호
+  path: string; // 이미지 파일 경로
 }
 ```
 
@@ -136,8 +139,8 @@ import type { ProcessedTable } from '@heripo/model';
 interface ProcessedTable {
   id: string; // 테이블 ID
   caption?: Caption; // 캡션 (선택)
-  pdfPageNo?: number; // PDF 페이지 번호
-  data: ProcessedTableCell[][]; // 2D 그리드 데이터
+  pdfPageNo: number; // PDF 페이지 번호
+  grid: ProcessedTableCell[][]; // 2D 그리드 데이터
   numRows: number; // 행 개수
   numCols: number; // 열 개수
 }
@@ -152,8 +155,8 @@ import type { ProcessedTableCell } from '@heripo/model';
 
 interface ProcessedTableCell {
   text: string; // 셀 텍스트
-  rowspan: number; // 행 병합
-  colspan: number; // 열 병합
+  rowSpan: number; // 행 병합
+  colSpan: number; // 열 병합
   isHeader: boolean; // 헤더 셀 여부
 }
 ```
@@ -166,7 +169,7 @@ interface ProcessedTableCell {
 import type { Caption } from '@heripo/model';
 
 interface Caption {
-  num?: number; // 캡션 번호 (예: "그림 1"의 1)
+  num?: string; // 캡션 번호 (예: "그림 1"의 "1")
   fullText: string; // 전체 캡션 텍스트
 }
 ```
@@ -179,9 +182,128 @@ PDF 페이지와 문서 페이지 매핑입니다.
 import type { PageRange } from '@heripo/model';
 
 interface PageRange {
-  pdfPageNo: number; // PDF 페이지 번호
-  pageNo: number; // 문서 논리적 페이지 번호
+  startPageNo: number; // 시작 페이지 번호
+  endPageNo: number; // 끝 페이지 번호
 }
+```
+
+### ProcessedFootnote
+
+문서에서 추출된 각주입니다.
+
+```typescript
+import type { ProcessedFootnote } from '@heripo/model';
+
+interface ProcessedFootnote {
+  id: string; // 각주 ID
+  text: string; // 각주 텍스트
+  pdfPageNo: number; // PDF 페이지 번호
+}
+```
+
+### DocumentProcessResult
+
+문서 처리 결과로, 처리된 문서와 토큰 사용량 리포트를 포함합니다.
+
+```typescript
+import type { DocumentProcessResult } from '@heripo/model';
+
+interface DocumentProcessResult {
+  document: ProcessedDocument; // 처리된 문서
+  usage: TokenUsageReport; // 토큰 사용량 리포트
+}
+```
+
+### OcrStrategy
+
+OCR 전략 선택 결과입니다.
+
+```typescript
+import type { OcrStrategy } from '@heripo/model';
+
+interface OcrStrategy {
+  method: 'ocrmac' | 'vlm'; // OCR 방법
+  ocrLanguages?: string[]; // OCR 언어
+  detectedLanguages?: Bcp47LanguageTag[]; // 감지된 BCP-47 언어 태그
+  reason: string; // 전략 선택 이유
+  sampledPages: number; // 샘플링된 페이지 수
+  totalPages: number; // 문서 전체 페이지 수
+  koreanHanjaMixPages?: number[]; // 한국어-한자 혼용 페이지
+}
+```
+
+### 토큰 사용량 타입
+
+처리 단계별 LLM 토큰 사용량을 추적하기 위한 타입입니다.
+
+```typescript
+import type {
+  ComponentUsageReport,
+  ModelUsageDetail,
+  PhaseUsageReport,
+  TokenUsageReport,
+  TokenUsageSummary,
+} from '@heripo/model';
+
+interface TokenUsageReport {
+  components: ComponentUsageReport[]; // 컴포넌트별 사용량
+  total: TokenUsageSummary; // 전체 사용량 요약
+}
+
+interface ComponentUsageReport {
+  component: string; // 컴포넌트 이름
+  phases: PhaseUsageReport[]; // 단계별 사용량
+  total: TokenUsageSummary; // 컴포넌트 합계
+}
+
+interface PhaseUsageReport {
+  phase: string; // 단계 이름
+  primary?: ModelUsageDetail; // 기본 모델 사용량
+  fallback?: ModelUsageDetail; // 폴백 모델 사용량
+  total: TokenUsageSummary; // 단계 합계
+}
+
+interface ModelUsageDetail {
+  modelName: string; // 모델 이름
+  inputTokens: number; // 입력 토큰 수
+  outputTokens: number; // 출력 토큰 수
+  totalTokens: number; // 전체 토큰 수
+}
+
+interface TokenUsageSummary {
+  inputTokens: number; // 입력 토큰 수
+  outputTokens: number; // 출력 토큰 수
+  totalTokens: number; // 전체 토큰 수
+}
+```
+
+### BCP-47 언어 태그 유틸리티
+
+BCP-47 언어 태그를 다루기 위한 유틸리티입니다.
+
+```typescript
+import {
+  type Bcp47LanguageTag,
+  BCP47_LANGUAGE_TAGS,
+  BCP47_LANGUAGE_TAG_SET,
+  isValidBcp47Tag,
+  normalizeToBcp47,
+} from '@heripo/model';
+
+// Bcp47LanguageTag - 지원되는 BCP-47 언어 태그의 유니온 타입
+type Bcp47LanguageTag = 'ko' | 'en' | 'ja' | 'zh' | /* ... */ string;
+
+// BCP47_LANGUAGE_TAGS - 30개 지원 태그의 상수 배열
+const BCP47_LANGUAGE_TAGS: readonly Bcp47LanguageTag[];
+
+// BCP47_LANGUAGE_TAG_SET - O(1) 조회를 위한 ReadonlySet
+const BCP47_LANGUAGE_TAG_SET: ReadonlySet<string>;
+
+// isValidBcp47Tag - 문자열이 유효한 BCP-47 태그인지 확인
+function isValidBcp47Tag(tag: string): tag is Bcp47LanguageTag;
+
+// normalizeToBcp47 - 언어 문자열을 BCP-47 형식으로 정규화
+function normalizeToBcp47(tag: string): Bcp47LanguageTag | undefined;
 ```
 
 ## 사용법
@@ -200,7 +322,7 @@ function analyzeDocument(doc: ProcessedDocument) {
     console.log(`  텍스트 블록: ${chapter.textBlocks.length}개`);
     console.log(`  이미지: ${chapter.imageIds.length}개`);
     console.log(`  테이블: ${chapter.tableIds.length}개`);
-    console.log(`  하위 챕터: ${chapter.children.length}개`);
+    console.log(`  하위 챕터: ${chapter.children?.length ?? 0}개`);
   });
 
   // 이미지 확인
@@ -209,7 +331,7 @@ function analyzeDocument(doc: ProcessedDocument) {
     if (image.caption) {
       console.log(`  캡션: ${image.caption.fullText}`);
     }
-    console.log(`  경로: ${image.filePath}`);
+    console.log(`  경로: ${image.path}`);
   });
 
   // 테이블 확인
@@ -233,7 +355,7 @@ function traverseChapters(chapter: Chapter, depth: number = 0) {
   console.log(`${indent}- ${chapter.title}`);
 
   // 재귀적으로 하위 챕터 순회
-  chapter.children.forEach((child) => {
+  chapter.children?.forEach((child) => {
     traverseChapters(child, depth + 1);
   });
 }
