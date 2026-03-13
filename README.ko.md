@@ -5,7 +5,7 @@
 [![CI](https://github.com/heripo-lab/heripo-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/heripo-lab/heripo-engine/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/Python-3.9--3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![pnpm](https://img.shields.io/badge/pnpm-%3E%3D9-orange)](https://pnpm.io)
+[![pnpm](https://img.shields.io/badge/pnpm-%3E%3D10-orange)](https://pnpm.io)
 ![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 
@@ -134,11 +134,11 @@ heripo-engine/
 │   ├── pdf-parser/        # PDF → DoclingDocument
 │   ├── document-processor/ # DoclingDocument → ProcessedDocument
 │   ├── model/             # 데이터 모델 및 타입 정의
-│   ├── shared/            # 내부 유틸리티 (배포 안 함)
-│   └── logger/            # 로깅 유틸리티 (배포 안 함)
+│   └── shared/            # 내부 유틸리티 (배포 안 함)
 ├── apps/                  # 애플리케이션
 │   └── demo-web/          # Next.js 웹 데모
 └── tools/                 # 빌드 도구 설정
+    ├── logger/            # 로깅 유틸리티 (배포 안 함)
     ├── tsconfig/          # 공유 TypeScript 설정
     ├── tsup-config/       # 빌드 설정
     └── vitest-config/     # 테스트 설정
@@ -152,7 +152,7 @@ heripo-engine/
 
 - **macOS** (Apple Silicon 또는 Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** >= 9.0.0
+- **pnpm** >= 10.0.0
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+는 지원하지 않음)
 - **jq** (JSON 처리 도구)
 - **poppler** (PDF 텍스트 추출 도구)
@@ -209,39 +209,47 @@ const logger = Logger(...);
 
 // 1. PDF 파싱
 const pdfParser = new PDFParser({
-  pythonPath: 'python3.11',
+  port: 5001,
   logger,
 });
 
 await pdfParser.init();
 
-const outputPath = await pdfParser.parse(
+const tokenUsageReport = await pdfParser.parse(
   'path/to/report.pdf',
-  'output-dir',
-  (resultPath) => {
-    console.log('PDF 변환 완료:', resultPath);
-  },
-);
-
-// 2. 문서 처리
-const processor = new DocumentProcessor({
-  logger,
-  fallbackModel: anthropic('claude-opus-4-5'),
-  pageRangeParserModel: openai('gpt-5.2'),
-  tocExtractorModel: openai('gpt-5.1'),
-  captionParserModel: openai('gpt-5-mini'),
-});
-
-const processedDoc = await processor.process(
-  doclingDocument,
   'report-001',
-  outputPath,
+  async (outputPath) => {
+    // 2. 문서 처리 (콜백 내부에서)
+    const processor = new DocumentProcessor({
+      logger,
+      fallbackModel: anthropic('claude-opus-4-5'),
+      pageRangeParserModel: openai('gpt-5.2'),
+      tocExtractorModel: openai('gpt-5.1'),
+      captionParserModel: openai('gpt-5-mini'),
+      textCleanerBatchSize: 10,
+      captionParserBatchSize: 5,
+      captionValidatorBatchSize: 5,
+    });
+
+    const { document, usage } = await processor.process(
+      doclingDocument,
+      'report-001',
+      outputPath,
+    );
+
+    // 3. 결과 활용
+    console.log('목차:', document.chapters);
+    console.log('이미지:', document.images);
+    console.log('표:', document.tables);
+    console.log('각주:', document.footnotes);
+    console.log('토큰 사용량:', usage.total);
+  },
+  true, // cleanupAfterCallback
+  {}, // PDFConvertOptions
 );
 
-// 3. 결과 활용
-console.log('목차:', processedDoc.chapters);
-console.log('이미지:', processedDoc.images);
-console.log('표:', processedDoc.tables);
+// 정리
+await pdfParser.dispose();
 ```
 
 ### 고급 사용법
@@ -260,7 +268,8 @@ const processor = new DocumentProcessor({
   captionParserBatchSize: 10,
   captionValidatorBatchSize: 10,
   maxRetries: 3,
-  enableFallbackRetry: true, // 실패 시 fallbackModel로 자동 재시도
+  enableFallbackRetry: true, // 실패 시 fallbackModel로 자동 재시도 (기본값: false)
+  onTokenUsage: (report) => console.log('토큰 사용량:', report.total),
 });
 ```
 

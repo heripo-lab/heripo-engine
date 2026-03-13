@@ -72,16 +72,18 @@ const processor = new DocumentProcessor({
 });
 
 // Process document
-const processedDoc = await processor.process(
+const { document, usage } = await processor.process(
   doclingDocument, // PDF parser output
   'report-001', // Report ID
   outputPath, // Directory containing images/pages
 );
 
 // Use results
-console.log('TOC:', processedDoc.chapters);
-console.log('Images:', processedDoc.images);
-console.log('Tables:', processedDoc.tables);
+console.log('TOC:', document.chapters);
+console.log('Images:', document.images);
+console.log('Tables:', document.tables);
+console.log('Footnotes:', document.footnotes);
+console.log('Token Usage:', usage.total);
 ```
 
 ### Advanced Usage - Per-Component Model Specification
@@ -109,10 +111,10 @@ const processor = new DocumentProcessor({
 
   // Retry settings
   maxRetries: 3,
-  enableFallbackRetry: true, // Automatic retry with fallback model
+  enableFallbackRetry: true, // Automatic retry with fallback model (default: false)
 });
 
-const processedDoc = await processor.process(
+const { document, usage } = await processor.process(
   doclingDocument,
   'report-001',
   outputPath,
@@ -176,6 +178,7 @@ DocumentProcessor processes documents through a 5-stage pipeline:
 - Create Chapter hierarchy
 - Link text blocks to chapters by page range
 - Connect image/table IDs to appropriate chapters
+- Link footnote IDs to appropriate chapters
 - Fallback: Create single "Document" chapter when TOC is empty
 
 ## API Documentation
@@ -197,19 +200,23 @@ interface DocumentProcessorOptions {
   captionParserModel?: LanguageModel; // For caption parser
 
   // Batch processing settings
-  textCleanerBatchSize?: number; // Text cleaning (default: 10)
-  captionParserBatchSize?: number; // Caption parsing (default: 5)
-  captionValidatorBatchSize?: number; // Caption validation (default: 5)
+  textCleanerBatchSize: number; // Text cleaning batch size (required)
+  captionParserBatchSize: number; // Caption parsing batch size (required)
+  captionValidatorBatchSize: number; // Caption validation batch size (required)
 
   // Retry settings
   maxRetries?: number; // LLM API retry count (default: 3)
-  enableFallbackRetry?: boolean; // Enable fallback retry (default: true)
+  enableFallbackRetry?: boolean; // Enable fallback retry (default: false)
+
+  // Advanced options
+  abortSignal?: AbortSignal; // Cancellation support
+  onTokenUsage?: (report: TokenUsageReport) => void; // Real-time token usage monitoring
 }
 ```
 
 #### Methods
 
-##### `process(doclingDoc, reportId, outputPath): Promise<ProcessedDocument>`
+##### `process(doclingDoc, reportId, outputPath): Promise<DocumentProcessResult>`
 
 Transforms DoclingDocument into ProcessedDocument.
 
@@ -221,22 +228,27 @@ Transforms DoclingDocument into ProcessedDocument.
 
 **Returns:**
 
-- `Promise<ProcessedDocument>`: Processed document
+- `Promise<DocumentProcessResult>`: Result containing:
+  - `document` (ProcessedDocument): Processed document (includes `chapters`, `images`, `tables`, `footnotes`)
+  - `usage` (TokenUsageReport): Token usage report
 
 ### Fallback Retry Mechanism
 
-When `enableFallbackRetry: true` is set, LLM components automatically retry with fallbackModel on failure:
+When `enableFallbackRetry: true` is set (default is `false`), LLM components automatically retry with fallbackModel on failure:
 
 ```typescript
 const processor = new DocumentProcessor({
   logger,
   fallbackModel: anthropic('claude-opus-4-5'), // For retry
   pageRangeParserModel: openai('gpt-5.2'), // First attempt
-  enableFallbackRetry: true, // Use fallback on failure
+  enableFallbackRetry: true, // Use fallback on failure (default: false)
+  textCleanerBatchSize: 10,
+  captionParserBatchSize: 5,
+  captionValidatorBatchSize: 5,
 });
 
 // If pageRangeParserModel fails, automatically retries with fallbackModel
-const result = await processor.process(doc, 'id', 'path');
+const { document, usage } = await processor.process(doc, 'id', 'path');
 ```
 
 ### Batch Size Parameters
@@ -257,7 +269,7 @@ Errors thrown when TOC extraction fails:
 
 ```typescript
 try {
-  const result = await processor.process(doc, 'id', 'path');
+  const { document, usage } = await processor.process(doc, 'id', 'path');
 } catch (error) {
   if (error instanceof TocNotFoundError) {
     console.log('TOC not found. Processing as single chapter.');

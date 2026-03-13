@@ -103,8 +103,8 @@ export interface DocumentProcessorOptions {
   maxRetries?: number;
 
   /**
-   * Enable fallback retry mechanism - automatically retries with fallback model on failure (default: true)
-   * Set to false to disable automatic fallback retry and fail immediately on component-specific model errors
+   * Enable fallback retry mechanism - automatically retries with fallback model on failure (default: false)
+   * Set to true to enable automatic fallback retry with fallback model on component-specific model errors
    */
   enableFallbackRetry?: boolean;
 

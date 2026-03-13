@@ -72,10 +72,11 @@ import type { ProcessedDocument } from '@heripo/model';
 
 interface ProcessedDocument {
   reportId: string; // Report ID
-  pageRangeMap: PageRange[]; // PDF page → document page mapping
+  pageRangeMap: Record<number, PageRange>; // PDF page → document page mapping
   chapters: Chapter[]; // Hierarchical chapter structure
   images: ProcessedImage[]; // Extracted image metadata
   tables: ProcessedTable[]; // Extracted table data
+  footnotes: ProcessedFootnote[]; // Extracted footnotes
 }
 ```
 
@@ -89,12 +90,14 @@ import type { Chapter } from '@heripo/model';
 interface Chapter {
   id: string; // Chapter ID
   title: string; // Chapter title
+  originTitle: string; // Original title from source
   level: number; // Hierarchy level (1, 2, 3, ...)
-  pageNo?: number; // Start page number
+  pageNo: number; // Start page number
   textBlocks: TextBlock[]; // Text blocks
   imageIds: string[]; // Image ID references
   tableIds: string[]; // Table ID references
-  children: Chapter[]; // Sub-chapters
+  footnoteIds: string[]; // Footnote ID references
+  children?: Chapter[]; // Sub-chapters (optional)
 }
 ```
 
@@ -107,7 +110,7 @@ import type { TextBlock } from '@heripo/model';
 
 interface TextBlock {
   text: string; // Text content
-  pageNo?: number; // Page number
+  pdfPageNo: number; // PDF page number
 }
 ```
 
@@ -121,8 +124,8 @@ import type { ProcessedImage } from '@heripo/model';
 interface ProcessedImage {
   id: string; // Image ID
   caption?: Caption; // Caption (optional)
-  pdfPageNo?: number; // PDF page number
-  filePath: string; // Image file path
+  pdfPageNo: number; // PDF page number
+  path: string; // Image file path
 }
 ```
 
@@ -136,8 +139,8 @@ import type { ProcessedTable } from '@heripo/model';
 interface ProcessedTable {
   id: string; // Table ID
   caption?: Caption; // Caption (optional)
-  pdfPageNo?: number; // PDF page number
-  data: ProcessedTableCell[][]; // 2D grid data
+  pdfPageNo: number; // PDF page number
+  grid: ProcessedTableCell[][]; // 2D grid data
   numRows: number; // Row count
   numCols: number; // Column count
 }
@@ -152,8 +155,8 @@ import type { ProcessedTableCell } from '@heripo/model';
 
 interface ProcessedTableCell {
   text: string; // Cell text
-  rowspan: number; // Row span
-  colspan: number; // Column span
+  rowSpan: number; // Row span
+  colSpan: number; // Column span
   isHeader: boolean; // Is header cell
 }
 ```
@@ -166,7 +169,7 @@ Image and table captions.
 import type { Caption } from '@heripo/model';
 
 interface Caption {
-  num?: number; // Caption number (e.g., 1 in "Figure 1")
+  num?: string; // Caption number (e.g., "1" in "Figure 1")
   fullText: string; // Full caption text
 }
 ```
@@ -179,9 +182,128 @@ PDF page to document page mapping.
 import type { PageRange } from '@heripo/model';
 
 interface PageRange {
-  pdfPageNo: number; // PDF page number
-  pageNo: number; // Document logical page number
+  startPageNo: number; // Start page number
+  endPageNo: number; // End page number
 }
+```
+
+### ProcessedFootnote
+
+Footnote extracted from the document.
+
+```typescript
+import type { ProcessedFootnote } from '@heripo/model';
+
+interface ProcessedFootnote {
+  id: string; // Footnote ID
+  text: string; // Footnote text
+  pdfPageNo: number; // PDF page number
+}
+```
+
+### DocumentProcessResult
+
+Result of document processing, including the processed document and token usage report.
+
+```typescript
+import type { DocumentProcessResult } from '@heripo/model';
+
+interface DocumentProcessResult {
+  document: ProcessedDocument; // Processed document
+  usage: TokenUsageReport; // Token usage report
+}
+```
+
+### OcrStrategy
+
+OCR strategy selection result.
+
+```typescript
+import type { OcrStrategy } from '@heripo/model';
+
+interface OcrStrategy {
+  method: 'ocrmac' | 'vlm'; // OCR method
+  ocrLanguages?: string[]; // OCR languages
+  detectedLanguages?: Bcp47LanguageTag[]; // Detected BCP-47 language tags
+  reason: string; // Reason for strategy selection
+  sampledPages: number; // Number of sampled pages
+  totalPages: number; // Total pages in document
+  koreanHanjaMixPages?: number[]; // Pages with Korean-Hanja mixed script
+}
+```
+
+### Token Usage Types
+
+Types for tracking LLM token usage across processing phases.
+
+```typescript
+import type {
+  ComponentUsageReport,
+  ModelUsageDetail,
+  PhaseUsageReport,
+  TokenUsageReport,
+  TokenUsageSummary,
+} from '@heripo/model';
+
+interface TokenUsageReport {
+  components: ComponentUsageReport[]; // Usage per component
+  total: TokenUsageSummary; // Total usage summary
+}
+
+interface ComponentUsageReport {
+  component: string; // Component name
+  phases: PhaseUsageReport[]; // Usage per phase
+  total: TokenUsageSummary; // Component total
+}
+
+interface PhaseUsageReport {
+  phase: string; // Phase name
+  primary?: ModelUsageDetail; // Primary model usage
+  fallback?: ModelUsageDetail; // Fallback model usage
+  total: TokenUsageSummary; // Phase total
+}
+
+interface ModelUsageDetail {
+  modelName: string; // Model name
+  inputTokens: number; // Input token count
+  outputTokens: number; // Output token count
+  totalTokens: number; // Total token count
+}
+
+interface TokenUsageSummary {
+  inputTokens: number; // Input token count
+  outputTokens: number; // Output token count
+  totalTokens: number; // Total token count
+}
+```
+
+### BCP-47 Language Tag Utilities
+
+Utilities for working with BCP-47 language tags.
+
+```typescript
+import {
+  type Bcp47LanguageTag,
+  BCP47_LANGUAGE_TAGS,
+  BCP47_LANGUAGE_TAG_SET,
+  isValidBcp47Tag,
+  normalizeToBcp47,
+} from '@heripo/model';
+
+// Bcp47LanguageTag - Union type of supported BCP-47 language tags
+type Bcp47LanguageTag = 'ko' | 'en' | 'ja' | 'zh' | /* ... */ string;
+
+// BCP47_LANGUAGE_TAGS - Const array of 30 supported tags
+const BCP47_LANGUAGE_TAGS: readonly Bcp47LanguageTag[];
+
+// BCP47_LANGUAGE_TAG_SET - ReadonlySet for O(1) lookup
+const BCP47_LANGUAGE_TAG_SET: ReadonlySet<string>;
+
+// isValidBcp47Tag - Check if a string is a valid BCP-47 tag
+function isValidBcp47Tag(tag: string): tag is Bcp47LanguageTag;
+
+// normalizeToBcp47 - Normalize a language string to BCP-47 format
+function normalizeToBcp47(tag: string): Bcp47LanguageTag | undefined;
 ```
 
 ## Usage
@@ -200,7 +322,7 @@ function analyzeDocument(doc: ProcessedDocument) {
     console.log(`  Text blocks: ${chapter.textBlocks.length}`);
     console.log(`  Images: ${chapter.imageIds.length}`);
     console.log(`  Tables: ${chapter.tableIds.length}`);
-    console.log(`  Sub-chapters: ${chapter.children.length}`);
+    console.log(`  Sub-chapters: ${chapter.children?.length ?? 0}`);
   });
 
   // Check images
@@ -209,7 +331,7 @@ function analyzeDocument(doc: ProcessedDocument) {
     if (image.caption) {
       console.log(`  Caption: ${image.caption.fullText}`);
     }
-    console.log(`  Path: ${image.filePath}`);
+    console.log(`  Path: ${image.path}`);
   });
 
   // Check tables
@@ -233,7 +355,7 @@ function traverseChapters(chapter: Chapter, depth: number = 0) {
   console.log(`${indent}- ${chapter.title}`);
 
   // Recursively traverse sub-chapters
-  chapter.children.forEach((child) => {
+  chapter.children?.forEach((child) => {
     traverseChapters(child, depth + 1);
   });
 }

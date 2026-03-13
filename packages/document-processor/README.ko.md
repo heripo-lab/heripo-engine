@@ -72,16 +72,18 @@ const processor = new DocumentProcessor({
 });
 
 // 문서 처리
-const processedDoc = await processor.process(
+const { document, usage } = await processor.process(
   doclingDocument, // PDF 파서 출력
   'report-001', // 리포트 ID
   outputPath, // 이미지/페이지가 있는 디렉토리
 );
 
 // 결과 사용
-console.log('목차:', processedDoc.chapters);
-console.log('이미지:', processedDoc.images);
-console.log('표:', processedDoc.tables);
+console.log('목차:', document.chapters);
+console.log('이미지:', document.images);
+console.log('표:', document.tables);
+console.log('각주:', document.footnotes);
+console.log('토큰 사용량:', usage.total);
 ```
 
 ### 고급 사용법 - 컴포넌트별 모델 지정
@@ -109,10 +111,10 @@ const processor = new DocumentProcessor({
 
   // 재시도 설정
   maxRetries: 3,
-  enableFallbackRetry: true, // fallback 모델로 자동 재시도
+  enableFallbackRetry: true, // fallback 모델로 자동 재시도 (기본값: false)
 });
 
-const processedDoc = await processor.process(
+const { document, usage } = await processor.process(
   doclingDocument,
   'report-001',
   outputPath,
@@ -176,6 +178,7 @@ DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니
 - Chapter 계층 생성
 - 페이지 범위별로 텍스트 블록을 챕터에 연결
 - 이미지/테이블 ID를 적절한 챕터에 연결
+- 각주 ID를 적절한 챕터에 연결
 - Fallback: TOC가 비어있을 때 단일 "Document" 챕터 생성
 
 ## API 문서
@@ -197,19 +200,23 @@ interface DocumentProcessorOptions {
   captionParserModel?: LanguageModel; // 캡션 파서용
 
   // 배치 처리 설정
-  textCleanerBatchSize?: number; // 텍스트 정리 (기본값: 10)
-  captionParserBatchSize?: number; // 캡션 파싱 (기본값: 5)
-  captionValidatorBatchSize?: number; // 캡션 검증 (기본값: 5)
+  textCleanerBatchSize: number; // 텍스트 정리 배치 크기 (필수)
+  captionParserBatchSize: number; // 캡션 파싱 배치 크기 (필수)
+  captionValidatorBatchSize: number; // 캡션 검증 배치 크기 (필수)
 
   // 재시도 설정
   maxRetries?: number; // LLM API 재시도 횟수 (기본값: 3)
-  enableFallbackRetry?: boolean; // Fallback 재시도 활성화 (기본값: true)
+  enableFallbackRetry?: boolean; // Fallback 재시도 활성화 (기본값: false)
+
+  // 고급 옵션
+  abortSignal?: AbortSignal; // 취소 지원
+  onTokenUsage?: (report: TokenUsageReport) => void; // 실시간 토큰 사용량 모니터링
 }
 ```
 
 #### 메서드
 
-##### `process(doclingDoc, reportId, outputPath): Promise<ProcessedDocument>`
+##### `process(doclingDoc, reportId, outputPath): Promise<DocumentProcessResult>`
 
 DoclingDocument를 ProcessedDocument로 변환합니다.
 
@@ -221,22 +228,27 @@ DoclingDocument를 ProcessedDocument로 변환합니다.
 
 **반환값:**
 
-- `Promise<ProcessedDocument>`: 처리된 문서
+- `Promise<DocumentProcessResult>`: 결과 객체:
+  - `document` (ProcessedDocument): 처리된 문서 (`chapters`, `images`, `tables`, `footnotes` 포함)
+  - `usage` (TokenUsageReport): 토큰 사용량 리포트
 
 ### Fallback 재시도 메커니즘
 
-`enableFallbackRetry: true`로 설정하면, LLM 컴포넌트가 실패할 때 자동으로 fallbackModel로 재시도합니다:
+`enableFallbackRetry: true`로 설정하면 (기본값은 `false`), LLM 컴포넌트가 실패할 때 자동으로 fallbackModel로 재시도합니다:
 
 ```typescript
 const processor = new DocumentProcessor({
   logger,
   fallbackModel: anthropic('claude-opus-4-5'), // 재시도용
   pageRangeParserModel: openai('gpt-5.2'), // 첫 시도
-  enableFallbackRetry: true, // 실패 시 fallback 사용
+  enableFallbackRetry: true, // 실패 시 fallback 사용 (기본값: false)
+  textCleanerBatchSize: 10,
+  captionParserBatchSize: 5,
+  captionValidatorBatchSize: 5,
 });
 
 // pageRangeParserModel이 실패하면 자동으로 fallbackModel로 재시도
-const result = await processor.process(doc, 'id', 'path');
+const { document, usage } = await processor.process(doc, 'id', 'path');
 ```
 
 ### 배치 크기 파라미터
@@ -257,7 +269,7 @@ TOC 추출 실패 시 발생하는 에러들:
 
 ```typescript
 try {
-  const result = await processor.process(doc, 'id', 'path');
+  const { document, usage } = await processor.process(doc, 'id', 'path');
 } catch (error) {
   if (error instanceof TocNotFoundError) {
     console.log('TOC를 찾을 수 없습니다. 단일 챕터로 처리됩니다.');
