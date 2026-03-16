@@ -26,7 +26,6 @@ vi.mock('./docling-conversion-executor', () => ({
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
-  copyFileSync: vi.fn(),
   rmSync: vi.fn(),
 }));
 
@@ -42,20 +41,8 @@ vi.mock('../validators/document-type-validator', () => ({
   DocumentTypeValidator: vi.fn(),
 }));
 
-vi.mock('../utils/jq', () => ({
-  runJqFileJson: vi.fn(),
-}));
-
-vi.mock('../processors/vlm-text-corrector', () => ({
-  VlmTextCorrector: vi.fn(),
-}));
-
-vi.mock('../samplers/ocr-strategy-sampler', () => ({
-  OcrStrategySampler: vi.fn(),
-}));
-
-vi.mock('../processors/page-renderer', () => ({
-  PageRenderer: vi.fn(),
+vi.mock('./vlm-conversion-pipeline', () => ({
+  VlmConversionPipeline: vi.fn(),
 }));
 
 describe('PDFConverter', () => {

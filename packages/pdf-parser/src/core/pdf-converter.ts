@@ -4,20 +4,19 @@ import type { LanguageModel } from 'ai';
 import type { ConversionOptions, DoclingAPIClient } from 'docling-sdk';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
-import { copyFileSync, existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { CHUNKED_CONVERSION, PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
-import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
-import { runJqFileJson } from '../utils/jq';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { DoclingConversionExecutor } from './docling-conversion-executor';
 import { ImagePdfConverter } from './image-pdf-converter';
+import { VlmConversionPipeline } from './vlm-conversion-pipeline';
 
 /**
  * Callback function invoked after PDF conversion completes
@@ -229,16 +228,33 @@ export class PDFConverter {
 
     // Step 2: Execute conversion based on strategy
     if (strategy.method === 'vlm') {
-      await this.convertWithVlm(
+      if (!pdfPath) {
+        throw new Error('VLM conversion requires a local file (file:// URL)');
+      }
+
+      const pipeline = new VlmConversionPipeline(this.logger);
+      const wrappedCallback = pipeline.wrapCallback(
         pdfPath,
-        reportId,
-        onComplete,
-        cleanupAfterCallback,
         trackedOptions,
+        onComplete,
         abortSignal,
         strategy.detectedLanguages,
         strategy.koreanHanjaMixPages,
       );
+
+      const vlmOptions: PDFConvertOptions = strategy.detectedLanguages
+        ? { ...trackedOptions, ocr_lang: strategy.detectedLanguages }
+        : trackedOptions;
+      await this.convert(
+        url,
+        reportId,
+        wrappedCallback,
+        cleanupAfterCallback,
+        vlmOptions,
+        abortSignal,
+      );
+
+      this.logger.info('[PDFConverter] VLM conversion completed successfully');
       return {
         strategy,
         tokenUsageReport: this.buildTokenReport(aggregator),
@@ -337,84 +353,6 @@ export class PDFConverter {
         rmSync(samplingDir, { recursive: true, force: true });
       }
     }
-  }
-
-  /**
-   * Execute VLM-enhanced PDF conversion.
-   *
-   * Runs the standard OCR pipeline (Docling) first, then applies VLM text
-   * correction to fix garbled Chinese characters (漢字/Hanja) in OCR output.
-   */
-  private async convertWithVlm(
-    pdfPath: string | null,
-    reportId: string,
-    onComplete: ConversionCompleteCallback,
-    cleanupAfterCallback: boolean,
-    options: PDFConvertOptions,
-    abortSignal?: AbortSignal,
-    detectedLanguages?: string[],
-    koreanHanjaMixPages?: number[],
-  ): Promise<void> {
-    if (!options.vlmProcessorModel) {
-      throw new Error('vlmProcessorModel is required when OCR strategy is VLM');
-    }
-    if (!pdfPath) {
-      throw new Error('VLM conversion requires a local file (file:// URL)');
-    }
-
-    const url = `file://${pdfPath}`;
-
-    // Wrap the original callback with VLM text correction
-    const wrappedCallback: ConversionCompleteCallback = async (outputDir) => {
-      // Pre-extract text from PDF text layer for VLM reference
-      let pageTexts: Map<number, string> | undefined;
-      try {
-        const resultPath = join(outputDir, 'result.json');
-        // Use jq to extract only page count — avoids loading full JSON into memory
-        const totalPages = await runJqFileJson<number>(
-          '.pages | length',
-          resultPath,
-        );
-        const textExtractor = new PdfTextExtractor(this.logger);
-        pageTexts = await textExtractor.extractText(pdfPath, totalPages);
-      } catch {
-        this.logger.warn(
-          '[PDFConverter] pdftotext extraction failed, proceeding without text reference',
-        );
-      }
-
-      // Save OCR-only result before VLM correction for debugging
-      const resultPath = join(outputDir, 'result.json');
-      const ocrOriginPath = join(outputDir, 'result_ocr_origin.json');
-      copyFileSync(resultPath, ocrOriginPath);
-
-      const corrector = new VlmTextCorrector(this.logger);
-      await corrector.correctAndSave(outputDir, options.vlmProcessorModel!, {
-        concurrency: options.vlmConcurrency,
-        aggregator: options.aggregator,
-        abortSignal,
-        onTokenUsage: options.onTokenUsage,
-        documentLanguages: detectedLanguages,
-        pageTexts,
-        koreanHanjaMixPages,
-      });
-      await onComplete(outputDir);
-    };
-
-    // Run the standard OCR pipeline, then apply VLM correction via the wrapped callback
-    const vlmOptions: PDFConvertOptions = detectedLanguages
-      ? { ...options, ocr_lang: detectedLanguages }
-      : options;
-    await this.convert(
-      url,
-      reportId,
-      wrappedCallback,
-      cleanupAfterCallback,
-      vlmOptions,
-      abortSignal,
-    );
-
-    this.logger.info('[PDFConverter] VLM conversion completed successfully');
   }
 
   /**
