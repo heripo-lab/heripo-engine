@@ -5,7 +5,6 @@ import type { DoclingAPIClient } from 'docling-sdk';
 import { spawnAsync } from '@heripo/shared';
 import {
   copyFileSync,
-  createWriteStream,
   existsSync,
   readFileSync,
   readdirSync,
@@ -13,7 +12,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { rename } from 'node:fs/promises';
-import { pipeline } from 'node:stream/promises';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { DoclingDocumentMerger } from '../processors/docling-document-merger';
@@ -35,20 +33,18 @@ vi.mock('node:fs', () => ({
   readdirSync: vi.fn(),
   rmSync: vi.fn(),
   writeFileSync: vi.fn(),
-  createWriteStream: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
   rename: vi.fn(),
-  writeFile: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
   join: vi.fn((...args: string[]) => args.join('/')),
 }));
 
-vi.mock('node:stream/promises', () => ({
-  pipeline: vi.fn(),
+vi.mock('../utils/docling-result-downloader', () => ({
+  downloadTaskResult: vi.fn(),
 }));
 
 vi.mock('../processors/image-extractor', () => ({
@@ -786,96 +782,6 @@ describe('ChunkedPDFConverter', () => {
           mockBuildOptions,
         ),
       ).rejects.toThrow('Chunk task timeout');
-    });
-
-    test('downloadResult uses fileStream when available', async () => {
-      vi.mocked(spawnAsync).mockResolvedValue({
-        code: 0,
-        stdout: 'Pages:          5\n',
-        stderr: '',
-      });
-
-      const mockWriteStream = { on: vi.fn() };
-      vi.mocked(createWriteStream).mockReturnValue(mockWriteStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
-
-      const mockStream = { pipe: vi.fn() };
-      vi.mocked(client.getTaskResultFile as Mock).mockResolvedValue({
-        fileStream: mockStream,
-      });
-
-      await converter.convertChunked(
-        'file:///test/input.pdf',
-        'report-1',
-        mockOnComplete,
-        false,
-        {},
-        mockBuildOptions,
-      );
-
-      expect(pipeline).toHaveBeenCalled();
-    });
-
-    test('downloadResult uses fetch fallback when no fileStream or data', async () => {
-      vi.mocked(spawnAsync).mockResolvedValue({
-        code: 0,
-        stdout: 'Pages:          5\n',
-        stderr: '',
-      });
-
-      vi.mocked(client.getTaskResultFile as Mock).mockResolvedValue({});
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
-      });
-      vi.stubGlobal('fetch', mockFetch);
-
-      await converter.convertChunked(
-        'file:///test/input.pdf',
-        'report-1',
-        mockOnComplete,
-        false,
-        {},
-        mockBuildOptions,
-      );
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:5001/v1/result/task-1',
-        expect.objectContaining({ headers: { Accept: 'application/zip' } }),
-      );
-
-      vi.unstubAllGlobals();
-    });
-
-    test('downloadResult fetch fallback throws on non-ok response', async () => {
-      vi.mocked(spawnAsync).mockResolvedValue({
-        code: 0,
-        stdout: 'Pages:          5\n',
-        stderr: '',
-      });
-
-      vi.mocked(client.getTaskResultFile as Mock).mockResolvedValue({});
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-      });
-      vi.stubGlobal('fetch', mockFetch);
-
-      await expect(
-        converter.convertChunked(
-          'file:///test/input.pdf',
-          'report-1',
-          mockOnComplete,
-          false,
-          {},
-          mockBuildOptions,
-        ),
-      ).rejects.toThrow('Failed to download chunk ZIP: 500');
-
-      vi.unstubAllGlobals();
     });
 
     test('chunk temp files are cleaned up after successful conversion', async () => {

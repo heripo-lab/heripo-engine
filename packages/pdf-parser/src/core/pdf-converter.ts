@@ -9,10 +9,9 @@ import type {
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { omit } from 'es-toolkit';
-import { copyFileSync, createWriteStream, existsSync, rmSync } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
+import { copyFileSync, existsSync, rmSync } from 'node:fs';
+import { rename } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 
 import {
   CHUNKED_CONVERSION,
@@ -25,6 +24,7 @@ import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
+import { downloadTaskResult } from '../utils/docling-result-downloader';
 import { runJqFileJson, runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { getTaskFailureDetails } from '../utils/task-failure-details';
@@ -585,7 +585,15 @@ export class PDFConverter {
         throw error;
       }
 
-      await this.downloadResult(task.taskId);
+      const cwd = process.cwd();
+      const zipPath = join(cwd, 'result.zip');
+      await downloadTaskResult(
+        this.client,
+        task.taskId,
+        zipPath,
+        this.logger,
+        '[PDFConverter]',
+      );
     } finally {
       // Stop local file server if started
       if (server) {
@@ -814,46 +822,6 @@ export class PDFConverter {
     task: AsyncConversionTask,
   ): Promise<string> {
     return getTaskFailureDetails(task, this.logger, '[PDFConverter]');
-  }
-
-  private async downloadResult(taskId: string): Promise<void> {
-    this.logger.info(
-      '\n[PDFConverter] Task completed, downloading ZIP file...',
-    );
-
-    const zipResult = await this.client.getTaskResultFile(taskId);
-
-    const zipPath = join(process.cwd(), 'result.zip');
-    this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
-
-    if (zipResult.fileStream) {
-      const writeStream = createWriteStream(zipPath);
-      await pipeline(zipResult.fileStream, writeStream);
-      return;
-    }
-
-    if (zipResult.data) {
-      await writeFile(zipPath, zipResult.data);
-      return;
-    }
-
-    // Fallback: direct HTTP download when SDK stream/data unavailable
-    this.logger.warn(
-      '[PDFConverter] SDK file result unavailable, falling back to direct download...',
-    );
-    const baseUrl = this.client.getConfig().baseUrl;
-    const response = await fetch(`${baseUrl}/v1/result/${taskId}`, {
-      headers: { Accept: 'application/zip' },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download ZIP file: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    await writeFile(zipPath, buffer);
   }
 
   private async processConvertedFiles(

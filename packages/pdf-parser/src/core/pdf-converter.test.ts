@@ -1,12 +1,10 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
-import type { Readable } from 'node:stream';
 
 import { omit } from 'es-toolkit';
-import { createWriteStream, existsSync, rmSync } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
+import { existsSync, rmSync } from 'node:fs';
+import { rename } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PDF_CONVERTER } from '../config/constants';
@@ -14,6 +12,7 @@ import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+import { downloadTaskResult } from '../utils/docling-result-downloader';
 import { runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
@@ -41,11 +40,9 @@ vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
   copyFileSync: vi.fn(),
   rmSync: vi.fn(),
-  createWriteStream: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
-  writeFile: vi.fn(),
   rename: vi.fn(),
 }));
 
@@ -53,8 +50,8 @@ vi.mock('node:path', () => ({
   join: vi.fn(),
 }));
 
-vi.mock('node:stream/promises', () => ({
-  pipeline: vi.fn(),
+vi.mock('../utils/docling-result-downloader', () => ({
+  downloadTaskResult: vi.fn(),
 }));
 
 vi.mock('../processors/image-extractor', () => ({
@@ -230,10 +227,6 @@ describe('PDFConverter', () => {
       test('does not use chunked conversion for non-file:// URLs', async () => {
         const mockTask = createMockTask();
         vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-        vi.mocked(client.getTaskResultFile).mockResolvedValue({
-          data: Buffer.from('zip'),
-          success: true,
-        } as any);
 
         await converter.convert(
           'http://example.com/test.pdf',
@@ -252,10 +245,6 @@ describe('PDFConverter', () => {
     test('should build conversion options with default values', async () => {
       const mockTask = createMockTask();
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -296,10 +285,6 @@ describe('PDFConverter', () => {
     test('should omit num_threads from options and use in accelerator_options', async () => {
       const mockTask = createMockTask();
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -337,10 +322,6 @@ describe('PDFConverter', () => {
     test('should include document_timeout when provided', async () => {
       const mockTask = createMockTask();
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -362,10 +343,6 @@ describe('PDFConverter', () => {
     test('should not include document_timeout when not provided', async () => {
       const mockTask = createMockTask();
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -397,16 +374,9 @@ describe('PDFConverter', () => {
     test('should validate document type for file:// URL with documentValidationModel', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
       const mockModel = {} as any;
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -433,16 +403,9 @@ describe('PDFConverter', () => {
     test('should skip validation for non-file:// URLs', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
       const mockModel = {} as any;
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -466,16 +429,9 @@ describe('PDFConverter', () => {
     test('should only validate once per converter instance', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
       const mockModel = {} as any;
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -493,10 +449,6 @@ describe('PDFConverter', () => {
       expect(mockValidate).toHaveBeenCalledTimes(1);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(createMockTask());
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
 
       // Second call skips validation (already validated)
       await converter.convert(
@@ -513,15 +465,8 @@ describe('PDFConverter', () => {
     test('should skip validation when documentValidationModel is not set', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -547,15 +492,8 @@ describe('PDFConverter', () => {
     test('should successfully convert PDF with cleanupAfterCallback=false', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -577,8 +515,7 @@ describe('PDFConverter', () => {
         'http://test.com/doc.pdf',
       );
       expect(client.convertSourceAsync).toHaveBeenCalled();
-      expect(client.getTaskResultFile).toHaveBeenCalledWith('task-123');
-      expect(pipeline).toHaveBeenCalled();
+      expect(downloadTaskResult).toHaveBeenCalled();
       expect(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).toHaveBeenCalledWith(
@@ -608,15 +545,8 @@ describe('PDFConverter', () => {
     test('should successfully convert PDF with cleanupAfterCallback=true', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -651,15 +581,8 @@ describe('PDFConverter', () => {
     test('should cleanup temporary files even if callback throws error', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockRejectedValue(new Error('Callback error'));
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -709,7 +632,7 @@ describe('PDFConverter', () => {
       const mockTask = createMockTask();
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockRejectedValue(
+      vi.mocked(downloadTaskResult).mockRejectedValue(
         new Error('Download failed'),
       );
 
@@ -731,15 +654,8 @@ describe('PDFConverter', () => {
 
     test('should handle processing failure and cleanup', async () => {
       const mockTask = createMockTask();
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockRejectedValue(new Error('Processing failed'));
@@ -767,15 +683,8 @@ describe('PDFConverter', () => {
     test('should handle non-existent files during cleanup', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -797,10 +706,6 @@ describe('PDFConverter', () => {
     test('should start conversion task and log task ID', async () => {
       const mockTask = createMockTask();
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -839,10 +744,6 @@ describe('PDFConverter', () => {
       ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -887,10 +788,6 @@ describe('PDFConverter', () => {
       ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -923,10 +820,6 @@ describe('PDFConverter', () => {
       ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -961,10 +854,6 @@ describe('PDFConverter', () => {
       ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -987,10 +876,6 @@ describe('PDFConverter', () => {
       const mockTask = createMockTask();
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -1072,10 +957,6 @@ describe('PDFConverter', () => {
       ]);
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       await converter.convert(
@@ -1094,146 +975,11 @@ describe('PDFConverter', () => {
     });
   });
 
-  describe('downloadResult', () => {
-    test('should download via stream when fileStream is present', async () => {
-      const mockTask = createMockTask();
-      const mockFileStream = {} as Readable;
-      const writeStream = { write: vi.fn(), end: vi.fn() };
-
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: mockFileStream,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        {},
-      );
-
-      expect(logger.info).toHaveBeenCalledWith(
-        '\n[PDFConverter] Task completed, downloading ZIP file...',
-      );
-      expect(logger.info).toHaveBeenCalledWith(
-        '[PDFConverter] Saving ZIP file to:',
-        '/test/cwd/result.zip',
-      );
-      expect(createWriteStream).toHaveBeenCalledWith('/test/cwd/result.zip');
-      expect(pipeline).toHaveBeenCalledWith(mockFileStream, writeStream);
-    });
-
-    test('should download via writeFile when data is present', async () => {
-      const mockTask = createMockTask();
-      const mockData = new Uint8Array([1, 2, 3]);
-
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        data: mockData,
-      });
-      vi.mocked(writeFile).mockResolvedValue(undefined);
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        {},
-      );
-
-      expect(writeFile).toHaveBeenCalledWith('/test/cwd/result.zip', mockData);
-      expect(createWriteStream).not.toHaveBeenCalled();
-      expect(pipeline).not.toHaveBeenCalled();
-    });
-
-    test('should fallback to direct fetch when neither fileStream nor data is present', async () => {
-      const mockTask = createMockTask();
-      const mockZipData = new Uint8Array([80, 75, 3, 4]);
-
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: false,
-      } as any);
-      vi.mocked(writeFile).mockResolvedValue(undefined);
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(mockZipData.buffer),
-      });
-      vi.stubGlobal('fetch', fetchMock);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report-fallback',
-        vi.fn(),
-        false,
-        {},
-      );
-
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:5001/v1/result/task-123',
-        { headers: { Accept: 'application/zip' } },
-      );
-      expect(writeFile).toHaveBeenCalledWith(
-        '/test/cwd/result.zip',
-        expect.any(Uint8Array),
-      );
-      expect(logger.warn).toHaveBeenCalledWith(
-        '[PDFConverter] SDK file result unavailable, falling back to direct download...',
-      );
-
-      vi.unstubAllGlobals();
-    });
-
-    test('should throw error when direct fetch fallback fails', async () => {
-      const mockTask = createMockTask();
-
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: false,
-      } as any);
-
-      const fetchMock = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-      });
-      vi.stubGlobal('fetch', fetchMock);
-
-      await expect(
-        converter.convert(
-          'http://test.com/doc.pdf',
-          'report-fail',
-          vi.fn(),
-          false,
-          {},
-        ),
-      ).rejects.toThrow('Failed to download ZIP file: 404 Not Found');
-
-      vi.unstubAllGlobals();
-    });
-  });
-
   describe('processConvertedFiles', () => {
     test('should call ImageExtractor with correct paths', async () => {
       const mockTask = createMockTask();
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -1275,10 +1021,6 @@ describe('PDFConverter', () => {
       } as unknown as AsyncConversionTask;
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
 
       await expect(
         converter.convert(
@@ -1299,15 +1041,8 @@ describe('PDFConverter', () => {
     test('should throw AbortError when aborted before callback', async () => {
       const mockTask = createMockTask();
       const abortController = new AbortController();
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
 
       // Abort after processConvertedFiles (ImageExtractor) completes
       vi.mocked(
@@ -1517,11 +1252,6 @@ describe('PDFConverter', () => {
         return Promise.resolve(successTask);
       });
 
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-
       const mockImagePdfConverter = {
         convert: vi.fn().mockResolvedValue('/tmp/test-image.pdf'),
         cleanup: vi.fn(),
@@ -1530,9 +1260,6 @@ describe('PDFConverter', () => {
         return mockImagePdfConverter as any;
       });
 
-      const writeStream = { write: vi.fn(), end: vi.fn() };
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -1644,11 +1371,6 @@ describe('PDFConverter', () => {
         return Promise.resolve(successTask);
       });
 
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-
       const mockImagePdfConverter = {
         convert: vi.fn().mockResolvedValue('/tmp/test-image.pdf'),
         cleanup: vi.fn(),
@@ -1657,9 +1379,6 @@ describe('PDFConverter', () => {
         return mockImagePdfConverter as any;
       });
 
-      const writeStream = { write: vi.fn(), end: vi.fn() };
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -1687,15 +1406,8 @@ describe('PDFConverter', () => {
     test('should render page images and update result.json for file:// URLs', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -1739,15 +1451,8 @@ describe('PDFConverter', () => {
     test('should skip rendering and log warning for http:// URLs', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -1772,15 +1477,8 @@ describe('PDFConverter', () => {
     test('should update page image URIs with correct indices', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -1821,15 +1519,8 @@ describe('PDFConverter', () => {
     test('should skip pages with page_no exceeding rendered page count', async () => {
       const mockTask = createMockTask();
       const onComplete = vi.fn().mockResolvedValue(undefined);
-      const writeStream = { write: vi.fn(), end: vi.fn() };
 
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
-      vi.mocked(createWriteStream).mockReturnValue(writeStream as any);
-      vi.mocked(pipeline).mockResolvedValue(undefined);
       vi.mocked(
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).mockResolvedValue(undefined);
@@ -1868,10 +1559,6 @@ describe('PDFConverter', () => {
     test('should convert via image PDF when forceImagePdf is true', async () => {
       const mockTask = createMockTask();
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(runJqFileToFile).mockResolvedValue(undefined);
       vi.mocked(rename).mockResolvedValue(undefined);
@@ -1893,10 +1580,6 @@ describe('PDFConverter', () => {
     test('should not convert via image PDF when forceImagePdf is false', async () => {
       const mockTask = createMockTask();
       vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(client.getTaskResultFile).mockResolvedValue({
-        success: true,
-        fileStream: {} as Readable,
-      });
       vi.mocked(existsSync).mockReturnValue(false);
 
       vi.mocked(ImagePdfConverter).mockClear();

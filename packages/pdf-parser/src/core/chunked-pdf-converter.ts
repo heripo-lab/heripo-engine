@@ -10,7 +10,6 @@ import type {
 import { spawnAsync } from '@heripo/shared';
 import {
   copyFileSync,
-  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -18,14 +17,14 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
+import { rename } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 
 import { PAGE_RENDERING, PDF_CONVERTER } from '../config/constants';
 import { DoclingDocumentMerger } from '../processors/docling-document-merger';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
+import { downloadTaskResult } from '../utils/docling-result-downloader';
 import { runJqFileJson, runJqFileToFile } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { getTaskFailureDetails } from '../utils/task-failure-details';
@@ -246,7 +245,13 @@ export class ChunkedPDFConverter {
 
         // Download ZIP result
         const zipPath = join(chunkDir, 'result.zip');
-        await this.downloadResult(task.taskId, zipPath);
+        await downloadTaskResult(
+          this.client,
+          task.taskId,
+          zipPath,
+          this.logger,
+          '[ChunkedPDFConverter]',
+        );
 
         // Extract ZIP and process images
         const extractDir = join(chunkDir, 'extracted');
@@ -359,37 +364,6 @@ export class ChunkedPDFConverter {
         setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
       );
     }
-  }
-
-  /** Download ZIP result for a task */
-  private async downloadResult(taskId: string, zipPath: string): Promise<void> {
-    const zipResult = await this.client.getTaskResultFile(taskId);
-
-    if (zipResult.fileStream) {
-      const writeStream = createWriteStream(zipPath);
-      await pipeline(zipResult.fileStream, writeStream);
-      return;
-    }
-
-    if (zipResult.data) {
-      await writeFile(zipPath, zipResult.data);
-      return;
-    }
-
-    // Fallback: direct HTTP download
-    const baseUrl = this.client.getConfig().baseUrl;
-    const response = await fetch(`${baseUrl}/v1/result/${taskId}`, {
-      headers: { Accept: 'application/zip' },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download chunk ZIP: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    await writeFile(zipPath, buffer);
   }
 
   /**
