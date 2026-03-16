@@ -1,6 +1,6 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type { DoclingDocument, TokenUsageReport } from '@heripo/model';
-import type { ConversionOptions, DoclingAPIClient } from 'docling-sdk';
+import type { DoclingAPIClient } from 'docling-sdk';
 
 import type {
   ConversionCompleteCallback,
@@ -27,6 +27,7 @@ import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { renderAndUpdatePageImages } from '../utils/page-image-updater';
 import { trackTaskProgress } from '../utils/task-progress-tracker';
+import { buildConversionOptions } from './conversion-options-builder';
 
 /** Configuration for chunked conversion */
 export interface ChunkedConversionConfig {
@@ -60,7 +61,6 @@ export class ChunkedPDFConverter {
    * @param onComplete - Callback invoked with the final output directory
    * @param cleanupAfterCallback - Whether to clean up the output directory after callback
    * @param options - PDF conversion options (chunked-specific fields are stripped internally)
-   * @param buildConversionOptions - Function to build Docling ConversionOptions from PDFConvertOptions
    * @param abortSignal - Optional abort signal for cancellation
    */
   async convertChunked(
@@ -69,7 +69,6 @@ export class ChunkedPDFConverter {
     onComplete: ConversionCompleteCallback,
     cleanupAfterCallback: boolean,
     options: PDFConvertOptions,
-    buildConversionOptions: (options: PDFConvertOptions) => ConversionOptions,
     abortSignal?: AbortSignal,
   ): Promise<TokenUsageReport | null> {
     const pdfPath = url.slice(7); // Remove 'file://' prefix
@@ -118,7 +117,6 @@ export class ChunkedPDFConverter {
           httpUrl,
           chunkDir,
           options,
-          buildConversionOptions,
         );
 
         chunkDocuments.push(doc);
@@ -213,7 +211,6 @@ export class ChunkedPDFConverter {
     httpUrl: string,
     chunkDir: string,
     options: PDFConvertOptions,
-    buildConversionOptions: (options: PDFConvertOptions) => ConversionOptions,
   ): Promise<DoclingDocument> {
     const chunkLabel = `Chunk ${chunkIndex + 1}/${totalChunks} (pages ${startPage}-${endPage})`;
 

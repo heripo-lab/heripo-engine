@@ -19,6 +19,7 @@ import { LocalFileServer } from '../utils/local-file-server';
 import { renderAndUpdatePageImages } from '../utils/page-image-updater';
 import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
+import { buildConversionOptions } from './conversion-options-builder';
 
 vi.mock('@heripo/shared', () => ({
   spawnAsync: vi.fn(),
@@ -40,6 +41,10 @@ vi.mock('node:path', () => ({
 
 vi.mock('../utils/docling-result-downloader', () => ({
   downloadTaskResult: vi.fn(),
+}));
+
+vi.mock('./conversion-options-builder', () => ({
+  buildConversionOptions: vi.fn(),
 }));
 
 vi.mock('../processors/image-extractor', () => ({
@@ -106,7 +111,6 @@ describe('ChunkedPDFConverter', () => {
   let client: DoclingAPIClient;
   let converter: ChunkedPDFConverter;
   let mockOnComplete: Mock;
-  let mockBuildOptions: Mock;
   let mockServerInstance: { start: Mock; stop: Mock };
   let mockMergerInstance: { merge: Mock };
   let mockTask: { taskId: string; poll: Mock; getResult: Mock };
@@ -141,7 +145,8 @@ describe('ChunkedPDFConverter', () => {
     });
 
     mockOnComplete = vi.fn();
-    mockBuildOptions = vi.fn().mockReturnValue({ to_formats: ['json'] });
+
+    vi.mocked(buildConversionOptions).mockReturnValue({ to_formats: ['json'] });
 
     vi.spyOn(process, 'cwd').mockReturnValue('/test/cwd');
 
@@ -279,7 +284,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // Local file server started and stopped
@@ -290,13 +294,13 @@ describe('ChunkedPDFConverter', () => {
       expect(client.convertSourceAsync).toHaveBeenCalledTimes(3);
 
       // buildConversionOptions called with page_range for each chunk
-      expect(mockBuildOptions).toHaveBeenCalledWith(
+      expect(buildConversionOptions).toHaveBeenCalledWith(
         expect.objectContaining({ page_range: [1, 10] }),
       );
-      expect(mockBuildOptions).toHaveBeenCalledWith(
+      expect(buildConversionOptions).toHaveBeenCalledWith(
         expect.objectContaining({ page_range: [11, 20] }),
       );
-      expect(mockBuildOptions).toHaveBeenCalledWith(
+      expect(buildConversionOptions).toHaveBeenCalledWith(
         expect.objectContaining({ page_range: [21, 25] }),
       );
 
@@ -332,7 +336,6 @@ describe('ChunkedPDFConverter', () => {
           mockOnComplete,
           false,
           {},
-          mockBuildOptions,
         ),
       ).rejects.toThrow('Failed to detect page count from PDF');
     });
@@ -355,7 +358,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // Called twice (1 failure + 1 retry success)
@@ -382,7 +384,6 @@ describe('ChunkedPDFConverter', () => {
           mockOnComplete,
           false,
           {},
-          mockBuildOptions,
         ),
       ).rejects.toThrow('Persistent error');
 
@@ -409,7 +410,6 @@ describe('ChunkedPDFConverter', () => {
           mockOnComplete,
           false,
           {},
-          mockBuildOptions,
           controller.signal,
         ),
       ).rejects.toThrow('aborted');
@@ -456,7 +456,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // 3 pic_ + 3 image_ = 6 total copies
@@ -523,7 +522,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // 3 image_ files only
@@ -555,7 +553,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       expect(mockOnComplete).toHaveBeenCalledWith('/test/cwd/output/my-report');
@@ -577,7 +574,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         true,
         {},
-        mockBuildOptions,
       );
 
       // Both chunks dir and output dir cleaned up
@@ -604,7 +600,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       expect(writeFileSync).toHaveBeenCalledWith(
@@ -626,7 +621,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       expect(trackTaskProgress).toHaveBeenCalledWith(
@@ -658,7 +652,6 @@ describe('ChunkedPDFConverter', () => {
           mockOnComplete,
           false,
           {},
-          mockBuildOptions,
         ),
       ).rejects.toThrow('OCR engine crashed');
     });
@@ -679,7 +672,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // ZIP and extracted dirs are cleaned per chunk
@@ -712,7 +704,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         true,
         {},
-        mockBuildOptions,
       );
 
       // _chunks dir cleaned up
@@ -756,7 +747,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // All 3 orphaned pic_ files deleted
@@ -808,7 +798,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // pic_0 and pic_2 deleted (orphaned)
@@ -850,7 +839,6 @@ describe('ChunkedPDFConverter', () => {
           mockOnComplete,
           false,
           {},
-          mockBuildOptions,
         ),
       ).rejects.toThrow('Failed to detect page count from PDF');
     });
@@ -893,7 +881,6 @@ describe('ChunkedPDFConverter', () => {
           mockOnComplete,
           false,
           {},
-          mockBuildOptions,
         ),
       ).rejects.toThrow('ImageMagick crashed');
 
@@ -922,7 +909,6 @@ describe('ChunkedPDFConverter', () => {
           mockOnComplete,
           false,
           {},
-          mockBuildOptions,
         ),
       ).rejects.toThrow('Callback error');
 
@@ -967,7 +953,6 @@ describe('ChunkedPDFConverter', () => {
         mockOnComplete,
         false,
         {},
-        mockBuildOptions,
       );
 
       // Merger should have been called with picFileOffsets [0, 3]

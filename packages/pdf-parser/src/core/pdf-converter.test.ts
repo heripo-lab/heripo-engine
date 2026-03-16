@@ -1,7 +1,6 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
 
-import { omit } from 'es-toolkit';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -15,11 +14,12 @@ import { renderAndUpdatePageImages } from '../utils/page-image-updater';
 import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
+import { buildConversionOptions } from './conversion-options-builder';
 import { ImagePdfConverter } from './image-pdf-converter';
 import { PDFConverter } from './pdf-converter';
 
-vi.mock('es-toolkit', () => ({
-  omit: vi.fn(),
+vi.mock('./conversion-options-builder', () => ({
+  buildConversionOptions: vi.fn(),
 }));
 
 vi.mock('./chunked-pdf-converter', () => ({
@@ -98,10 +98,23 @@ describe('PDFConverter', () => {
     vi.spyOn(process, 'cwd').mockReturnValue('/test/cwd');
     vi.spyOn(Date, 'now').mockReturnValue(1000000);
 
-    vi.mocked(omit).mockImplementation((obj, keys) => {
-      const result = { ...obj };
-      keys.forEach((key) => delete result[key as keyof typeof result]);
-      return result;
+    vi.mocked(buildConversionOptions).mockReturnValue({
+      to_formats: ['json', 'html'],
+      image_export_mode: 'embedded',
+      ocr_engine: 'ocrmac',
+      ocr_options: {
+        kind: 'ocrmac',
+        lang: ['ko-KR', 'en-US'],
+        recognition: 'accurate',
+        framework: 'livetext',
+      },
+      generate_picture_images: true,
+      do_picture_classification: true,
+      do_picture_description: true,
+      generate_page_images: false,
+      images_scale: 2.0,
+      force_ocr: true,
+      accelerator_options: { device: 'mps', num_threads: 4 },
     });
 
     vi.mocked(join).mockImplementation((...args) => args.join('/'));
@@ -169,7 +182,6 @@ describe('PDFConverter', () => {
           expect.any(Function),
           false,
           expect.objectContaining({ chunkedConversion: true }),
-          expect.any(Function),
           undefined,
         );
       });
@@ -191,26 +203,6 @@ describe('PDFConverter', () => {
         );
       });
 
-      test('passes a working buildConversionOptions callback to ChunkedPDFConverter', async () => {
-        await converter.convert(
-          'file:///test/input.pdf',
-          'report-1',
-          vi.fn(),
-          false,
-          { chunkedConversion: true },
-        );
-
-        // Capture the buildConversionOptions callback (6th argument)
-        const buildFn = mockConvertChunked.mock.calls[0][5] as (
-          opts: any,
-        ) => any;
-        expect(typeof buildFn).toBe('function');
-
-        // Invoke it and verify it returns conversion options
-        const result = buildFn({ page_range: [1, 10] });
-        expect(result).toBeDefined();
-      });
-
       test('does not use chunked conversion for non-file:// URLs', async () => {
         const mockTask = createMockTask();
         vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
@@ -225,123 +217,6 @@ describe('PDFConverter', () => {
 
         expect(ChunkedPDFConverter).not.toHaveBeenCalled();
       });
-    });
-  });
-
-  describe('buildConversionOptions', () => {
-    test('should build conversion options with default values', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { num_threads: 4 },
-      );
-
-      expect(client.convertSourceAsync).toHaveBeenCalledWith({
-        sources: [{ kind: 'http', url: 'http://test.com/doc.pdf' }],
-        options: {
-          to_formats: ['json', 'html'],
-          image_export_mode: 'embedded',
-          ocr_engine: 'ocrmac',
-          ocr_options: {
-            kind: 'ocrmac',
-            lang: ['ko-KR', 'en-US'],
-            recognition: 'accurate',
-            framework: 'livetext',
-          },
-          generate_picture_images: true,
-          do_picture_classification: true,
-          do_picture_description: true,
-          generate_page_images: false,
-          images_scale: 2.0,
-          force_ocr: true,
-          accelerator_options: {
-            device: 'mps',
-            num_threads: 4,
-          },
-        },
-        target: { kind: 'zip' },
-      });
-    });
-
-    test('should omit num_threads from options and use in accelerator_options', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { num_threads: 8 },
-      );
-
-      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
-      expect(callArgs.options).toEqual({
-        to_formats: ['json', 'html'],
-        image_export_mode: 'embedded',
-        ocr_engine: 'ocrmac',
-        ocr_options: {
-          kind: 'ocrmac',
-          lang: ['ko-KR', 'en-US'],
-          recognition: 'accurate',
-          framework: 'livetext',
-        },
-        generate_picture_images: true,
-        do_picture_classification: true,
-        do_picture_description: true,
-        generate_page_images: false,
-        images_scale: 2.0,
-        force_ocr: true,
-        accelerator_options: {
-          device: 'mps',
-          num_threads: 8,
-        },
-      });
-    });
-
-    test('should include document_timeout when provided', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { num_threads: 4, document_timeout: 600 },
-      );
-
-      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
-      expect(callArgs.options).toEqual(
-        expect.objectContaining({
-          document_timeout: 600,
-        }),
-      );
-    });
-
-    test('should not include document_timeout when not provided', async () => {
-      const mockTask = createMockTask();
-      vi.mocked(client.convertSourceAsync).mockResolvedValue(mockTask);
-      vi.mocked(existsSync).mockReturnValue(false);
-
-      await converter.convert(
-        'http://test.com/doc.pdf',
-        'report123',
-        vi.fn(),
-        false,
-        { num_threads: 4 },
-      );
-
-      const callArgs = vi.mocked(client.convertSourceAsync).mock.calls[0][0];
-      expect(callArgs.options).not.toHaveProperty('document_timeout');
     });
   });
 

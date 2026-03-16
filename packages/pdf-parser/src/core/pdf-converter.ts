@@ -8,7 +8,6 @@ import type {
 } from 'docling-sdk';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
-import { omit } from 'es-toolkit';
 import { copyFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -26,6 +25,7 @@ import { renderAndUpdatePageImages } from '../utils/page-image-updater';
 import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
+import { buildConversionOptions } from './conversion-options-builder';
 import { ImagePdfConverter } from './image-pdf-converter';
 
 /**
@@ -160,7 +160,6 @@ export class PDFConverter {
         onComplete,
         cleanupAfterCallback,
         options,
-        (opts) => this.buildConversionOptions(opts),
         abortSignal,
       );
     }
@@ -551,7 +550,7 @@ export class PDFConverter {
     abortSignal?: AbortSignal,
   ): Promise<TokenUsageReport | null> {
     const startTime = Date.now();
-    const conversionOptions = this.buildConversionOptions(options);
+    const conversionOptions = buildConversionOptions(options);
 
     this.logger.info(
       `[PDFConverter] OCR languages: ${JSON.stringify(conversionOptions.ocr_options?.lang)}`,
@@ -668,57 +667,6 @@ export class PDFConverter {
     }
 
     return null;
-  }
-
-  private buildConversionOptions(
-    options: PDFConvertOptions,
-  ): ConversionOptions {
-    return {
-      ...omit(options, [
-        'num_threads',
-        'document_timeout',
-        'forceImagePdf',
-        'strategySamplerModel',
-        'vlmProcessorModel',
-        'skipSampling',
-        'forcedMethod',
-        'aggregator',
-        'onTokenUsage',
-        'chunkedConversion',
-        'chunkSize',
-        'chunkMaxRetries',
-        'documentValidationModel',
-      ]),
-      to_formats: ['json', 'html'],
-      image_export_mode: 'embedded',
-      ocr_engine: 'ocrmac',
-      ocr_options: {
-        kind: 'ocrmac',
-        lang: options.ocr_lang ?? ['ko-KR', 'en-US'],
-        recognition: 'accurate',
-        framework: 'livetext',
-      },
-      generate_picture_images: true,
-      do_picture_classification: true,
-      do_picture_description: true,
-      generate_page_images: false, // Page images are rendered by PageRenderer (ImageMagick) after conversion
-      images_scale: 2.0,
-      /**
-       * While disabling this option yields the most accurate text extraction for readable PDFs,
-       * text layers overlaid on images or drawings can introduce noise when not merged properly.
-       * In practice, archaeological report PDFs almost always contain such overlapping cases.
-       * Enabling force_ocr mitigates this risk. Although OCR may introduce minor errors compared
-       * to direct text extraction, the accuracy remains high since the source is digital, not scanned paper.
-       */
-      force_ocr: true,
-      accelerator_options: {
-        device: 'mps',
-        num_threads: options.num_threads,
-      },
-      ...(options.document_timeout !== undefined && {
-        document_timeout: options.document_timeout,
-      }),
-    };
   }
 
   private async startConversionTask(
