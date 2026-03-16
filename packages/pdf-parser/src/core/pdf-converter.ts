@@ -9,25 +9,21 @@ import type {
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { omit } from 'es-toolkit';
-import { copyFileSync, createWriteStream, existsSync, rmSync } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
+import { copyFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 
-import {
-  CHUNKED_CONVERSION,
-  PAGE_RENDERING,
-  PDF_CONVERTER,
-} from '../config/constants';
+import { CHUNKED_CONVERSION, PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
-import { runJqFileJson, runJqFileToFile } from '../utils/jq';
+import { downloadTaskResult } from '../utils/docling-result-downloader';
+import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
-import { getTaskFailureDetails } from '../utils/task-failure-details';
+import { renderAndUpdatePageImages } from '../utils/page-image-updater';
+import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { ImagePdfConverter } from './image-pdf-converter';
@@ -573,7 +569,15 @@ export class PDFConverter {
 
     try {
       const task = await this.startConversionTask(httpUrl, conversionOptions);
-      await this.trackTaskProgress(task);
+      await trackTaskProgress(
+        task,
+        this.timeout,
+        this.logger,
+        '[PDFConverter]',
+        {
+          showDetailedProgress: true,
+        },
+      );
 
       // Check abort after docling task completes
       if (abortSignal?.aborted) {
@@ -585,7 +589,15 @@ export class PDFConverter {
         throw error;
       }
 
-      await this.downloadResult(task.taskId);
+      const cwd = process.cwd();
+      const zipPath = join(cwd, 'result.zip');
+      await downloadTaskResult(
+        this.client,
+        task.taskId,
+        zipPath,
+        this.logger,
+        '[PDFConverter]',
+      );
     } finally {
       // Stop local file server if started
       if (server) {
@@ -603,7 +615,18 @@ export class PDFConverter {
       await this.processConvertedFiles(zipPath, extractDir, outputDir);
 
       // Render page images using ImageMagick (replaces Docling's page image generation)
-      await this.renderPageImages(url, outputDir);
+      if (url.startsWith('file://')) {
+        await renderAndUpdatePageImages(
+          url.slice(7),
+          outputDir,
+          this.logger,
+          '[PDFConverter]',
+        );
+      } else {
+        this.logger.warn(
+          '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
+        );
+      }
 
       // Check abort before callback
       if (abortSignal?.aborted) {
@@ -743,119 +766,6 @@ export class PDFConverter {
     return { httpUrl: url };
   }
 
-  private async trackTaskProgress(task: AsyncConversionTask): Promise<void> {
-    const conversionStartTime = Date.now();
-    let lastProgressLine = '';
-
-    const logProgress = (status: {
-      task_status: string;
-      task_position?: number;
-      task_meta?: { total_documents?: number; processed_documents?: number };
-    }) => {
-      const parts: string[] = [`Status: ${status.task_status}`];
-
-      if (status.task_position !== undefined) {
-        parts.push(`position: ${status.task_position}`);
-      }
-
-      const meta = status.task_meta;
-      if (meta) {
-        if (
-          meta.processed_documents !== undefined &&
-          meta.total_documents !== undefined
-        ) {
-          parts.push(
-            `progress: ${meta.processed_documents}/${meta.total_documents}`,
-          );
-        }
-      }
-
-      const progressLine = `\r[PDFConverter] ${parts.join(' | ')}`;
-      if (progressLine !== lastProgressLine) {
-        lastProgressLine = progressLine;
-        process.stdout.write(progressLine);
-      }
-    };
-
-    while (true) {
-      if (Date.now() - conversionStartTime > this.timeout) {
-        throw new Error('Task timeout');
-      }
-
-      const status = await task.poll();
-
-      logProgress(status);
-
-      if (status.task_status === 'success') {
-        this.logger.info('\n[PDFConverter] Conversion completed!');
-        return;
-      }
-
-      if (status.task_status === 'failure') {
-        // Try to get detailed error info from the task result
-        const errorDetails = await this.getTaskFailureDetails(task);
-        const elapsed = Math.round((Date.now() - conversionStartTime) / 1000);
-        this.logger.error(
-          `\n[PDFConverter] Task failed after ${elapsed}s: ${errorDetails}`,
-        );
-        throw new Error(`Task failed: ${errorDetails}`);
-      }
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
-      );
-    }
-  }
-
-  /**
-   * Fetch detailed error information from a failed task result.
-   */
-  private async getTaskFailureDetails(
-    task: AsyncConversionTask,
-  ): Promise<string> {
-    return getTaskFailureDetails(task, this.logger, '[PDFConverter]');
-  }
-
-  private async downloadResult(taskId: string): Promise<void> {
-    this.logger.info(
-      '\n[PDFConverter] Task completed, downloading ZIP file...',
-    );
-
-    const zipResult = await this.client.getTaskResultFile(taskId);
-
-    const zipPath = join(process.cwd(), 'result.zip');
-    this.logger.info('[PDFConverter] Saving ZIP file to:', zipPath);
-
-    if (zipResult.fileStream) {
-      const writeStream = createWriteStream(zipPath);
-      await pipeline(zipResult.fileStream, writeStream);
-      return;
-    }
-
-    if (zipResult.data) {
-      await writeFile(zipPath, zipResult.data);
-      return;
-    }
-
-    // Fallback: direct HTTP download when SDK stream/data unavailable
-    this.logger.warn(
-      '[PDFConverter] SDK file result unavailable, falling back to direct download...',
-    );
-    const baseUrl = this.client.getConfig().baseUrl;
-    const response = await fetch(`${baseUrl}/v1/result/${taskId}`, {
-      headers: { Accept: 'application/zip' },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download ZIP file: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    await writeFile(zipPath, buffer);
-  }
-
   private async processConvertedFiles(
     zipPath: string,
     extractDir: string,
@@ -867,51 +777,6 @@ export class PDFConverter {
       zipPath,
       extractDir,
       outputDir,
-    );
-  }
-
-  /**
-   * Render page images from the source PDF using ImageMagick and update result.json.
-   * Uses jq to update the JSON file without loading it into Node.js memory.
-   * Replaces Docling's generate_page_images which fails on large PDFs
-   * due to memory limits when embedding all page images as base64.
-   */
-  private async renderPageImages(
-    url: string,
-    outputDir: string,
-  ): Promise<void> {
-    if (!url.startsWith('file://')) {
-      this.logger.warn(
-        '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
-      );
-      return;
-    }
-
-    const pdfPath = url.slice(7);
-    this.logger.info(
-      '[PDFConverter] Rendering page images with ImageMagick...',
-    );
-
-    const renderer = new PageRenderer(this.logger);
-    const renderResult = await renderer.renderPages(pdfPath, outputDir);
-
-    // Update result.json with page image URIs using jq to avoid loading large JSON
-    const resultPath = join(outputDir, 'result.json');
-    const tmpPath = resultPath + '.tmp';
-    const jqProgram = `
-      .pages |= with_entries(
-        if (.value.page_no - 1) >= 0 and (.value.page_no - 1) < ${renderResult.pageCount} then
-          .value.image.uri = "pages/page_\\(.value.page_no - 1).png" |
-          .value.image.mimetype = "image/png" |
-          .value.image.dpi = ${PAGE_RENDERING.DEFAULT_DPI}
-        else . end
-      )
-    `;
-    await runJqFileToFile(jqProgram, resultPath, tmpPath);
-    await rename(tmpPath, resultPath);
-
-    this.logger.info(
-      `[PDFConverter] Rendered ${renderResult.pageCount} page images`,
     );
   }
 }

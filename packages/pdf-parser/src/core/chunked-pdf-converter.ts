@@ -10,7 +10,6 @@ import type {
 import { spawnAsync } from '@heripo/shared';
 import {
   copyFileSync,
-  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -18,17 +17,16 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 
-import { PAGE_RENDERING, PDF_CONVERTER } from '../config/constants';
+import { PDF_CONVERTER } from '../config/constants';
 import { DoclingDocumentMerger } from '../processors/docling-document-merger';
 import { ImageExtractor } from '../processors/image-extractor';
-import { PageRenderer } from '../processors/page-renderer';
-import { runJqFileJson, runJqFileToFile } from '../utils/jq';
+import { downloadTaskResult } from '../utils/docling-result-downloader';
+import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
-import { getTaskFailureDetails } from '../utils/task-failure-details';
+import { renderAndUpdatePageImages } from '../utils/page-image-updater';
+import { trackTaskProgress } from '../utils/task-progress-tracker';
 
 /** Configuration for chunked conversion */
 export interface ChunkedConversionConfig {
@@ -162,7 +160,12 @@ export class ChunkedPDFConverter {
 
     try {
       // Step 7: Render page images (ImageMagick, same as non-chunked)
-      await this.renderPageImages(pdfPath, outputDir);
+      await renderAndUpdatePageImages(
+        pdfPath,
+        outputDir,
+        this.logger,
+        '[ChunkedPDFConverter]',
+      );
 
       // Step 7.5: Clean up orphaned pic_ files
       this.cleanupOrphanedPicFiles(resultPath, imagesDir);
@@ -242,11 +245,25 @@ export class ChunkedPDFConverter {
         });
 
         // Poll until completion
-        await this.trackTaskProgress(task);
+        await trackTaskProgress(
+          task,
+          this.timeout,
+          this.logger,
+          '[ChunkedPDFConverter]',
+          {
+            errorPrefix: '[ChunkedPDFConverter] Chunk task ',
+          },
+        );
 
         // Download ZIP result
         const zipPath = join(chunkDir, 'result.zip');
-        await this.downloadResult(task.taskId, zipPath);
+        await downloadTaskResult(
+          this.client,
+          task.taskId,
+          zipPath,
+          this.logger,
+          '[ChunkedPDFConverter]',
+        );
 
         // Extract ZIP and process images
         const extractDir = join(chunkDir, 'extracted');
@@ -322,76 +339,6 @@ export class ChunkedPDFConverter {
     return match ? parseInt(match[1], 10) : 0;
   }
 
-  /** Poll task progress until completion */
-  private async trackTaskProgress(task: {
-    taskId: string;
-    poll: () => Promise<{ task_status: string }>;
-    getResult: () => Promise<{
-      errors?: { message: string }[];
-      status?: string;
-    }>;
-  }): Promise<void> {
-    const startTime = Date.now();
-
-    while (true) {
-      if (Date.now() - startTime > this.timeout) {
-        throw new Error('[ChunkedPDFConverter] Chunk task timeout');
-      }
-
-      const status = await task.poll();
-
-      if (status.task_status === 'success') return;
-
-      if (status.task_status === 'failure') {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        this.logger.error(
-          `[ChunkedPDFConverter] Task ${task.taskId} failed after ${elapsed}s`,
-        );
-        const details = await getTaskFailureDetails(
-          task,
-          this.logger,
-          '[ChunkedPDFConverter]',
-        );
-        throw new Error(`[ChunkedPDFConverter] Chunk task failed: ${details}`);
-      }
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
-      );
-    }
-  }
-
-  /** Download ZIP result for a task */
-  private async downloadResult(taskId: string, zipPath: string): Promise<void> {
-    const zipResult = await this.client.getTaskResultFile(taskId);
-
-    if (zipResult.fileStream) {
-      const writeStream = createWriteStream(zipPath);
-      await pipeline(zipResult.fileStream, writeStream);
-      return;
-    }
-
-    if (zipResult.data) {
-      await writeFile(zipPath, zipResult.data);
-      return;
-    }
-
-    // Fallback: direct HTTP download
-    const baseUrl = this.client.getConfig().baseUrl;
-    const response = await fetch(`${baseUrl}/v1/result/${taskId}`, {
-      headers: { Accept: 'application/zip' },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download chunk ZIP: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    await writeFile(zipPath, buffer);
-  }
-
   /**
    * Relocate images from chunk output directories to the final images directory
    * with global indexing.
@@ -463,37 +410,6 @@ export class ChunkedPDFConverter {
 
     this.logger.info(
       `[ChunkedPDFConverter] Relocated ${picGlobalIndex} pic + ${imageGlobalIndex} image files to ${imagesDir}`,
-    );
-  }
-
-  /** Render page images from PDF using ImageMagick and update result.json */
-  private async renderPageImages(
-    pdfPath: string,
-    outputDir: string,
-  ): Promise<void> {
-    this.logger.info(
-      '[ChunkedPDFConverter] Rendering page images with ImageMagick...',
-    );
-
-    const renderer = new PageRenderer(this.logger);
-    const renderResult = await renderer.renderPages(pdfPath, outputDir);
-
-    const resultPath = join(outputDir, 'result.json');
-    const tmpPath = resultPath + '.tmp';
-    const jqProgram = `
-      .pages |= with_entries(
-        if (.value.page_no - 1) >= 0 and (.value.page_no - 1) < ${renderResult.pageCount} then
-          .value.image.uri = "pages/page_\\(.value.page_no - 1).png" |
-          .value.image.mimetype = "image/png" |
-          .value.image.dpi = ${PAGE_RENDERING.DEFAULT_DPI}
-        else . end
-      )
-    `;
-    await runJqFileToFile(jqProgram, resultPath, tmpPath);
-    await rename(tmpPath, resultPath);
-
-    this.logger.info(
-      `[ChunkedPDFConverter] Rendered ${renderResult.pageCount} page images`,
     );
   }
 
