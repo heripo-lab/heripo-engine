@@ -10,7 +10,6 @@ import type {
 import { spawnAsync } from '@heripo/shared';
 import {
   copyFileSync,
-  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -20,7 +19,6 @@ import {
 } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 
 import { PAGE_RENDERING, PDF_CONVERTER } from '../config/constants';
 import { DoclingDocumentMerger } from '../processors/docling-document-merger';
@@ -359,37 +357,6 @@ export class ChunkedPDFConverter {
         setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
       );
     }
-  }
-
-  /** Download ZIP result for a task */
-  private async downloadResult(taskId: string, zipPath: string): Promise<void> {
-    const zipResult = await this.client.getTaskResultFile(taskId);
-
-    if (zipResult.fileStream) {
-      const writeStream = createWriteStream(zipPath);
-      await pipeline(zipResult.fileStream, writeStream);
-      return;
-    }
-
-    if (zipResult.data) {
-      await writeFile(zipPath, zipResult.data);
-      return;
-    }
-
-    // Fallback: direct HTTP download
-    const baseUrl = this.client.getConfig().baseUrl;
-    const response = await fetch(`${baseUrl}/v1/result/${taskId}`, {
-      headers: { Accept: 'application/zip' },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download chunk ZIP: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    await writeFile(zipPath, buffer);
   }
 
   /**
