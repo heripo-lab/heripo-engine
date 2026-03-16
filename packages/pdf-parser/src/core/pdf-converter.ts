@@ -10,14 +10,9 @@ import type {
 import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { omit } from 'es-toolkit';
 import { copyFileSync, existsSync, rmSync } from 'node:fs';
-import { rename } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import {
-  CHUNKED_CONVERSION,
-  PAGE_RENDERING,
-  PDF_CONVERTER,
-} from '../config/constants';
+import { CHUNKED_CONVERSION, PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { ImageExtractor } from '../processors/image-extractor';
 import { PageRenderer } from '../processors/page-renderer';
@@ -25,8 +20,9 @@ import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { downloadTaskResult } from '../utils/docling-result-downloader';
-import { runJqFileJson, runJqFileToFile } from '../utils/jq';
+import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
+import { renderAndUpdatePageImages } from '../utils/page-image-updater';
 import { getTaskFailureDetails } from '../utils/task-failure-details';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
@@ -611,7 +607,18 @@ export class PDFConverter {
       await this.processConvertedFiles(zipPath, extractDir, outputDir);
 
       // Render page images using ImageMagick (replaces Docling's page image generation)
-      await this.renderPageImages(url, outputDir);
+      if (url.startsWith('file://')) {
+        await renderAndUpdatePageImages(
+          url.slice(7),
+          outputDir,
+          this.logger,
+          '[PDFConverter]',
+        );
+      } else {
+        this.logger.warn(
+          '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
+        );
+      }
 
       // Check abort before callback
       if (abortSignal?.aborted) {
@@ -835,51 +842,6 @@ export class PDFConverter {
       zipPath,
       extractDir,
       outputDir,
-    );
-  }
-
-  /**
-   * Render page images from the source PDF using ImageMagick and update result.json.
-   * Uses jq to update the JSON file without loading it into Node.js memory.
-   * Replaces Docling's generate_page_images which fails on large PDFs
-   * due to memory limits when embedding all page images as base64.
-   */
-  private async renderPageImages(
-    url: string,
-    outputDir: string,
-  ): Promise<void> {
-    if (!url.startsWith('file://')) {
-      this.logger.warn(
-        '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
-      );
-      return;
-    }
-
-    const pdfPath = url.slice(7);
-    this.logger.info(
-      '[PDFConverter] Rendering page images with ImageMagick...',
-    );
-
-    const renderer = new PageRenderer(this.logger);
-    const renderResult = await renderer.renderPages(pdfPath, outputDir);
-
-    // Update result.json with page image URIs using jq to avoid loading large JSON
-    const resultPath = join(outputDir, 'result.json');
-    const tmpPath = resultPath + '.tmp';
-    const jqProgram = `
-      .pages |= with_entries(
-        if (.value.page_no - 1) >= 0 and (.value.page_no - 1) < ${renderResult.pageCount} then
-          .value.image.uri = "pages/page_\\(.value.page_no - 1).png" |
-          .value.image.mimetype = "image/png" |
-          .value.image.dpi = ${PAGE_RENDERING.DEFAULT_DPI}
-        else . end
-      )
-    `;
-    await runJqFileToFile(jqProgram, resultPath, tmpPath);
-    await rename(tmpPath, resultPath);
-
-    this.logger.info(
-      `[PDFConverter] Rendered ${renderResult.pageCount} page images`,
     );
   }
 }

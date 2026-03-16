@@ -11,13 +11,12 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { rename } from 'node:fs/promises';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { DoclingDocumentMerger } from '../processors/docling-document-merger';
-import { PageRenderer } from '../processors/page-renderer';
-import { runJqFileJson, runJqFileToFile } from '../utils/jq';
+import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
+import { renderAndUpdatePageImages } from '../utils/page-image-updater';
 import * as taskFailureDetailsModule from '../utils/task-failure-details';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 
@@ -33,10 +32,6 @@ vi.mock('node:fs', () => ({
   readdirSync: vi.fn(),
   rmSync: vi.fn(),
   writeFileSync: vi.fn(),
-}));
-
-vi.mock('node:fs/promises', () => ({
-  rename: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
@@ -57,13 +52,12 @@ vi.mock('../processors/docling-document-merger', () => ({
   DoclingDocumentMerger: vi.fn(),
 }));
 
-vi.mock('../processors/page-renderer', () => ({
-  PageRenderer: vi.fn(),
-}));
-
 vi.mock('../utils/jq', () => ({
   runJqFileJson: vi.fn(),
-  runJqFileToFile: vi.fn(),
+}));
+
+vi.mock('../utils/page-image-updater', () => ({
+  renderAndUpdatePageImages: vi.fn(),
 }));
 
 vi.mock('../utils/local-file-server', () => ({
@@ -115,7 +109,6 @@ describe('ChunkedPDFConverter', () => {
   let mockBuildOptions: Mock;
   let mockServerInstance: { start: Mock; stop: Mock };
   let mockMergerInstance: { merge: Mock };
-  let mockRendererInstance: { renderPages: Mock };
   let mockTask: { taskId: string; poll: Mock; getResult: Mock };
 
   beforeEach(() => {
@@ -177,18 +170,6 @@ describe('ChunkedPDFConverter', () => {
       return mockMergerInstance as any;
     });
 
-    // Mock PageRenderer
-    mockRendererInstance = {
-      renderPages: vi.fn().mockResolvedValue({
-        pageCount: 25,
-        pagesDir: '/test/cwd/output/report/pages',
-        pageFiles: [],
-      }),
-    };
-    vi.mocked(PageRenderer).mockImplementation(function () {
-      return mockRendererInstance as any;
-    });
-
     // Mock spawnAsync (pdfinfo returning page count)
     vi.mocked(spawnAsync).mockResolvedValue({
       code: 0,
@@ -198,12 +179,6 @@ describe('ChunkedPDFConverter', () => {
 
     // Mock runJqFileJson (returns DoclingDocument per chunk)
     vi.mocked(runJqFileJson).mockResolvedValue(makeDoc());
-
-    // Mock runJqFileToFile
-    vi.mocked(runJqFileToFile).mockResolvedValue(undefined as any);
-
-    // Mock rename
-    vi.mocked(rename).mockResolvedValue(undefined);
 
     // Mock existsSync: default false
     vi.mocked(existsSync).mockReturnValue(false);
@@ -340,7 +315,12 @@ describe('ChunkedPDFConverter', () => {
       expect(mockOnComplete).toHaveBeenCalledWith('/test/cwd/output/report-1');
 
       // Page rendering done
-      expect(mockRendererInstance.renderPages).toHaveBeenCalled();
+      expect(renderAndUpdatePageImages).toHaveBeenCalledWith(
+        '/test/input.pdf',
+        '/test/cwd/output/report-1',
+        logger,
+        '[ChunkedPDFConverter]',
+      );
     });
 
     test('fails when page count detection fails', async () => {
@@ -1003,7 +983,7 @@ describe('ChunkedPDFConverter', () => {
 
       vi.mocked(existsSync).mockReturnValue(true);
 
-      mockRendererInstance.renderPages.mockRejectedValue(
+      vi.mocked(renderAndUpdatePageImages).mockRejectedValue(
         new Error('ImageMagick crashed'),
       );
 
