@@ -23,7 +23,7 @@ import { downloadTaskResult } from '../utils/docling-result-downloader';
 import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { renderAndUpdatePageImages } from '../utils/page-image-updater';
-import { getTaskFailureDetails } from '../utils/task-failure-details';
+import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { ImagePdfConverter } from './image-pdf-converter';
@@ -569,7 +569,15 @@ export class PDFConverter {
 
     try {
       const task = await this.startConversionTask(httpUrl, conversionOptions);
-      await this.trackTaskProgress(task);
+      await trackTaskProgress(
+        task,
+        this.timeout,
+        this.logger,
+        '[PDFConverter]',
+        {
+          showDetailedProgress: true,
+        },
+      );
 
       // Check abort after docling task completes
       if (abortSignal?.aborted) {
@@ -756,79 +764,6 @@ export class PDFConverter {
     }
 
     return { httpUrl: url };
-  }
-
-  private async trackTaskProgress(task: AsyncConversionTask): Promise<void> {
-    const conversionStartTime = Date.now();
-    let lastProgressLine = '';
-
-    const logProgress = (status: {
-      task_status: string;
-      task_position?: number;
-      task_meta?: { total_documents?: number; processed_documents?: number };
-    }) => {
-      const parts: string[] = [`Status: ${status.task_status}`];
-
-      if (status.task_position !== undefined) {
-        parts.push(`position: ${status.task_position}`);
-      }
-
-      const meta = status.task_meta;
-      if (meta) {
-        if (
-          meta.processed_documents !== undefined &&
-          meta.total_documents !== undefined
-        ) {
-          parts.push(
-            `progress: ${meta.processed_documents}/${meta.total_documents}`,
-          );
-        }
-      }
-
-      const progressLine = `\r[PDFConverter] ${parts.join(' | ')}`;
-      if (progressLine !== lastProgressLine) {
-        lastProgressLine = progressLine;
-        process.stdout.write(progressLine);
-      }
-    };
-
-    while (true) {
-      if (Date.now() - conversionStartTime > this.timeout) {
-        throw new Error('Task timeout');
-      }
-
-      const status = await task.poll();
-
-      logProgress(status);
-
-      if (status.task_status === 'success') {
-        this.logger.info('\n[PDFConverter] Conversion completed!');
-        return;
-      }
-
-      if (status.task_status === 'failure') {
-        // Try to get detailed error info from the task result
-        const errorDetails = await this.getTaskFailureDetails(task);
-        const elapsed = Math.round((Date.now() - conversionStartTime) / 1000);
-        this.logger.error(
-          `\n[PDFConverter] Task failed after ${elapsed}s: ${errorDetails}`,
-        );
-        throw new Error(`Task failed: ${errorDetails}`);
-      }
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
-      );
-    }
-  }
-
-  /**
-   * Fetch detailed error information from a failed task result.
-   */
-  private async getTaskFailureDetails(
-    task: AsyncConversionTask,
-  ): Promise<string> {
-    return getTaskFailureDetails(task, this.logger, '[PDFConverter]');
   }
 
   private async processConvertedFiles(

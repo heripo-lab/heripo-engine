@@ -26,7 +26,7 @@ import { downloadTaskResult } from '../utils/docling-result-downloader';
 import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { renderAndUpdatePageImages } from '../utils/page-image-updater';
-import { getTaskFailureDetails } from '../utils/task-failure-details';
+import { trackTaskProgress } from '../utils/task-progress-tracker';
 
 /** Configuration for chunked conversion */
 export interface ChunkedConversionConfig {
@@ -245,7 +245,15 @@ export class ChunkedPDFConverter {
         });
 
         // Poll until completion
-        await this.trackTaskProgress(task);
+        await trackTaskProgress(
+          task,
+          this.timeout,
+          this.logger,
+          '[ChunkedPDFConverter]',
+          {
+            errorPrefix: '[ChunkedPDFConverter] Chunk task ',
+          },
+        );
 
         // Download ZIP result
         const zipPath = join(chunkDir, 'result.zip');
@@ -329,45 +337,6 @@ export class ChunkedPDFConverter {
     }
     const match = result.stdout.match(/^Pages:\s+(\d+)/m);
     return match ? parseInt(match[1], 10) : 0;
-  }
-
-  /** Poll task progress until completion */
-  private async trackTaskProgress(task: {
-    taskId: string;
-    poll: () => Promise<{ task_status: string }>;
-    getResult: () => Promise<{
-      errors?: { message: string }[];
-      status?: string;
-    }>;
-  }): Promise<void> {
-    const startTime = Date.now();
-
-    while (true) {
-      if (Date.now() - startTime > this.timeout) {
-        throw new Error('[ChunkedPDFConverter] Chunk task timeout');
-      }
-
-      const status = await task.poll();
-
-      if (status.task_status === 'success') return;
-
-      if (status.task_status === 'failure') {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        this.logger.error(
-          `[ChunkedPDFConverter] Task ${task.taskId} failed after ${elapsed}s`,
-        );
-        const details = await getTaskFailureDetails(
-          task,
-          this.logger,
-          '[ChunkedPDFConverter]',
-        );
-        throw new Error(`[ChunkedPDFConverter] Chunk task failed: ${details}`);
-      }
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
-      );
-    }
   }
 
   /**

@@ -17,7 +17,7 @@ import { DoclingDocumentMerger } from '../processors/docling-document-merger';
 import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
 import { renderAndUpdatePageImages } from '../utils/page-image-updater';
-import * as taskFailureDetailsModule from '../utils/task-failure-details';
+import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 
 vi.mock('@heripo/shared', () => ({
@@ -64,8 +64,8 @@ vi.mock('../utils/local-file-server', () => ({
   LocalFileServer: vi.fn(),
 }));
 
-vi.mock('../utils/task-failure-details', () => ({
-  getTaskFailureDetails: vi.fn(),
+vi.mock('../utils/task-progress-tracker', () => ({
+  trackTaskProgress: vi.fn(),
 }));
 
 function makeDoc(overrides: Partial<DoclingDocument> = {}): DoclingDocument {
@@ -188,11 +188,6 @@ describe('ChunkedPDFConverter', () => {
 
     // Mock readFileSync: empty JSON by default (for cleanupOrphanedPicFiles)
     vi.mocked(readFileSync).mockReturnValue('{}');
-
-    // Mock getTaskFailureDetails: default returns a generic message
-    vi.mocked(taskFailureDetailsModule.getTaskFailureDetails).mockResolvedValue(
-      'unable to retrieve error details',
-    );
   });
 
   describe('calculateChunks', () => {
@@ -618,25 +613,42 @@ describe('ChunkedPDFConverter', () => {
       );
     });
 
-    test('task poll failure reports error details with taskId and elapsed time', async () => {
+    test('trackTaskProgress is called with correct options per chunk', async () => {
       vi.mocked(spawnAsync).mockResolvedValue({
         code: 0,
         stdout: 'Pages:          5\n',
         stderr: '',
       });
 
-      vi.mocked(
-        taskFailureDetailsModule.getTaskFailureDetails,
-      ).mockResolvedValue('OCR engine crashed');
+      await converter.convertChunked(
+        'file:///test/input.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {},
+        mockBuildOptions,
+      );
 
-      const failingTask = {
-        taskId: 'task-fail',
-        poll: vi.fn().mockResolvedValue({ task_status: 'failure' }),
-        getResult: vi.fn(),
-      };
+      expect(trackTaskProgress).toHaveBeenCalledWith(
+        mockTask,
+        expect.any(Number),
+        logger,
+        '[ChunkedPDFConverter]',
+        { errorPrefix: '[ChunkedPDFConverter] Chunk task ' },
+      );
+    });
 
-      vi.mocked(client.convertSourceAsync as Mock).mockResolvedValue(
-        failingTask,
+    test('chunk task failure propagates through retry logic', async () => {
+      vi.mocked(spawnAsync).mockResolvedValue({
+        code: 0,
+        stdout: 'Pages:          5\n',
+        stderr: '',
+      });
+
+      vi.mocked(trackTaskProgress).mockRejectedValue(
+        new Error(
+          '[ChunkedPDFConverter] Chunk task failed: OCR engine crashed',
+        ),
       );
 
       await expect(
@@ -649,119 +661,6 @@ describe('ChunkedPDFConverter', () => {
           mockBuildOptions,
         ),
       ).rejects.toThrow('OCR engine crashed');
-
-      // Verify detailed failure logging with taskId and elapsed time
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringMatching(
-          /\[ChunkedPDFConverter\] Task task-fail failed after \d+\.\d+s/,
-        ),
-      );
-    });
-
-    test('task poll failure without errors array falls back to status', async () => {
-      vi.mocked(spawnAsync).mockResolvedValue({
-        code: 0,
-        stdout: 'Pages:          5\n',
-        stderr: '',
-      });
-
-      vi.mocked(
-        taskFailureDetailsModule.getTaskFailureDetails,
-      ).mockResolvedValue('status: failure');
-
-      const failingTask = {
-        taskId: 'task-fail',
-        poll: vi.fn().mockResolvedValue({ task_status: 'failure' }),
-        getResult: vi.fn(),
-      };
-
-      vi.mocked(client.convertSourceAsync as Mock).mockResolvedValue(
-        failingTask,
-      );
-
-      await expect(
-        converter.convertChunked(
-          'file:///test/input.pdf',
-          'report-1',
-          mockOnComplete,
-          false,
-          {},
-          mockBuildOptions,
-        ),
-      ).rejects.toThrow('Chunk task failed: status: failure');
-    });
-
-    test('task poll failure with getResult error falls back to unable to retrieve error details', async () => {
-      vi.mocked(spawnAsync).mockResolvedValue({
-        code: 0,
-        stdout: 'Pages:          5\n',
-        stderr: '',
-      });
-
-      // getTaskFailureDetails is already mocked to return 'unable to retrieve error details' by default
-
-      const failingTask = {
-        taskId: 'task-fail',
-        poll: vi.fn().mockResolvedValue({ task_status: 'failure' }),
-        getResult: vi.fn(),
-      };
-
-      vi.mocked(client.convertSourceAsync as Mock).mockResolvedValue(
-        failingTask,
-      );
-
-      await expect(
-        converter.convertChunked(
-          'file:///test/input.pdf',
-          'report-1',
-          mockOnComplete,
-          false,
-          {},
-          mockBuildOptions,
-        ),
-      ).rejects.toThrow('Chunk task failed: unable to retrieve error details');
-
-      // Verify getTaskFailureDetails was called with correct arguments
-      expect(
-        taskFailureDetailsModule.getTaskFailureDetails,
-      ).toHaveBeenCalledWith(failingTask, logger, '[ChunkedPDFConverter]');
-    });
-
-    test('task poll timeout throws error', async () => {
-      vi.mocked(spawnAsync).mockResolvedValue({
-        code: 0,
-        stdout: 'Pages:          5\n',
-        stderr: '',
-      });
-
-      // Use a very short timeout
-      const shortTimeoutConverter = new ChunkedPDFConverter(
-        logger,
-        client,
-        { chunkSize: 10, maxRetries: 0 },
-        1,
-      );
-
-      const hangingTask = {
-        taskId: 'task-hang',
-        poll: vi.fn().mockResolvedValue({ task_status: 'pending' }),
-        getResult: vi.fn(),
-      };
-
-      vi.mocked(client.convertSourceAsync as Mock).mockResolvedValue(
-        hangingTask,
-      );
-
-      await expect(
-        shortTimeoutConverter.convertChunked(
-          'file:///test/input.pdf',
-          'report-1',
-          mockOnComplete,
-          false,
-          {},
-          mockBuildOptions,
-        ),
-      ).rejects.toThrow('Chunk task timeout');
     });
 
     test('chunk temp files are cleaned up after successful conversion', async () => {
