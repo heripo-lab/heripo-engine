@@ -8,32 +8,16 @@ import type {
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
+import { buildLanguageDescription } from '@heripo/model';
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { TEXT_CORRECTION_SYSTEM_PROMPT } from '../prompts/text-correction-prompt';
 import {
   type VlmTextCorrectionOutput,
   vlmTextCorrectionSchema,
 } from '../types/vlm-text-correction-schema';
-
-/** Language display names for prompt context (keyed by ISO 639-1 base language code) */
-const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
-  ko: 'Korean (한국어)',
-  ja: 'Japanese (日本語)',
-  zh: 'Chinese (中文)',
-  en: 'English',
-  fr: 'French (Français)',
-  de: 'German (Deutsch)',
-  es: 'Spanish (Español)',
-  pt: 'Portuguese (Português)',
-  ru: 'Russian (Русский)',
-  uk: 'Ukrainian (Українська)',
-  it: 'Italian (Italiano)',
-};
-
-/** Minimum character overlap ratio to consider a pdftotext line as matching an OCR element */
-const REFERENCE_MATCH_THRESHOLD = 0.4;
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -43,6 +27,9 @@ const DEFAULT_MAX_RETRIES = 3;
 
 /** Default temperature for VLM generation */
 const DEFAULT_TEMPERATURE = 0;
+
+/** Minimum character overlap ratio to accept a pdftotext block as reference */
+const REFERENCE_MATCH_THRESHOLD = 0.4;
 
 /** Type abbreviation codes for text element labels */
 const LABEL_TO_TYPE_CODE: Record<string, string> = {
@@ -57,62 +44,6 @@ const LABEL_TO_TYPE_CODE: Record<string, string> = {
 
 /** Text labels that should be included in VLM correction */
 const TEXT_LABELS = new Set(Object.keys(LABEL_TO_TYPE_CODE));
-
-/**
- * System prompt for VLM text correction.
- * Instructs the VLM to compare OCR text against the page image and fix errors.
- */
-const TEXT_CORRECTION_SYSTEM_PROMPT = `You are a text correction engine for OCR output from Korean archaeological (考古學) report PDFs. Compare OCR text against the page image and reference text to fix errors.
-
-The OCR engine cannot read Chinese characters (漢字/Hanja) correctly. These errors appear as:
-- Random ASCII letters/symbols: 熊津 → "M", 小京制 → "5☆", 故址 → "Bbt"
-- Meaningless Korean syllables: 東明 → "햇배", 金憲昌 → "숲", 總管 → "3씁"
-- Number/symbol noise: 熊川州 → "IEJIM", 湯井郡 → "3#"
-- Hanja dropped entirely: (株)韓國纖維 → (주), (財)忠淸文化財硏究院 → (재)충남문화재연구원
-- Phonetic reading substitution (音讀): 漢字 replaced by Korean pronunciation, e.g. 忠淸文化財硏究院 → 충남문화재연구원, 實玉洞遺蹟 → 실옥동유적
-
-FIX: garbled/wrong Chinese characters, mojibake, encoding artifacts, random ASCII/Korean replacing Hanja, dropped Hanja, phonetic reading substitutions
-KEEP: correct text, structure, punctuation, whitespace
-
-Input format:
-T: (text elements) index|type|text
-   Optional: index|ref|reference_text (PDF text layer for the above element)
-C: (table cells) tableIndex|row,col|text
-   Optional: C_REF: (unused pdftotext blocks as table reference)
-
-FOOTNOTE (fn) SPECIAL INSTRUCTIONS:
-- Footnotes in archaeological reports contain institution names with Hanja that are severely garbled
-- Common pattern: (財)機關名硏究院 → (W)#X1CR003T or (W): 103 or similar ASCII noise
-- When OCR shows patterns like (W), (M), or random ASCII where an institution name should be, READ THE IMAGE directly
-- Institution names follow patterns like: (財)OO文化財硏究院, (株)OO, (社)OO學會
-
-TABLE CELL (C:) SPECIAL INSTRUCTIONS:
-- Table headers often contain Hanja that OCR cannot read: 發刊日, 時代, 調査緣由, 調査機關, 遺蹟名, 類型 및 基數
-- When OCR shows garbled characters like "₩ A", "#쩯및표뽰" in table cells, READ THE IMAGE directly
-- If C_REF is present, use it as additional context for correcting table cells
-
-When a |ref| line is present:
-- It shows text extracted directly from the PDF text layer for that element
-- If OCR text contains garbled characters but ref text looks correct, USE the ref text
-- For long paragraphs, align OCR and ref text segment by segment to identify and fix each garbled portion
-- IMPORTANT: If BOTH OCR and ref text are garbled (e.g. CJK font encoding issues), IGNORE the ref text and READ THE IMAGE directly
-
-When NO |ref| line is present:
-- The PDF text layer could not be matched to this element
-- READ THE IMAGE directly to determine the correct text
-
-Output JSON with corrections:
-tc=[{i:index, s:[{f:"garbled_substring",r:"corrected_text"}, ...]}] for text
-cc=[{ti:tableIndex, r:row, c:col, t:corrected}] for table cells
-
-Substitution rules for tc:
-- 'f': exact garbled/wrong substring from the input text (must match exactly)
-- 'r': the corrected replacement
-- Include ALL garbled portions for each element as separate s entries
-- Order substitutions left-to-right as they appear in the text
-- Do NOT include unchanged text — only the specific substrings that need fixing
-
-If all correct: {"tc":[],"cc":[]}`;
 
 /** Options for VlmTextCorrector */
 export interface VlmTextCorrectorOptions {
@@ -474,16 +405,7 @@ export class VlmTextCorrector {
     if (!documentLanguages?.length) {
       return TEXT_CORRECTION_SYSTEM_PROMPT;
     }
-    const primaryBase = documentLanguages[0].split('-')[0];
-    const primaryName =
-      LANGUAGE_DISPLAY_NAMES[primaryBase] ?? documentLanguages[0];
-    const otherNames = documentLanguages
-      .slice(1)
-      .map((code) => LANGUAGE_DISPLAY_NAMES[code.split('-')[0]] ?? code);
-    const languageDesc =
-      otherNames.length > 0
-        ? `primarily written in ${primaryName}, with ${otherNames.join(', ')} also present`
-        : `written in ${primaryName}`;
+    const languageDesc = buildLanguageDescription(documentLanguages);
     const prefix =
       `LANGUAGE CONTEXT: This document is ${languageDesc}. ` +
       'Focus on correcting characters that do not match this language.\n\n';

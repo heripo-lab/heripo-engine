@@ -7,9 +7,17 @@ import type { VlmPageResult } from '../types/vlm-page-result';
 import type { VlmPageOutput } from '../types/vlm-page-schema';
 import type { VlmQualityIssue } from '../validators/vlm-response-validator';
 
+import {
+  buildLanguageDescription,
+  getLanguageDisplayName,
+} from '@heripo/model';
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 
+import {
+  PAGE_ANALYSIS_PROMPT,
+  TEXT_REFERENCE_PROMPT,
+} from '../prompts/page-analysis-prompt';
 import { toVlmPageResult, vlmPageOutputSchema } from '../types/vlm-page-schema';
 import { VlmResponseValidator } from '../validators/vlm-response-validator';
 
@@ -27,69 +35,6 @@ const EMPTY_PAGE_RETRY_TEMPERATURE = 0.3;
 
 /** Temperature for retrying pages that failed quality validation */
 const QUALITY_RETRY_TEMPERATURE = 0.5;
-
-/** Language display names for VLM prompt context (keyed by ISO 639-1 base language code) */
-const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
-  ko: 'Korean (한국어)',
-  ja: 'Japanese (日本語)',
-  zh: 'Chinese (中文)',
-  en: 'English',
-  fr: 'French (Français)',
-  de: 'German (Deutsch)',
-  es: 'Spanish (Español)',
-  pt: 'Portuguese (Português)',
-  ru: 'Russian (Русский)',
-  uk: 'Ukrainian (Українська)',
-  it: 'Italian (Italiano)',
-};
-
-/**
- * System prompt for VLM page analysis.
- *
- * Instructs the VLM to extract all content elements from a page image
- * using abbreviated field names to reduce output tokens.
- */
-const PAGE_ANALYSIS_PROMPT = `Analyze the page image and extract all content elements in reading order.
-
-You MUST respond with valid JSON only. No markdown, no code fences, no explanation — just the JSON object.
-
-Output a JSON object with a single key "e" containing an array of element objects.
-Each element object MUST include ALL six fields (no field may be omitted):
-- "t": type code string — one of: "tx" (text), "sh" (section_header), "ca" (caption), "fn" (footnote), "ph" (page_header), "pf" (page_footer), "li" (list_item), "pi" (picture), "tb" (table)
-- "c": text content string (empty string "" for pictures)
-- "o": reading order integer (0-based, top-to-bottom, left-to-right)
-- "l": heading level integer (section_header only, 1=top-level). Use null for non-header elements.
-- "m": list marker string (list_item only, e.g. "1.", "•"). Use null for non-list elements.
-- "b": bounding box object {"l", "t", "r", "b"} with normalized coordinates 0.0-1.0, top-left origin. REQUIRED for picture elements, null for others unless known.
-
-## Example Output
-
-For a page with a header, paragraph, picture, caption, and footer:
-
-{"e":[{"t":"ph","c":"Report Title","o":0,"l":null,"m":null,"b":null},{"t":"sh","c":"Chapter 1. Introduction","o":1,"l":1,"m":null,"b":null},{"t":"tx","c":"This is the first paragraph of the document.","o":2,"l":null,"m":null,"b":null},{"t":"pi","c":"","o":3,"l":null,"m":null,"b":{"l":0.1,"t":0.4,"r":0.9,"b":0.7}},{"t":"ca","c":"Figure 1. Site overview","o":4,"l":null,"m":null,"b":null},{"t":"pf","c":"- 1 -","o":5,"l":null,"m":null,"b":null}]}
-
-## Rules
-
-- Every element MUST include all six fields (t, c, o, l, m, b). Use null for inapplicable fields.
-- Preserve original language and characters exactly
-- Follow natural reading order (top→bottom, left→right for multi-column)
-- Always include bounding box for picture elements
-- For tables: extract visible cell text as content
-- For text-heavy pages: extract ALL visible text as "tx" elements. Never return an empty array if the page contains visible text.
-- If the page contains only body text paragraphs, output each paragraph as a separate "tx" element
-- CRITICAL: You are an OCR engine, NOT an image describer. The "c" field must contain the ACTUAL text characters visible on the page, transcribed verbatim. NEVER output meta-descriptions such as "The image contains...", "The text is not legible...", or "exact transcription is not possible". Always attempt to read and transcribe every visible character, regardless of text size, contrast, or resolution.
-- If text appears blurry or low-contrast, still output your best-effort transcription of the actual characters rather than a description of the image.`;
-
-/** Prompt block for injecting pdftotext reference text */
-const TEXT_REFERENCE_PROMPT =
-  `TEXT REFERENCE: The following text was extracted from the PDF text layer of this page. ` +
-  `This text may be accurate, partially correct, or completely garbled/empty depending ` +
-  `on how the PDF was created. Scanned or image-based PDFs may produce no text or garbage characters.\n\n` +
-  `- If the extracted text looks correct and matches the page image, use it as-is for the "c" field. ` +
-  `Focus on identifying element types, reading order, and bounding boxes.\n` +
-  `- If the extracted text is garbled, empty, or clearly wrong, IGNORE it entirely ` +
-  `and perform OCR from the image as usual.\n` +
-  `- Do NOT blindly trust the extracted text — always verify against what you see in the image.`;
 
 /** Options for VlmPageProcessor */
 export interface VlmPageProcessorOptions {
@@ -409,14 +354,7 @@ export class VlmPageProcessor {
    * Build the initial prompt with language context prepended.
    */
   private buildLanguageAwarePrompt(documentLanguages: string[]): string {
-    const primaryName = this.getLanguageDisplayName(documentLanguages[0]);
-    const otherNames = documentLanguages
-      .slice(1)
-      .map((code) => this.getLanguageDisplayName(code));
-    const languageDesc =
-      otherNames.length > 0
-        ? `primarily written in ${primaryName}, with ${otherNames.join(', ')} also present`
-        : `written in ${primaryName}`;
+    const languageDesc = buildLanguageDescription(documentLanguages);
     const prefix =
       `LANGUAGE CONTEXT: This document is ${languageDesc}. ` +
       'The extracted text MUST be in this language. ' +
@@ -436,7 +374,7 @@ export class VlmPageProcessor {
     ];
 
     const primaryDisplayName = documentLanguages?.length
-      ? this.getLanguageDisplayName(documentLanguages[0])
+      ? getLanguageDisplayName(documentLanguages[0])
       : 'unknown';
 
     /* v8 ignore start -- all branches tested; V8 undercounts if/else-if per call site */
@@ -477,15 +415,4 @@ export class VlmPageProcessor {
 
     return warnings.join('\n') + '\n\n' + PAGE_ANALYSIS_PROMPT;
   }
-
-  /**
-   * Get human-readable display name for a BCP 47 or ISO 639-1 language code.
-   */
-  /* v8 ignore start -- defensive fallback; script_anomaly always implies documentLanguages is set */
-  private getLanguageDisplayName(code?: string): string {
-    if (!code) return 'unknown';
-    const baseCode = code.split('-')[0];
-    return LANGUAGE_DISPLAY_NAMES[baseCode] ?? code;
-  }
-  /* v8 ignore stop */
 }
