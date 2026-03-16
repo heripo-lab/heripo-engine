@@ -1,4 +1,4 @@
-import type { Bcp47LanguageTag } from './bcp47-language-tag';
+import type { Bcp47LanguageTag } from '../language/bcp47-language-tag';
 
 /**
  * Result of the OCR strategy sampling phase.

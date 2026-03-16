@@ -55,12 +55,20 @@
     "build": "pnpm clean && tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "TEST_MODE=ci vitest run --coverage",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:watch": "vitest --coverage",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix"
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
     "@heripo/tsup-config": "workspace:*",
-    "tsup": "catalog:"
+    "@heripo/vitest-config": "workspace:*",
+    "@vitest/coverage-v8": "catalog:",
+    "tsup": "catalog:",
+    "vitest": "catalog:"
   }
 }

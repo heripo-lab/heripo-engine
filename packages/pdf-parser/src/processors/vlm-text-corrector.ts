@@ -8,32 +8,17 @@ import type {
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
+import { buildLanguageDescription } from '@heripo/model';
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { TEXT_CORRECTION_SYSTEM_PROMPT } from '../prompts/text-correction-prompt';
 import {
   type VlmTextCorrectionOutput,
   vlmTextCorrectionSchema,
 } from '../types/vlm-text-correction-schema';
-
-/** Language display names for prompt context (keyed by ISO 639-1 base language code) */
-const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
-  ko: 'Korean (한국어)',
-  ja: 'Japanese (日本語)',
-  zh: 'Chinese (中文)',
-  en: 'English',
-  fr: 'French (Français)',
-  de: 'German (Deutsch)',
-  es: 'Spanish (Español)',
-  pt: 'Portuguese (Português)',
-  ru: 'Russian (Русский)',
-  uk: 'Ukrainian (Українська)',
-  it: 'Italian (Italiano)',
-};
-
-/** Minimum character overlap ratio to consider a pdftotext line as matching an OCR element */
-const REFERENCE_MATCH_THRESHOLD = 0.4;
+import { matchTextToReferenceWithUnused } from '../utils/text-reference-matcher';
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -474,16 +459,7 @@ export class VlmTextCorrector {
     if (!documentLanguages?.length) {
       return TEXT_CORRECTION_SYSTEM_PROMPT;
     }
-    const primaryBase = documentLanguages[0].split('-')[0];
-    const primaryName =
-      LANGUAGE_DISPLAY_NAMES[primaryBase] ?? documentLanguages[0];
-    const otherNames = documentLanguages
-      .slice(1)
-      .map((code) => LANGUAGE_DISPLAY_NAMES[code.split('-')[0]] ?? code);
-    const languageDesc =
-      otherNames.length > 0
-        ? `primarily written in ${primaryName}, with ${otherNames.join(', ')} also present`
-        : `written in ${primaryName}`;
+    const languageDesc = buildLanguageDescription(documentLanguages);
     const prefix =
       `LANGUAGE CONTEXT: This document is ${languageDesc}. ` +
       'Focus on correcting characters that do not match this language.\n\n';

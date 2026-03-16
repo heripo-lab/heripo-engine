@@ -7,9 +7,17 @@ import type { VlmPageResult } from '../types/vlm-page-result';
 import type { VlmPageOutput } from '../types/vlm-page-schema';
 import type { VlmQualityIssue } from '../validators/vlm-response-validator';
 
+import {
+  buildLanguageDescription,
+  getLanguageDisplayName,
+} from '@heripo/model';
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { readFileSync } from 'node:fs';
 
+import {
+  PAGE_ANALYSIS_PROMPT,
+  TEXT_REFERENCE_PROMPT,
+} from '../prompts/page-analysis-prompt';
 import { toVlmPageResult, vlmPageOutputSchema } from '../types/vlm-page-schema';
 import { VlmResponseValidator } from '../validators/vlm-response-validator';
 
@@ -409,14 +417,7 @@ export class VlmPageProcessor {
    * Build the initial prompt with language context prepended.
    */
   private buildLanguageAwarePrompt(documentLanguages: string[]): string {
-    const primaryName = this.getLanguageDisplayName(documentLanguages[0]);
-    const otherNames = documentLanguages
-      .slice(1)
-      .map((code) => this.getLanguageDisplayName(code));
-    const languageDesc =
-      otherNames.length > 0
-        ? `primarily written in ${primaryName}, with ${otherNames.join(', ')} also present`
-        : `written in ${primaryName}`;
+    const languageDesc = buildLanguageDescription(documentLanguages);
     const prefix =
       `LANGUAGE CONTEXT: This document is ${languageDesc}. ` +
       'The extracted text MUST be in this language. ' +
@@ -436,7 +437,7 @@ export class VlmPageProcessor {
     ];
 
     const primaryDisplayName = documentLanguages?.length
-      ? this.getLanguageDisplayName(documentLanguages[0])
+      ? getLanguageDisplayName(documentLanguages[0])
       : 'unknown';
 
     /* v8 ignore start -- all branches tested; V8 undercounts if/else-if per call site */
@@ -477,15 +478,4 @@ export class VlmPageProcessor {
 
     return warnings.join('\n') + '\n\n' + PAGE_ANALYSIS_PROMPT;
   }
-
-  /**
-   * Get human-readable display name for a BCP 47 or ISO 639-1 language code.
-   */
-  /* v8 ignore start -- defensive fallback; script_anomaly always implies documentLanguages is set */
-  private getLanguageDisplayName(code?: string): string {
-    if (!code) return 'unknown';
-    const baseCode = code.split('-')[0];
-    return LANGUAGE_DISPLAY_NAMES[baseCode] ?? code;
-  }
-  /* v8 ignore stop */
 }
