@@ -869,49 +869,4 @@ export class PDFConverter {
       outputDir,
     );
   }
-
-  /**
-   * Render page images from the source PDF using ImageMagick and update result.json.
-   * Uses jq to update the JSON file without loading it into Node.js memory.
-   * Replaces Docling's generate_page_images which fails on large PDFs
-   * due to memory limits when embedding all page images as base64.
-   */
-  private async renderPageImages(
-    url: string,
-    outputDir: string,
-  ): Promise<void> {
-    if (!url.startsWith('file://')) {
-      this.logger.warn(
-        '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
-      );
-      return;
-    }
-
-    const pdfPath = url.slice(7);
-    this.logger.info(
-      '[PDFConverter] Rendering page images with ImageMagick...',
-    );
-
-    const renderer = new PageRenderer(this.logger);
-    const renderResult = await renderer.renderPages(pdfPath, outputDir);
-
-    // Update result.json with page image URIs using jq to avoid loading large JSON
-    const resultPath = join(outputDir, 'result.json');
-    const tmpPath = resultPath + '.tmp';
-    const jqProgram = `
-      .pages |= with_entries(
-        if (.value.page_no - 1) >= 0 and (.value.page_no - 1) < ${renderResult.pageCount} then
-          .value.image.uri = "pages/page_\\(.value.page_no - 1).png" |
-          .value.image.mimetype = "image/png" |
-          .value.image.dpi = ${PAGE_RENDERING.DEFAULT_DPI}
-        else . end
-      )
-    `;
-    await runJqFileToFile(jqProgram, resultPath, tmpPath);
-    await rename(tmpPath, resultPath);
-
-    this.logger.info(
-      `[PDFConverter] Rendered ${renderResult.pageCount} page images`,
-    );
-  }
 }

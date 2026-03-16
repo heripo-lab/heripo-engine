@@ -17,16 +17,17 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { PAGE_RENDERING, PDF_CONVERTER } from '../config/constants';
+import { PDF_CONVERTER } from '../config/constants';
 import { DoclingDocumentMerger } from '../processors/docling-document-merger';
 import { ImageExtractor } from '../processors/image-extractor';
-import { PageRenderer } from '../processors/page-renderer';
-import { runJqFileJson, runJqFileToFile } from '../utils/jq';
+import { downloadTaskResult } from '../utils/docling-result-downloader';
+import { runJqFileJson } from '../utils/jq';
 import { LocalFileServer } from '../utils/local-file-server';
-import { getTaskFailureDetails } from '../utils/task-failure-details';
+import { renderAndUpdatePageImages } from '../utils/page-image-updater';
+import { trackTaskProgress } from '../utils/task-progress-tracker';
+import { buildConversionOptions } from './conversion-options-builder';
 
 /** Configuration for chunked conversion */
 export interface ChunkedConversionConfig {
@@ -160,7 +161,12 @@ export class ChunkedPDFConverter {
 
     try {
       // Step 7: Render page images (ImageMagick, same as non-chunked)
-      await this.renderPageImages(pdfPath, outputDir);
+      await renderAndUpdatePageImages(
+        pdfPath,
+        outputDir,
+        this.logger,
+        '[ChunkedPDFConverter]',
+      );
 
       // Step 7.5: Clean up orphaned pic_ files
       this.cleanupOrphanedPicFiles(resultPath, imagesDir);
@@ -430,37 +436,6 @@ export class ChunkedPDFConverter {
 
     this.logger.info(
       `[ChunkedPDFConverter] Relocated ${picGlobalIndex} pic + ${imageGlobalIndex} image files to ${imagesDir}`,
-    );
-  }
-
-  /** Render page images from PDF using ImageMagick and update result.json */
-  private async renderPageImages(
-    pdfPath: string,
-    outputDir: string,
-  ): Promise<void> {
-    this.logger.info(
-      '[ChunkedPDFConverter] Rendering page images with ImageMagick...',
-    );
-
-    const renderer = new PageRenderer(this.logger);
-    const renderResult = await renderer.renderPages(pdfPath, outputDir);
-
-    const resultPath = join(outputDir, 'result.json');
-    const tmpPath = resultPath + '.tmp';
-    const jqProgram = `
-      .pages |= with_entries(
-        if (.value.page_no - 1) >= 0 and (.value.page_no - 1) < ${renderResult.pageCount} then
-          .value.image.uri = "pages/page_\\(.value.page_no - 1).png" |
-          .value.image.mimetype = "image/png" |
-          .value.image.dpi = ${PAGE_RENDERING.DEFAULT_DPI}
-        else . end
-      )
-    `;
-    await runJqFileToFile(jqProgram, resultPath, tmpPath);
-    await rename(tmpPath, resultPath);
-
-    this.logger.info(
-      `[ChunkedPDFConverter] Rendered ${renderResult.pageCount} page images`,
     );
   }
 
