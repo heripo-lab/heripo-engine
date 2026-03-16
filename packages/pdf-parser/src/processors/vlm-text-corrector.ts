@@ -18,7 +18,6 @@ import {
   type VlmTextCorrectionOutput,
   vlmTextCorrectionSchema,
 } from '../types/vlm-text-correction-schema';
-import { matchTextToReferenceWithUnused } from '../utils/text-reference-matcher';
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -28,6 +27,9 @@ const DEFAULT_MAX_RETRIES = 3;
 
 /** Default temperature for VLM generation */
 const DEFAULT_TEMPERATURE = 0;
+
+/** Minimum character overlap ratio to accept a pdftotext block as reference */
+const REFERENCE_MATCH_THRESHOLD = 0.4;
 
 /** Type abbreviation codes for text element labels */
 const LABEL_TO_TYPE_CODE: Record<string, string> = {
