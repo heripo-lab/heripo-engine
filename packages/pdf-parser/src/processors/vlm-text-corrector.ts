@@ -19,6 +19,12 @@ import {
   vlmTextCorrectionSchema,
 } from '../types/vlm-text-correction-schema';
 import { matchTextToReferenceWithUnused } from '../utils/text-reference-matcher';
+import {
+  LABEL_TO_TYPE_CODE,
+  applyCorrections,
+  getPageTables,
+  getPageTexts,
+} from './correction-applier';
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -28,20 +34,6 @@ const DEFAULT_MAX_RETRIES = 3;
 
 /** Default temperature for VLM generation */
 const DEFAULT_TEMPERATURE = 0;
-
-/** Type abbreviation codes for text element labels */
-const LABEL_TO_TYPE_CODE: Record<string, string> = {
-  section_header: 'sh',
-  text: 'tx',
-  caption: 'ca',
-  footnote: 'fn',
-  list_item: 'li',
-  page_header: 'ph',
-  page_footer: 'pf',
-};
-
-/** Text labels that should be included in VLM correction */
-const TEXT_LABELS = new Set(Object.keys(LABEL_TO_TYPE_CODE));
 
 /** Options for VlmTextCorrector */
 export interface VlmTextCorrectorOptions {
@@ -166,7 +158,7 @@ export class VlmTextCorrector {
     for (let i = 0; i < pageNumbers.length; i++) {
       const corrections = results[i];
       if (corrections === null) continue;
-      this.applyCorrections(doc, pageNumbers[i], corrections);
+      applyCorrections(doc, pageNumbers[i], corrections, this.logger);
     }
 
     // Save corrected document
@@ -205,8 +197,8 @@ export class VlmTextCorrector {
     options?: VlmTextCorrectorOptions,
   ): Promise<VlmTextCorrectionOutput | null> {
     try {
-      const pageTexts = this.getPageTexts(doc, pageNo);
-      const pageTables = this.getPageTables(doc, pageNo);
+      const pageTexts = getPageTexts(doc, pageNo);
+      const pageTables = getPageTables(doc, pageNo);
 
       // Skip pages with no text or table content
       if (pageTexts.length === 0 && pageTables.length === 0) {
@@ -298,45 +290,6 @@ export class VlmTextCorrector {
   }
 
   /**
-   * Get text items on a specific page, with their indices for prompt building.
-   */
-  private getPageTexts(
-    doc: DoclingDocument,
-    pageNo: number,
-  ): Array<{ index: number; item: DoclingTextItem }> {
-    const results: Array<{ index: number; item: DoclingTextItem }> = [];
-
-    for (let i = 0; i < doc.texts.length; i++) {
-      const item = doc.texts[i];
-      if (!TEXT_LABELS.has(item.label)) continue;
-      if (item.prov.some((p) => p.page_no === pageNo)) {
-        results.push({ index: i, item });
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * Get table items on a specific page, with their indices.
-   */
-  private getPageTables(
-    doc: DoclingDocument,
-    pageNo: number,
-  ): Array<{ index: number; item: DoclingTableItem }> {
-    const results: Array<{ index: number; item: DoclingTableItem }> = [];
-
-    for (let i = 0; i < doc.tables.length; i++) {
-      const item = doc.tables[i];
-      if (item.prov.some((p) => p.page_no === pageNo)) {
-        results.push({ index: i, item });
-      }
-    }
-
-    return results;
-  }
-
-  /**
    * Build compact user prompt for a page.
    *
    * Format:
@@ -417,73 +370,5 @@ export class VlmTextCorrector {
   private readPageImage(outputDir: string, pageNo: number): Uint8Array {
     const imagePath = join(outputDir, 'pages', `page_${pageNo - 1}.png`);
     return new Uint8Array(readFileSync(imagePath));
-  }
-
-  /**
-   * Apply VLM corrections to the DoclingDocument.
-   */
-  private applyCorrections(
-    doc: DoclingDocument,
-    pageNo: number,
-    corrections: VlmTextCorrectionOutput,
-  ): void {
-    // Apply text corrections (substitution-based)
-    if (corrections.tc.length > 0) {
-      const pageTexts = this.getPageTexts(doc, pageNo);
-      for (const correction of corrections.tc) {
-        if (correction.i >= 0 && correction.i < pageTexts.length) {
-          const docIndex = pageTexts[correction.i].index;
-          let text = doc.texts[docIndex].text;
-          for (const sub of correction.s) {
-            const idx = text.indexOf(sub.f);
-            if (idx >= 0) {
-              text =
-                text.substring(0, idx) +
-                sub.r +
-                text.substring(idx + sub.f.length);
-            } else {
-              this.logger.warn(
-                `[VlmTextCorrector] Page ${pageNo}, text ${correction.i}: ` +
-                  `find string not found, skipping substitution`,
-              );
-            }
-          }
-          if (text !== doc.texts[docIndex].text) {
-            doc.texts[docIndex].text = text;
-            doc.texts[docIndex].orig = text;
-          }
-        }
-      }
-    }
-
-    // Apply cell corrections
-    if (corrections.cc.length > 0) {
-      const pageTables = this.getPageTables(doc, pageNo);
-      for (const correction of corrections.cc) {
-        if (correction.ti >= 0 && correction.ti < pageTables.length) {
-          const table = pageTables[correction.ti].item;
-
-          // Update table_cells
-          for (const cell of table.data.table_cells) {
-            if (
-              cell.start_row_offset_idx === correction.r &&
-              cell.start_col_offset_idx === correction.c
-            ) {
-              cell.text = correction.t;
-              break;
-            }
-          }
-
-          // Sync grid cell (grid stores separate objects from table_cells)
-          const gridRow = table.data.grid[correction.r];
-          if (gridRow) {
-            const gridCell = gridRow[correction.c];
-            if (gridCell) {
-              gridCell.text = correction.t;
-            }
-          }
-        }
-      }
-    }
   }
 }
