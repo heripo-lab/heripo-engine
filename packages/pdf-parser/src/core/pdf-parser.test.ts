@@ -892,7 +892,7 @@ describe('PDFParser', () => {
     });
   });
 
-  describe('strategy-based flow (parseWithStrategy)', () => {
+  describe('strategy-based flow', () => {
     test('parse routes to strategy flow when strategySamplerModel is provided', async () => {
       vi.mocked(platform).mockReturnValue('darwin');
       vi.mocked(execSync as any).mockImplementation((cmd: string) => {
