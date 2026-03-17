@@ -3,12 +3,15 @@ import type { TokenUsageReport } from '@heripo/model';
 import type { DoclingAPIClient } from 'docling-sdk';
 
 import { Docling } from 'docling-sdk';
-import { execSync } from 'node:child_process';
-import { platform } from 'node:os';
 import { join } from 'node:path';
 
 import { PDF_PARSER } from '../config/constants';
 import { DoclingEnvironment } from '../environment/docling-environment';
+import {
+  checkCommandExists,
+  checkMacOSVersion,
+  checkOperatingSystem,
+} from '../utils/system-checks';
 import {
   type ConversionCompleteCallback,
   type PDFConvertOptions,
@@ -119,15 +122,29 @@ export class PDFParser {
   async init(): Promise<void> {
     this.logger.info('[PDFParser] Initializing...');
 
-    this.checkOperatingSystem();
-    this.checkJqInstalled();
-    this.checkPopplerInstalled();
-    this.checkMacOSVersion();
+    checkOperatingSystem();
+    checkCommandExists(
+      'jq',
+      'jq is not installed. Please install jq using: brew install jq',
+    );
+    checkCommandExists(
+      'pdftotext',
+      'poppler is not installed. Please install poppler using: brew install poppler',
+    );
+    checkMacOSVersion();
 
     // Check ImageMagick/Ghostscript only for local server mode with fallback enabled
     if (this.enableImagePdfFallback && !this.baseUrl) {
-      this.checkImageMagickInstalled();
-      this.checkGhostscriptInstalled();
+      checkCommandExists(
+        'magick',
+        'ImageMagick is not installed but enableImagePdfFallback is enabled. ' +
+          'Please install ImageMagick using: brew install imagemagick',
+      );
+      checkCommandExists(
+        'gs',
+        'Ghostscript is not installed but enableImagePdfFallback is enabled. ' +
+          'Please install Ghostscript using: brew install ghostscript',
+      );
     } else if (this.enableImagePdfFallback && this.baseUrl) {
       this.logger.warn(
         '[PDFParser] enableImagePdfFallback is ignored when using external server (baseUrl)',
@@ -167,79 +184,6 @@ export class PDFParser {
     } catch (error) {
       this.logger.error('[PDFParser] Initialization failed:', error);
       throw new Error(`Failed to initialize PDFParser: ${error}`);
-    }
-  }
-
-  private checkOperatingSystem(): void {
-    if (platform() !== 'darwin') {
-      throw new Error(
-        'PDFParser is only supported on macOS. Current platform: ' + platform(),
-      );
-    }
-  }
-
-  private checkJqInstalled(): void {
-    try {
-      execSync('which jq', { stdio: 'ignore' });
-    } catch {
-      throw new Error(
-        'jq is not installed. Please install jq using: brew install jq',
-      );
-    }
-  }
-
-  private checkPopplerInstalled(): void {
-    try {
-      execSync('which pdftotext', { stdio: 'ignore' });
-    } catch {
-      throw new Error(
-        'poppler is not installed. Please install poppler using: brew install poppler',
-      );
-    }
-  }
-
-  private checkMacOSVersion(): void {
-    try {
-      const versionOutput = execSync('sw_vers -productVersion', {
-        encoding: 'utf-8',
-      }).trim();
-      const versionMatch = versionOutput.match(/^(\d+)\.(\d+)/);
-      if (versionMatch) {
-        const major = parseInt(versionMatch[1]);
-        const minor = parseInt(versionMatch[2]);
-        if (major < 10 || (major === 10 && minor < 15)) {
-          throw new Error(
-            `macOS 10.15 or later is required. Current version: ${versionOutput}`,
-          );
-        }
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('macOS 10.15')) {
-        throw error;
-      }
-      throw new Error('Failed to check macOS version');
-    }
-  }
-
-  private checkImageMagickInstalled(): void {
-    try {
-      execSync('which magick', { stdio: 'ignore' });
-    } catch {
-      throw new Error(
-        'ImageMagick is not installed but enableImagePdfFallback is enabled. ' +
-          'Please install ImageMagick using: brew install imagemagick',
-      );
-    }
-  }
-
-  private checkGhostscriptInstalled(): void {
-    try {
-      execSync('which gs', { stdio: 'ignore' });
-    } catch {
-      throw new Error(
-        'Ghostscript is not installed but enableImagePdfFallback is enabled. ' +
-          'Please install Ghostscript using: brew install ghostscript',
-      );
     }
   }
 
@@ -350,8 +294,16 @@ export class PDFParser {
 
     // Check ImageMagick/Ghostscript for forceImagePdf (lazy check at parse time)
     if (options.forceImagePdf && !this.baseUrl) {
-      this.checkImageMagickInstalled();
-      this.checkGhostscriptInstalled();
+      checkCommandExists(
+        'magick',
+        'ImageMagick is not installed but enableImagePdfFallback is enabled. ' +
+          'Please install ImageMagick using: brew install imagemagick',
+      );
+      checkCommandExists(
+        'gs',
+        'Ghostscript is not installed but enableImagePdfFallback is enabled. ' +
+          'Please install Ghostscript using: brew install ghostscript',
+      );
     }
 
     // Use strategy-based flow when new options are provided
@@ -359,99 +311,17 @@ export class PDFParser {
       options.strategySamplerModel !== undefined ||
       options.forcedMethod !== undefined;
 
-    if (useStrategyFlow) {
-      return this.parseWithStrategy(
-        url,
-        reportId,
-        onComplete,
-        cleanupAfterCallback,
-        options,
-        abortSignal,
+    return this.executeWithRecovery(async () => {
+      const effectiveFallbackEnabled =
+        this.enableImagePdfFallback && !this.baseUrl;
+      const converter = new PDFConverter(
+        this.logger,
+        this.client!,
+        effectiveFallbackEnabled,
+        this.timeout,
       );
-    }
 
-    // Enable recovery only for local server mode
-    const canRecover = !this.baseUrl && this.port !== undefined;
-    const maxAttempts = PDF_PARSER.MAX_SERVER_RECOVERY_ATTEMPTS;
-    let attempt = 0;
-
-    while (attempt <= maxAttempts) {
-      try {
-        // Enable fallback only for local server mode
-        const effectiveFallbackEnabled =
-          this.enableImagePdfFallback && !this.baseUrl;
-        const converter = new PDFConverter(
-          this.logger,
-          this.client,
-          effectiveFallbackEnabled,
-          this.timeout,
-        );
-        return await converter.convert(
-          url,
-          reportId,
-          onComplete,
-          cleanupAfterCallback,
-          options,
-          abortSignal,
-        );
-      } catch (error) {
-        // If aborted, don't retry - re-throw immediately
-        if (abortSignal?.aborted) {
-          throw error;
-        }
-
-        // Attempt server recovery on ECONNREFUSED (server crashed)
-        if (
-          canRecover &&
-          this.isConnectionRefusedError(error) &&
-          attempt < maxAttempts
-        ) {
-          this.logger.warn(
-            '[PDFParser] Connection refused, attempting server recovery...',
-          );
-          await this.restartServer();
-          attempt++;
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    /* v8 ignore start */
-    return null;
-    /* v8 ignore stop */
-  }
-
-  /**
-   * Parse a PDF using OCR strategy sampling to decide between ocrmac and VLM.
-   * Delegates to PDFConverter.convertWithStrategy() and returns the token usage report.
-   *
-   * Server recovery (restart on ECONNREFUSED) is preserved because
-   * the ocrmac path still uses the Docling server.
-   */
-  private async parseWithStrategy(
-    url: string,
-    reportId: string,
-    onComplete: ConversionCompleteCallback,
-    cleanupAfterCallback: boolean,
-    options: PDFConvertOptions,
-    abortSignal?: AbortSignal,
-  ): Promise<TokenUsageReport | null> {
-    // Enable recovery only for local server mode
-    const canRecover = !this.baseUrl && this.port !== undefined;
-    const maxAttempts = PDF_PARSER.MAX_SERVER_RECOVERY_ATTEMPTS;
-    let attempt = 0;
-
-    while (attempt <= maxAttempts) {
-      try {
-        const effectiveFallbackEnabled =
-          this.enableImagePdfFallback && !this.baseUrl;
-        const converter = new PDFConverter(
-          this.logger,
-          this.client!,
-          effectiveFallbackEnabled,
-          this.timeout,
-        );
+      if (useStrategyFlow) {
         const result = await converter.convertWithStrategy(
           url,
           reportId,
@@ -461,13 +331,36 @@ export class PDFParser {
           abortSignal,
         );
         return result.tokenUsageReport;
-      } catch (error) {
-        // If aborted, don't retry - re-throw immediately
-        if (abortSignal?.aborted) {
-          throw error;
-        }
+      }
 
-        // Attempt server recovery on ECONNREFUSED (server crashed)
+      return converter.convert(
+        url,
+        reportId,
+        onComplete,
+        cleanupAfterCallback,
+        options,
+        abortSignal,
+      );
+    }, abortSignal);
+  }
+
+  /**
+   * Execute a function with automatic server recovery on ECONNREFUSED errors.
+   * Recovery is only attempted in local server mode (no baseUrl, port defined).
+   */
+  private async executeWithRecovery<T>(
+    fn: () => Promise<T>,
+    abortSignal?: AbortSignal,
+  ): Promise<T> {
+    const canRecover = !this.baseUrl && this.port !== undefined;
+    const maxAttempts = PDF_PARSER.MAX_SERVER_RECOVERY_ATTEMPTS;
+    let attempt = 0;
+
+    while (attempt <= maxAttempts) {
+      try {
+        return await fn();
+      } catch (error) {
+        if (abortSignal?.aborted) throw error;
         if (
           canRecover &&
           this.isConnectionRefusedError(error) &&
@@ -485,7 +378,7 @@ export class PDFParser {
     }
 
     /* v8 ignore start */
-    return null;
+    return null as T;
     /* v8 ignore stop */
   }
 

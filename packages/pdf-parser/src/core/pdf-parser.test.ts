@@ -1,18 +1,15 @@
 import * as DoclingSdk from 'docling-sdk';
-import { execSync } from 'node:child_process';
-import { platform } from 'node:os';
 import { describe, expect, test, vi } from 'vitest';
 
 import * as EnvMod from '../environment/docling-environment';
+import * as SystemChecks from '../utils/system-checks';
 import * as ConvMod from './pdf-converter';
 import { PDFParser } from './pdf-parser';
 
-vi.mock('node:os', () => ({
-  platform: vi.fn(() => 'darwin'),
-}));
-
-vi.mock('node:child_process', () => ({
-  execSync: vi.fn(() => ''),
+vi.mock('../utils/system-checks', () => ({
+  checkCommandExists: vi.fn(),
+  checkOperatingSystem: vi.fn(),
+  checkMacOSVersion: vi.fn(),
 }));
 
 vi.mock('docling-sdk', () => {
@@ -75,13 +72,6 @@ const convertWithStrategyMock = (ConvMod as any)
 
 describe('PDFParser', () => {
   test('init with external server (baseUrl) succeeds and waits for health', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      // Return a non-matching version string to cover the versionMatch === null branch
-      if (cmd.startsWith('sw_vers')) return 'unknown-version-output';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
 
     const logger = makeLogger();
@@ -92,6 +82,16 @@ describe('PDFParser', () => {
     });
     await parser.init();
 
+    expect(SystemChecks.checkOperatingSystem).toHaveBeenCalled();
+    expect(SystemChecks.checkCommandExists).toHaveBeenCalledWith(
+      'jq',
+      expect.any(String),
+    );
+    expect(SystemChecks.checkCommandExists).toHaveBeenCalledWith(
+      'pdftotext',
+      expect.any(String),
+    );
+    expect(SystemChecks.checkMacOSVersion).toHaveBeenCalled();
     expect(Docling).toHaveBeenCalledWith({
       api: { baseUrl: 'http://example.com', timeout: 123 },
     });
@@ -99,12 +99,6 @@ describe('PDFParser', () => {
   });
 
   test('init with local server succeeds (environment setup and client ready)', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '13.5.1';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
     vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
 
@@ -130,12 +124,6 @@ describe('PDFParser', () => {
   });
 
   test('init with local server wraps environment setup error', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '13.0.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     vi.mocked(envMocks.setupMock).mockRejectedValueOnce(new Error('boom'));
 
     const logger = makeLogger();
@@ -149,12 +137,6 @@ describe('PDFParser', () => {
 
   test('waitForServerReady times out after maximum attempts (logs throttled)', async () => {
     vi.useFakeTimers();
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.3';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockRejectedValue(new Error('down'));
 
     const logger = makeLogger();
@@ -170,8 +152,12 @@ describe('PDFParser', () => {
     vi.useRealTimers();
   });
 
-  test('throws on non-macOS platforms', async () => {
-    vi.mocked(platform).mockReturnValue('linux');
+  test('init propagates checkOperatingSystem error', async () => {
+    vi.mocked(SystemChecks.checkOperatingSystem).mockImplementationOnce(() => {
+      throw new Error(
+        'PDFParser is only supported on macOS. Current platform: linux',
+      );
+    });
     const logger = makeLogger();
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
     await expect(parser.init()).rejects.toThrow(
@@ -179,12 +165,12 @@ describe('PDFParser', () => {
     );
   });
 
-  test('throws when jq is not installed', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('which jq')) throw new Error('not found');
-      return '';
-    });
+  test('init propagates checkCommandExists error for jq', async () => {
+    vi.mocked(SystemChecks.checkCommandExists).mockImplementationOnce(
+      (_cmd, msg) => {
+        throw new Error(msg);
+      },
+    );
     const logger = makeLogger();
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
     await expect(parser.init()).rejects.toThrow(
@@ -192,13 +178,13 @@ describe('PDFParser', () => {
     );
   });
 
-  test('throws when poppler is not installed', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('which jq')) return '';
-      if (cmd.startsWith('which pdftotext')) throw new Error('not found');
-      return '';
-    });
+  test('init propagates checkCommandExists error for poppler', async () => {
+    // First call (jq) succeeds, second call (pdftotext) throws
+    vi.mocked(SystemChecks.checkCommandExists)
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce((_cmd, msg) => {
+        throw new Error(msg);
+      });
     const logger = makeLogger();
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
     await expect(parser.init()).rejects.toThrow(
@@ -206,12 +192,11 @@ describe('PDFParser', () => {
     );
   });
 
-  test('throws when macOS version is below 10.15', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('which jq')) return '';
-      if (cmd.startsWith('sw_vers')) return '10.14.6';
-      return '';
+  test('init propagates checkMacOSVersion error', async () => {
+    vi.mocked(SystemChecks.checkMacOSVersion).mockImplementationOnce(() => {
+      throw new Error(
+        'macOS 10.15 or later is required. Current version: 10.14.6',
+      );
     });
     const logger = makeLogger();
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
@@ -220,28 +205,37 @@ describe('PDFParser', () => {
     );
   });
 
-  test('throws when macOS version check fails unexpectedly', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('which jq')) return '';
-      if (cmd.startsWith('sw_vers')) throw new Error('boom');
-      return '';
-    });
+  test('init checks ImageMagick and Ghostscript when enableImagePdfFallback on local server', async () => {
+    doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+
     const logger = makeLogger();
-    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-    await expect(parser.init()).rejects.toThrow(
-      'Failed to check macOS version',
+    const parser = new PDFParser({
+      logger,
+      port: 5001,
+      enableImagePdfFallback: true,
+    });
+    await parser.init();
+
+    // jq, pdftotext, magick, gs = 4 calls
+    expect(SystemChecks.checkCommandExists).toHaveBeenCalledWith(
+      'magick',
+      expect.stringContaining('ImageMagick'),
+    );
+    expect(SystemChecks.checkCommandExists).toHaveBeenCalledWith(
+      'gs',
+      expect.stringContaining('Ghostscript'),
     );
   });
 
-  test('throws when ImageMagick is not installed with enableImagePdfFallback on local server', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '13.0.0';
-      if (cmd.startsWith('which jq')) return '';
-      if (cmd.startsWith('which magick')) throw new Error('not found');
-      return '';
-    });
+  test('init propagates ImageMagick check error with enableImagePdfFallback on local server', async () => {
+    // jq ok, pdftotext ok, magick throws
+    vi.mocked(SystemChecks.checkCommandExists)
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce((_cmd, msg) => {
+        throw new Error(msg);
+      });
     const logger = makeLogger();
     const parser = new PDFParser({
       logger,
@@ -254,15 +248,15 @@ describe('PDFParser', () => {
     );
   });
 
-  test('throws when Ghostscript is not installed with enableImagePdfFallback on local server', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '13.0.0';
-      if (cmd.startsWith('which jq')) return '';
-      if (cmd.startsWith('which magick')) return '';
-      if (cmd.startsWith('which gs')) throw new Error('not found');
-      return '';
-    });
+  test('init propagates Ghostscript check error with enableImagePdfFallback on local server', async () => {
+    // jq ok, pdftotext ok, magick ok, gs throws
+    vi.mocked(SystemChecks.checkCommandExists)
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce(() => {})
+      .mockImplementationOnce((_cmd, msg) => {
+        throw new Error(msg);
+      });
     const logger = makeLogger();
     const parser = new PDFParser({
       logger,
@@ -275,16 +269,7 @@ describe('PDFParser', () => {
     );
   });
 
-  test('does not check ImageMagick/Ghostscript when enableImagePdfFallback is false', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '13.0.0';
-      if (cmd.startsWith('which jq')) return '';
-      // magick and gs would throw if called, but they should not be called
-      if (cmd.startsWith('which magick')) throw new Error('not found');
-      if (cmd.startsWith('which gs')) throw new Error('not found');
-      return '';
-    });
+  test('init does not check ImageMagick/Ghostscript when enableImagePdfFallback is false', async () => {
     doclingClient.health.mockResolvedValueOnce();
 
     const logger = makeLogger();
@@ -293,8 +278,10 @@ describe('PDFParser', () => {
       baseUrl: 'http://example.com',
       enableImagePdfFallback: false,
     });
-    // Should not throw because ImageMagick/Ghostscript checks are skipped
     await expect(parser.init()).resolves.toBeUndefined();
+
+    // Only jq and pdftotext should be checked
+    expect(SystemChecks.checkCommandExists).toHaveBeenCalledTimes(2);
   });
 
   test('parse throws if called before init', async () => {
@@ -308,12 +295,6 @@ describe('PDFParser', () => {
   });
 
   test('parse delegates to PDFConverter.convert after init', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
     convertMock.mockResolvedValueOnce('OK');
 
@@ -330,8 +311,6 @@ describe('PDFParser', () => {
       { num_threads: 4 },
     );
 
-    // Third argument is false because baseUrl is used (external server)
-    // Fourth argument is the timeout value (defaults to PDF_PARSER.DEFAULT_TIMEOUT_MS)
     expect(PDFConverter).toHaveBeenCalledWith(
       logger,
       expect.any(Object),
@@ -350,12 +329,6 @@ describe('PDFParser', () => {
   });
 
   test('parse returns TokenUsageReport from converter via strategy flow', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
 
     const mockReport = {
@@ -406,12 +379,6 @@ describe('PDFParser', () => {
   });
 
   test('parse returns null when converter returns null', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
     convertMock.mockResolvedValueOnce(null);
 
@@ -430,47 +397,47 @@ describe('PDFParser', () => {
     expect(result).toBeNull();
   });
 
-  test('parse checks ImageMagick and Ghostscript when forceImagePdf is true on local server', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    const whichCalls: string[] = [];
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which')) {
-        whichCalls.push(cmd);
-        return '';
-      }
-      return '';
-    });
+  test('parse calls checkCommandExists for magick and gs when forceImagePdf is true on local server', async () => {
     doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
     convertMock.mockResolvedValueOnce('OK');
 
     const logger = makeLogger();
     const parser = new PDFParser({ logger, port: 5001 });
     await parser.init();
 
+    // Clear mock calls from init
+    vi.mocked(SystemChecks.checkCommandExists).mockClear();
+
     await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
       num_threads: 4,
       forceImagePdf: true,
     });
 
-    // Should check for ImageMagick and Ghostscript during parse
-    expect(whichCalls).toContain('which magick');
-    expect(whichCalls).toContain('which gs');
+    expect(SystemChecks.checkCommandExists).toHaveBeenCalledWith(
+      'magick',
+      expect.stringContaining('ImageMagick'),
+    );
+    expect(SystemChecks.checkCommandExists).toHaveBeenCalledWith(
+      'gs',
+      expect.stringContaining('Ghostscript'),
+    );
   });
 
-  test('parse throws when ImageMagick is missing with forceImagePdf on local server', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      if (cmd.startsWith('which magick')) throw new Error('not found');
-      return '';
-    });
+  test('parse propagates checkCommandExists error when forceImagePdf and magick missing', async () => {
     doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
 
     const logger = makeLogger();
     const parser = new PDFParser({ logger, port: 5001 });
     await parser.init();
+
+    // After init, make checkCommandExists throw for magick
+    vi.mocked(SystemChecks.checkCommandExists).mockImplementation(
+      (cmd, msg) => {
+        if (cmd === 'magick') throw new Error(msg);
+      },
+    );
 
     await expect(
       parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
@@ -481,16 +448,6 @@ describe('PDFParser', () => {
   });
 
   test('parse skips forceImagePdf dependency check when using external server', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    const whichCalls: string[] = [];
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which')) {
-        whichCalls.push(cmd);
-        return '';
-      }
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
     convertMock.mockResolvedValueOnce('OK');
 
@@ -498,27 +455,21 @@ describe('PDFParser', () => {
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
     await parser.init();
 
-    // Reset whichCalls after init
-    whichCalls.length = 0;
+    // Clear mock calls from init
+    vi.mocked(SystemChecks.checkCommandExists).mockClear();
 
     await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
       num_threads: 4,
       forceImagePdf: true,
     });
 
-    // Should NOT check for magick/gs since external server is used
-    expect(whichCalls).not.toContain('which magick');
-    expect(whichCalls).not.toContain('which gs');
+    // Should NOT call checkCommandExists during parse since external server
+    expect(SystemChecks.checkCommandExists).not.toHaveBeenCalled();
   });
 
   test('parse passes enableImagePdfFallback=true when local server and option enabled', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which')) return ''; // jq, magick, gs all found
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
     convertMock.mockResolvedValueOnce('OK');
 
     const logger = makeLogger();
@@ -534,8 +485,6 @@ describe('PDFParser', () => {
       num_threads: 4,
     });
 
-    // Third argument is true because local server mode and fallback is enabled
-    // Fourth argument is the timeout value
     expect(PDFConverter).toHaveBeenCalledWith(
       logger,
       expect.any(Object),
@@ -545,12 +494,6 @@ describe('PDFParser', () => {
   });
 
   test('parse passes enableImagePdfFallback=false when external server even if option enabled', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
     convertMock.mockResolvedValueOnce('OK');
 
@@ -567,8 +510,6 @@ describe('PDFParser', () => {
       num_threads: 4,
     });
 
-    // Third argument is false because external server mode disables fallback
-    // Fourth argument is the timeout value
     expect(PDFConverter).toHaveBeenCalledWith(
       logger,
       expect.any(Object),
@@ -582,12 +523,6 @@ describe('PDFParser', () => {
   });
 
   test('dispose with external server destroys client without killing local process', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
 
     const logger = makeLogger();
@@ -603,13 +538,8 @@ describe('PDFParser', () => {
   });
 
   test('dispose with local server kills process and destroys client', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
     const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
     killSpy.mockResolvedValueOnce();
 
@@ -623,13 +553,8 @@ describe('PDFParser', () => {
   });
 
   test('dispose swallows kill errors but still destroys client', async () => {
-    vi.mocked(platform).mockReturnValue('darwin');
-    vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-      if (cmd.startsWith('sw_vers')) return '12.6.0';
-      if (cmd.startsWith('which jq')) return '';
-      return '';
-    });
     doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
     const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
     killSpy.mockRejectedValueOnce(new Error('kill failed'));
 
@@ -644,13 +569,8 @@ describe('PDFParser', () => {
 
   describe('server recovery', () => {
     test('parse recovers from ECONNREFUSED error on local server', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
       const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
       killSpy.mockResolvedValue(undefined);
 
@@ -691,12 +611,6 @@ describe('PDFParser', () => {
     });
 
     test('parse does not recover from ECONNREFUSED error on external server', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
 
       const econnRefusedError = new Error(
@@ -719,13 +633,8 @@ describe('PDFParser', () => {
     });
 
     test('parse throws after recovery attempt fails', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
       const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
       killSpy.mockResolvedValue(undefined);
 
@@ -763,13 +672,8 @@ describe('PDFParser', () => {
     });
 
     test('parse throws non-ECONNREFUSED errors without recovery', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
 
       convertMock.mockRejectedValueOnce(new Error('Some other error'));
 
@@ -788,13 +692,8 @@ describe('PDFParser', () => {
     });
 
     test('isConnectionRefusedError returns false for non-Error objects', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
 
       // Throw a non-Error object
       convertMock.mockRejectedValueOnce('string error');
@@ -814,13 +713,8 @@ describe('PDFParser', () => {
     });
 
     test('parse recovers from ECONNREFUSED in error cause chain (ofetch style)', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
       const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
       killSpy.mockResolvedValue(undefined);
 
@@ -856,13 +750,8 @@ describe('PDFParser', () => {
     });
 
     test('parse throws immediately when abortSignal is already aborted', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
 
       const abortError = new Error('Aborted');
       abortError.name = 'AbortError';
@@ -892,14 +781,8 @@ describe('PDFParser', () => {
     });
   });
 
-  describe('strategy-based flow (parseWithStrategy)', () => {
+  describe('strategy-based flow', () => {
     test('parse routes to strategy flow when strategySamplerModel is provided', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
 
       const mockReport = {
@@ -943,12 +826,6 @@ describe('PDFParser', () => {
     });
 
     test('parse routes to strategy flow when forcedMethod is provided', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
 
       convertWithStrategyMock.mockResolvedValueOnce({
@@ -979,12 +856,6 @@ describe('PDFParser', () => {
     });
 
     test('parse returns null tokenUsageReport from strategy flow', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
 
       convertWithStrategyMock.mockResolvedValueOnce({
@@ -1013,13 +884,8 @@ describe('PDFParser', () => {
     });
 
     test('strategy flow recovers from ECONNREFUSED on local server', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
       const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
       killSpy.mockResolvedValue(undefined);
 
@@ -1066,12 +932,6 @@ describe('PDFParser', () => {
     });
 
     test('strategy flow does not recover on external server', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
 
       const econnRefusedError = new Error(
@@ -1093,13 +953,8 @@ describe('PDFParser', () => {
     });
 
     test('strategy flow throws immediately when abortSignal is aborted', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
 
       const abortError = new Error('Aborted');
       abortError.name = 'AbortError';
@@ -1127,13 +982,8 @@ describe('PDFParser', () => {
     });
 
     test('strategy flow throws after recovery attempt exhausted', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
       const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
       killSpy.mockResolvedValue(undefined);
 
@@ -1164,13 +1014,8 @@ describe('PDFParser', () => {
     });
 
     test('strategy flow passes enableImagePdfFallback=true for local server', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
 
       convertWithStrategyMock.mockResolvedValueOnce({
         strategy: {
@@ -1204,12 +1049,6 @@ describe('PDFParser', () => {
     });
 
     test('strategy flow uses legacy flow when neither strategySamplerModel nor forcedMethod set', async () => {
-      vi.mocked(platform).mockReturnValue('darwin');
-      vi.mocked(execSync as any).mockImplementation((cmd: string) => {
-        if (cmd.startsWith('sw_vers')) return '12.6.0';
-        if (cmd.startsWith('which jq')) return '';
-        return '';
-      });
       doclingClient.health.mockResolvedValueOnce();
       convertMock.mockResolvedValueOnce('legacy-result');
 
