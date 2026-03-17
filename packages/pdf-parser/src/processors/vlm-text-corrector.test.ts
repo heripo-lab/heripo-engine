@@ -13,6 +13,7 @@ import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { applyCorrections } from './correction-applier';
 import { VlmTextCorrector } from './vlm-text-corrector';
 
 vi.mock('@heripo/shared', () => ({
@@ -28,6 +29,17 @@ vi.mock('node:fs', () => ({
 vi.mock('node:path', () => ({
   join: vi.fn((...args: string[]) => args.join('/')),
 }));
+
+vi.mock('./correction-applier', async () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  const original = await vi.importActual<typeof import('./correction-applier')>(
+    './correction-applier',
+  );
+  return {
+    ...original,
+    applyCorrections: vi.fn(),
+  };
+});
 
 const mockModel = { modelId: 'test-vlm' } as any;
 
@@ -77,23 +89,6 @@ function createTableCell(
     end_col_offset_idx: col + 1,
     text,
     column_header: row === 0,
-    row_header: false,
-    row_section: false,
-    fillable: false,
-  };
-}
-
-function createGridCell(text: string): DoclingTableCell {
-  return {
-    bbox: { l: 0, t: 0, r: 50, b: 20, coord_origin: 'BOTTOMLEFT' },
-    row_span: 1,
-    col_span: 1,
-    start_row_offset_idx: 0,
-    end_row_offset_idx: 1,
-    start_col_offset_idx: 0,
-    end_col_offset_idx: 1,
-    text,
-    column_header: false,
     row_header: false,
     row_section: false,
     fillable: false,
@@ -249,18 +244,19 @@ describe('VlmTextCorrector', () => {
       expect(result.pagesProcessed).toBe(1);
       expect(result.pagesFailed).toBe(0);
 
+      // Should call applyCorrections for each page
+      expect(applyCorrections).toHaveBeenCalledWith(
+        expect.any(Object),
+        1,
+        correctionOutput,
+        logger,
+      );
+
       // Should save corrected document
       expect(writeFileSync).toHaveBeenCalledWith(
         '/output/report-1/result.json',
         expect.any(String),
       );
-
-      // Verify substitution was applied
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.texts[0].text).toBe('잘못된 遺蹟');
-      expect(savedDoc.texts[0].orig).toBe('잘못된 遺蹟');
     });
 
     test('returns zero counts when document has no pages', async () => {
@@ -392,285 +388,6 @@ describe('VlmTextCorrector', () => {
       });
 
       expect(onTokenUsage).not.toHaveBeenCalled();
-    });
-
-    test('applies table cell corrections and syncs grid', async () => {
-      const cells = [
-        createTableCell('유구명', 0, 0),
-        createTableCell('잘못된 住居阯', 1, 0),
-      ];
-      const grid = [
-        [createGridCell('유구명')],
-        [createGridCell('잘못된 住居阯')],
-      ];
-      const doc = createTestDoc([], [createTableItem(cells, 1, grid)]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [],
-        cc: [{ ti: 0, r: 1, c: 0, t: '1호 住居址' }],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      const result = await corrector.correctAndSave(
-        '/output/report-1',
-        mockModel,
-      );
-
-      expect(result.cellCorrections).toBe(1);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.tables[0].data.table_cells[1].text).toBe('1호 住居址');
-      expect(savedDoc.tables[0].data.grid[1][0].text).toBe('1호 住居址');
-    });
-
-    test('handles missing grid row gracefully', async () => {
-      const cells = [createTableCell('text', 0, 0)];
-      const doc = createTestDoc([], [createTableItem(cells, 1)]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [],
-        cc: [{ ti: 0, r: 0, c: 0, t: 'corrected' }],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      const result = await corrector.correctAndSave(
-        '/output/report-1',
-        mockModel,
-      );
-
-      expect(result.cellCorrections).toBe(1);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.tables[0].data.table_cells[0].text).toBe('corrected');
-      expect(savedDoc.tables[0].data.grid).toEqual([]);
-    });
-
-    test('handles missing grid cell gracefully', async () => {
-      const cells = [
-        createTableCell('col0', 0, 0),
-        createTableCell('col1', 0, 1),
-      ];
-      const grid = [[createGridCell('col0')]];
-      const doc = createTestDoc([], [createTableItem(cells, 1, grid)]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [],
-        cc: [{ ti: 0, r: 0, c: 1, t: 'corrected col1' }],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      const result = await corrector.correctAndSave(
-        '/output/report-1',
-        mockModel,
-      );
-
-      expect(result.cellCorrections).toBe(1);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.tables[0].data.table_cells[1].text).toBe(
-        'corrected col1',
-      );
-      expect(savedDoc.tables[0].data.grid[0]).toHaveLength(1);
-    });
-
-    test('skips corrections with out-of-range text indices', async () => {
-      const doc = createTestDoc([createTextItem('original', 'text', 1)]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [{ i: 99, s: [{ f: 'original', r: 'should not apply' }] }],
-        cc: [],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      await corrector.correctAndSave('/output/report-1', mockModel);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.texts[0].text).toBe('original');
-    });
-
-    test('skips cell corrections with out-of-range table indices', async () => {
-      const cells = [createTableCell('original', 0, 0)];
-      const doc = createTestDoc([], [createTableItem(cells, 1)]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [],
-        cc: [{ ti: 99, r: 0, c: 0, t: 'should not apply' }],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      await corrector.correctAndSave('/output/report-1', mockModel);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.tables[0].data.table_cells[0].text).toBe('original');
-    });
-
-    test('applies multiple substitutions in order', async () => {
-      const doc = createTestDoc([
-        createTextItem('AAA 잘못1 BBB 잘못2 CCC', 'text', 1),
-      ]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [
-          {
-            i: 0,
-            s: [
-              { f: '잘못1', r: '보정1' },
-              { f: '잘못2', r: '보정2' },
-            ],
-          },
-        ],
-        cc: [],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      await corrector.correctAndSave('/output/report-1', mockModel);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.texts[0].text).toBe('AAA 보정1 BBB 보정2 CCC');
-      expect(savedDoc.texts[0].orig).toBe('AAA 보정1 BBB 보정2 CCC');
-    });
-
-    test('logs warning and skips when find string is not found', async () => {
-      const doc = createTestDoc([
-        createTextItem('original text here', 'text', 1),
-      ]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [{ i: 0, s: [{ f: 'nonexistent', r: 'replacement' }] }],
-        cc: [],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      await corrector.correctAndSave('/output/report-1', mockModel);
-
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('find string not found, skipping substitution'),
-      );
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.texts[0].text).toBe('original text here');
-    });
-
-    test('does not modify document when substitutions produce no change', async () => {
-      const doc = createTestDoc([createTextItem('text with same', 'text', 1)]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [{ i: 0, s: [{ f: 'same', r: 'same' }] }],
-        cc: [],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      await corrector.correctAndSave('/output/report-1', mockModel);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      // orig should remain as original, not overwritten
-      expect(savedDoc.texts[0].text).toBe('text with same');
-      expect(savedDoc.texts[0].orig).toBe('text with same');
-    });
-
-    test('replaces only first occurrence of find string', async () => {
-      const doc = createTestDoc([createTextItem('AAA BBB AAA', 'text', 1)]);
-
-      vi.mocked(readFileSync).mockImplementation((path: any) => {
-        if (String(path).endsWith('result.json')) {
-          return Buffer.from(JSON.stringify(doc));
-        }
-        return Buffer.from('fake-image');
-      });
-
-      const correctionOutput: VlmTextCorrectionOutput = {
-        tc: [{ i: 0, s: [{ f: 'AAA', r: 'CCC' }] }],
-        cc: [],
-      };
-
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([correctionOutput]);
-
-      await corrector.correctAndSave('/output/report-1', mockModel);
-
-      const savedDoc = JSON.parse(
-        vi.mocked(writeFileSync).mock.calls[0][1] as string,
-      );
-      expect(savedDoc.texts[0].text).toBe('CCC BBB AAA');
     });
 
     test('filters to koreanHanjaMixPages when provided', async () => {
@@ -1637,199 +1354,6 @@ describe('VlmTextCorrector', () => {
       const promptText = getPromptText();
       expect(promptText).toContain('LANGUAGE CONTEXT');
       expect(promptText).toContain('written in vi-VT');
-    });
-  });
-
-  describe('matchTextToReference', () => {
-    test('matches garbled footnote to correct pdftotext line', () => {
-      const pageTexts = [
-        {
-          index: 0,
-          item: createTextItem(
-            '49) (W)#X1CR003T 2008, 『아산 상성리유적』.',
-            'footnote',
-            1,
-          ),
-        },
-      ];
-      const pageText = '49) (財)忠淸文化財硏究院 2008,『아산 상성리유적』.';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      expect(result.size).toBe(1);
-      expect(result.get(0)).toBe(
-        '49) (財)忠淸文化財硏究院 2008,『아산 상성리유적』.',
-      );
-    });
-
-    test('matches heavily garbled text above threshold', () => {
-      const pageTexts = [
-        {
-          index: 0,
-          item: createTextItem(
-            '50) (M):23x1CR03% 2008, 『아산 장재리 아골유적』.',
-            'footnote',
-            1,
-          ),
-        },
-      ];
-      const pageText =
-        '50) (財)忠淸文化財硏究院 2008,『아산 장재리 아골유적』.';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      expect(result.size).toBe(1);
-      expect(result.get(0)).toBe(pageText);
-    });
-
-    test('skips identical text (no ref needed)', () => {
-      const pageTexts = [
-        {
-          index: 0,
-          item: createTextItem('제1장 조사개요', 'section_header', 1),
-        },
-      ];
-      const pageText = '제1장 조사개요';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      expect(result.size).toBe(0);
-    });
-
-    test('returns empty map when no matches above threshold', () => {
-      const pageTexts = [
-        {
-          index: 0,
-          item: createTextItem('completely different text', 'text', 1),
-        },
-      ];
-      const pageText = 'XXXXXXXXYYYYYYZZZZZZ';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      expect(result.size).toBe(0);
-    });
-
-    test('returns empty map for empty pageText', () => {
-      const pageTexts = [
-        { index: 0, item: createTextItem('some text', 'text', 1) },
-      ];
-
-      const result = corrector.matchTextToReference(pageTexts, '');
-
-      expect(result.size).toBe(0);
-    });
-
-    test('handles greedy matching without double assignment', () => {
-      const pageTexts = [
-        { index: 0, item: createTextItem('AAA BBB', 'text', 1) },
-        { index: 1, item: createTextItem('CCC DDD', 'text', 1) },
-        { index: 2, item: createTextItem('EEE FFF', 'text', 1) },
-      ];
-      const pageText = 'AAA BBB ref\n\nCCC DDD ref\n\nEEE FFF ref';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      expect(result.size).toBe(3);
-      // Each element should match a unique ref block
-      const refValues = new Set(result.values());
-      expect(refValues.size).toBe(3);
-    });
-
-    test('handles empty OCR text element against non-empty ref line', () => {
-      const pageTexts = [{ index: 0, item: createTextItem('', 'text', 1) }];
-      const pageText = 'some reference text';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      expect(result.size).toBe(0);
-    });
-
-    test('handles more OCR elements than reference lines', () => {
-      const pageTexts = [
-        { index: 0, item: createTextItem('AAA BBB', 'text', 1) },
-        { index: 1, item: createTextItem('CCC DDD', 'text', 1) },
-        { index: 2, item: createTextItem('EEE FFF', 'text', 1) },
-      ];
-      const pageText = 'AAA BBB ref';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      // Only one ref block available, so at most 1 match
-      expect(result.size).toBeLessThanOrEqual(1);
-    });
-
-    test('matches long OCR paragraph against merged pdftotext block', () => {
-      // OCR produces one long paragraph; pdftotext splits into layout lines
-      const ocrText =
-        '唐은 熊津(공주), 馬韓(익산), 東明에 都督府를 설치하고 9州 5小京制를 완성하였다';
-      const pageTexts = [
-        { index: 0, item: createTextItem(ocrText, 'text', 1) },
-      ];
-      // pdftotext: same content split across multiple lines (no blank line separator)
-      const pageText =
-        '唐은 熊津(공주), 馬韓(익산),\n東明에 都督府를 설치하고\n9州 5小京制를 완성하였다';
-
-      // Identical after merge → no ref needed (skips identical text)
-      const identicalResult = corrector.matchTextToReference(
-        pageTexts,
-        pageText,
-      );
-      expect(identicalResult.size).toBe(0);
-
-      // Use a garbled OCR version to verify ref is provided
-      const garbledOcrText =
-        '받은 M(공주), 5류(익산), 햇배에 Bbt를 설치하고 9MM 5☆를 완성하였다';
-      const garbledPageTexts = [
-        { index: 0, item: createTextItem(garbledOcrText, 'text', 1) },
-      ];
-
-      const garbledResult = corrector.matchTextToReference(
-        garbledPageTexts,
-        pageText,
-      );
-
-      expect(garbledResult.size).toBe(1);
-      expect(garbledResult.get(0)).toBe(
-        '唐은 熊津(공주), 馬韓(익산), 東明에 都督府를 설치하고 9州 5小京制를 완성하였다',
-      );
-    });
-
-    test('separates blocks at blank lines for independent matching', () => {
-      const pageTexts = [
-        {
-          index: 0,
-          item: createTextItem(
-            '본문 단락 텍스트 내용이 여기에 있습니다',
-            'text',
-            1,
-          ),
-        },
-        {
-          index: 1,
-          item: createTextItem('49) (W)#X1 2008, 『보고서』.', 'footnote', 1),
-        },
-      ];
-      // pdftotext: body paragraph (2 layout lines) + blank line + footnote
-      const pageText =
-        '본문 단락 텍스트\n내용이 여기에 있습니다\n\n49) (財)忠淸 2008, 『보고서』.';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      // Body paragraph matches merged block, footnote matches separate block
-      expect(result.size).toBe(1);
-      expect(result.get(1)).toBe('49) (財)忠淸 2008, 『보고서』.');
-    });
-
-    test('returns empty map when pdftotext contains only blank lines', () => {
-      const pageTexts = [
-        { index: 0, item: createTextItem('some text', 'text', 1) },
-      ];
-      const pageText = '\n\n\n\n';
-
-      const result = corrector.matchTextToReference(pageTexts, pageText);
-
-      expect(result.size).toBe(0);
     });
   });
 

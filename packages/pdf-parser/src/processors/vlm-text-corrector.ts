@@ -18,6 +18,13 @@ import {
   type VlmTextCorrectionOutput,
   vlmTextCorrectionSchema,
 } from '../types/vlm-text-correction-schema';
+import { matchTextToReferenceWithUnused } from '../utils/text-reference-matcher';
+import {
+  LABEL_TO_TYPE_CODE,
+  applyCorrections,
+  getPageTables,
+  getPageTexts,
+} from './correction-applier';
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -27,23 +34,6 @@ const DEFAULT_MAX_RETRIES = 3;
 
 /** Default temperature for VLM generation */
 const DEFAULT_TEMPERATURE = 0;
-
-/** Minimum character overlap ratio to accept a pdftotext block as reference */
-const REFERENCE_MATCH_THRESHOLD = 0.4;
-
-/** Type abbreviation codes for text element labels */
-const LABEL_TO_TYPE_CODE: Record<string, string> = {
-  section_header: 'sh',
-  text: 'tx',
-  caption: 'ca',
-  footnote: 'fn',
-  list_item: 'li',
-  page_header: 'ph',
-  page_footer: 'pf',
-};
-
-/** Text labels that should be included in VLM correction */
-const TEXT_LABELS = new Set(Object.keys(LABEL_TO_TYPE_CODE));
 
 /** Options for VlmTextCorrector */
 export interface VlmTextCorrectorOptions {
@@ -168,7 +158,7 @@ export class VlmTextCorrector {
     for (let i = 0; i < pageNumbers.length; i++) {
       const corrections = results[i];
       if (corrections === null) continue;
-      this.applyCorrections(doc, pageNumbers[i], corrections);
+      applyCorrections(doc, pageNumbers[i], corrections, this.logger);
     }
 
     // Save corrected document
@@ -207,8 +197,8 @@ export class VlmTextCorrector {
     options?: VlmTextCorrectorOptions,
   ): Promise<VlmTextCorrectionOutput | null> {
     try {
-      const pageTexts = this.getPageTexts(doc, pageNo);
-      const pageTables = this.getPageTables(doc, pageNo);
+      const pageTexts = getPageTexts(doc, pageNo);
+      const pageTables = getPageTables(doc, pageNo);
 
       // Skip pages with no text or table content
       if (pageTexts.length === 0 && pageTables.length === 0) {
@@ -226,7 +216,7 @@ export class VlmTextCorrector {
 
       if (pageText) {
         const { references: refs, unusedBlocks } =
-          this.matchTextToReferenceWithUnused(pageTexts, pageText);
+          matchTextToReferenceWithUnused(pageTexts, pageText);
         references = refs;
 
         if (pageTables.length > 0 && unusedBlocks.length > 0) {
@@ -297,45 +287,6 @@ export class VlmTextCorrector {
       );
       return null;
     }
-  }
-
-  /**
-   * Get text items on a specific page, with their indices for prompt building.
-   */
-  private getPageTexts(
-    doc: DoclingDocument,
-    pageNo: number,
-  ): Array<{ index: number; item: DoclingTextItem }> {
-    const results: Array<{ index: number; item: DoclingTextItem }> = [];
-
-    for (let i = 0; i < doc.texts.length; i++) {
-      const item = doc.texts[i];
-      if (!TEXT_LABELS.has(item.label)) continue;
-      if (item.prov.some((p) => p.page_no === pageNo)) {
-        results.push({ index: i, item });
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * Get table items on a specific page, with their indices.
-   */
-  private getPageTables(
-    doc: DoclingDocument,
-    pageNo: number,
-  ): Array<{ index: number; item: DoclingTableItem }> {
-    const results: Array<{ index: number; item: DoclingTableItem }> = [];
-
-    for (let i = 0; i < doc.tables.length; i++) {
-      const item = doc.tables[i];
-      if (item.prov.some((p) => p.page_no === pageNo)) {
-        results.push({ index: i, item });
-      }
-    }
-
-    return results;
   }
 
   /**
@@ -413,189 +364,11 @@ export class VlmTextCorrector {
   }
 
   /**
-   * Match pdftotext paragraph blocks to OCR elements using character multiset overlap.
-   * Returns a map from prompt index to the best-matching reference block.
-   */
-  matchTextToReference(
-    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
-    pageText: string,
-  ): Map<number, string> {
-    return this.matchTextToReferenceWithUnused(pageTexts, pageText).references;
-  }
-
-  /**
-   * Match pdftotext paragraph blocks to OCR elements and also return unused blocks.
-   * Unused blocks are those that were not consumed by any text element match.
-   */
-  private matchTextToReferenceWithUnused(
-    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
-    pageText: string,
-  ): { references: Map<number, string>; unusedBlocks: string[] } {
-    const references = new Map<number, string>();
-
-    const refBlocks = this.mergeIntoBlocks(pageText);
-
-    if (refBlocks.length === 0) {
-      return { references, unusedBlocks: [] };
-    }
-
-    const available = new Set(refBlocks.map((_, i) => i));
-
-    for (let promptIndex = 0; promptIndex < pageTexts.length; promptIndex++) {
-      const ocrText = pageTexts[promptIndex].item.text;
-
-      let bestScore = 0;
-      let bestBlockIndex = -1;
-
-      for (const blockIndex of available) {
-        const score = this.computeCharOverlap(ocrText, refBlocks[blockIndex]);
-        if (score > bestScore) {
-          bestScore = score;
-          bestBlockIndex = blockIndex;
-        }
-      }
-
-      if (bestBlockIndex >= 0 && bestScore >= REFERENCE_MATCH_THRESHOLD) {
-        if (refBlocks[bestBlockIndex] !== ocrText) {
-          references.set(promptIndex, refBlocks[bestBlockIndex]);
-        }
-        available.delete(bestBlockIndex);
-      }
-    }
-
-    const unusedBlocks = [...available]
-      .sort((a, b) => a - b)
-      .map((i) => refBlocks[i]);
-
-    return { references, unusedBlocks };
-  }
-
-  /**
-   * Merge pdftotext output into paragraph blocks separated by blank lines.
-   * Consecutive non-empty lines are joined with a space.
-   */
-  private mergeIntoBlocks(pageText: string): string[] {
-    const blocks: string[] = [];
-    let currentLines: string[] = [];
-
-    for (const rawLine of pageText.split('\n')) {
-      const trimmed = rawLine.trim();
-      if (trimmed.length === 0) {
-        if (currentLines.length > 0) {
-          blocks.push(currentLines.join(' '));
-          currentLines = [];
-        }
-      } else {
-        currentLines.push(trimmed);
-      }
-    }
-    if (currentLines.length > 0) {
-      blocks.push(currentLines.join(' '));
-    }
-
-    return blocks;
-  }
-
-  /**
-   * Compute character multiset overlap ratio between two strings.
-   * Returns a value between 0.0 and 1.0.
-   */
-  private computeCharOverlap(a: string, b: string): number {
-    if (a.length === 0 || b.length === 0) return 0;
-
-    const freqA = new Map<string, number>();
-    for (const ch of a) {
-      freqA.set(ch, (freqA.get(ch) ?? 0) + 1);
-    }
-
-    const freqB = new Map<string, number>();
-    for (const ch of b) {
-      freqB.set(ch, (freqB.get(ch) ?? 0) + 1);
-    }
-
-    let overlap = 0;
-    for (const [ch, countA] of freqA) {
-      const countB = freqB.get(ch) ?? 0;
-      overlap += Math.min(countA, countB);
-    }
-
-    return overlap / Math.max(a.length, b.length);
-  }
-
-  /**
    * Read page image as base64.
    * Page images are 0-indexed: page_no N → pages/page_{N-1}.png
    */
   private readPageImage(outputDir: string, pageNo: number): Uint8Array {
     const imagePath = join(outputDir, 'pages', `page_${pageNo - 1}.png`);
     return new Uint8Array(readFileSync(imagePath));
-  }
-
-  /**
-   * Apply VLM corrections to the DoclingDocument.
-   */
-  private applyCorrections(
-    doc: DoclingDocument,
-    pageNo: number,
-    corrections: VlmTextCorrectionOutput,
-  ): void {
-    // Apply text corrections (substitution-based)
-    if (corrections.tc.length > 0) {
-      const pageTexts = this.getPageTexts(doc, pageNo);
-      for (const correction of corrections.tc) {
-        if (correction.i >= 0 && correction.i < pageTexts.length) {
-          const docIndex = pageTexts[correction.i].index;
-          let text = doc.texts[docIndex].text;
-          for (const sub of correction.s) {
-            const idx = text.indexOf(sub.f);
-            if (idx >= 0) {
-              text =
-                text.substring(0, idx) +
-                sub.r +
-                text.substring(idx + sub.f.length);
-            } else {
-              this.logger.warn(
-                `[VlmTextCorrector] Page ${pageNo}, text ${correction.i}: ` +
-                  `find string not found, skipping substitution`,
-              );
-            }
-          }
-          if (text !== doc.texts[docIndex].text) {
-            doc.texts[docIndex].text = text;
-            doc.texts[docIndex].orig = text;
-          }
-        }
-      }
-    }
-
-    // Apply cell corrections
-    if (corrections.cc.length > 0) {
-      const pageTables = this.getPageTables(doc, pageNo);
-      for (const correction of corrections.cc) {
-        if (correction.ti >= 0 && correction.ti < pageTables.length) {
-          const table = pageTables[correction.ti].item;
-
-          // Update table_cells
-          for (const cell of table.data.table_cells) {
-            if (
-              cell.start_row_offset_idx === correction.r &&
-              cell.start_col_offset_idx === correction.c
-            ) {
-              cell.text = correction.t;
-              break;
-            }
-          }
-
-          // Sync grid cell (grid stores separate objects from table_cells)
-          const gridRow = table.data.grid[correction.r];
-          if (gridRow) {
-            const gridCell = gridRow[correction.c];
-            if (gridCell) {
-              gridCell.text = correction.t;
-            }
-          }
-        }
-      }
-    }
   }
 }
