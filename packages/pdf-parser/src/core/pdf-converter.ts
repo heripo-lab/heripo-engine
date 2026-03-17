@@ -4,18 +4,15 @@ import type { LanguageModel } from 'ai';
 import type { ConversionOptions, DoclingAPIClient } from 'docling-sdk';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
-import { existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { CHUNKED_CONVERSION, PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
-import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
-import { OcrStrategySampler } from '../samplers/ocr-strategy-sampler';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { DoclingConversionExecutor } from './docling-conversion-executor';
 import { ImagePdfConverter } from './image-pdf-converter';
+import { StrategyResolver } from './strategy-resolver';
 import { VlmConversionPipeline } from './vlm-conversion-pipeline';
 
 /**
@@ -208,7 +205,8 @@ export class PDFConverter {
     await this.validateDocumentType(url, trackedOptions, abortSignal);
 
     // Step 1: Determine OCR strategy
-    const strategy = await this.determineStrategy(
+    const strategyResolver = new StrategyResolver(this.logger);
+    const strategy = await strategyResolver.resolve(
       pdfPath,
       reportId,
       trackedOptions,
@@ -291,68 +289,6 @@ export class PDFConverter {
       return null;
     }
     return report;
-  }
-
-  /**
-   * Determine the OCR strategy based on options and page sampling.
-   *
-   * When sampling is possible (strategySamplerModel + local file), it always
-   * runs — even with forcedMethod — so that detectedLanguages are available
-   * for OCR engine configuration. The forced method simply overrides the
-   * sampled method choice.
-   */
-  private async determineStrategy(
-    pdfPath: string | null,
-    reportId: string,
-    options: PDFConvertOptions,
-    abortSignal?: AbortSignal,
-  ): Promise<OcrStrategy> {
-    // Cannot sample: skip, no sampler model, or non-local URL
-    if (options.skipSampling || !options.strategySamplerModel || !pdfPath) {
-      const method = options.forcedMethod ?? 'ocrmac';
-      const reason = options.forcedMethod
-        ? `Forced: ${options.forcedMethod}`
-        : !pdfPath
-          ? 'Non-local URL, sampling skipped'
-          : 'Sampling skipped';
-      return { method, reason, sampledPages: 0, totalPages: 0 };
-    }
-
-    // Sample pages to determine strategy (also detects languages)
-    const samplingDir = join(process.cwd(), 'output', reportId, '_sampling');
-    const sampler = new OcrStrategySampler(
-      this.logger,
-      new PageRenderer(this.logger),
-      new PdfTextExtractor(this.logger),
-    );
-
-    try {
-      const strategy = await sampler.sample(
-        pdfPath,
-        samplingDir,
-        options.strategySamplerModel,
-        {
-          aggregator: options.aggregator,
-          abortSignal,
-        },
-      );
-
-      // Override method when forced, preserving detected languages from sampling
-      if (options.forcedMethod) {
-        return {
-          ...strategy,
-          method: options.forcedMethod,
-          reason: `Forced: ${options.forcedMethod} (${strategy.reason})`,
-        };
-      }
-
-      return strategy;
-    } finally {
-      // Always clean up sampling temp directory
-      if (existsSync(samplingDir)) {
-        rmSync(samplingDir, { recursive: true, force: true });
-      }
-    }
   }
 
   /**
