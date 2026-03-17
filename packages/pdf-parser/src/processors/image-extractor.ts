@@ -117,54 +117,55 @@ export class ImageExtractor {
     htmlOutputPath: string,
     imagesDir: string,
   ): Promise<number> {
-    let imageIndex = 0;
-    let pending = '';
+    const state = { imageIndex: 0, pending: '' };
     const MARKER = 'src="data:image/png;base64,';
+
+    function parseChunk(): string {
+      const markerIdx = state.pending.indexOf(MARKER);
+
+      if (markerIdx === -1) {
+        // Keep a tail that could be a partial marker match
+        const safeEnd = Math.max(0, state.pending.length - MARKER.length);
+        const result = state.pending.slice(0, safeEnd);
+        state.pending = state.pending.slice(safeEnd);
+        return result;
+      }
+
+      // Flush everything before the marker
+      const before = state.pending.slice(0, markerIdx);
+
+      // Find the closing quote after base64 data
+      const dataStart = markerIdx + MARKER.length;
+      const quoteIdx = state.pending.indexOf('"', dataStart);
+
+      if (quoteIdx === -1) {
+        // Closing quote not in buffer yet — keep everything from marker onward
+        state.pending = state.pending.slice(markerIdx);
+        return before;
+      }
+
+      // Extract base64 content and save as image file
+      const base64Content = state.pending.slice(dataStart, quoteIdx);
+      const filename = `image_${state.imageIndex}.png`;
+      const filepath = join(imagesDir, filename);
+      const buf = Buffer.from(base64Content, 'base64');
+      writeFileSync(filepath, buf);
+
+      const relativePath = `images/${filename}`;
+      state.imageIndex++;
+
+      state.pending = state.pending.slice(quoteIdx + 1);
+
+      // Recurse to process remaining buffer
+      return before + `src="${relativePath}"` + parseChunk();
+    }
 
     const transform = new Transform({
       decodeStrings: false,
       encoding: 'utf-8',
       transform(chunk: string, _encoding, callback) {
-        pending += chunk;
-        let result = '';
-
-        while (true) {
-          const markerIdx = pending.indexOf(MARKER);
-
-          if (markerIdx === -1) {
-            // Keep a tail that could be a partial marker match
-            const safeEnd = Math.max(0, pending.length - MARKER.length);
-            result += pending.slice(0, safeEnd);
-            pending = pending.slice(safeEnd);
-            break;
-          }
-
-          // Flush everything before the marker
-          result += pending.slice(0, markerIdx);
-
-          // Find the closing quote after base64 data
-          const dataStart = markerIdx + MARKER.length;
-          const quoteIdx = pending.indexOf('"', dataStart);
-
-          if (quoteIdx === -1) {
-            // Closing quote not in buffer yet — keep everything from marker onward
-            pending = pending.slice(markerIdx);
-            break;
-          }
-
-          // Extract base64 content and save as image file
-          const base64Content = pending.slice(dataStart, quoteIdx);
-          const filename = `image_${imageIndex}.png`;
-          const filepath = join(imagesDir, filename);
-          const buf = Buffer.from(base64Content, 'base64');
-          writeFileSync(filepath, buf);
-
-          const relativePath = `images/${filename}`;
-          result += `src="${relativePath}"`;
-          imageIndex++;
-
-          pending = pending.slice(quoteIdx + 1);
-        }
+        state.pending += chunk;
+        const result = parseChunk();
 
         if (result.length > 0) {
           this.push(result);
@@ -172,8 +173,8 @@ export class ImageExtractor {
         callback();
       },
       flush(callback) {
-        if (pending.length > 0) {
-          this.push(pending);
+        if (state.pending.length > 0) {
+          this.push(state.pending);
         }
         callback();
       },
@@ -184,7 +185,7 @@ export class ImageExtractor {
 
     await pipeline(rs, transform, ws);
 
-    return imageIndex;
+    return state.imageIndex;
   }
 
   /**

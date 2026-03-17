@@ -102,25 +102,29 @@ export class ChunkedPDFConverter {
 
     try {
       // Step 4: Process each chunk sequentially
-      for (let i = 0; i < chunks.length; i++) {
-        this.checkAbort(abortSignal);
+      const docs = await chunks.reduce(
+        async (accPromise, [start, end], i) => {
+          const acc = await accPromise;
+          this.checkAbort(abortSignal);
 
-        const [start, end] = chunks[i];
-        const chunkDir = join(chunksBaseDir, `_chunk_${i}`);
-        mkdirSync(chunkDir, { recursive: true });
+          const chunkDir = join(chunksBaseDir, `_chunk_${i}`);
+          mkdirSync(chunkDir, { recursive: true });
 
-        const doc = await this.convertChunk(
-          i,
-          chunks.length,
-          start,
-          end,
-          httpUrl,
-          chunkDir,
-          options,
-        );
+          const doc = await this.convertChunk(
+            i,
+            chunks.length,
+            start,
+            end,
+            httpUrl,
+            chunkDir,
+            options,
+          );
 
-        chunkDocuments.push(doc);
-      }
+          return [...acc, doc];
+        },
+        Promise.resolve([] as DoclingDocument[]),
+      );
+      chunkDocuments.push(...docs);
     } finally {
       // Always stop the local file server
       this.logger.info('[ChunkedPDFConverter] Stopping local file server...');
@@ -213,103 +217,126 @@ export class ChunkedPDFConverter {
     options: PDFConvertOptions,
   ): Promise<DoclingDocument> {
     const chunkLabel = `Chunk ${chunkIndex + 1}/${totalChunks} (pages ${startPage}-${endPage})`;
+    return this.convertChunkWithRetry(
+      chunkLabel,
+      0,
+      startPage,
+      endPage,
+      httpUrl,
+      chunkDir,
+      options,
+    );
+  }
 
-    for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
-      try {
-        if (attempt > 0) {
-          this.logger.info(
-            `[ChunkedPDFConverter] ${chunkLabel}: retrying (${attempt}/${this.config.maxRetries})...`,
-          );
-        } else {
-          this.logger.info(
-            `[ChunkedPDFConverter] ${chunkLabel}: converting...`,
-          );
-        }
-
-        const startTime = Date.now();
-
-        // Build conversion options with page_range
-        const conversionOptions = buildConversionOptions({
-          ...options,
-          page_range: [startPage, endPage],
-        });
-
-        // Start conversion task
-        const task = await this.client.convertSourceAsync({
-          sources: [{ kind: 'http', url: httpUrl }],
-          options: conversionOptions,
-          target: { kind: 'zip' },
-        });
-
-        // Poll until completion
-        await trackTaskProgress(
-          task,
-          this.timeout,
-          this.logger,
-          '[ChunkedPDFConverter]',
-          {
-            errorPrefix: '[ChunkedPDFConverter] Chunk task ',
-          },
+  /**
+   * Recursive retry logic for chunk conversion.
+   */
+  private async convertChunkWithRetry(
+    chunkLabel: string,
+    attempt: number,
+    startPage: number,
+    endPage: number,
+    httpUrl: string,
+    chunkDir: string,
+    options: PDFConvertOptions,
+  ): Promise<DoclingDocument> {
+    try {
+      if (attempt > 0) {
+        this.logger.info(
+          `[ChunkedPDFConverter] ${chunkLabel}: retrying (${attempt}/${this.config.maxRetries})...`,
         );
+      } else {
+        this.logger.info(`[ChunkedPDFConverter] ${chunkLabel}: converting...`);
+      }
 
-        // Download ZIP result
-        const zipPath = join(chunkDir, 'result.zip');
-        await downloadTaskResult(
-          this.client,
-          task.taskId,
-          zipPath,
-          this.logger,
-          '[ChunkedPDFConverter]',
+      const startTime = Date.now();
+
+      // Build conversion options with page_range
+      const conversionOptions = buildConversionOptions({
+        ...options,
+        page_range: [startPage, endPage],
+      });
+
+      // Start conversion task
+      const task = await this.client.convertSourceAsync({
+        sources: [{ kind: 'http', url: httpUrl }],
+        options: conversionOptions,
+        target: { kind: 'zip' },
+      });
+
+      // Poll until completion
+      await trackTaskProgress(
+        task,
+        this.timeout,
+        this.logger,
+        '[ChunkedPDFConverter]',
+        {
+          errorPrefix: '[ChunkedPDFConverter] Chunk task ',
+        },
+      );
+
+      // Download ZIP result
+      const zipPath = join(chunkDir, 'result.zip');
+      await downloadTaskResult(
+        this.client,
+        task.taskId,
+        zipPath,
+        this.logger,
+        '[ChunkedPDFConverter]',
+      );
+
+      // Extract ZIP and process images
+      const extractDir = join(chunkDir, 'extracted');
+      const chunkOutputDir = join(chunkDir, 'output');
+      await ImageExtractor.extractAndSaveDocumentsFromZip(
+        this.logger,
+        zipPath,
+        extractDir,
+        chunkOutputDir,
+      );
+
+      // Parse result.json into a DoclingDocument object
+      const resultJsonPath = join(chunkOutputDir, 'result.json');
+      const doc = await runJqFileJson<DoclingDocument>('.', resultJsonPath);
+
+      // Cleanup chunk temp files (ZIP + extracted)
+      if (existsSync(zipPath)) rmSync(zipPath, { force: true });
+      if (existsSync(extractDir)) {
+        rmSync(extractDir, { recursive: true, force: true });
+      }
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      if (attempt > 0) {
+        this.logger.info(
+          `[ChunkedPDFConverter] ${chunkLabel}: completed on retry ${attempt} (${elapsed}s)`,
         );
-
-        // Extract ZIP and process images
-        const extractDir = join(chunkDir, 'extracted');
-        const chunkOutputDir = join(chunkDir, 'output');
-        await ImageExtractor.extractAndSaveDocumentsFromZip(
-          this.logger,
-          zipPath,
-          extractDir,
-          chunkOutputDir,
-        );
-
-        // Parse result.json into a DoclingDocument object
-        const resultJsonPath = join(chunkOutputDir, 'result.json');
-        const doc = await runJqFileJson<DoclingDocument>('.', resultJsonPath);
-
-        // Cleanup chunk temp files (ZIP + extracted)
-        if (existsSync(zipPath)) rmSync(zipPath, { force: true });
-        if (existsSync(extractDir)) {
-          rmSync(extractDir, { recursive: true, force: true });
-        }
-
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        if (attempt > 0) {
-          this.logger.info(
-            `[ChunkedPDFConverter] ${chunkLabel}: completed on retry ${attempt} (${elapsed}s)`,
-          );
-        } else {
-          this.logger.info(
-            `[ChunkedPDFConverter] ${chunkLabel}: completed (${elapsed}s)`,
-          );
-        }
-
-        return doc;
-      } catch (error) {
-        if (attempt >= this.config.maxRetries) {
-          this.logger.error(
-            `[ChunkedPDFConverter] ${chunkLabel}: failed after ${this.config.maxRetries} retries`,
-          );
-          throw error;
-        }
-        this.logger.warn(
-          `[ChunkedPDFConverter] ${chunkLabel}: failed, retrying (${attempt + 1}/${this.config.maxRetries})...`,
+      } else {
+        this.logger.info(
+          `[ChunkedPDFConverter] ${chunkLabel}: completed (${elapsed}s)`,
         );
       }
-    }
 
-    /* v8 ignore start -- unreachable: loop always returns or throws */
-    throw new Error('Unreachable');
-    /* v8 ignore stop */
+      return doc;
+    } catch (error) {
+      if (attempt >= this.config.maxRetries) {
+        this.logger.error(
+          `[ChunkedPDFConverter] ${chunkLabel}: failed after ${this.config.maxRetries} retries`,
+        );
+        throw error;
+      }
+      this.logger.warn(
+        `[ChunkedPDFConverter] ${chunkLabel}: failed, retrying (${attempt + 1}/${this.config.maxRetries})...`,
+      );
+      return this.convertChunkWithRetry(
+        chunkLabel,
+        attempt + 1,
+        startPage,
+        endPage,
+        httpUrl,
+        chunkDir,
+        options,
+      );
+    }
   }
 
   /** Calculate page ranges for chunks */
@@ -318,12 +345,12 @@ export class ChunkedPDFConverter {
       throw new Error('[ChunkedPDFConverter] chunkSize must be positive');
     }
 
-    const ranges: PageRange[] = [];
-    for (let start = 1; start <= totalPages; start += this.config.chunkSize) {
+    const numChunks = Math.ceil(totalPages / this.config.chunkSize);
+    return Array.from({ length: numChunks }, (_, i) => {
+      const start = i * this.config.chunkSize + 1;
       const end = Math.min(start + this.config.chunkSize - 1, totalPages);
-      ranges.push([start, end]);
-    }
-    return ranges;
+      return [start, end] as PageRange;
+    });
   }
 
   /** Get total page count using pdfinfo */
@@ -345,16 +372,17 @@ export class ChunkedPDFConverter {
     totalChunks: number,
     imagesDir: string,
   ): void {
+    const chunkIndices = Array.from({ length: totalChunks }, (_, i) => i);
+
     // 1. Relocate pic_ files (JSON base64 images)
-    let picGlobalIndex = 0;
-    for (let i = 0; i < totalChunks; i++) {
+    const picGlobalIndex = chunkIndices.reduce((globalIndex, i) => {
       const chunkImagesDir = join(
         chunksBaseDir,
         `_chunk_${i}`,
         'output',
         'images',
       );
-      if (!existsSync(chunkImagesDir)) continue;
+      if (!existsSync(chunkImagesDir)) return globalIndex;
 
       const picFiles = readdirSync(chunkImagesDir)
         .filter((f) => f.startsWith('pic_') && f.endsWith('.png'))
@@ -364,24 +392,24 @@ export class ChunkedPDFConverter {
           return numA - numB;
         });
 
-      for (const file of picFiles) {
+      picFiles.forEach((file, fileIdx) => {
         const src = join(chunkImagesDir, file);
-        const dest = join(imagesDir, `pic_${picGlobalIndex}.png`);
+        const dest = join(imagesDir, `pic_${globalIndex + fileIdx}.png`);
         copyFileSync(src, dest);
-        picGlobalIndex++;
-      }
-    }
+      });
+
+      return globalIndex + picFiles.length;
+    }, 0);
 
     // 2. Relocate image_ files (HTML content images)
-    let imageGlobalIndex = 0;
-    for (let i = 0; i < totalChunks; i++) {
+    const imageGlobalIndex = chunkIndices.reduce((globalIndex, i) => {
       const chunkImagesDir = join(
         chunksBaseDir,
         `_chunk_${i}`,
         'output',
         'images',
       );
-      if (!existsSync(chunkImagesDir)) continue;
+      if (!existsSync(chunkImagesDir)) return globalIndex;
 
       const imageFiles = readdirSync(chunkImagesDir)
         .filter((f) => f.startsWith('image_') && f.endsWith('.png'))
@@ -397,13 +425,14 @@ export class ChunkedPDFConverter {
           return numA - numB;
         });
 
-      for (const file of imageFiles) {
+      imageFiles.forEach((file, fileIdx) => {
         const src = join(chunkImagesDir, file);
-        const dest = join(imagesDir, `image_${imageGlobalIndex}.png`);
+        const dest = join(imagesDir, `image_${globalIndex + fileIdx}.png`);
         copyFileSync(src, dest);
-        imageGlobalIndex++;
-      }
-    }
+      });
+
+      return globalIndex + imageFiles.length;
+    }, 0);
 
     this.logger.info(
       `[ChunkedPDFConverter] Relocated ${picGlobalIndex} pic + ${imageGlobalIndex} image files to ${imagesDir}`,
@@ -418,28 +447,24 @@ export class ChunkedPDFConverter {
    */
   private cleanupOrphanedPicFiles(resultPath: string, imagesDir: string): void {
     const content = readFileSync(resultPath, 'utf-8');
-    const referencedPics = new Set<string>();
-    const picPattern = /images\/pic_\d+\.png/g;
-    let match;
-    while ((match = picPattern.exec(content)) !== null) {
-      referencedPics.add(match[0].replace('images/', ''));
-    }
+    const referencedPics = new Set(
+      [...content.matchAll(/images\/pic_\d+\.png/g)].map((m) =>
+        m[0].replace('images/', ''),
+      ),
+    );
 
     const picFiles = readdirSync(imagesDir).filter(
       (f) => f.startsWith('pic_') && f.endsWith('.png'),
     );
 
-    let removedCount = 0;
-    for (const file of picFiles) {
-      if (!referencedPics.has(file)) {
-        rmSync(join(imagesDir, file), { force: true });
-        removedCount++;
-      }
-    }
+    const orphanedFiles = picFiles.filter((file) => !referencedPics.has(file));
+    orphanedFiles.forEach((file) => {
+      rmSync(join(imagesDir, file), { force: true });
+    });
 
-    if (removedCount > 0) {
+    if (orphanedFiles.length > 0) {
       this.logger.info(
-        `[ChunkedPDFConverter] Cleaned up ${removedCount} orphaned pic_ files (${referencedPics.size} referenced, kept)`,
+        `[ChunkedPDFConverter] Cleaned up ${orphanedFiles.length} orphaned pic_ files (${referencedPics.size} referenced, kept)`,
       );
     }
   }
@@ -452,18 +477,21 @@ export class ChunkedPDFConverter {
     chunksBaseDir: string,
     totalChunks: number,
   ): number[] {
-    const offsets: number[] = [];
-    let cumulative = 0;
-    for (let i = 0; i < totalChunks; i++) {
-      offsets.push(cumulative);
-      const dir = join(chunksBaseDir, `_chunk_${i}`, 'output', 'images');
-      const count = existsSync(dir)
-        ? readdirSync(dir).filter(
-            (f) => f.startsWith('pic_') && f.endsWith('.png'),
-          ).length
-        : 0;
-      cumulative += count;
-    }
+    const { offsets } = Array.from({ length: totalChunks }, (_, i) => i).reduce(
+      (acc, i) => {
+        const dir = join(chunksBaseDir, `_chunk_${i}`, 'output', 'images');
+        const count = existsSync(dir)
+          ? readdirSync(dir).filter(
+              (f) => f.startsWith('pic_') && f.endsWith('.png'),
+            ).length
+          : 0;
+        return {
+          offsets: [...acc.offsets, acc.cumulative],
+          cumulative: acc.cumulative + count,
+        };
+      },
+      { offsets: [] as number[], cumulative: 0 },
+    );
     return offsets;
   }
 

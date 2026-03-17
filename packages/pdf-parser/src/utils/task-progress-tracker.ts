@@ -38,9 +38,8 @@ export async function trackTaskProgress(
 ): Promise<void> {
   const startTime = Date.now();
   const errPrefix = options?.errorPrefix ?? 'Task ';
-  let lastProgressLine = '';
 
-  while (true) {
+  const pollOnce = async (lastProgressLine: string): Promise<void> => {
     if (Date.now() - startTime > timeout) {
       throw new Error(`${errPrefix}timeout`);
     }
@@ -48,26 +47,29 @@ export async function trackTaskProgress(
     const status = await task.poll();
 
     // Detailed progress logging (used by single-pass conversion)
-    if (options?.showDetailedProgress) {
-      const parts: string[] = [`Status: ${status.task_status}`];
-      if (status.task_position !== undefined) {
-        parts.push(`position: ${status.task_position}`);
-      }
-      const meta = status.task_meta;
-      if (
-        meta?.processed_documents !== undefined &&
-        meta?.total_documents !== undefined
-      ) {
-        parts.push(
-          `progress: ${meta.processed_documents}/${meta.total_documents}`,
-        );
-      }
-      const progressLine = `\r${logPrefix} ${parts.join(' | ')}`;
-      if (progressLine !== lastProgressLine) {
-        lastProgressLine = progressLine;
-        process.stdout.write(progressLine);
-      }
-    }
+    const updatedProgressLine = options?.showDetailedProgress
+      ? (() => {
+          const parts: string[] = [`Status: ${status.task_status}`];
+          if (status.task_position !== undefined) {
+            parts.push(`position: ${status.task_position}`);
+          }
+          const meta = status.task_meta;
+          if (
+            meta?.processed_documents !== undefined &&
+            meta?.total_documents !== undefined
+          ) {
+            parts.push(
+              `progress: ${meta.processed_documents}/${meta.total_documents}`,
+            );
+          }
+          const progressLine = `\r${logPrefix} ${parts.join(' | ')}`;
+          if (progressLine !== lastProgressLine) {
+            process.stdout.write(progressLine);
+            return progressLine;
+          }
+          return lastProgressLine;
+        })()
+      : lastProgressLine;
 
     if (status.task_status === 'success') {
       if (options?.showDetailedProgress) {
@@ -97,5 +99,8 @@ export async function trackTaskProgress(
     await new Promise((resolve) =>
       setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
     );
-  }
+    return pollOnce(updatedProgressLine);
+  };
+
+  return pollOnce('');
 }

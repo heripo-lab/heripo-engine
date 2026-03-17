@@ -186,42 +186,19 @@ export class VlmPageProcessor {
       options.aggregator.track(result.usage);
     }
 
-    let pageResult = toVlmPageResult(pageNo, result.output as VlmPageOutput);
+    const initialPageResult = toVlmPageResult(
+      pageNo,
+      result.output as VlmPageOutput,
+    );
 
     // Retry once with higher temperature if VLM returned no elements
+    const pageResult =
+      initialPageResult.elements.length === 0
+        ? await this.retryForEmptyPage(pageNo, messages, model, options)
+        : initialPageResult;
+
     if (pageResult.elements.length === 0) {
-      this.logger.warn(
-        `[VlmPageProcessor] Page ${pageNo}: 0 elements extracted, retrying with temperature ${EMPTY_PAGE_RETRY_TEMPERATURE}...`,
-      );
-
-      const retryResult = await LLMCaller.callVision({
-        schema: vlmPageOutputSchema as any,
-        messages,
-        primaryModel: model,
-        fallbackModel: options?.fallbackModel,
-        maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
-        temperature: EMPTY_PAGE_RETRY_TEMPERATURE,
-        abortSignal: options?.abortSignal,
-        component: 'VlmPageProcessor',
-        phase: 'page-analysis-retry',
-      });
-
-      if (options?.aggregator) {
-        options.aggregator.track(retryResult.usage);
-      }
-
-      pageResult = toVlmPageResult(pageNo, retryResult.output as VlmPageOutput);
-
-      if (pageResult.elements.length > 0) {
-        this.logger.debug(
-          `[VlmPageProcessor] Page ${pageNo}: ${pageResult.elements.length} elements extracted on retry`,
-        );
-      } else {
-        this.logger.warn(
-          `[VlmPageProcessor] Page ${pageNo}: still 0 elements after retry`,
-        );
-        return pageResult;
-      }
+      return pageResult;
     }
 
     // Quality validation: detect hallucination and script anomalies
@@ -245,6 +222,59 @@ export class VlmPageProcessor {
     );
 
     return pageResult;
+  }
+
+  /**
+   * Retry a page with higher temperature when initial VLM call returned no elements.
+   */
+  private async retryForEmptyPage(
+    pageNo: number,
+    messages: Array<{
+      role: 'user';
+      content: Array<
+        | { type: 'text'; text: string }
+        | { type: 'image'; image: Uint8Array; mediaType: 'image/png' }
+      >;
+    }>,
+    model: LanguageModel,
+    options?: VlmPageProcessorOptions,
+  ): Promise<VlmPageResult> {
+    this.logger.warn(
+      `[VlmPageProcessor] Page ${pageNo}: 0 elements extracted, retrying with temperature ${EMPTY_PAGE_RETRY_TEMPERATURE}...`,
+    );
+
+    const retryResult = await LLMCaller.callVision({
+      schema: vlmPageOutputSchema as any,
+      messages,
+      primaryModel: model,
+      fallbackModel: options?.fallbackModel,
+      maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
+      temperature: EMPTY_PAGE_RETRY_TEMPERATURE,
+      abortSignal: options?.abortSignal,
+      component: 'VlmPageProcessor',
+      phase: 'page-analysis-retry',
+    });
+
+    if (options?.aggregator) {
+      options.aggregator.track(retryResult.usage);
+    }
+
+    const retryPageResult = toVlmPageResult(
+      pageNo,
+      retryResult.output as VlmPageOutput,
+    );
+
+    if (retryPageResult.elements.length > 0) {
+      this.logger.debug(
+        `[VlmPageProcessor] Page ${pageNo}: ${retryPageResult.elements.length} elements extracted on retry`,
+      );
+    } else {
+      this.logger.warn(
+        `[VlmPageProcessor] Page ${pageNo}: still 0 elements after retry`,
+      );
+    }
+
+    return retryPageResult;
   }
 
   /**

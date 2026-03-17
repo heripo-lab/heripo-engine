@@ -139,49 +139,100 @@ export class OcrStrategySampler {
     );
 
     // Step 4: Check each sample page for Korean-Hanja mix (early exit on detection)
-    let sampledCount = 0;
-    const languageFrequency = new Map<Bcp47LanguageTag, number>();
-    for (const idx of sampleIndices) {
-      sampledCount++;
-      const pageFile = renderResult.pageFiles[idx];
-      const pageAnalysis = await this.analyzeSamplePage(
-        pageFile,
-        idx + 1,
-        model,
-        options,
+    const sampleResult = await this.samplePages(
+      sampleIndices,
+      renderResult.pageFiles,
+      model,
+      options,
+    );
+
+    if (sampleResult.foundMix) {
+      this.logger.info(
+        `[OcrStrategySampler] Korean-Hanja mix detected on page ${sampleResult.mixPageNo} → VLM strategy`,
       );
-
-      for (const lang of pageAnalysis.detectedLanguages) {
-        languageFrequency.set(lang, (languageFrequency.get(lang) ?? 0) + 1);
-      }
-
-      if (pageAnalysis.hasKoreanHanjaMix) {
-        this.logger.info(
-          `[OcrStrategySampler] Korean-Hanja mix detected on page ${idx + 1} → VLM strategy`,
-        );
-        const detectedLanguages = this.aggregateLanguages(languageFrequency);
-        return {
-          method: 'vlm',
-          detectedLanguages,
-          reason: `Korean-Hanja mix detected on page ${idx + 1}`,
-          sampledPages: sampledCount,
-          totalPages: renderResult.pageCount,
-        };
-      }
+      const detectedLanguages = this.aggregateLanguages(
+        sampleResult.languageFrequency,
+      );
+      return {
+        method: 'vlm',
+        detectedLanguages,
+        reason: `Korean-Hanja mix detected on page ${sampleResult.mixPageNo}`,
+        sampledPages: sampleResult.sampledCount,
+        totalPages: renderResult.pageCount,
+      };
     }
 
     // Step 5: No Korean-Hanja mix found → ocrmac
     this.logger.info(
       '[OcrStrategySampler] No Korean-Hanja mix detected → ocrmac strategy',
     );
-    const detectedLanguages = this.aggregateLanguages(languageFrequency);
+    const detectedLanguages = this.aggregateLanguages(
+      sampleResult.languageFrequency,
+    );
     return {
       method: 'ocrmac',
       detectedLanguages,
-      reason: `No Korean-Hanja mix detected in ${sampledCount} sampled pages`,
-      sampledPages: sampledCount,
+      reason: `No Korean-Hanja mix detected in ${sampleResult.sampledCount} sampled pages`,
+      sampledPages: sampleResult.sampledCount,
       totalPages: renderResult.pageCount,
     };
+  }
+
+  /**
+   * Recursively sample pages for Korean-Hanja mix detection with early exit.
+   */
+  private async samplePages(
+    sampleIndices: number[],
+    pageFiles: string[],
+    model: LanguageModel,
+    options?: OcrStrategySamplerOptions,
+    currentIndex = 0,
+    languageFrequency = new Map<Bcp47LanguageTag, number>(),
+  ): Promise<{
+    foundMix: boolean;
+    mixPageNo?: number;
+    sampledCount: number;
+    languageFrequency: Map<Bcp47LanguageTag, number>;
+  }> {
+    if (currentIndex >= sampleIndices.length) {
+      return {
+        foundMix: false,
+        sampledCount: sampleIndices.length,
+        languageFrequency,
+      };
+    }
+
+    const idx = sampleIndices[currentIndex];
+    const pageFile = pageFiles[idx];
+    const pageAnalysis = await this.analyzeSamplePage(
+      pageFile,
+      idx + 1,
+      model,
+      options,
+    );
+
+    const updatedFrequency = new Map(languageFrequency);
+    pageAnalysis.detectedLanguages.forEach((lang) => {
+      updatedFrequency.set(lang, (updatedFrequency.get(lang) ?? 0) + 1);
+    });
+
+    if (pageAnalysis.hasKoreanHanjaMix) {
+      return {
+        foundMix: true,
+        mixPageNo: idx + 1,
+        sampledCount: currentIndex + 1,
+        languageFrequency: updatedFrequency,
+      };
+    }
+
+    return this.samplePages(
+      sampleIndices,
+      pageFiles,
+      model,
+      options,
+      currentIndex + 1,
+      updatedFrequency,
+    );
   }
 
   /**
@@ -219,12 +270,9 @@ export class OcrStrategySampler {
 
       if (hasHanja) {
         const pageTextArray = fullText.split('\f');
-        const koreanHanjaMixPages: number[] = [];
-        for (let i = 0; i < pageTextArray.length; i++) {
-          if (CJK_REGEX.test(pageTextArray[i])) {
-            koreanHanjaMixPages.push(i + 1); // 1-based
-          }
-        }
+        const koreanHanjaMixPages = pageTextArray.flatMap((text, i) =>
+          CJK_REGEX.test(text) ? [i + 1] : [],
+        );
 
         this.logger.info(
           `[OcrStrategySampler] Hangul-Hanja mix detected in text layer → VLM strategy (${koreanHanjaMixPages.length} pages with Hanja)`,
@@ -290,12 +338,11 @@ export class OcrStrategySampler {
     }
 
     // Distribute samples evenly across eligible range
-    const indices: number[] = [];
     const step = eligibleCount / maxSamples;
-    for (let i = 0; i < maxSamples; i++) {
-      indices.push(start + Math.floor(i * step));
-    }
-    return indices;
+    return Array.from(
+      { length: maxSamples },
+      (_, i) => start + Math.floor(i * step),
+    );
   }
 
   /**
