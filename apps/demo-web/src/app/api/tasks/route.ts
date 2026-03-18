@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 
 import { verifyTOTP } from '~/lib/auth/totp';
 import { isTurnstileTokenValid } from '~/lib/auth/turnstile';
+import { publicModeConfig } from '~/lib/config/public-mode';
 import {
   canAttemptOTP,
   recordOTPAttempt,
@@ -208,27 +209,29 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Step 3: Check weekly session lockout (only for non-OTP users)
-        const lockoutStatus = getWeeklyLockoutStatus(sessionId);
-        if (lockoutStatus.locked) {
-          sendWebhookAsync(
-            createSessionWeeklyLockedPayload({
-              ...clientInfo,
-              sessionId,
-              filename: file.name,
-              lockedUntil: lockoutStatus.lockedUntil!,
-            }),
-          );
+        // Step 3: Check weekly session lockout (official demo + non-OTP only)
+        if (publicModeConfig.isPublicMode && publicModeConfig.isOfficialDemo) {
+          const lockoutStatus = getWeeklyLockoutStatus(sessionId);
+          if (lockoutStatus.locked) {
+            sendWebhookAsync(
+              createSessionWeeklyLockedPayload({
+                ...clientInfo,
+                sessionId,
+                filename: file.name,
+                lockedUntil: lockoutStatus.lockedUntil!,
+              }),
+            );
 
-          return NextResponse.json(
-            {
-              error:
-                'You have already completed a task this week. Please try again later.',
-              code: 'WEEKLY_SESSION_LOCKED',
-              lockedUntil: lockoutStatus.lockedUntil,
-            },
-            { status: 429 },
-          );
+            return NextResponse.json(
+              {
+                error:
+                  'You have already completed a task this week. Please try again later.',
+                code: 'WEEKLY_SESSION_LOCKED',
+                lockedUntil: lockoutStatus.lockedUntil,
+              },
+              { status: 429 },
+            );
+          }
         }
 
         // Step 4: Check rate limit (only for non-OTP users)
