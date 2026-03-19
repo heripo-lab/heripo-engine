@@ -30,34 +30,30 @@ export function matchTextToReferenceWithUnused(
     return { references, unusedBlocks: [] };
   }
 
-  const initialAvailable = new Set(refBlocks.map((_, i) => i));
+  const available = new Set(refBlocks.map((_, i) => i));
 
-  const finalAvailable = pageTexts.reduce((available, entry, promptIndex) => {
-    const ocrText = entry.item.text;
+  for (let promptIndex = 0; promptIndex < pageTexts.length; promptIndex++) {
+    const ocrText = pageTexts[promptIndex].item.text;
 
-    const { bestScore, bestBlockIndex } = [...available].reduce(
-      (best, blockIndex) => {
-        const score = computeCharOverlap(ocrText, refBlocks[blockIndex]);
-        return score > best.bestScore
-          ? { bestScore: score, bestBlockIndex: blockIndex }
-          : best;
-      },
-      { bestScore: 0, bestBlockIndex: -1 },
-    );
+    let bestScore = 0;
+    let bestBlockIndex = -1;
+    for (const blockIndex of available) {
+      const score = computeCharOverlap(ocrText, refBlocks[blockIndex]);
+      if (score > bestScore) {
+        bestScore = score;
+        bestBlockIndex = blockIndex;
+      }
+    }
 
     if (bestBlockIndex >= 0 && bestScore >= REFERENCE_MATCH_THRESHOLD) {
       if (refBlocks[bestBlockIndex] !== ocrText) {
         references.set(promptIndex, refBlocks[bestBlockIndex]);
       }
-      const next = new Set(available);
-      next.delete(bestBlockIndex);
-      return next;
+      available.delete(bestBlockIndex);
     }
+  }
 
-    return available;
-  }, initialAvailable);
-
-  const unusedBlocks = [...finalAvailable]
+  const unusedBlocks = [...available]
     .sort((a, b) => a - b)
     .map((i) => refBlocks[i]);
 
@@ -69,27 +65,26 @@ export function matchTextToReferenceWithUnused(
  * Consecutive non-empty lines are joined with a space.
  */
 export function mergeIntoBlocks(pageText: string): string[] {
-  const { blocks, currentLines } = pageText.split('\n').reduce(
-    (acc, rawLine) => {
-      const trimmed = rawLine.trim();
-      if (trimmed.length === 0) {
-        if (acc.currentLines.length > 0) {
-          return {
-            blocks: [...acc.blocks, acc.currentLines.join(' ')],
-            currentLines: [],
-          };
-        }
-        return acc;
-      }
-      return {
-        blocks: acc.blocks,
-        currentLines: [...acc.currentLines, trimmed],
-      };
-    },
-    { blocks: [] as string[], currentLines: [] as string[] },
-  );
+  const blocks: string[] = [];
+  const currentLines: string[] = [];
 
-  return currentLines.length > 0 ? [...blocks, currentLines.join(' ')] : blocks;
+  for (const rawLine of pageText.split('\n')) {
+    const trimmed = rawLine.trim();
+    if (trimmed.length === 0) {
+      if (currentLines.length > 0) {
+        blocks.push(currentLines.join(' '));
+        currentLines.length = 0;
+      }
+    } else {
+      currentLines.push(trimmed);
+    }
+  }
+
+  if (currentLines.length > 0) {
+    blocks.push(currentLines.join(' '));
+  }
+
+  return blocks;
 }
 
 /**
@@ -99,20 +94,21 @@ export function mergeIntoBlocks(pageText: string): string[] {
 export function computeCharOverlap(a: string, b: string): number {
   if (a.length === 0 || b.length === 0) return 0;
 
-  const freqA = [...a].reduce((freq, ch) => {
-    freq.set(ch, (freq.get(ch) ?? 0) + 1);
-    return freq;
-  }, new Map<string, number>());
+  const freqA = new Map<string, number>();
+  for (const ch of a) {
+    freqA.set(ch, (freqA.get(ch) ?? 0) + 1);
+  }
 
-  const freqB = [...b].reduce((freq, ch) => {
-    freq.set(ch, (freq.get(ch) ?? 0) + 1);
-    return freq;
-  }, new Map<string, number>());
+  const freqB = new Map<string, number>();
+  for (const ch of b) {
+    freqB.set(ch, (freqB.get(ch) ?? 0) + 1);
+  }
 
-  const overlap = [...freqA].reduce((sum, [ch, countA]) => {
+  let overlap = 0;
+  for (const [ch, countA] of freqA) {
     const countB = freqB.get(ch) ?? 0;
-    return sum + Math.min(countA, countB);
-  }, 0);
+    overlap += Math.min(countA, countB);
+  }
 
   return overlap / Math.max(a.length, b.length);
 }

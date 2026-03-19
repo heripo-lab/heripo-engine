@@ -102,29 +102,25 @@ export class ChunkedPDFConverter {
 
     try {
       // Step 4: Process each chunk sequentially
-      const docs = await chunks.reduce(
-        async (accPromise, [start, end], i) => {
-          const acc = await accPromise;
-          this.checkAbort(abortSignal);
+      for (let i = 0; i < chunks.length; i++) {
+        const [start, end] = chunks[i];
+        this.checkAbort(abortSignal);
 
-          const chunkDir = join(chunksBaseDir, `_chunk_${i}`);
-          mkdirSync(chunkDir, { recursive: true });
+        const chunkDir = join(chunksBaseDir, `_chunk_${i}`);
+        mkdirSync(chunkDir, { recursive: true });
 
-          const doc = await this.convertChunk(
-            i,
-            chunks.length,
-            start,
-            end,
-            httpUrl,
-            chunkDir,
-            options,
-          );
+        const doc = await this.convertChunk(
+          i,
+          chunks.length,
+          start,
+          end,
+          httpUrl,
+          chunkDir,
+          options,
+        );
 
-          return [...acc, doc];
-        },
-        Promise.resolve([] as DoclingDocument[]),
-      );
-      chunkDocuments.push(...docs);
+        chunkDocuments.push(doc);
+      }
     } finally {
       // Always stop the local file server
       this.logger.info('[ChunkedPDFConverter] Stopping local file server...');
@@ -372,17 +368,16 @@ export class ChunkedPDFConverter {
     totalChunks: number,
     imagesDir: string,
   ): void {
-    const chunkIndices = Array.from({ length: totalChunks }, (_, i) => i);
-
     // 1. Relocate pic_ files (JSON base64 images)
-    const picGlobalIndex = chunkIndices.reduce((globalIndex, i) => {
+    let picGlobalIndex = 0;
+    for (let i = 0; i < totalChunks; i++) {
       const chunkImagesDir = join(
         chunksBaseDir,
         `_chunk_${i}`,
         'output',
         'images',
       );
-      if (!existsSync(chunkImagesDir)) return globalIndex;
+      if (!existsSync(chunkImagesDir)) continue;
 
       const picFiles = readdirSync(chunkImagesDir)
         .filter((f) => f.startsWith('pic_') && f.endsWith('.png'))
@@ -392,24 +387,25 @@ export class ChunkedPDFConverter {
           return numA - numB;
         });
 
-      picFiles.forEach((file, fileIdx) => {
-        const src = join(chunkImagesDir, file);
-        const dest = join(imagesDir, `pic_${globalIndex + fileIdx}.png`);
+      for (let fileIdx = 0; fileIdx < picFiles.length; fileIdx++) {
+        const src = join(chunkImagesDir, picFiles[fileIdx]);
+        const dest = join(imagesDir, `pic_${picGlobalIndex + fileIdx}.png`);
         copyFileSync(src, dest);
-      });
+      }
 
-      return globalIndex + picFiles.length;
-    }, 0);
+      picGlobalIndex += picFiles.length;
+    }
 
     // 2. Relocate image_ files (HTML content images)
-    const imageGlobalIndex = chunkIndices.reduce((globalIndex, i) => {
+    let imageGlobalIndex = 0;
+    for (let i = 0; i < totalChunks; i++) {
       const chunkImagesDir = join(
         chunksBaseDir,
         `_chunk_${i}`,
         'output',
         'images',
       );
-      if (!existsSync(chunkImagesDir)) return globalIndex;
+      if (!existsSync(chunkImagesDir)) continue;
 
       const imageFiles = readdirSync(chunkImagesDir)
         .filter((f) => f.startsWith('image_') && f.endsWith('.png'))
@@ -425,14 +421,14 @@ export class ChunkedPDFConverter {
           return numA - numB;
         });
 
-      imageFiles.forEach((file, fileIdx) => {
-        const src = join(chunkImagesDir, file);
-        const dest = join(imagesDir, `image_${globalIndex + fileIdx}.png`);
+      for (let fileIdx = 0; fileIdx < imageFiles.length; fileIdx++) {
+        const src = join(chunkImagesDir, imageFiles[fileIdx]);
+        const dest = join(imagesDir, `image_${imageGlobalIndex + fileIdx}.png`);
         copyFileSync(src, dest);
-      });
+      }
 
-      return globalIndex + imageFiles.length;
-    }, 0);
+      imageGlobalIndex += imageFiles.length;
+    }
 
     this.logger.info(
       `[ChunkedPDFConverter] Relocated ${picGlobalIndex} pic + ${imageGlobalIndex} image files to ${imagesDir}`,
@@ -477,21 +473,18 @@ export class ChunkedPDFConverter {
     chunksBaseDir: string,
     totalChunks: number,
   ): number[] {
-    const { offsets } = Array.from({ length: totalChunks }, (_, i) => i).reduce(
-      (acc, i) => {
-        const dir = join(chunksBaseDir, `_chunk_${i}`, 'output', 'images');
-        const count = existsSync(dir)
-          ? readdirSync(dir).filter(
-              (f) => f.startsWith('pic_') && f.endsWith('.png'),
-            ).length
-          : 0;
-        return {
-          offsets: [...acc.offsets, acc.cumulative],
-          cumulative: acc.cumulative + count,
-        };
-      },
-      { offsets: [] as number[], cumulative: 0 },
-    );
+    const offsets: number[] = [];
+    let cumulative = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      const dir = join(chunksBaseDir, `_chunk_${i}`, 'output', 'images');
+      const count = existsSync(dir)
+        ? readdirSync(dir).filter(
+            (f) => f.startsWith('pic_') && f.endsWith('.png'),
+          ).length
+        : 0;
+      offsets.push(cumulative);
+      cumulative += count;
+    }
     return offsets;
   }
 

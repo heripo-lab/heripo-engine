@@ -47,29 +47,27 @@ export async function trackTaskProgress(
     const status = await task.poll();
 
     // Detailed progress logging (used by single-pass conversion)
-    const updatedProgressLine = options?.showDetailedProgress
-      ? (() => {
-          const parts: string[] = [`Status: ${status.task_status}`];
-          if (status.task_position !== undefined) {
-            parts.push(`position: ${status.task_position}`);
-          }
-          const meta = status.task_meta;
-          if (
-            meta?.processed_documents !== undefined &&
-            meta?.total_documents !== undefined
-          ) {
-            parts.push(
-              `progress: ${meta.processed_documents}/${meta.total_documents}`,
-            );
-          }
-          const progressLine = `\r${logPrefix} ${parts.join(' | ')}`;
-          if (progressLine !== lastProgressLine) {
-            process.stdout.write(progressLine);
-            return progressLine;
-          }
-          return lastProgressLine;
-        })()
-      : lastProgressLine;
+    let updatedProgressLine = lastProgressLine;
+    if (options?.showDetailedProgress) {
+      const parts: string[] = [`Status: ${status.task_status}`];
+      if (status.task_position !== undefined) {
+        parts.push(`position: ${status.task_position}`);
+      }
+      const meta = status.task_meta;
+      if (
+        meta?.processed_documents !== undefined &&
+        meta?.total_documents !== undefined
+      ) {
+        parts.push(
+          `progress: ${meta.processed_documents}/${meta.total_documents}`,
+        );
+      }
+      const progressLine = `\r${logPrefix} ${parts.join(' | ')}`;
+      if (progressLine !== lastProgressLine) {
+        process.stdout.write(progressLine);
+        updatedProgressLine = progressLine;
+      }
+    }
 
     if (status.task_status === 'success') {
       if (options?.showDetailedProgress) {

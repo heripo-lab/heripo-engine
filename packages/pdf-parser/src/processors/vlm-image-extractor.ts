@@ -89,26 +89,23 @@ export class VlmImageExtractor {
       dims: { width: number; height: number };
     }>;
 
-    const imagePaths = await validPictures.reduce(
-      async (accPromise, { picture, i, pageFile, dims }) => {
-        const acc = await accPromise;
-        const crop = this.computeCropRegion(
-          picture.bbox,
-          dims.width,
-          dims.height,
-        );
+    const imagePaths: string[] = [];
+    for (const { picture, i, pageFile, dims } of validPictures) {
+      const crop = this.computeCropRegion(
+        picture.bbox,
+        dims.width,
+        dims.height,
+      );
 
-        // Warn for outlier crop regions but still attempt extraction
-        this.validateCropRegion(i, crop.w, crop.h, dims.width, dims.height);
+      // Warn for outlier crop regions but still attempt extraction
+      this.validateCropRegion(i, crop.w, crop.h, dims.width, dims.height);
 
-        const relativePath = `images/image_${i}.png`;
-        const outputPath = join(outputDir, relativePath);
+      const relativePath = `images/image_${i}.png`;
+      const outputPath = join(outputDir, relativePath);
 
-        await this.cropImage(pageFile, outputPath, crop);
-        return [...acc, relativePath];
-      },
-      Promise.resolve([] as string[]),
-    );
+      await this.cropImage(pageFile, outputPath, crop);
+      imagePaths.push(relativePath);
+    }
 
     this.logger.info(
       `[VlmImageExtractor] Extracted ${imagePaths.length} images`,
@@ -127,11 +124,11 @@ export class VlmImageExtractor {
     pictures: PictureLocation[],
   ): Promise<Map<number, { width: number; height: number }>> {
     const uniquePages = [...new Set(pictures.map((p) => p.pageNo))];
+    const dimensions = new Map<number, { width: number; height: number }>();
 
-    return uniquePages.reduce(async (accPromise, pageNo) => {
-      const acc = await accPromise;
+    for (const pageNo of uniquePages) {
       const pageFile = pageFiles[pageNo - 1];
-      if (!pageFile) return acc;
+      if (!pageFile) continue;
 
       const result = await spawnAsync('magick', [
         'identify',
@@ -146,14 +143,12 @@ export class VlmImageExtractor {
         const height = Number(parts[1]);
 
         if (!isNaN(width) && !isNaN(height)) {
-          const next = new Map(acc);
-          next.set(pageNo, { width, height });
-          return next;
+          dimensions.set(pageNo, { width, height });
         }
       }
+    }
 
-      return acc;
-    }, Promise.resolve(new Map<number, { width: number; height: number }>()));
+    return dimensions;
   }
 
   /**

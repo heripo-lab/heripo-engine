@@ -110,17 +110,19 @@ export class VlmTextCorrector {
       };
     }
 
-    const pageNumbers =
-      options?.koreanHanjaMixPages && options.koreanHanjaMixPages.length > 0
-        ? (() => {
-            const hanjaSet = new Set(options.koreanHanjaMixPages);
-            const filtered = allPageNumbers.filter((p) => hanjaSet.has(p));
-            this.logger.info(
-              `[VlmTextCorrector] Filtering to ${filtered.length} Korean-Hanja mix pages out of ${allPageNumbers.length} total`,
-            );
-            return filtered;
-          })()
-        : allPageNumbers;
+    let pageNumbers: number[];
+    if (
+      options?.koreanHanjaMixPages &&
+      options.koreanHanjaMixPages.length > 0
+    ) {
+      const hanjaSet = new Set(options.koreanHanjaMixPages);
+      pageNumbers = allPageNumbers.filter((p) => hanjaSet.has(p));
+      this.logger.info(
+        `[VlmTextCorrector] Filtering to ${pageNumbers.length} Korean-Hanja mix pages out of ${allPageNumbers.length} total`,
+      );
+    } else {
+      pageNumbers = allPageNumbers;
+    }
 
     const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;
     this.logger.info(
@@ -141,20 +143,17 @@ export class VlmTextCorrector {
     );
 
     // Aggregate results
-    const { totalTextCorrections, totalCellCorrections, pagesFailed } =
-      results.reduce(
-        (acc, result) => {
-          if (result === null) {
-            return { ...acc, pagesFailed: acc.pagesFailed + 1 };
-          }
-          return {
-            ...acc,
-            totalTextCorrections: acc.totalTextCorrections + result.tc.length,
-            totalCellCorrections: acc.totalCellCorrections + result.cc.length,
-          };
-        },
-        { totalTextCorrections: 0, totalCellCorrections: 0, pagesFailed: 0 },
-      );
+    let totalTextCorrections = 0;
+    let totalCellCorrections = 0;
+    let pagesFailed = 0;
+    for (const result of results) {
+      if (result === null) {
+        pagesFailed++;
+      } else {
+        totalTextCorrections += result.tc.length;
+        totalCellCorrections += result.cc.length;
+      }
+    }
 
     // Apply corrections to document
     pageNumbers.forEach((pageNo, i) => {

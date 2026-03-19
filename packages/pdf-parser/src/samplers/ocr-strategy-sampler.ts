@@ -179,60 +179,50 @@ export class OcrStrategySampler {
   }
 
   /**
-   * Recursively sample pages for Korean-Hanja mix detection with early exit.
+   * Sample pages for Korean-Hanja mix detection with early exit.
    */
   private async samplePages(
     sampleIndices: number[],
     pageFiles: string[],
     model: LanguageModel,
     options?: OcrStrategySamplerOptions,
-    currentIndex = 0,
-    languageFrequency = new Map<Bcp47LanguageTag, number>(),
   ): Promise<{
     foundMix: boolean;
     mixPageNo?: number;
     sampledCount: number;
     languageFrequency: Map<Bcp47LanguageTag, number>;
   }> {
-    if (currentIndex >= sampleIndices.length) {
-      return {
-        foundMix: false,
-        sampledCount: sampleIndices.length,
-        languageFrequency,
-      };
+    const languageFrequency = new Map<Bcp47LanguageTag, number>();
+
+    for (let i = 0; i < sampleIndices.length; i++) {
+      const idx = sampleIndices[i];
+      const pageFile = pageFiles[idx];
+      const pageAnalysis = await this.analyzeSamplePage(
+        pageFile,
+        idx + 1,
+        model,
+        options,
+      );
+
+      for (const lang of pageAnalysis.detectedLanguages) {
+        languageFrequency.set(lang, (languageFrequency.get(lang) ?? 0) + 1);
+      }
+
+      if (pageAnalysis.hasKoreanHanjaMix) {
+        return {
+          foundMix: true,
+          mixPageNo: idx + 1,
+          sampledCount: i + 1,
+          languageFrequency,
+        };
+      }
     }
 
-    const idx = sampleIndices[currentIndex];
-    const pageFile = pageFiles[idx];
-    const pageAnalysis = await this.analyzeSamplePage(
-      pageFile,
-      idx + 1,
-      model,
-      options,
-    );
-
-    const updatedFrequency = new Map(languageFrequency);
-    pageAnalysis.detectedLanguages.forEach((lang) => {
-      updatedFrequency.set(lang, (updatedFrequency.get(lang) ?? 0) + 1);
-    });
-
-    if (pageAnalysis.hasKoreanHanjaMix) {
-      return {
-        foundMix: true,
-        mixPageNo: idx + 1,
-        sampledCount: currentIndex + 1,
-        languageFrequency: updatedFrequency,
-      };
-    }
-
-    return this.samplePages(
-      sampleIndices,
-      pageFiles,
-      model,
-      options,
-      currentIndex + 1,
-      updatedFrequency,
-    );
+    return {
+      foundMix: false,
+      sampledCount: sampleIndices.length,
+      languageFrequency,
+    };
   }
 
   /**

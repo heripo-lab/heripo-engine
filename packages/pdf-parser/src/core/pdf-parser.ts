@@ -263,19 +263,17 @@ export class PDFParser {
         this.logger.info('[PDFParser] Server is ready');
       } catch {
         const now = Date.now();
-        const updatedLogTime =
-          now - lastLogTime >= logInterval
-            ? (() => {
-                this.logger.info(
-                  '[PDFParser] Waiting for server... (attempt',
-                  attempt,
-                  '/',
-                  maxAttempts,
-                  ')',
-                );
-                return now;
-              })()
-            : lastLogTime;
+        let updatedLogTime = lastLogTime;
+        if (now - lastLogTime >= logInterval) {
+          this.logger.info(
+            '[PDFParser] Waiting for server... (attempt',
+            attempt,
+            '/',
+            maxAttempts,
+            ')',
+          );
+          updatedLogTime = now;
+        }
 
         if (attempt < maxAttempts) {
           await new Promise((resolve) => setTimeout(resolve, checkInterval));
