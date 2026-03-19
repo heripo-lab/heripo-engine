@@ -180,15 +180,14 @@ export function runJqFileLines(
     }
 
     function processBuffer(): void {
-      const newlineIdx = state.buffer.indexOf('\n');
-      if (newlineIdx === -1) return;
-
-      const line = state.buffer.slice(0, newlineIdx);
-      state.buffer = state.buffer.slice(newlineIdx + 1);
-      if (line.length > 0) {
-        safeOnLine(line);
+      let newlineIdx: number;
+      while ((newlineIdx = state.buffer.indexOf('\n')) !== -1) {
+        const line = state.buffer.slice(0, newlineIdx);
+        state.buffer = state.buffer.slice(newlineIdx + 1);
+        if (line.length > 0) {
+          safeOnLine(line);
+        }
       }
-      processBuffer();
     }
 
     child.stdout.on('data', (chunk: string) => {
