@@ -24,17 +24,11 @@ import {
   TocExtractor,
   TocFinder,
   TocNotFoundError,
-  TocValidationError,
   VisionTocExtractor,
 } from './extractors';
 import { CaptionParser, PageRangeParser } from './parsers';
-import {
-  IdGenerator,
-  MarkdownConverter,
-  RefResolver,
-  TextCleaner,
-  extractMaxPageNumber,
-} from './utils';
+import { TocExtractionPipeline } from './pipelines';
+import { IdGenerator, RefResolver, TextCleaner } from './utils';
 import { CaptionValidator, TocContentValidator } from './validators';
 
 /**
@@ -202,6 +196,7 @@ export class DocumentProcessor {
   private visionTocExtractor?: VisionTocExtractor;
   private captionParser?: CaptionParser;
   private chapterConverter?: ChapterConverter;
+  private tocExtractionPipeline?: TocExtractionPipeline;
   private textCleaner = TextCleaner;
   private readonly usageAggregator = new LLMTokenUsageAggregator();
 
@@ -308,7 +303,10 @@ export class DocumentProcessor {
     this.checkAborted();
 
     const startTimeToc = Date.now();
-    const tocEntries = await this.extractTableOfContents(doclingDoc, filtered);
+    const tocEntries = await this.tocExtractionPipeline!.extract(
+      doclingDoc,
+      filtered,
+    );
     const tocTime = Date.now() - startTimeToc;
     this.logger.info(`[DocumentProcessor] TOC extraction took ${tocTime}ms`);
     this.emitTokenUsage();
@@ -444,6 +442,17 @@ export class DocumentProcessor {
 
     this.logger.info('[DocumentProcessor] - ChapterConverter');
     this.chapterConverter = new ChapterConverter(this.logger, this.idGenerator);
+
+    this.logger.info('[DocumentProcessor] - TocExtractionPipeline');
+    this.tocExtractionPipeline = new TocExtractionPipeline({
+      logger: this.logger,
+      tocFinder: this.tocFinder!,
+      tocExtractor: this.tocExtractor!,
+      tocContentValidator: this.tocContentValidator!,
+      visionTocExtractor: this.visionTocExtractor!,
+      refResolver: this.refResolver!,
+      usageAggregator: this.usageAggregator,
+    });
 
     this.logger.info('[DocumentProcessor] All processors initialized');
   }
@@ -592,173 +601,6 @@ export class DocumentProcessor {
     );
 
     return processedDoc;
-  }
-
-  /**
-   * Extract table of contents (TOC)
-   *
-   * Uses rule-based extraction with LLM validation and vision fallback:
-   * 1. TocFinder - find TOC area in document (rule-based)
-   * 2. MarkdownConverter - convert TOC items to Markdown
-   * 3. TocContentValidator - validate if content is actually a TOC (LLM)
-   * 4. If invalid: VisionTocExtractor - extract from page images (vision LLM fallback)
-   * 5. TocExtractor - LLM-based structured extraction
-   */
-  private async extractTableOfContents(
-    doclingDoc: DoclingDocument,
-    _filteredTexts: string[],
-  ): Promise<TocEntry[]> {
-    this.logger.info('[DocumentProcessor] Extracting TOC...');
-
-    let markdown: string | null = null;
-
-    // Stage 1: Try rule-based extraction
-    try {
-      const tocArea = this.tocFinder!.find(doclingDoc);
-      this.logger.info(
-        `[DocumentProcessor] Found TOC area: pages ${tocArea.startPage}-${tocArea.endPage}`,
-      );
-
-      // Stage 2: Convert to Markdown
-      markdown = MarkdownConverter.convert(tocArea.itemRefs, this.refResolver!);
-      this.logger.info(
-        `[DocumentProcessor] Converted TOC to Markdown (${markdown.length} chars)`,
-      );
-
-      // Stage 3: Validate with LLM
-      const validation = await this.tocContentValidator!.validate(markdown);
-      if (!this.tocContentValidator!.isValid(validation)) {
-        this.logger.warn(
-          `[DocumentProcessor] TOC validation failed: ${validation.reason}`,
-        );
-        markdown = null;
-      } else {
-        const validMarkdown =
-          this.tocContentValidator!.getValidMarkdown(validation);
-        if (validMarkdown) {
-          if (validation.contentType === 'mixed') {
-            this.logger.info(
-              `[DocumentProcessor] Mixed TOC detected, using extracted main TOC (${validMarkdown.length} chars)`,
-            );
-          }
-          markdown = validMarkdown;
-          this.logger.info(
-            `[DocumentProcessor] TOC validation passed (confidence: ${validation.confidence})`,
-          );
-        } else {
-          markdown = null;
-        }
-      }
-    } catch (error) {
-      if (error instanceof TocNotFoundError) {
-        this.logger.info(
-          '[DocumentProcessor] Rule-based TOC not found, will try vision fallback',
-        );
-      } else {
-        throw error;
-      }
-    }
-
-    // Stage 4: Vision fallback if needed
-    let fromVision = false;
-    if (!markdown) {
-      fromVision = true;
-      this.logger.info('[DocumentProcessor] Using vision fallback for TOC');
-      const totalPages = Object.keys(doclingDoc.pages).length;
-      markdown = await this.visionTocExtractor!.extract(totalPages);
-
-      if (!markdown) {
-        const reason =
-          'Both rule-based search and vision fallback failed to locate TOC';
-        this.logger.error(
-          `[DocumentProcessor] TOC extraction failed: ${reason}`,
-        );
-        throw new TocNotFoundError(
-          `Table of contents not found in the document. ${reason}.`,
-        );
-      }
-
-      this.logger.info(
-        `[DocumentProcessor] Vision extracted TOC markdown (${markdown.length} chars)`,
-      );
-    }
-
-    // Stage 5: Extract structure with LLM (with fallback retry)
-    const totalPages = Object.keys(doclingDoc.pages).length;
-
-    // Detect compiled volume: if TOC page numbers exceed document page count,
-    // the document is part of a larger volume with absolute page numbers.
-    // Skip page range upper bound validation to avoid false V002/V007 errors.
-    const maxTocPageNo = extractMaxPageNumber(markdown);
-    const effectiveTotalPages =
-      maxTocPageNo > totalPages ? undefined : totalPages;
-
-    let tocResult: { entries: TocEntry[]; usages: ExtendedTokenUsage[] };
-    try {
-      tocResult = await this.tocExtractor!.extract(markdown, {
-        totalPages: effectiveTotalPages,
-      });
-    } catch (error) {
-      if (error instanceof TocValidationError) {
-        this.logger.warn(
-          `[DocumentProcessor] TOC extraction validation failed: ${error.message}`,
-        );
-        tocResult = { entries: [], usages: [] };
-      } else {
-        throw error;
-      }
-    }
-
-    // Track token usage (initial extraction + any correction retries)
-    for (const usage of tocResult.usages) {
-      this.usageAggregator.track(usage);
-    }
-
-    // Stage 5b: Vision fallback when text-based extraction yields 0 entries
-    if (tocResult.entries.length === 0 && !fromVision) {
-      this.logger.warn(
-        '[DocumentProcessor] Text-based TOC extraction yielded 0 entries, retrying with vision',
-      );
-      const visionMarkdown = await this.visionTocExtractor!.extract(totalPages);
-      if (visionMarkdown) {
-        this.logger.info(
-          `[DocumentProcessor] Vision extracted TOC markdown (${visionMarkdown.length} chars)`,
-        );
-        const visionMaxPageNo = extractMaxPageNumber(visionMarkdown);
-        const visionEffectivePages =
-          visionMaxPageNo > totalPages ? undefined : totalPages;
-
-        try {
-          const visionResult = await this.tocExtractor!.extract(
-            visionMarkdown,
-            {
-              totalPages: visionEffectivePages,
-            },
-          );
-          for (const usage of visionResult.usages) {
-            this.usageAggregator.track(usage);
-          }
-          if (visionResult.entries.length > 0) {
-            tocResult = visionResult;
-          }
-        } catch {
-          // Vision retry also failed, will fall through to error below
-        }
-      }
-    }
-
-    if (tocResult.entries.length === 0) {
-      const reason =
-        'TOC area was detected but LLM could not extract any structured entries';
-      this.logger.error(`[DocumentProcessor] TOC extraction failed: ${reason}`);
-      throw new TocNotFoundError(`${reason}.`);
-    }
-
-    this.logger.info(
-      `[DocumentProcessor] Extracted ${tocResult.entries.length} top-level TOC entries`,
-    );
-
-    return tocResult.entries;
   }
 
   /**
