@@ -15,6 +15,7 @@ import {
   extractBearerToken,
   verifyUploadSessionToken,
 } from '~/lib/auth/upload-session';
+import { publicModeConfig } from '~/lib/config/public-mode';
 import { getWeeklyLockoutStatus } from '~/lib/db/repositories/success-session-repository';
 import { createTask } from '~/lib/db/repositories/task-repository';
 import {
@@ -130,8 +131,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Re-validate weekly lockout at completion time (non-OTP only)
-    if (!uploadSession.isOtpBypass) {
+    // Re-validate weekly lockout at completion time (official demo + non-OTP only)
+    if (
+      publicModeConfig.isPublicMode &&
+      publicModeConfig.isOfficialDemo &&
+      !uploadSession.isOtpBypass
+    ) {
       const lockoutStatus = getWeeklyLockoutStatus(uploadSession.sessionId);
       if (lockoutStatus.locked) {
         updateUploadSessionStatus(payload.uploadId, 'expired');

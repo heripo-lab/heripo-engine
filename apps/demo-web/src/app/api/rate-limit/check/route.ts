@@ -1,18 +1,27 @@
 import { NextResponse } from 'next/server';
 
-import { getWeeklyLockoutStatus } from '~/lib/db/repositories/success-session-repository';
+import { publicModeConfig } from '~/lib/config/public-mode';
+import {
+  type WeeklyLockoutStatus,
+  getWeeklyLockoutStatus,
+} from '~/lib/db/repositories/success-session-repository';
 import {
   getNextResetTime,
   getUsageStatus,
 } from '~/lib/db/repositories/usage-repository';
 import { getOrCreateSessionId } from '~/lib/session';
 
+const UNLOCKED: WeeklyLockoutStatus = { locked: false, lockedUntil: null };
+
 export async function GET() {
   const sessionId = await getOrCreateSessionId();
   const status = getUsageStatus();
   const resetsAt = getNextResetTime().toISOString();
 
-  const lockout = getWeeklyLockoutStatus(sessionId);
+  const lockout =
+    publicModeConfig.isPublicMode && publicModeConfig.isOfficialDemo
+      ? getWeeklyLockoutStatus(sessionId)
+      : UNLOCKED;
 
   return NextResponse.json({
     canCreate: lockout.locked ? false : status.canCreate,
