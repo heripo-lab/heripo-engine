@@ -2588,63 +2588,7 @@ describe('DocumentProcessor', () => {
     });
   });
 
-  describe('extractMaxPageNumber', () => {
-    let processor: DocumentProcessor;
-
-    beforeEach(() => {
-      processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-    });
-
-    test('extracts max page number from dot-leader markdown', () => {
-      const markdown = [
-        '- Ⅰ. 調査概要 ...... 175',
-        '- Ⅱ. 調査内容 ...... 180',
-        '- Ⅲ. 考察 ........... 228',
-      ].join('\n');
-
-      const result = (processor as any).extractMaxPageNumber(markdown);
-      expect(result).toBe(228);
-    });
-
-    test('extracts max page number from table markdown', () => {
-      const markdown = [
-        '| 목차 | 페이지 |',
-        '| --- | --- |',
-        '| I. 調査概要 | 175 |',
-        '| II. 調査内容 | 180 |',
-        '| III. 考察 | 228 |',
-      ].join('\n');
-
-      const result = (processor as any).extractMaxPageNumber(markdown);
-      expect(result).toBe(228);
-    });
-
-    test('extracts max from mixed dot-leader and table markdown', () => {
-      const markdown = [
-        '- Ⅰ. 調査概要 ...... 175',
-        '| II. 調査内容 | 300 |',
-        '- Ⅲ. 考察 ........... 228',
-      ].join('\n');
-
-      const result = (processor as any).extractMaxPageNumber(markdown);
-      expect(result).toBe(300);
-    });
-
-    test('returns 0 when no page numbers found', () => {
-      const markdown = ['- Introduction', '- Chapter 1', '- Chapter 2'].join(
-        '\n',
-      );
-
-      const result = (processor as any).extractMaxPageNumber(markdown);
-      expect(result).toBe(0);
-    });
-  });
+  // extractMaxPageNumber tests moved to src/utils/toc-markdown-utils.test.ts
 
   describe('extractTableOfContents - Vision fallback after Stage 5 failure', () => {
     const createMockDoc = (pageCount: number): DoclingDocument =>

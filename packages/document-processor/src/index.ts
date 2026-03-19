@@ -67,3 +67,4 @@ export type {
   CaptionValidatorOptions,
 } from './validators';
 export { ChapterConverter } from './converters';
+export { extractMaxPageNumber } from './utils';

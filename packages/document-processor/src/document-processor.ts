@@ -33,6 +33,7 @@ import {
   MarkdownConverter,
   RefResolver,
   TextCleaner,
+  extractMaxPageNumber,
 } from './utils';
 import { CaptionValidator, TocContentValidator } from './validators';
 
@@ -688,7 +689,7 @@ export class DocumentProcessor {
     // Detect compiled volume: if TOC page numbers exceed document page count,
     // the document is part of a larger volume with absolute page numbers.
     // Skip page range upper bound validation to avoid false V002/V007 errors.
-    const maxTocPageNo = this.extractMaxPageNumber(markdown);
+    const maxTocPageNo = extractMaxPageNumber(markdown);
     const effectiveTotalPages =
       maxTocPageNo > totalPages ? undefined : totalPages;
 
@@ -723,7 +724,7 @@ export class DocumentProcessor {
         this.logger.info(
           `[DocumentProcessor] Vision extracted TOC markdown (${visionMarkdown.length} chars)`,
         );
-        const visionMaxPageNo = this.extractMaxPageNumber(visionMarkdown);
+        const visionMaxPageNo = extractMaxPageNumber(visionMarkdown);
         const visionEffectivePages =
           visionMaxPageNo > totalPages ? undefined : totalPages;
 
@@ -758,31 +759,6 @@ export class DocumentProcessor {
     );
 
     return tocResult.entries;
-  }
-
-  /**
-   * Extract the maximum page number from TOC markdown
-   *
-   * Parses page numbers from dot-leader patterns (e.g., "..... 175")
-   * and table cell patterns (e.g., "| title | 175 |") to detect compiled
-   * volume scenarios where TOC page numbers exceed the sub-document's page count.
-   */
-  private extractMaxPageNumber(markdown: string): number {
-    // Pattern 1: dot-leader format (e.g., "..... 175")
-    const dotLeaderMatches = [...markdown.matchAll(/\.{2,}\s*(\d+)/g)];
-
-    // Pattern 2: table last cell (e.g., "| title | 175 |")
-    const tableCellMatches = [...markdown.matchAll(/\|\s*(\d+)\s*\|\s*$/gm)];
-
-    const allNumbers = [
-      ...dotLeaderMatches.map((m) => parseInt(m[1], 10)),
-      ...tableCellMatches.map((m) => parseInt(m[1], 10)),
-    ];
-
-    if (allNumbers.length === 0) {
-      return 0;
-    }
-    return Math.max(...allNumbers);
   }
 
   /**
