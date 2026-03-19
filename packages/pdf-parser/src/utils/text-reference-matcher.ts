@@ -37,7 +37,6 @@ export function matchTextToReferenceWithUnused(
 
     let bestScore = 0;
     let bestBlockIndex = -1;
-
     for (const blockIndex of available) {
       const score = computeCharOverlap(ocrText, refBlocks[blockIndex]);
       if (score > bestScore) {
@@ -67,19 +66,20 @@ export function matchTextToReferenceWithUnused(
  */
 export function mergeIntoBlocks(pageText: string): string[] {
   const blocks: string[] = [];
-  let currentLines: string[] = [];
+  const currentLines: string[] = [];
 
   for (const rawLine of pageText.split('\n')) {
     const trimmed = rawLine.trim();
     if (trimmed.length === 0) {
       if (currentLines.length > 0) {
         blocks.push(currentLines.join(' '));
-        currentLines = [];
+        currentLines.length = 0;
       }
     } else {
       currentLines.push(trimmed);
     }
   }
+
   if (currentLines.length > 0) {
     blocks.push(currentLines.join(' '));
   }

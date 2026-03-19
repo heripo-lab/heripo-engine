@@ -67,20 +67,30 @@ export class VlmImageExtractor {
     // Get dimensions for pages that have pictures (one call per unique page)
     const pageDimensions = await this.getPageDimensions(pageFiles, pictures);
 
+    const validPictures = pictures
+      .map((picture, i) => ({
+        picture,
+        i,
+        pageFile: pageFiles[picture.pageNo - 1],
+        dims: pageDimensions.get(picture.pageNo),
+      }))
+      .filter(({ i, picture, pageFile, dims }) => {
+        if (!pageFile || !dims) {
+          this.logger.warn(
+            `[VlmImageExtractor] Skipping picture ${i}: page ${picture.pageNo} not found`,
+          );
+          return false;
+        }
+        return true;
+      }) as Array<{
+      picture: PictureLocation;
+      i: number;
+      pageFile: string;
+      dims: { width: number; height: number };
+    }>;
+
     const imagePaths: string[] = [];
-
-    for (let i = 0; i < pictures.length; i++) {
-      const picture = pictures[i];
-      const pageFile = pageFiles[picture.pageNo - 1];
-      const dims = pageDimensions.get(picture.pageNo);
-
-      if (!pageFile || !dims) {
-        this.logger.warn(
-          `[VlmImageExtractor] Skipping picture ${i}: page ${picture.pageNo} not found`,
-        );
-        continue;
-      }
-
+    for (const { picture, i, pageFile, dims } of validPictures) {
       const crop = this.computeCropRegion(
         picture.bbox,
         dims.width,

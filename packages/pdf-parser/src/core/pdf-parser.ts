@@ -249,15 +249,21 @@ export class PDFParser {
     const maxAttempts = PDF_PARSER.MAX_HEALTH_CHECK_ATTEMPTS;
     const checkInterval = PDF_PARSER.HEALTH_CHECK_INTERVAL_MS;
     const logInterval = PDF_PARSER.HEALTH_CHECK_LOG_INTERVAL_MS;
-    let lastLogTime = 0;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const checkHealth = async (
+      attempt: number,
+      lastLogTime: number,
+    ): Promise<void> => {
+      if (attempt > maxAttempts) {
+        throw new Error('Server failed to become ready after maximum attempts');
+      }
+
       try {
         await this.client!.health();
         this.logger.info('[PDFParser] Server is ready');
-        return;
       } catch {
         const now = Date.now();
+        let updatedLogTime = lastLogTime;
         if (now - lastLogTime >= logInterval) {
           this.logger.info(
             '[PDFParser] Waiting for server... (attempt',
@@ -266,16 +272,17 @@ export class PDFParser {
             maxAttempts,
             ')',
           );
-          lastLogTime = now;
+          updatedLogTime = now;
         }
 
         if (attempt < maxAttempts) {
           await new Promise((resolve) => setTimeout(resolve, checkInterval));
         }
+        return checkHealth(attempt + 1, updatedLogTime);
       }
-    }
+    };
 
-    throw new Error('Server failed to become ready after maximum attempts');
+    return checkHealth(1, 0);
   }
 
   public async parse(
@@ -354,9 +361,8 @@ export class PDFParser {
   ): Promise<T> {
     const canRecover = !this.baseUrl && this.port !== undefined;
     const maxAttempts = PDF_PARSER.MAX_SERVER_RECOVERY_ATTEMPTS;
-    let attempt = 0;
 
-    while (attempt <= maxAttempts) {
+    const tryExecute = async (attempt: number): Promise<T> => {
       try {
         return await fn();
       } catch (error) {
@@ -370,16 +376,13 @@ export class PDFParser {
             '[PDFParser] Connection refused, attempting server recovery...',
           );
           await this.restartServer();
-          attempt++;
-          continue;
+          return tryExecute(attempt + 1);
         }
         throw error;
       }
-    }
+    };
 
-    /* v8 ignore start */
-    return null as T;
-    /* v8 ignore stop */
+    return tryExecute(0);
   }
 
   /**

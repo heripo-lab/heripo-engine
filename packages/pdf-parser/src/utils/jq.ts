@@ -34,17 +34,16 @@ export function runJqFileJson<T = unknown>(
       env: process.env,
     });
 
-    let stdout = '';
-    let stderr = '';
+    const state = { stdout: '', stderr: '' };
 
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
 
     child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
+      state.stdout += chunk;
     });
     child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
+      state.stderr += chunk;
     });
 
     child.on('error', (err) => {
@@ -54,19 +53,19 @@ export function runJqFileJson<T = unknown>(
     child.on('close', (code) => {
       if (code !== 0) {
         const error = new Error(
-          `jq exited with code ${code}. ${stderr ? 'Stderr: ' + stderr : ''}`,
+          `jq exited with code ${code}. ${state.stderr ? 'Stderr: ' + state.stderr : ''}`,
         );
         return reject(error);
       }
       try {
         // jq may output trailing newlines; trim is safe for JSON
-        const text = stdout.trim();
+        const text = state.stdout.trim();
         const parsed = JSON.parse(text) as T;
         resolve(parsed);
       } catch (e) {
         reject(
           new Error(
-            `Failed to parse jq output as JSON. Output length=${stdout.length}. Error: ${(e as Error).message}`,
+            `Failed to parse jq output as JSON. Output length=${state.stdout.length}. Error: ${(e as Error).message}`,
           ),
         );
       }
@@ -92,26 +91,28 @@ export function runJqFileToFile(
       env: process.env,
     });
 
-    let stderr = '';
-    let exitCode: number | null = null;
-    let pipelineDone = false;
-    let settled = false;
+    const state = {
+      stderr: '',
+      exitCode: null as number | null,
+      pipelineDone: false,
+      settled: false,
+    };
 
     child.stderr.setEncoding('utf-8');
     child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
+      state.stderr += chunk;
     });
 
     const ws = createWriteStream(outputPath);
 
     function trySettle() {
-      if (settled) return;
-      if (!pipelineDone || exitCode === null) return;
-      settled = true;
-      if (exitCode !== 0) {
+      if (state.settled) return;
+      if (!state.pipelineDone || state.exitCode === null) return;
+      state.settled = true;
+      if (state.exitCode !== 0) {
         reject(
           new Error(
-            `jq exited with code ${exitCode}. ${stderr ? 'Stderr: ' + stderr : ''}`,
+            `jq exited with code ${state.exitCode}. ${state.stderr ? 'Stderr: ' + state.stderr : ''}`,
           ),
         );
       } else {
@@ -120,25 +121,25 @@ export function runJqFileToFile(
     }
 
     child.on('error', (err) => {
-      if (settled) return;
-      settled = true;
+      if (state.settled) return;
+      state.settled = true;
       ws.destroy();
       reject(err);
     });
 
     pipeline(child.stdout, ws)
       .then(() => {
-        pipelineDone = true;
+        state.pipelineDone = true;
         trySettle();
       })
       .catch((err) => {
-        if (settled) return;
-        settled = true;
+        if (state.settled) return;
+        state.settled = true;
         reject(err);
       });
 
     child.on('close', (code) => {
-      exitCode = code ?? 1;
+      state.exitCode = code ?? 1;
       trySettle();
     });
   });
@@ -162,56 +163,58 @@ export function runJqFileLines(
       env: process.env,
     });
 
-    let stderr = '';
-    let buffer = '';
-    let callbackError = false;
+    const state = { stderr: '', buffer: '', callbackError: false };
 
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
 
     function safeOnLine(line: string): void {
-      if (callbackError) return;
+      if (state.callbackError) return;
       try {
         onLine(line);
       } catch (err) {
-        callbackError = true;
+        state.callbackError = true;
         child.kill();
         reject(err);
       }
     }
 
-    child.stdout.on('data', (chunk: string) => {
-      buffer += chunk;
+    function processBuffer(): void {
       let newlineIdx: number;
-      while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, newlineIdx);
-        buffer = buffer.slice(newlineIdx + 1);
+      while ((newlineIdx = state.buffer.indexOf('\n')) !== -1) {
+        const line = state.buffer.slice(0, newlineIdx);
+        state.buffer = state.buffer.slice(newlineIdx + 1);
         if (line.length > 0) {
           safeOnLine(line);
         }
       }
+    }
+
+    child.stdout.on('data', (chunk: string) => {
+      state.buffer += chunk;
+      processBuffer();
     });
 
     child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
+      state.stderr += chunk;
     });
 
     child.on('error', (err) => {
-      if (!callbackError) reject(err);
+      if (!state.callbackError) reject(err);
     });
 
     child.on('close', (code) => {
-      if (callbackError) return;
+      if (state.callbackError) return;
       // Process any remaining data in buffer
-      if (buffer.length > 0) {
-        safeOnLine(buffer);
+      if (state.buffer.length > 0) {
+        safeOnLine(state.buffer);
       }
-      if (callbackError) return;
+      if (state.callbackError) return;
 
       if (code !== 0) {
         reject(
           new Error(
-            `jq exited with code ${code}. ${stderr ? 'Stderr: ' + stderr : ''}`,
+            `jq exited with code ${code}. ${state.stderr ? 'Stderr: ' + state.stderr : ''}`,
           ),
         );
       } else {
@@ -243,16 +246,16 @@ export async function jqExtractBase64PngStringsStreaming(
   filePath: string,
   onImage: (base64Data: string, index: number) => void,
 ): Promise<number> {
-  let index = 0;
+  const counter = { value: 0 };
   await runJqFileLines(
     '.. | select(type == "string" and startswith("data:image/png;base64"))',
     filePath,
     (line) => {
-      onImage(line, index);
-      index++;
+      onImage(line, counter.value);
+      counter.value++;
     },
   );
-  return index;
+  return counter.value;
 }
 
 /**

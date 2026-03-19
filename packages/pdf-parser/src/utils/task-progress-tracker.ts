@@ -38,9 +38,8 @@ export async function trackTaskProgress(
 ): Promise<void> {
   const startTime = Date.now();
   const errPrefix = options?.errorPrefix ?? 'Task ';
-  let lastProgressLine = '';
 
-  while (true) {
+  const pollOnce = async (lastProgressLine: string): Promise<void> => {
     if (Date.now() - startTime > timeout) {
       throw new Error(`${errPrefix}timeout`);
     }
@@ -48,6 +47,7 @@ export async function trackTaskProgress(
     const status = await task.poll();
 
     // Detailed progress logging (used by single-pass conversion)
+    let updatedProgressLine = lastProgressLine;
     if (options?.showDetailedProgress) {
       const parts: string[] = [`Status: ${status.task_status}`];
       if (status.task_position !== undefined) {
@@ -64,8 +64,8 @@ export async function trackTaskProgress(
       }
       const progressLine = `\r${logPrefix} ${parts.join(' | ')}`;
       if (progressLine !== lastProgressLine) {
-        lastProgressLine = progressLine;
         process.stdout.write(progressLine);
+        updatedProgressLine = progressLine;
       }
     }
 
@@ -97,5 +97,8 @@ export async function trackTaskProgress(
     await new Promise((resolve) =>
       setTimeout(resolve, PDF_CONVERTER.POLL_INTERVAL_MS),
     );
-  }
+    return pollOnce(updatedProgressLine);
+  };
+
+  return pollOnce('');
 }

@@ -28,17 +28,13 @@ export function getPageTexts(
   doc: DoclingDocument,
   pageNo: number,
 ): Array<{ index: number; item: DoclingTextItem }> {
-  const results: Array<{ index: number; item: DoclingTextItem }> = [];
-
-  for (let i = 0; i < doc.texts.length; i++) {
-    const item = doc.texts[i];
-    if (!TEXT_LABELS.has(item.label)) continue;
-    if (item.prov.some((p) => p.page_no === pageNo)) {
-      results.push({ index: i, item });
-    }
-  }
-
-  return results;
+  return doc.texts
+    .map((item, index) => ({ index, item }))
+    .filter(
+      ({ item }) =>
+        TEXT_LABELS.has(item.label) &&
+        item.prov.some((p) => p.page_no === pageNo),
+    );
 }
 
 /**
@@ -48,16 +44,9 @@ export function getPageTables(
   doc: DoclingDocument,
   pageNo: number,
 ): Array<{ index: number; item: DoclingTableItem }> {
-  const results: Array<{ index: number; item: DoclingTableItem }> = [];
-
-  for (let i = 0; i < doc.tables.length; i++) {
-    const item = doc.tables[i];
-    if (item.prov.some((p) => p.page_no === pageNo)) {
-      results.push({ index: i, item });
-    }
-  }
-
-  return results;
+  return doc.tables
+    .map((item, index) => ({ index, item }))
+    .filter(({ item }) => item.prov.some((p) => p.page_no === pageNo));
 }
 
 /**
@@ -72,48 +61,45 @@ export function applyCorrections(
   // Apply text corrections (substitution-based)
   if (corrections.tc.length > 0) {
     const pageTexts = getPageTexts(doc, pageNo);
-    for (const correction of corrections.tc) {
+    corrections.tc.forEach((correction) => {
       if (correction.i >= 0 && correction.i < pageTexts.length) {
         const docIndex = pageTexts[correction.i].index;
-        let text = doc.texts[docIndex].text;
-        for (const sub of correction.s) {
-          const idx = text.indexOf(sub.f);
+        const text = correction.s.reduce((acc, sub) => {
+          const idx = acc.indexOf(sub.f);
           if (idx >= 0) {
-            text =
-              text.substring(0, idx) +
-              sub.r +
-              text.substring(idx + sub.f.length);
-          } else {
-            logger.warn(
-              `[VlmTextCorrector] Page ${pageNo}, text ${correction.i}: ` +
-                `find string not found, skipping substitution`,
+            return (
+              acc.substring(0, idx) + sub.r + acc.substring(idx + sub.f.length)
             );
           }
-        }
+          logger.warn(
+            `[VlmTextCorrector] Page ${pageNo}, text ${correction.i}: ` +
+              `find string not found, skipping substitution`,
+          );
+          return acc;
+        }, doc.texts[docIndex].text);
         if (text !== doc.texts[docIndex].text) {
           doc.texts[docIndex].text = text;
           doc.texts[docIndex].orig = text;
         }
       }
-    }
+    });
   }
 
   // Apply cell corrections
   if (corrections.cc.length > 0) {
     const pageTables = getPageTables(doc, pageNo);
-    for (const correction of corrections.cc) {
+    corrections.cc.forEach((correction) => {
       if (correction.ti >= 0 && correction.ti < pageTables.length) {
         const table = pageTables[correction.ti].item;
 
         // Update table_cells
-        for (const cell of table.data.table_cells) {
-          if (
+        const matchingCell = table.data.table_cells.find(
+          (cell) =>
             cell.start_row_offset_idx === correction.r &&
-            cell.start_col_offset_idx === correction.c
-          ) {
-            cell.text = correction.t;
-            break;
-          }
+            cell.start_col_offset_idx === correction.c,
+        );
+        if (matchingCell) {
+          matchingCell.text = correction.t;
         }
 
         // Sync grid cell (grid stores separate objects from table_cells)
@@ -125,6 +111,6 @@ export function applyCorrections(
           }
         }
       }
-    }
+    });
   }
 }

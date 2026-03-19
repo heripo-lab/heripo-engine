@@ -292,9 +292,23 @@ export class PDFConverter {
   }
 
   /**
-   * Convert by first creating an image PDF, then running the conversion.
-   * Used when forceImagePdf option is enabled.
+   * Execute a conversion using an image PDF, handling cleanup in finally.
    */
+  private async withImagePdf(
+    url: string,
+    reportId: string,
+    fn: (localUrl: string) => Promise<TokenUsageReport | null>,
+  ): Promise<TokenUsageReport | null> {
+    const imagePdfConverter = new ImagePdfConverter(this.logger);
+    const imagePdfPath = await imagePdfConverter.convert(url, reportId);
+    try {
+      const localUrl = `file://${imagePdfPath}`;
+      return await fn(localUrl);
+    } finally {
+      imagePdfConverter.cleanup(imagePdfPath);
+    }
+  }
+
   private async convertViaImagePdf(
     url: string,
     reportId: string,
@@ -306,12 +320,8 @@ export class PDFConverter {
     this.logger.info(
       '[PDFConverter] Force image PDF mode: converting to image PDF first...',
     );
-    const imagePdfConverter = new ImagePdfConverter(this.logger);
-    let imagePdfPath: string | null = null;
 
-    try {
-      imagePdfPath = await imagePdfConverter.convert(url, reportId);
-      const localUrl = `file://${imagePdfPath}`;
+    return this.withImagePdf(url, reportId, (localUrl) => {
       this.logger.info(
         '[PDFConverter] Image PDF ready, starting conversion:',
         localUrl,
@@ -322,7 +332,7 @@ export class PDFConverter {
         this.client,
         this.timeout,
       );
-      return await executor.execute(
+      return executor.execute(
         localUrl,
         reportId,
         onComplete,
@@ -330,11 +340,7 @@ export class PDFConverter {
         options,
         abortSignal,
       );
-    } finally {
-      if (imagePdfPath) {
-        imagePdfConverter.cleanup(imagePdfPath);
-      }
-    }
+    });
   }
 
   /**
@@ -349,60 +355,44 @@ export class PDFConverter {
     options: PDFConvertOptions,
     abortSignal?: AbortSignal,
   ): Promise<TokenUsageReport | null> {
-    let originalError: Error | null = null;
+    const directResult = await this.tryDirectConversion(
+      url,
+      reportId,
+      onComplete,
+      cleanupAfterCallback,
+      options,
+      abortSignal,
+    );
 
-    try {
-      const executor = new DoclingConversionExecutor(
-        this.logger,
-        this.client,
-        this.timeout,
-      );
-      return await executor.execute(
-        url,
-        reportId,
-        onComplete,
-        cleanupAfterCallback,
-        options,
-        abortSignal,
-      );
-    } catch (error) {
-      // If aborted, don't try fallback - re-throw immediately
-      if (abortSignal?.aborted) {
-        throw error;
-      }
-
-      originalError = error as Error;
-      this.logger.error('[PDFConverter] Conversion failed:', error);
-
-      if (!this.enableImagePdfFallback) {
-        throw error;
-      }
+    if (directResult.success) {
+      return directResult.report;
     }
 
     // Fallback: Convert to image PDF and retry
+    const originalError = directResult.error;
     this.logger.info('[PDFConverter] Attempting image PDF fallback...');
-    const imagePdfConverter = new ImagePdfConverter(this.logger);
-    let imagePdfPath: string | null = null;
 
     try {
-      imagePdfPath = await imagePdfConverter.convert(url, reportId);
-
-      // Use file:// URL for local file
-      const localUrl = `file://${imagePdfPath}`;
-      this.logger.info('[PDFConverter] Retrying with image PDF:', localUrl);
-
-      const fallbackExecutor = new DoclingConversionExecutor(
-        this.logger,
-        this.client,
-        this.timeout,
-      );
-      const report = await fallbackExecutor.execute(
-        localUrl,
+      const report = await this.withImagePdf(
+        url,
         reportId,
-        onComplete,
-        cleanupAfterCallback,
-        options,
-        abortSignal,
+        async (localUrl) => {
+          this.logger.info('[PDFConverter] Retrying with image PDF:', localUrl);
+
+          const fallbackExecutor = new DoclingConversionExecutor(
+            this.logger,
+            this.client,
+            this.timeout,
+          );
+          return fallbackExecutor.execute(
+            localUrl,
+            reportId,
+            onComplete,
+            cleanupAfterCallback,
+            options,
+            abortSignal,
+          );
+        },
       );
 
       this.logger.info('[PDFConverter] Fallback conversion succeeded');
@@ -412,12 +402,52 @@ export class PDFConverter {
         '[PDFConverter] Fallback conversion also failed:',
         fallbackError,
       );
-      throw new ImagePdfFallbackError(originalError!, fallbackError as Error);
-    } finally {
-      // Cleanup temp image PDF
-      if (imagePdfPath) {
-        imagePdfConverter.cleanup(imagePdfPath);
+      throw new ImagePdfFallbackError(originalError, fallbackError as Error);
+    }
+  }
+
+  /**
+   * Attempt direct conversion, returning success/failure without throwing.
+   */
+  private async tryDirectConversion(
+    url: string,
+    reportId: string,
+    onComplete: ConversionCompleteCallback,
+    cleanupAfterCallback: boolean,
+    options: PDFConvertOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<
+    | { success: true; report: TokenUsageReport | null }
+    | { success: false; error: Error }
+  > {
+    try {
+      const executor = new DoclingConversionExecutor(
+        this.logger,
+        this.client,
+        this.timeout,
+      );
+      const report = await executor.execute(
+        url,
+        reportId,
+        onComplete,
+        cleanupAfterCallback,
+        options,
+        abortSignal,
+      );
+      return { success: true, report };
+    } catch (error) {
+      // If aborted, don't try fallback - re-throw immediately
+      if (abortSignal?.aborted) {
+        throw error;
       }
+
+      this.logger.error('[PDFConverter] Conversion failed:', error);
+
+      if (!this.enableImagePdfFallback) {
+        throw error;
+      }
+
+      return { success: false, error: error as Error };
     }
   }
 }

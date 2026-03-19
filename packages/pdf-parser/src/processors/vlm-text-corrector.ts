@@ -99,8 +99,8 @@ export class VlmTextCorrector {
     const resultPath = join(outputDir, 'result.json');
     const doc: DoclingDocument = JSON.parse(readFileSync(resultPath, 'utf-8'));
 
-    let pageNumbers = this.getPageNumbers(doc);
-    if (pageNumbers.length === 0) {
+    const allPageNumbers = this.getPageNumbers(doc);
+    if (allPageNumbers.length === 0) {
       this.logger.info('[VlmTextCorrector] No pages to process');
       return {
         textCorrections: 0,
@@ -110,16 +110,18 @@ export class VlmTextCorrector {
       };
     }
 
+    let pageNumbers: number[];
     if (
       options?.koreanHanjaMixPages &&
       options.koreanHanjaMixPages.length > 0
     ) {
-      const totalPageCount = pageNumbers.length;
       const hanjaSet = new Set(options.koreanHanjaMixPages);
-      pageNumbers = pageNumbers.filter((p) => hanjaSet.has(p));
+      pageNumbers = allPageNumbers.filter((p) => hanjaSet.has(p));
       this.logger.info(
-        `[VlmTextCorrector] Filtering to ${pageNumbers.length} Korean-Hanja mix pages out of ${totalPageCount} total`,
+        `[VlmTextCorrector] Filtering to ${pageNumbers.length} Korean-Hanja mix pages out of ${allPageNumbers.length} total`,
       );
+    } else {
+      pageNumbers = allPageNumbers;
     }
 
     const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;
@@ -144,7 +146,6 @@ export class VlmTextCorrector {
     let totalTextCorrections = 0;
     let totalCellCorrections = 0;
     let pagesFailed = 0;
-
     for (const result of results) {
       if (result === null) {
         pagesFailed++;
@@ -155,11 +156,11 @@ export class VlmTextCorrector {
     }
 
     // Apply corrections to document
-    for (let i = 0; i < pageNumbers.length; i++) {
+    pageNumbers.forEach((pageNo, i) => {
       const corrections = results[i];
-      if (corrections === null) continue;
-      applyCorrections(doc, pageNumbers[i], corrections, this.logger);
-    }
+      if (corrections === null) return;
+      applyCorrections(doc, pageNo, corrections, this.logger);
+    });
 
     // Save corrected document
     writeFileSync(resultPath, JSON.stringify(doc, null, 2));
@@ -322,20 +323,14 @@ export class VlmTextCorrector {
     }
 
     if (pageTables.length > 0) {
-      const cellLines: string[] = [];
-      for (
-        let tablePromptIndex = 0;
-        tablePromptIndex < pageTables.length;
-        tablePromptIndex++
-      ) {
-        const table = pageTables[tablePromptIndex].item;
-        for (const cell of table.data.table_cells) {
-          if (!cell.text || cell.text.trim().length === 0) continue;
-          cellLines.push(
-            `${tablePromptIndex}|${cell.start_row_offset_idx},${cell.start_col_offset_idx}|${cell.text}`,
-          );
-        }
-      }
+      const cellLines = pageTables.flatMap((entry, tablePromptIndex) =>
+        entry.item.data.table_cells
+          .filter((cell) => cell.text && cell.text.trim().length > 0)
+          .map(
+            (cell) =>
+              `${tablePromptIndex}|${cell.start_row_offset_idx},${cell.start_col_offset_idx}|${cell.text}`,
+          ),
+      );
       if (cellLines.length > 0) {
         const cellSection = 'C:\n' + cellLines.join('\n');
         if (tableContext) {
