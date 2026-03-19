@@ -32,9 +32,9 @@
     "archiver": "^7.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "jose": "^6.2.1",
+    "jose": "^6.2.2",
     "lucide-react": "^0.577.0",
-    "next": "^16.1.6",
+    "next": "^16.1.7",
     "node-cron": "^4.2.1",
     "otplib": "^13.3.0",
     "radix-ui": "^1.4.3",
@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "@tailwindcss/postcss": "^4.2.1",
+    "@tailwindcss/postcss": "^4.2.2",
     "@tanstack/react-query-devtools": "^5.91.3",
     "@types/archiver": "^7.0.0",
     "@types/node-cron": "^3.0.11",
@@ -54,6 +54,6 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.8",
-    "tailwindcss": "^4.2.1"
+    "tailwindcss": "^4.2.2"
   }
 }
