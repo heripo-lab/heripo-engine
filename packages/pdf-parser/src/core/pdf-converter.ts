@@ -292,10 +292,6 @@ export class PDFConverter {
   }
 
   /**
-   * Convert by first creating an image PDF, then running the conversion.
-   * Used when forceImagePdf option is enabled.
-   */
-  /**
    * Execute a conversion using an image PDF, handling cleanup in finally.
    */
   private async withImagePdf(
