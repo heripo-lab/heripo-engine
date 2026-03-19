@@ -27,7 +27,7 @@
     "@heripo/pdf-parser": "workspace:*",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tanstack/react-form": "^1.28.5",
-    "@tanstack/react-query": "^5.90.21",
+    "@tanstack/react-query": "^5.91.0",
     "ai": "catalog:",
     "archiver": "^7.0.1",
     "class-variance-authority": "^0.7.1",
