@@ -26,6 +26,11 @@ export const LLM_MODELS: LLMModel[] = [
     provider: 'OpenAI',
   },
   {
+    id: 'openai/gpt-5.4-mini',
+    label: 'GPT-5.4 Mini',
+    provider: 'OpenAI',
+  },
+  {
     id: 'openai/gpt-5-mini',
     label: 'GPT-5 Mini',
     provider: 'OpenAI',

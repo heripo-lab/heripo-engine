@@ -53,6 +53,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'gpt-5.1': { input: 1.25, output: 10 },
     'gpt-5.2': { input: 1.75, output: 14 },
     'gpt-5.4': { input: 2.5, output: 15 },
+    'gpt-5.4-mini': { input: 0.75, output: 4.5 },
     'gpt-5-mini': { input: 0.25, output: 2 },
     // Google
     'gemini-3-flash-preview': { input: 0.5, output: 3 },
