@@ -142,9 +142,7 @@ export class PageRangeParser extends VisionLLMComponent {
     }
 
     // Step 3: Track all usage in aggregator
-    for (const usage of usageList) {
-      this.trackUsage(usage);
-    }
+    usageList.forEach((usage) => this.trackUsage(usage));
 
     // Step 4: Post-processing
     this.postProcess(pageRangeMap);
@@ -244,9 +242,7 @@ export class PageRangeParser extends VisionLLMComponent {
       );
 
       // Track which pages we've sampled
-      for (const p of samplePageNos) {
-        sampledPages.add(p);
-      }
+      samplePageNos.forEach((p) => sampledPages.add(p));
 
       this.log(
         'info',
@@ -322,10 +318,9 @@ export class PageRangeParser extends VisionLLMComponent {
       'warn',
       `Could not detect page pattern after ${consecutiveAllNullAttempts >= MAX_ALL_NULL_ATTEMPTS ? consecutiveAllNullAttempts : this.MAX_PATTERN_RETRIES + 1} attempts for group with ${pageNos.length} pages, marking as failed`,
     );
-    const fallbackMap: Record<number, PageRange> = {};
-    for (const pageNo of pageNos) {
-      fallbackMap[pageNo] = { startPageNo: 0, endPageNo: 0 };
-    }
+    const fallbackMap: Record<number, PageRange> = Object.fromEntries(
+      pageNos.map((pageNo) => [pageNo, { startPageNo: 0, endPageNo: 0 }]),
+    );
     return { pageRangeMap: fallbackMap, usage: usageList };
   }
 
@@ -371,7 +366,7 @@ export class PageRangeParser extends VisionLLMComponent {
       mediaType: string;
     }> = [];
 
-    for (const pageNo of pageNos) {
+    const imageContentsFromPages = pageNos.map((pageNo) => {
       const page = pages[pageNo - 1];
       // Page files are 0-indexed: page_0.png, page_1.png, etc.
       const imagePath = path.resolve(
@@ -381,12 +376,13 @@ export class PageRangeParser extends VisionLLMComponent {
       const imageData = new Uint8Array(fs.readFileSync(imagePath));
       const mimeType = page.image.mimetype || 'image/png';
 
-      imageContents.push({
-        type: 'image',
+      return {
+        type: 'image' as const,
         image: imageData,
         mediaType: mimeType,
-      });
-    }
+      };
+    });
+    imageContents.push(...imageContentsFromPages);
 
     // Build schema for multi-page response
     const schema = z.object({
@@ -528,7 +524,7 @@ export class PageRangeParser extends VisionLLMComponent {
   ): Record<number, PageRange> {
     const result: Record<number, PageRange> = {};
 
-    for (const pdfPageNo of pageNos) {
+    pageNos.forEach((pdfPageNo) => {
       switch (pattern.pattern) {
         case PagePattern.SIMPLE_INCREMENT:
         case PagePattern.OFFSET: {
@@ -552,7 +548,7 @@ export class PageRangeParser extends VisionLLMComponent {
         default:
           result[pdfPageNo] = { startPageNo: 0, endPageNo: 0 };
       }
-    }
+    });
 
     return result;
   }
@@ -561,20 +557,17 @@ export class PageRangeParser extends VisionLLMComponent {
    * Convert sample results to page range map (for small groups)
    */
   private samplesToMap(samples: SampleResult[]): Record<number, PageRange> {
-    const result: Record<number, PageRange> = {};
-
-    for (const sample of samples) {
-      if (sample.startPageNo !== null) {
-        result[sample.pdfPageNo] = {
-          startPageNo: sample.startPageNo,
-          endPageNo: sample.endPageNo ?? sample.startPageNo,
-        };
-      } else {
-        result[sample.pdfPageNo] = { startPageNo: 0, endPageNo: 0 };
-      }
-    }
-
-    return result;
+    return Object.fromEntries(
+      samples.map((sample) => [
+        sample.pdfPageNo,
+        sample.startPageNo !== null
+          ? {
+              startPageNo: sample.startPageNo,
+              endPageNo: sample.endPageNo ?? sample.startPageNo,
+            }
+          : { startPageNo: 0, endPageNo: 0 },
+      ]),
+    );
   }
 
   /**

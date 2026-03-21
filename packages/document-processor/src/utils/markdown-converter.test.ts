@@ -283,6 +283,25 @@ describe('MarkdownConverter', () => {
 
       expect(result).toBe('- Valid text');
     });
+
+    test('skips items with data property but no grid (not a table)', () => {
+      const texts = [createMockTextItem(0, 'Valid text')];
+      const doc = createMockDocument(texts);
+      const resolver = new RefResolver(mockLogger, doc);
+      vi.spyOn(resolver, 'resolve').mockImplementation((ref: string) => {
+        if (ref === '#/unknown/0') {
+          return { data: { someField: 'value' } } as unknown as DoclingTextItem;
+        }
+        return texts.find((t) => t.self_ref === ref) ?? null;
+      });
+
+      const result = MarkdownConverter.convert(
+        ['#/unknown/0', '#/texts/0'],
+        resolver,
+      );
+
+      expect(result).toBe('- Valid text');
+    });
   });
 
   describe('groupToMarkdown', () => {

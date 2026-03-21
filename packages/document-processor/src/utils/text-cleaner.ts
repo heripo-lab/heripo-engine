@@ -107,14 +107,9 @@ export class TextCleaner {
   ): string[] {
     if (batchSize === 0) {
       // Sequential processing without BatchProcessor
-      const results: string[] = [];
-      for (const text of texts) {
-        const normalized = this.normalize(text);
-        if (this.isValidText(normalized)) {
-          results.push(normalized);
-        }
-      }
-      return results;
+      return texts
+        .map((text) => this.normalize(text))
+        .filter((normalized) => this.isValidText(normalized));
     }
 
     // Batch processing: normalize then filter for each batch

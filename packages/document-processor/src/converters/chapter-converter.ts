@@ -181,7 +181,7 @@ export class ChapterConverter {
     const result: FlatChapter[] = [];
 
     const flatten = (chapterList: Chapter[]): void => {
-      for (const chapter of chapterList) {
+      chapterList.forEach((chapter) => {
         result.push({
           chapter,
           tocPageNo: chapter.pageNo,
@@ -190,7 +190,7 @@ export class ChapterConverter {
         if (chapter.children && chapter.children.length > 0) {
           flatten(chapter.children);
         }
-      }
+      });
     };
 
     flatten(chapters);
@@ -236,15 +236,14 @@ export class ChapterConverter {
     });
 
     // Set ranges for TOC chapters
-    for (let i = 0; i < sorted.length; i++) {
-      const current = sorted[i];
+    sorted.forEach((current, i) => {
       const next = sorted[i + 1];
 
       ranges.set(current.chapter.id, {
         startPage: current.tocPageNo,
         endPage: next ? next.tocPageNo - 1 : Number.MAX_SAFE_INTEGER,
       });
-    }
+    });
 
     return ranges;
   }
@@ -347,7 +346,7 @@ export class ChapterConverter {
     // Build chapter map for O(1) lookup
     const chapterMap = this.buildChapterMap(chapters);
 
-    for (const textBlock of textBlocks) {
+    textBlocks.forEach((textBlock) => {
       const actualPageNo = this.pdfPageToActualPage(
         textBlock.pdfPageNo,
         pageRangeMap,
@@ -357,7 +356,7 @@ export class ChapterConverter {
       if (chapterId && chapterMap.has(chapterId)) {
         chapterMap.get(chapterId)!.textBlocks.push(textBlock);
       }
-    }
+    });
   }
 
   /**
@@ -375,7 +374,7 @@ export class ChapterConverter {
     const chapterMap = this.buildChapterMap(chapters);
 
     // Link images
-    for (const image of images) {
+    images.forEach((image) => {
       const actualPageNo = this.pdfPageToActualPage(
         image.pdfPageNo,
         pageRangeMap,
@@ -385,10 +384,10 @@ export class ChapterConverter {
       if (chapterId && chapterMap.has(chapterId)) {
         chapterMap.get(chapterId)!.imageIds.push(image.id);
       }
-    }
+    });
 
     // Link tables
-    for (const table of tables) {
+    tables.forEach((table) => {
       const actualPageNo = this.pdfPageToActualPage(
         table.pdfPageNo,
         pageRangeMap,
@@ -398,10 +397,10 @@ export class ChapterConverter {
       if (chapterId && chapterMap.has(chapterId)) {
         chapterMap.get(chapterId)!.tableIds.push(table.id);
       }
-    }
+    });
 
     // Link footnotes
-    for (const footnote of footnotes) {
+    footnotes.forEach((footnote) => {
       const actualPageNo = this.pdfPageToActualPage(
         footnote.pdfPageNo,
         pageRangeMap,
@@ -411,7 +410,7 @@ export class ChapterConverter {
       if (chapterId && chapterMap.has(chapterId)) {
         chapterMap.get(chapterId)!.footnoteIds.push(footnote.id);
       }
-    }
+    });
   }
 
   /**
@@ -421,13 +420,13 @@ export class ChapterConverter {
     const map = new Map<string, Chapter>();
 
     const addToMap = (chapterList: Chapter[]): void => {
-      for (const chapter of chapterList) {
+      chapterList.forEach((chapter) => {
         map.set(chapter.id, chapter);
 
         if (chapter.children && chapter.children.length > 0) {
           addToMap(chapter.children);
         }
-      }
+      });
     };
 
     addToMap(chapters);
