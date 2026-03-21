@@ -8,7 +8,6 @@ import type {
   ProcessedFootnote,
   ProcessedImage,
   ProcessedTable,
-  ProcessedTableCell,
   TokenUsageReport,
 } from '@heripo/model';
 import type { LanguageModel } from 'ai';
@@ -17,7 +16,7 @@ import type { TocEntry } from './types';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
 
-import { ChapterConverter } from './converters';
+import { ChapterConverter, ResourceConverter } from './converters';
 import {
   TocExtractor,
   TocFinder,
@@ -194,9 +193,9 @@ export class DocumentProcessor {
   private visionTocExtractor?: VisionTocExtractor;
   private captionParser?: CaptionParser;
   private chapterConverter?: ChapterConverter;
+  private resourceConverter?: ResourceConverter;
   private tocExtractionPipeline?: TocExtractionPipeline;
   private captionProcessingPipeline?: CaptionProcessingPipeline;
-  private textCleaner = TextCleaner;
   private readonly usageAggregator = new LLMTokenUsageAggregator();
 
   constructor(options: DocumentProcessorOptions) {
@@ -314,10 +313,8 @@ export class DocumentProcessor {
     this.checkAborted();
 
     const startTimeResources = Date.now();
-    const { images, tables, footnotes } = await this.convertResources(
-      doclingDoc,
-      outputPath,
-    );
+    const { images, tables, footnotes } =
+      await this.resourceConverter!.convertAll(doclingDoc, outputPath);
     const resourcesTime = Date.now() - startTimeResources;
     this.logger.info(
       `[DocumentProcessor] Resource conversion took ${resourcesTime}ms`,
@@ -468,6 +465,13 @@ export class DocumentProcessor {
       abortSignal: this.abortSignal,
     });
 
+    this.logger.info('[DocumentProcessor] - ResourceConverter');
+    this.resourceConverter = new ResourceConverter(
+      this.logger,
+      this.idGenerator,
+      this.captionProcessingPipeline!,
+    );
+
     this.logger.info('[DocumentProcessor] All processors initialized');
   }
 
@@ -481,7 +485,7 @@ export class DocumentProcessor {
     this.logger.info('[DocumentProcessor] Normalizing and filtering texts...');
 
     const texts = doclingDoc.texts.map((text) => text.text);
-    const filtered = this.textCleaner.normalizeAndFilterBatch(
+    const filtered = TextCleaner.normalizeAndFilterBatch(
       texts,
       this.textCleanerBatchSize,
     );
@@ -516,77 +520,6 @@ export class DocumentProcessor {
   }
 
   /**
-   * Convert images, tables, and footnotes
-   *
-   * Runs conversions:
-   * - Images conversion (with caption extraction)
-   * - Tables conversion (with caption extraction, excluding TOC tables)
-   * - Footnotes conversion (synchronous, from text items with label='footnote')
-   */
-  private async convertResources(
-    doclingDoc: DoclingDocument,
-    outputPath: string,
-  ): Promise<{
-    images: ProcessedImage[];
-    tables: ProcessedTable[];
-    footnotes: ProcessedFootnote[];
-  }> {
-    this.logger.info(
-      '[DocumentProcessor] Converting images, tables, and footnotes...',
-    );
-
-    const [images, tables] = await Promise.all([
-      this.convertImages(doclingDoc, outputPath),
-      this.convertTables(doclingDoc),
-    ]);
-
-    const footnotes = this.convertFootnotes(doclingDoc);
-
-    this.logger.info(
-      `[DocumentProcessor] Converted ${images.length} images, ${tables.length} tables, and ${footnotes.length} footnotes`,
-    );
-
-    return { images, tables, footnotes };
-  }
-
-  /**
-   * Convert footnotes
-   *
-   * Extracts footnotes from DoclingDocument text items with label='footnote'
-   */
-  private convertFootnotes(doclingDoc: DoclingDocument): ProcessedFootnote[] {
-    const footnoteItems = doclingDoc.texts.filter(
-      (item) => item.label === 'footnote',
-    );
-    this.logger.info(
-      `[DocumentProcessor] Converting ${footnoteItems.length} footnotes...`,
-    );
-
-    const footnotes: ProcessedFootnote[] = [];
-
-    for (const item of footnoteItems) {
-      if (!this.textCleaner.isValidText(item.text)) {
-        continue;
-      }
-
-      const pdfPageNo = item.prov?.[0]?.page_no ?? 1;
-      const footnoteId = this.idGenerator.generateFootnoteId();
-
-      footnotes.push({
-        id: footnoteId,
-        text: this.textCleaner.normalize(item.text),
-        pdfPageNo,
-      });
-    }
-
-    this.logger.info(
-      `[DocumentProcessor] Converted ${footnotes.length} valid footnotes`,
-    );
-
-    return footnotes;
-  }
-
-  /**
    * Assemble the final ProcessedDocument
    *
    * Creates the ProcessedDocument structure with all converted components
@@ -615,121 +548,6 @@ export class DocumentProcessor {
     );
 
     return processedDoc;
-  }
-
-  /**
-   * Convert images
-   *
-   * Converts pictures from DoclingDocument to ProcessedImage
-   */
-  private async convertImages(
-    doclingDoc: DoclingDocument,
-    outputPath: string,
-  ): Promise<ProcessedImage[]> {
-    this.logger.info(
-      `[DocumentProcessor] Converting ${doclingDoc.pictures.length} images...`,
-    );
-
-    const images: ProcessedImage[] = [];
-    const captionTexts: Array<string | undefined> = [];
-
-    // Step 1: Collect image data and caption texts
-    for (const picture of doclingDoc.pictures) {
-      const pdfPageNo = picture.prov?.[0]?.page_no ?? 0;
-      const imageId =
-        this.idGenerator?.generateImageId() ?? `img-${images.length + 1}`;
-
-      const captionText = this.captionProcessingPipeline!.extractCaptionText(
-        picture.captions,
-      );
-      captionTexts.push(captionText);
-
-      images.push({
-        id: imageId,
-        path: `${outputPath}/images/image_${images.length}.png`,
-        pdfPageNo,
-        // caption will be assigned later
-      });
-    }
-
-    // Step 2: Process captions
-    const captionsByIndex =
-      await this.captionProcessingPipeline!.processResourceCaptions(
-        captionTexts,
-        'image',
-      );
-
-    // Step 3: Assign parsed captions to images
-    for (let i = 0; i < images.length; i++) {
-      if (captionsByIndex.has(i)) {
-        images[i].caption = captionsByIndex.get(i);
-      }
-    }
-
-    return images;
-  }
-
-  /**
-   * Convert tables
-   *
-   * Converts tables from DoclingDocument to ProcessedTable
-   */
-  private async convertTables(
-    doclingDoc: DoclingDocument,
-  ): Promise<ProcessedTable[]> {
-    this.logger.info(
-      `[DocumentProcessor] Converting ${doclingDoc.tables.length} tables...`,
-    );
-
-    const tables: ProcessedTable[] = [];
-    const captionTexts: Array<string | undefined> = [];
-
-    // Step 1: Collect table data and caption texts
-    for (const table of doclingDoc.tables) {
-      const pdfPageNo = table.prov?.[0]?.page_no ?? 0;
-      const tableId =
-        this.idGenerator?.generateTableId() ?? `tbl-${tables.length + 1}`;
-
-      // Convert table cells
-      const grid: ProcessedTableCell[][] = table.data.grid.map((row) =>
-        row.map((cell) => ({
-          text: cell.text,
-          rowSpan: cell.row_span ?? 1,
-          colSpan: cell.col_span ?? 1,
-          isHeader: cell.column_header || cell.row_header || false,
-        })),
-      );
-
-      const captionText = this.captionProcessingPipeline!.extractCaptionText(
-        table.captions,
-      );
-      captionTexts.push(captionText);
-
-      tables.push({
-        id: tableId,
-        pdfPageNo,
-        numRows: grid.length,
-        numCols: grid[0]?.length ?? 0,
-        grid,
-        // caption will be assigned later
-      });
-    }
-
-    // Step 2: Process captions
-    const captionsByIndex =
-      await this.captionProcessingPipeline!.processResourceCaptions(
-        captionTexts,
-        'table',
-      );
-
-    // Step 3: Assign parsed captions to tables
-    for (let i = 0; i < tables.length; i++) {
-      if (captionsByIndex.has(i)) {
-        tables[i].caption = captionsByIndex.get(i);
-      }
-    }
-
-    return tables;
   }
 
   /**
