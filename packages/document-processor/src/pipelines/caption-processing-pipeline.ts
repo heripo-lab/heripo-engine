@@ -3,9 +3,10 @@ import type { Caption } from '@heripo/model';
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
-import type { CaptionParser } from '../parsers';
 import type { RefResolver } from '../utils';
 import type { CaptionValidator } from '../validators';
+
+import { CaptionParser } from '../parsers';
 
 /**
  * Dependencies required by CaptionProcessingPipeline
@@ -209,9 +210,7 @@ export class CaptionProcessingPipeline {
           );
 
           // Create a new CaptionParser instance with fallback model for separate token tracking
-          const { CaptionParser: CaptionParserClass } =
-            await import('../parsers/caption-parser');
-          const fallbackCaptionParser = new CaptionParserClass(
+          const fallbackCaptionParser = new CaptionParser(
             this.logger,
             this.fallbackModel,
             {
