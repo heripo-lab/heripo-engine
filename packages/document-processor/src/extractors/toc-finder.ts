@@ -209,23 +209,21 @@ export class TocFinder {
 
     // Check groups for TOC-like structure
     doc.groups
-      .filter((group) => {
-        const pageNo = this.getGroupFirstPage(group);
-        return (
+      .map((group) => ({ group, pageNo: this.getGroupFirstPage(group) }))
+      .filter(
+        ({ group, pageNo }) =>
           pageNo !== undefined &&
           pageNo <= this.maxSearchPages &&
-          this.isGroupTocLike(group, doc)
-        );
-      })
-      .forEach((group) => {
-        const pageNo = this.getGroupFirstPage(group)!;
+          this.isGroupTocLike(group, doc),
+      )
+      .forEach(({ group, pageNo }) => {
         candidates.push({
           result: {
             itemRefs: [group.self_ref],
-            startPage: pageNo,
-            endPage: pageNo,
+            startPage: pageNo!,
+            endPage: pageNo!,
           },
-          score: this.calculateScore(group, pageNo),
+          score: this.calculateScore(group, pageNo!),
         });
       });
 

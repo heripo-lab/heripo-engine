@@ -114,21 +114,22 @@ export class MarkdownConverter {
       return '';
     }
 
-    const lines: string[] = grid
-      .filter((row) => row && row.length > 0)
-      .flatMap((row, rowIdx) => {
-        const cells = row.map((cell) =>
-          MarkdownConverter.escapeTableCell(cell.text),
-        );
-        const rowLine = `| ${cells.join(' | ')} |`;
+    const lines: string[] = grid.flatMap((row, rowIdx) => {
+      if (!row || row.length === 0) {
+        return [];
+      }
+      const cells = row.map((cell) =>
+        MarkdownConverter.escapeTableCell(cell.text),
+      );
+      const rowLine = `| ${cells.join(' | ')} |`;
 
-        // Add separator after header row (first row)
-        if (rowIdx === 0) {
-          const separator = row.map(() => '---').join(' | ');
-          return [rowLine, `| ${separator} |`];
-        }
-        return [rowLine];
-      });
+      // Add separator after header row (first row)
+      if (rowIdx === 0) {
+        const separator = row.map(() => '---').join(' | ');
+        return [rowLine, `| ${separator} |`];
+      }
+      return [rowLine];
+    });
 
     return lines.join('\n');
   }
