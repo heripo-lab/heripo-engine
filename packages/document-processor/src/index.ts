@@ -66,7 +66,7 @@ export type {
   TocContentValidationResult,
   CaptionValidatorOptions,
 } from './validators';
-export { ChapterConverter } from './converters';
+export { ChapterConverter, ResourceConverter } from './converters';
 export { CaptionProcessingPipeline, TocExtractionPipeline } from './pipelines';
 export type {
   CaptionProcessingPipelineDeps,
