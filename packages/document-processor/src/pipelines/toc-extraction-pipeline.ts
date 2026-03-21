@@ -168,9 +168,7 @@ export class TocExtractionPipeline {
     }
 
     // Track token usage
-    for (const usage of tocResult.usages) {
-      this.usageAggregator.track(usage);
-    }
+    tocResult.usages.forEach((usage) => this.usageAggregator.track(usage));
 
     // Stage 5b: Vision fallback when text-based extraction yields 0 entries
     if (tocResult.entries.length === 0 && !fromVision) {
@@ -190,9 +188,9 @@ export class TocExtractionPipeline {
           const visionResult = await this.tocExtractor.extract(visionMarkdown, {
             totalPages: visionEffectivePages,
           });
-          for (const usage of visionResult.usages) {
-            this.usageAggregator.track(usage);
-          }
+          visionResult.usages.forEach((usage) =>
+            this.usageAggregator.track(usage),
+          );
           if (visionResult.entries.length > 0) {
             tocResult = visionResult;
           }

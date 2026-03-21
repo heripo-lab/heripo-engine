@@ -86,8 +86,7 @@ export class CaptionProcessingPipeline {
       text: string;
     }> = [];
 
-    for (let i = 0; i < captionTexts.length; i++) {
-      const text = captionTexts[i];
+    captionTexts.forEach((text, i) => {
       if (text !== undefined) {
         validCaptionData.push({
           resourceIndex: i,
@@ -95,7 +94,7 @@ export class CaptionProcessingPipeline {
           text,
         });
       }
-    }
+    });
 
     const validCaptionTexts = validCaptionData.map((item) => item.text);
 
@@ -120,32 +119,26 @@ export class CaptionProcessingPipeline {
       );
 
       // Create a map of fullText -> parsed caption for O(1) lookup
-      const parsedMap = new Map<string, Caption>();
-      for (const parsed of parsedCaptions) {
-        parsedMap.set(parsed.fullText, parsed);
-      }
+      const parsedMap = new Map<string, Caption>(
+        parsedCaptions.map((parsed) => [parsed.fullText, parsed]),
+      );
 
       // Filter validCaptionData to only include items that were successfully parsed
-      const recoveredData: typeof validCaptionData = [];
-      for (const item of validCaptionData) {
+      const recoveredData = validCaptionData.filter((item) => {
         if (parsedMap.has(item.text)) {
-          recoveredData.push(item);
-        } else {
-          this.logger.warn(
-            `[CaptionProcessingPipeline] Skipping ${resourceType} caption at index ${item.resourceIndex}: "${item.text}" (not found in parsed results)`,
-          );
+          return true;
         }
-      }
+        this.logger.warn(
+          `[CaptionProcessingPipeline] Skipping ${resourceType} caption at index ${item.resourceIndex}: "${item.text}" (not found in parsed results)`,
+        );
+        return false;
+      });
 
       // Re-map parsedCaptions to match the filtered data
       /* c8 ignore start - defensive guard: recoveredData only contains items where parsedMap.has() returned true */
-      const recoveredCaptions: Caption[] = [];
-      for (const item of recoveredData) {
-        const caption = parsedMap.get(item.text);
-        if (caption) {
-          recoveredCaptions.push(caption);
-        }
-      }
+      const recoveredCaptions: Caption[] = recoveredData
+        .map((item) => parsedMap.get(item.text))
+        .filter((caption): caption is Caption => caption !== undefined);
       /* c8 ignore stop */
 
       /* c8 ignore start - defensive guard: recoveredData only contains items where parsedMap.has() returned true */
@@ -166,10 +159,10 @@ export class CaptionProcessingPipeline {
     }
 
     // Store parsed captions by resource index
-    for (let i = 0; i < finalParsedCaptions.length; i++) {
+    finalParsedCaptions.forEach((caption, i) => {
       const resourceIndex = finalValidCaptionData[i].resourceIndex;
-      captionsByIndex.set(resourceIndex, finalParsedCaptions[i]);
-    }
+      captionsByIndex.set(resourceIndex, caption);
+    });
 
     // Step 2: Validate parsed captions
     if (finalParsedCaptions.length > 0) {
@@ -188,7 +181,7 @@ export class CaptionProcessingPipeline {
         .filter((index) => index !== -1);
 
       if (failedIndices.length > 0) {
-        for (const filteredIndex of failedIndices) {
+        failedIndices.forEach((filteredIndex) => {
           const captionData = finalValidCaptionData[filteredIndex];
           const originalText = captionData.text;
           const parsedNum = finalParsedCaptions[filteredIndex].num;
@@ -196,7 +189,7 @@ export class CaptionProcessingPipeline {
           this.logger.warn(
             `[CaptionProcessingPipeline] Invalid ${resourceType} caption [${resourceIndex}]: "${originalText}" | parsed num="${parsedNum}"`,
           );
-        }
+        });
 
         // Reparse failed captions with fallback model if enabled
         if (this.enableFallbackRetry) {
@@ -229,12 +222,11 @@ export class CaptionProcessingPipeline {
           );
 
           // Update captionsByIndex with reparsed results
-          for (let i = 0; i < failedIndices.length; i++) {
-            const filteredIndex = failedIndices[i];
+          failedIndices.forEach((filteredIndex, i) => {
             const resourceIndex =
               finalValidCaptionData[filteredIndex].resourceIndex;
             captionsByIndex.set(resourceIndex, reparsedCaptions[i]);
-          }
+          });
 
           this.logger.info(
             `[CaptionProcessingPipeline] Reparsed ${reparsedCaptions.length} ${resourceType} captions`,

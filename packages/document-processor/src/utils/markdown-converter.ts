@@ -25,45 +25,29 @@ export class MarkdownConverter {
       return '';
     }
 
-    const lines: string[] = [];
-
-    for (const ref of refs) {
-      const item = refResolver.resolve(ref);
-      if (!item) {
-        continue;
-      }
-
-      // Check if it's a group item
-      if ('name' in item && (item.name === 'list' || item.name === 'group')) {
-        const groupMarkdown = MarkdownConverter.groupToMarkdown(
-          item as DoclingGroupItem,
-          refResolver,
-          0,
-        );
-        if (groupMarkdown) {
-          lines.push(groupMarkdown);
+    const lines: string[] = refs
+      .map((ref) => refResolver.resolve(ref))
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .map((item) => {
+        // Check if it's a group item
+        if ('name' in item && (item.name === 'list' || item.name === 'group')) {
+          return MarkdownConverter.groupToMarkdown(
+            item as DoclingGroupItem,
+            refResolver,
+            0,
+          );
         }
-      }
-      // Check if it's a table item
-      else if ('data' in item && 'grid' in (item as DoclingTableItem).data) {
-        const tableMarkdown = MarkdownConverter.tableToMarkdown(
-          item as DoclingTableItem,
-        );
-        if (tableMarkdown) {
-          lines.push(tableMarkdown);
+        // Check if it's a table item
+        if ('data' in item && 'grid' in (item as DoclingTableItem).data) {
+          return MarkdownConverter.tableToMarkdown(item as DoclingTableItem);
         }
-      }
-      // Check if it's a text item
-      else if ('text' in item && 'orig' in item) {
-        const textMarkdown = MarkdownConverter.textToMarkdown(
-          item as DoclingTextItem,
-          0,
-        );
-        if (textMarkdown) {
-          lines.push(textMarkdown);
+        // Check if it's a text item
+        if ('text' in item && 'orig' in item) {
+          return MarkdownConverter.textToMarkdown(item as DoclingTextItem, 0);
         }
-      }
-    }
+        return '';
+      })
+      .filter((line) => line !== '');
 
     return lines.join('\n\n');
   }
@@ -85,39 +69,31 @@ export class MarkdownConverter {
     refResolver: RefResolver,
     indentLevel = 0,
   ): string {
-    const lines: string[] = [];
-
-    for (const childRef of group.children) {
-      const child = refResolver.resolve(childRef.$ref);
-      if (!child) {
-        continue;
-      }
-
-      // Handle nested group
-      if (
-        'name' in child &&
-        (child.name === 'list' || child.name === 'group')
-      ) {
-        const nestedMarkdown = MarkdownConverter.groupToMarkdown(
-          child as DoclingGroupItem,
-          refResolver,
-          indentLevel + 1,
-        );
-        if (nestedMarkdown) {
-          lines.push(nestedMarkdown);
+    const lines: string[] = group.children
+      .map((childRef) => refResolver.resolve(childRef.$ref))
+      .filter((child): child is NonNullable<typeof child> => child !== null)
+      .map((child) => {
+        // Handle nested group
+        if (
+          'name' in child &&
+          (child.name === 'list' || child.name === 'group')
+        ) {
+          return MarkdownConverter.groupToMarkdown(
+            child as DoclingGroupItem,
+            refResolver,
+            indentLevel + 1,
+          );
         }
-      }
-      // Handle text item
-      else if ('text' in child && 'orig' in child) {
-        const textMarkdown = MarkdownConverter.textToMarkdown(
-          child as DoclingTextItem,
-          indentLevel,
-        );
-        if (textMarkdown) {
-          lines.push(textMarkdown);
+        // Handle text item
+        if ('text' in child && 'orig' in child) {
+          return MarkdownConverter.textToMarkdown(
+            child as DoclingTextItem,
+            indentLevel,
+          );
         }
-      }
-    }
+        return '';
+      })
+      .filter((line) => line !== '');
 
     return lines.join('\n');
   }
@@ -138,26 +114,21 @@ export class MarkdownConverter {
       return '';
     }
 
-    const lines: string[] = [];
+    const lines: string[] = grid
+      .filter((row) => row && row.length > 0)
+      .flatMap((row, rowIdx) => {
+        const cells = row.map((cell) =>
+          MarkdownConverter.escapeTableCell(cell.text),
+        );
+        const rowLine = `| ${cells.join(' | ')} |`;
 
-    // Build rows from grid
-    for (let rowIdx = 0; rowIdx < grid.length; rowIdx++) {
-      const row = grid[rowIdx];
-      if (!row || row.length === 0) {
-        continue;
-      }
-
-      const cells = row.map((cell) =>
-        MarkdownConverter.escapeTableCell(cell.text),
-      );
-      lines.push(`| ${cells.join(' | ')} |`);
-
-      // Add separator after header row (first row)
-      if (rowIdx === 0) {
-        const separator = row.map(() => '---').join(' | ');
-        lines.push(`| ${separator} |`);
-      }
-    }
+        // Add separator after header row (first row)
+        if (rowIdx === 0) {
+          const separator = row.map(() => '---').join(' | ');
+          return [rowLine, `| ${separator} |`];
+        }
+        return [rowLine];
+      });
 
     return lines.join('\n');
   }

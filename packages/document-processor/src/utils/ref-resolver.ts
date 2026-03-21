@@ -41,11 +41,7 @@ export class RefResolver {
     items: T[],
     _prefix: string,
   ): Map<string, T> {
-    const map = new Map<string, T>();
-    for (const item of items) {
-      map.set(item.self_ref, item);
-    }
-    return map;
+    return new Map(items.map((item) => [item.self_ref, item]));
   }
 
   /**

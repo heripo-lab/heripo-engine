@@ -75,24 +75,18 @@ export class ResourceConverter {
       `[ResourceConverter] Converting ${doclingDoc.pictures.length} images...`,
     );
 
-    const images: ProcessedImage[] = [];
-    const captionTexts: Array<string | undefined> = [];
+    const captionTexts: Array<string | undefined> = doclingDoc.pictures.map(
+      (picture) =>
+        this.captionProcessingPipeline.extractCaptionText(picture.captions),
+    );
 
-    for (const picture of doclingDoc.pictures) {
-      const pdfPageNo = picture.prov?.[0]?.page_no ?? 0;
-      const imageId = this.idGenerator.generateImageId();
-
-      const captionText = this.captionProcessingPipeline.extractCaptionText(
-        picture.captions,
-      );
-      captionTexts.push(captionText);
-
-      images.push({
-        id: imageId,
-        path: `${outputPath}/images/image_${images.length}.png`,
-        pdfPageNo,
-      });
-    }
+    const images: ProcessedImage[] = doclingDoc.pictures.map(
+      (picture, index) => ({
+        id: this.idGenerator.generateImageId(),
+        path: `${outputPath}/images/image_${index}.png`,
+        pdfPageNo: picture.prov?.[0]?.page_no ?? 0,
+      }),
+    );
 
     const captionsByIndex =
       await this.captionProcessingPipeline.processResourceCaptions(
@@ -100,11 +94,11 @@ export class ResourceConverter {
         'image',
       );
 
-    for (let i = 0; i < images.length; i++) {
+    images.forEach((image, i) => {
       if (captionsByIndex.has(i)) {
-        images[i].caption = captionsByIndex.get(i);
+        image.caption = captionsByIndex.get(i);
       }
-    }
+    });
 
     return images;
   }
@@ -117,13 +111,12 @@ export class ResourceConverter {
       `[ResourceConverter] Converting ${doclingDoc.tables.length} tables...`,
     );
 
-    const tables: ProcessedTable[] = [];
-    const captionTexts: Array<string | undefined> = [];
+    const captionTexts: Array<string | undefined> = doclingDoc.tables.map(
+      (table) =>
+        this.captionProcessingPipeline.extractCaptionText(table.captions),
+    );
 
-    for (const table of doclingDoc.tables) {
-      const pdfPageNo = table.prov?.[0]?.page_no ?? 0;
-      const tableId = this.idGenerator.generateTableId();
-
+    const tables: ProcessedTable[] = doclingDoc.tables.map((table) => {
       const grid: ProcessedTableCell[][] = table.data.grid.map((row) =>
         row.map((cell) => ({
           text: cell.text,
@@ -133,19 +126,14 @@ export class ResourceConverter {
         })),
       );
 
-      const captionText = this.captionProcessingPipeline.extractCaptionText(
-        table.captions,
-      );
-      captionTexts.push(captionText);
-
-      tables.push({
-        id: tableId,
-        pdfPageNo,
+      return {
+        id: this.idGenerator.generateTableId(),
+        pdfPageNo: table.prov?.[0]?.page_no ?? 0,
         numRows: grid.length,
         numCols: grid[0]?.length ?? 0,
         grid,
-      });
-    }
+      };
+    });
 
     const captionsByIndex =
       await this.captionProcessingPipeline.processResourceCaptions(
@@ -153,11 +141,11 @@ export class ResourceConverter {
         'table',
       );
 
-    for (let i = 0; i < tables.length; i++) {
+    tables.forEach((table, i) => {
       if (captionsByIndex.has(i)) {
-        tables[i].caption = captionsByIndex.get(i);
+        table.caption = captionsByIndex.get(i);
       }
-    }
+    });
 
     return tables;
   }
@@ -173,22 +161,13 @@ export class ResourceConverter {
       `[ResourceConverter] Converting ${footnoteItems.length} footnotes...`,
     );
 
-    const footnotes: ProcessedFootnote[] = [];
-
-    for (const item of footnoteItems) {
-      if (!TextCleaner.isValidText(item.text)) {
-        continue;
-      }
-
-      const pdfPageNo = item.prov?.[0]?.page_no ?? 1;
-      const footnoteId = this.idGenerator.generateFootnoteId();
-
-      footnotes.push({
-        id: footnoteId,
+    const footnotes: ProcessedFootnote[] = footnoteItems
+      .filter((item) => TextCleaner.isValidText(item.text))
+      .map((item) => ({
+        id: this.idGenerator.generateFootnoteId(),
         text: TextCleaner.normalize(item.text),
-        pdfPageNo,
-      });
-    }
+        pdfPageNo: item.prov?.[0]?.page_no ?? 1,
+      }));
 
     this.logger.info(
       `[ResourceConverter] Converted ${footnotes.length} valid footnotes`,

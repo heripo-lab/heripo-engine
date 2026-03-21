@@ -208,37 +208,42 @@ export class TocFinder {
     }> = [];
 
     // Check groups for TOC-like structure
-    for (const group of doc.groups) {
-      const pageNo = this.getGroupFirstPage(group);
-      if (pageNo === undefined || pageNo > this.maxSearchPages) {
-        continue;
-      }
-
-      if (this.isGroupTocLike(group, doc)) {
-        const score = this.calculateScore(group, pageNo);
+    doc.groups
+      .filter((group) => {
+        const pageNo = this.getGroupFirstPage(group);
+        return (
+          pageNo !== undefined &&
+          pageNo <= this.maxSearchPages &&
+          this.isGroupTocLike(group, doc)
+        );
+      })
+      .forEach((group) => {
+        const pageNo = this.getGroupFirstPage(group)!;
         candidates.push({
           result: {
             itemRefs: [group.self_ref],
             startPage: pageNo,
             endPage: pageNo,
           },
-          score,
+          score: this.calculateScore(group, pageNo),
         });
-      }
-    }
+      });
 
     // Check tables for TOC-like structure
-    for (const table of doc.tables) {
-      const pageNo = table.prov[0]?.page_no;
-      if (pageNo === undefined || pageNo > this.maxSearchPages) {
-        continue;
-      }
-
-      if (this.isTableTocLike(table)) {
-        let score = this.calculateTableScore(table, pageNo);
-        if (this.isResourceIndexTable(table)) {
-          score -= 100;
-        }
+    doc.tables
+      .filter((table) => {
+        const pageNo = table.prov[0]?.page_no;
+        return (
+          pageNo !== undefined &&
+          pageNo <= this.maxSearchPages &&
+          this.isTableTocLike(table)
+        );
+      })
+      .forEach((table) => {
+        const pageNo = table.prov[0]!.page_no;
+        const score =
+          this.calculateTableScore(table, pageNo) -
+          (this.isResourceIndexTable(table) ? 100 : 0);
         candidates.push({
           result: {
             itemRefs: [table.self_ref],
@@ -247,8 +252,7 @@ export class TocFinder {
           },
           score,
         });
-      }
-    }
+      });
 
     if (candidates.length === 0) {
       return null;
@@ -355,20 +359,15 @@ export class TocFinder {
     }
 
     // Count children with page number patterns
-    let pageNumberCount = 0;
     const children = this.refResolver.resolveMany(group.children);
 
-    for (const child of children) {
-      if (!child) continue;
-
-      // Check if it's a text item with page number pattern
-      if ('text' in child && 'orig' in child) {
-        const textItem = child as DoclingTextItem;
-        if (PAGE_NUMBER_PATTERN.test(textItem.text)) {
-          pageNumberCount++;
-        }
-      }
-    }
+    const pageNumberCount = children.filter(
+      (child) =>
+        child !== null &&
+        'text' in child &&
+        'orig' in child &&
+        PAGE_NUMBER_PATTERN.test((child as DoclingTextItem).text),
+    ).length;
 
     // Consider TOC-like if at least 3 items have page numbers
     // or if more than 50% of items have page numbers
@@ -393,13 +392,10 @@ export class TocFinder {
     }
 
     // Check if last column contains mostly numbers (page numbers)
-    let numberCount = 0;
-    for (let row = 1; row < grid.length; row++) {
-      const lastCell = grid[row]?.[num_cols - 1];
-      if (lastCell && /^\d+$/.test(lastCell.text.trim())) {
-        numberCount++;
-      }
-    }
+    const numberCount = grid.slice(1).filter((row) => {
+      const lastCell = row?.[num_cols - 1];
+      return lastCell && /^\d+$/.test(lastCell.text.trim());
+    }).length;
 
     // More than 50% of data rows have numeric last column
     return numberCount > 0 && numberCount / (num_rows - 1) > 0.5;
@@ -415,12 +411,9 @@ export class TocFinder {
     );
     if (firstColCells.length === 0) return false;
 
-    let resourceCount = 0;
-    for (const cell of firstColCells) {
-      if (RESOURCE_INDEX_PATTERNS.some((p) => p.test(cell.text.trim()))) {
-        resourceCount++;
-      }
-    }
+    const resourceCount = firstColCells.filter((cell) =>
+      RESOURCE_INDEX_PATTERNS.some((p) => p.test(cell.text.trim())),
+    ).length;
     return resourceCount / firstColCells.length > 0.5;
   }
 
@@ -444,9 +437,7 @@ export class TocFinder {
       }
 
       const newItems = continuationItems.filter((ref) => !seenRefs.has(ref));
-      for (const ref of newItems) {
-        seenRefs.add(ref);
-      }
+      newItems.forEach((ref) => seenRefs.add(ref));
       itemRefs.unshift(...newItems);
       startPage = pageNo;
       this.logger.info(`[TocFinder] Expanded TOC backward to page ${pageNo}`);
@@ -464,9 +455,7 @@ export class TocFinder {
       }
 
       const newItems = continuationItems.filter((ref) => !seenRefs.has(ref));
-      for (const ref of newItems) {
-        seenRefs.add(ref);
-      }
+      newItems.forEach((ref) => seenRefs.add(ref));
       itemRefs.push(...newItems);
       endPage = pageNo;
       this.logger.info(`[TocFinder] Expanded TOC forward to page ${pageNo}`);
@@ -489,12 +478,13 @@ export class TocFinder {
     const refs: string[] = [];
 
     // Check for continuation markers in texts
-    for (const text of doc.texts) {
-      if (text.prov[0]?.page_no !== pageNo) {
-        continue;
-      }
-
-      if (this.hasContinuationMarker(text.text)) {
+    doc.texts
+      .filter(
+        (text) =>
+          text.prov[0]?.page_no === pageNo &&
+          this.hasContinuationMarker(text.text),
+      )
+      .forEach((text) => {
         const parentRef = text.parent?.$ref;
         if (parentRef) {
           const group = this.refResolver.resolveGroup(parentRef);
@@ -502,35 +492,32 @@ export class TocFinder {
             refs.push(group.self_ref);
           }
         }
-      }
-    }
+      });
 
     // Check for TOC-like groups on this page
-    for (const group of doc.groups) {
-      const groupPage = this.getGroupFirstPage(group);
-      if (groupPage !== pageNo) {
-        continue;
-      }
-
-      if (this.isGroupTocLike(group, doc) && !refs.includes(group.self_ref)) {
+    doc.groups
+      .filter(
+        (group) =>
+          this.getGroupFirstPage(group) === pageNo &&
+          this.isGroupTocLike(group, doc) &&
+          !refs.includes(group.self_ref),
+      )
+      .forEach((group) => {
         refs.push(group.self_ref);
-      }
-    }
+      });
 
     // Check for TOC-like tables on this page
-    for (const table of doc.tables) {
-      if (table.prov[0]?.page_no !== pageNo) {
-        continue;
-      }
-
-      if (
-        this.isTableTocLike(table) &&
-        !this.isResourceIndexTable(table) &&
-        !refs.includes(table.self_ref)
-      ) {
+    doc.tables
+      .filter(
+        (table) =>
+          table.prov[0]?.page_no === pageNo &&
+          this.isTableTocLike(table) &&
+          !this.isResourceIndexTable(table) &&
+          !refs.includes(table.self_ref),
+      )
+      .forEach((table) => {
         refs.push(table.self_ref);
-      }
-    }
+      });
 
     return refs;
   }
@@ -559,16 +546,16 @@ export class TocFinder {
    * Get first page number of a group by checking its children
    */
   private getGroupFirstPage(group: DoclingGroupItem): number | undefined {
-    for (const childRef of group.children) {
-      const child = this.refResolver.resolve(childRef.$ref);
-      if (child && 'prov' in child) {
-        const prov = (child as DoclingTextItem).prov;
-        if (prov && prov[0]?.page_no !== undefined) {
-          return prov[0].page_no;
-        }
-      }
-    }
-    return undefined;
+    const found = group.children
+      .map((childRef) => this.refResolver.resolve(childRef.$ref))
+      .find(
+        (child) =>
+          child !== null &&
+          'prov' in child &&
+          (child as DoclingTextItem).prov?.[0]?.page_no !== undefined,
+      );
+
+    return found ? (found as DoclingTextItem).prov[0]?.page_no : undefined;
   }
 
   /**
@@ -586,14 +573,13 @@ export class TocFinder {
 
     // Count items with page numbers
     const children = this.refResolver.resolveMany(group.children);
-    for (const child of children) {
-      if (child && 'text' in child) {
-        const textItem = child as DoclingTextItem;
-        if (PAGE_NUMBER_PATTERN.test(textItem.text)) {
-          score += 5;
-        }
-      }
-    }
+    score +=
+      children.filter(
+        (child) =>
+          child !== null &&
+          'text' in child &&
+          PAGE_NUMBER_PATTERN.test((child as DoclingTextItem).text),
+      ).length * 5;
 
     return score;
   }
