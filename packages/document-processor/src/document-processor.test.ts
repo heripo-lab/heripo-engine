@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { DocumentProcessor } from './document-processor';
 import { TocNotFoundError } from './extractors/toc-extract-error';
-import { CaptionParser } from './parsers/caption-parser';
 
 // Mock CaptionParser for fallback reparse tests
 vi.mock('./parsers/caption-parser.js', () => ({
@@ -376,456 +375,6 @@ describe('DocumentProcessor', () => {
     });
   });
 
-  describe('processResourceCaptions - Length mismatch recovery', () => {
-    test('should recover from length mismatch by filtering validCaptionData', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      // Mock captionParser to return only 2 captions for 3 inputs
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([
-          { fullText: 'Caption A', num: 'A' },
-          { fullText: 'Caption C', num: 'C' },
-        ]),
-      };
-
-      // Mock captionValidator to return validation for recovered captions
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true, true]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      // Input: array of caption strings (not resources)
-      const captionTexts: Array<string | undefined> = [
-        'Caption A',
-        'Caption B',
-        'Caption C',
-      ];
-
-      const result = await (processor as any).processResourceCaptions(
-        captionTexts,
-        'image',
-      );
-
-      // Should recover and skip 'Caption B'
-      expect(result.size).toBe(2);
-      expect(result.get(0)).toEqual({ fullText: 'Caption A', num: 'A' });
-      expect(result.get(2)).toEqual({ fullText: 'Caption C', num: 'C' });
-      expect(result.has(1)).toBe(false); // Caption B was skipped
-
-      // Verify warning was logged about length mismatch
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Caption parsing length mismatch'),
-      );
-
-      // Verify info log about successful recovery
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Successfully recovered'),
-      );
-
-      // Verify individual skip warning for Caption B
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Skipping'),
-      );
-    });
-
-    test('should handle length match case without recovery', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      // Mock captionParser to return correct number of captions
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([
-          { fullText: 'Caption A', num: 'A' },
-          { fullText: 'Caption B', num: 'B' },
-        ]),
-      };
-
-      // Mock captionValidator to return all valid
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true, true]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      const captionTexts: Array<string | undefined> = [
-        'Caption A',
-        'Caption B',
-      ];
-
-      const result = await (processor as any).processResourceCaptions(
-        captionTexts,
-        'image',
-      );
-
-      // Should have both captions
-      expect(result.size).toBe(2);
-      expect(result.get(0)).toEqual({ fullText: 'Caption A', num: 'A' });
-      expect(result.get(1)).toEqual({ fullText: 'Caption B', num: 'B' });
-
-      // Should NOT log length mismatch warning
-      expect(mockLogger.warn).not.toHaveBeenCalledWith(
-        expect.stringContaining('Caption parsing length mismatch'),
-      );
-    });
-
-    test('should handle empty caption texts', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn(),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      const result = await (processor as any).processResourceCaptions(
-        [],
-        'image',
-      );
-
-      expect(result.size).toBe(0);
-      expect(mockCaptionParser.parseBatch).not.toHaveBeenCalled();
-    });
-
-    test('should handle caption with failed validations (fallback retry disabled)', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-        enableFallbackRetry: false,
-      });
-
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([
-          { fullText: 'Caption A', num: 'A' },
-          { fullText: 'Caption B', num: 'B' },
-        ]),
-      };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true, false]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      const captionTexts: Array<string | undefined> = [
-        'Caption A',
-        'Caption B',
-      ];
-
-      const result = await (processor as any).processResourceCaptions(
-        captionTexts,
-        'image',
-      );
-
-      expect(result.size).toBe(2);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('failed validation'),
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('fallback retry disabled'),
-      );
-      // Should NOT call parseBatch again for reparsing
-      expect(mockCaptionParser.parseBatch).toHaveBeenCalledTimes(1);
-    });
-
-    test('should reparse failed captions with fallback model when enableFallbackRetry is true', async () => {
-      const fallbackModel = { modelId: 'fallback-model' } as LanguageModel;
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: fallbackModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-        enableFallbackRetry: true,
-      });
-
-      // Mock for initial parsing
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([
-          { fullText: 'Caption A', num: 'A' },
-          { fullText: 'Caption B', num: 'wrong-B' },
-        ]),
-      };
-
-      // Mock for fallback reparsing (new CaptionParser instance)
-      const mockFallbackParseBatch = vi.fn().mockResolvedValue([
-        { fullText: 'Caption B', num: 'B' }, // Reparsed result
-      ]);
-      vi.mocked(CaptionParser).mockImplementation(function () {
-        return {
-          parseBatch: mockFallbackParseBatch,
-        } as any;
-      });
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true, false]), // B fails validation
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      const captionTexts: Array<string | undefined> = [
-        'Caption A',
-        'Caption B',
-      ];
-
-      const result = await (processor as any).processResourceCaptions(
-        captionTexts,
-        'image',
-      );
-
-      expect(result.size).toBe(2);
-      // Initial parsing
-      expect(mockCaptionParser.parseBatch).toHaveBeenCalledTimes(1);
-      // Fallback reparsing with new CaptionParser instance
-      expect(CaptionParser).toHaveBeenCalledWith(
-        mockLogger,
-        fallbackModel,
-        { maxRetries: 3, componentName: 'CaptionParser-fallback' },
-        undefined,
-        expect.anything(),
-      );
-      expect(mockFallbackParseBatch).toHaveBeenCalledWith(['Caption B'], 0);
-      // Result should have reparsed caption
-      expect(result.get(1)).toEqual({ fullText: 'Caption B', num: 'B' });
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Reparsing'),
-      );
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Reparsed 1 image captions'),
-      );
-    });
-
-    test('should not reparse when all validations pass', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-        enableFallbackRetry: true,
-      });
-
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([
-          { fullText: 'Caption A', num: 'A' },
-          { fullText: 'Caption B', num: 'B' },
-        ]),
-      };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true, true]), // All pass
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      const captionTexts: Array<string | undefined> = [
-        'Caption A',
-        'Caption B',
-      ];
-
-      await (processor as any).processResourceCaptions(captionTexts, 'image');
-
-      // Should only call parseBatch once (no reparsing needed)
-      expect(mockCaptionParser.parseBatch).toHaveBeenCalledTimes(1);
-      expect(mockLogger.info).not.toHaveBeenCalledWith(
-        expect.stringContaining('Reparsing'),
-      );
-    });
-
-    test('should reparse multiple failed captions', async () => {
-      const fallbackModel = { modelId: 'fallback-model' } as LanguageModel;
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: fallbackModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-        enableFallbackRetry: true,
-      });
-
-      // Mock for initial parsing
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([
-          { fullText: 'Caption A', num: 'wrong-A' },
-          { fullText: 'Caption B', num: 'B' },
-          { fullText: 'Caption C', num: 'wrong-C' },
-        ]),
-      };
-
-      // Mock for fallback reparsing (new CaptionParser instance)
-      const mockFallbackParseBatch = vi.fn().mockResolvedValue([
-        { fullText: 'Caption A', num: 'A' },
-        { fullText: 'Caption C', num: 'C' },
-      ]);
-      vi.mocked(CaptionParser).mockImplementation(function () {
-        return {
-          parseBatch: mockFallbackParseBatch,
-        } as any;
-      });
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([false, true, false]), // A and C fail
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      const captionTexts: Array<string | undefined> = [
-        'Caption A',
-        'Caption B',
-        'Caption C',
-      ];
-
-      const result = await (processor as any).processResourceCaptions(
-        captionTexts,
-        'table',
-      );
-
-      expect(result.size).toBe(3);
-      expect(mockCaptionParser.parseBatch).toHaveBeenCalledTimes(1);
-      expect(mockFallbackParseBatch).toHaveBeenCalledWith(
-        ['Caption A', 'Caption C'],
-        0,
-      );
-      // Reparsed results should be updated
-      expect(result.get(0)).toEqual({ fullText: 'Caption A', num: 'A' });
-      expect(result.get(1)).toEqual({ fullText: 'Caption B', num: 'B' });
-      expect(result.get(2)).toEqual({ fullText: 'Caption C', num: 'C' });
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Reparsed 2 table captions'),
-      );
-    });
-  });
-
-  describe('extractCaptionText', () => {
-    test('returns undefined when captions undefined', () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const result = (processor as any).extractCaptionText(undefined);
-      expect(result).toBeUndefined();
-    });
-
-    test('returns undefined when captions empty array', () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const result = (processor as any).extractCaptionText([]);
-      expect(result).toBeUndefined();
-    });
-
-    test('returns string caption when first element is string', () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const result = (processor as any).extractCaptionText(['Test Caption']);
-      expect(result).toBe('Test Caption');
-    });
-
-    test('returns undefined when first element is ref and resolver not available', () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const result = (processor as any).extractCaptionText([
-        { $ref: '#/texts/0' },
-      ]);
-      expect(result).toBeUndefined();
-    });
-
-    test('returns resolved text when resolver is available', () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockResolver = {
-        resolveText: vi.fn().mockReturnValue({ text: 'Resolved Caption' }),
-      };
-
-      (processor as any).refResolver = mockResolver;
-
-      const result = (processor as any).extractCaptionText([
-        { $ref: '#/texts/0' },
-      ]);
-      expect(result).toBe('Resolved Caption');
-      expect(mockResolver.resolveText).toHaveBeenCalledWith('#/texts/0');
-    });
-
-    test('returns undefined when ref resolution returns undefined', () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      const mockResolver = {
-        resolveText: vi.fn().mockReturnValue(undefined),
-      };
-
-      (processor as any).refResolver = mockResolver;
-
-      const result = (processor as any).extractCaptionText([
-        { $ref: '#/texts/0' },
-      ]);
-      expect(result).toBeUndefined();
-    });
-  });
-
   describe('constructor with enableFallbackRetry', () => {
     test('default enableFallbackRetry is false', () => {
       const processor = new DocumentProcessor({
@@ -953,16 +502,12 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue(undefined),
+        processResourceCaptions: vi
+          .fn()
+          .mockResolvedValue(new Map<number, any>()),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       (processor as any).idGenerator = {
         generateImageId: vi.fn(() => 'img-001'),
       };
@@ -994,16 +539,12 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue(undefined),
+        processResourceCaptions: vi
+          .fn()
+          .mockResolvedValue(new Map<number, any>()),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       (processor as any).idGenerator = {
         generateImageId: vi.fn(() => 'img-001'),
       };
@@ -1035,16 +576,12 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue(undefined),
+        processResourceCaptions: vi
+          .fn()
+          .mockResolvedValue(new Map<number, any>()),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       // Explicitly set idGenerator to undefined
       (processor as any).idGenerator = undefined;
 
@@ -1077,20 +614,16 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue('Figure 1: Test image'),
+        processResourceCaptions: vi
           .fn()
-          .mockResolvedValue([
-            { fullText: 'Figure 1: Test image', num: 'Figure 1' },
-          ]),
+          .mockResolvedValue(
+            new Map<number, any>([
+              [0, { fullText: 'Figure 1: Test image', num: 'Figure 1' }],
+            ]),
+          ),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       (processor as any).idGenerator = {
         generateImageId: vi.fn(() => 'img-001'),
       };
@@ -1161,16 +694,12 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue(undefined),
+        processResourceCaptions: vi
+          .fn()
+          .mockResolvedValue(new Map<number, any>()),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       (processor as any).idGenerator = {
         generateTableId: vi.fn(() => 'tbl-001'),
       };
@@ -1205,16 +734,12 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue(undefined),
+        processResourceCaptions: vi
+          .fn()
+          .mockResolvedValue(new Map<number, any>()),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       (processor as any).idGenerator = {
         generateTableId: vi.fn(() => 'tbl-001'),
       };
@@ -1249,16 +774,12 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue(undefined),
+        processResourceCaptions: vi
+          .fn()
+          .mockResolvedValue(new Map<number, any>()),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       // Explicitly set idGenerator to undefined
       (processor as any).idGenerator = undefined;
 
@@ -1292,16 +813,12 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([]),
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue(undefined),
+        processResourceCaptions: vi
+          .fn()
+          .mockResolvedValue(new Map<number, any>()),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       (processor as any).idGenerator = {
         generateTableId: vi.fn(() => 'tbl-001'),
       };
@@ -1339,20 +856,16 @@ describe('DocumentProcessor', () => {
         captionValidatorBatchSize: 5,
       });
 
-      const mockCaptionParser = {
-        parseBatch: vi
+      (processor as any).captionProcessingPipeline = {
+        extractCaptionText: vi.fn().mockReturnValue('Table 1: Data summary'),
+        processResourceCaptions: vi
           .fn()
-          .mockResolvedValue([
-            { fullText: 'Table 1: Data summary', num: 'Table 1' },
-          ]),
+          .mockResolvedValue(
+            new Map<number, any>([
+              [0, { fullText: 'Table 1: Data summary', num: 'Table 1' }],
+            ]),
+          ),
       };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
       (processor as any).idGenerator = {
         generateTableId: vi.fn(() => 'tbl-001'),
       };
@@ -1424,44 +937,6 @@ describe('DocumentProcessor', () => {
       expect(result[0].numCols).toBe(2);
       expect(result[0].caption?.fullText).toBe('Table 1: Data summary');
       expect(result[0].grid).toHaveLength(2);
-    });
-  });
-
-  describe('processResourceCaptions - Recovery error handling', () => {
-    test('should handle length mismatch with successful recovery', async () => {
-      const processor = new DocumentProcessor({
-        logger: mockLogger,
-        fallbackModel: mockModel,
-        textCleanerBatchSize: 10,
-        captionParserBatchSize: 5,
-        captionValidatorBatchSize: 5,
-      });
-
-      // Mock parseBatch to return captions with only some matched
-      const mockCaptionParser = {
-        parseBatch: vi.fn().mockResolvedValue([
-          { fullText: 'Caption A', num: 'A' },
-          { fullText: 'Caption B', num: 'B' },
-        ]),
-      };
-
-      const mockCaptionValidator = {
-        validateBatch: vi.fn().mockResolvedValue([true, true]),
-      };
-
-      (processor as any).captionParser = mockCaptionParser;
-      (processor as any).captionValidator = mockCaptionValidator;
-
-      const captionTexts = ['Caption A', 'Caption B'];
-
-      // This should succeed through recovery path
-      const result = await (processor as any).processResourceCaptions(
-        captionTexts,
-        'image',
-      );
-
-      expect(result).toBeInstanceOf(Map);
-      expect(result.size).toBe(2);
     });
   });
 

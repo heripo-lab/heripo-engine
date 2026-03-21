@@ -1,6 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type {
-  Caption,
   Chapter,
   DoclingDocument,
   DocumentProcessResult,
@@ -12,7 +11,6 @@ import type {
   ProcessedTableCell,
   TokenUsageReport,
 } from '@heripo/model';
-import type { ExtendedTokenUsage } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { TocEntry } from './types';
@@ -27,7 +25,7 @@ import {
   VisionTocExtractor,
 } from './extractors';
 import { CaptionParser, PageRangeParser } from './parsers';
-import { TocExtractionPipeline } from './pipelines';
+import { CaptionProcessingPipeline, TocExtractionPipeline } from './pipelines';
 import { IdGenerator, RefResolver, TextCleaner } from './utils';
 import { CaptionValidator, TocContentValidator } from './validators';
 
@@ -197,6 +195,7 @@ export class DocumentProcessor {
   private captionParser?: CaptionParser;
   private chapterConverter?: ChapterConverter;
   private tocExtractionPipeline?: TocExtractionPipeline;
+  private captionProcessingPipeline?: CaptionProcessingPipeline;
   private textCleaner = TextCleaner;
   private readonly usageAggregator = new LLMTokenUsageAggregator();
 
@@ -454,6 +453,21 @@ export class DocumentProcessor {
       usageAggregator: this.usageAggregator,
     });
 
+    this.logger.info('[DocumentProcessor] - CaptionProcessingPipeline');
+    this.captionProcessingPipeline = new CaptionProcessingPipeline({
+      logger: this.logger,
+      captionParser: this.captionParser!,
+      captionValidator: this.captionValidator!,
+      refResolver: this.refResolver,
+      fallbackModel: this.fallbackModel,
+      enableFallbackRetry: this.enableFallbackRetry,
+      maxRetries: this.maxRetries,
+      captionParserBatchSize: this.captionParserBatchSize,
+      captionValidatorBatchSize: this.captionValidatorBatchSize,
+      usageAggregator: this.usageAggregator,
+      abortSignal: this.abortSignal,
+    });
+
     this.logger.info('[DocumentProcessor] All processors initialized');
   }
 
@@ -604,220 +618,6 @@ export class DocumentProcessor {
   }
 
   /**
-   * Process resource captions (for images and tables)
-   *
-   * Common caption processing pipeline:
-   * 1. Parse captions in batch
-   * 2. Validate parsed captions
-   * 3. Reparse failed captions with fallback model
-   *
-   * @param captionTexts - Array of caption texts to process
-   * @param resourceType - Type of resource for logging (e.g., 'image', 'table')
-   * @returns Parsed captions with index mapping
-   */
-  private async processResourceCaptions(
-    captionTexts: Array<string | undefined>,
-    resourceType: string,
-  ): Promise<Map<number, Caption>> {
-    const captionsByIndex: Map<number, Caption> = new Map();
-
-    // Build map of valid captions with indices
-    const validCaptionData: Array<{
-      resourceIndex: number;
-      filteredIndex: number;
-      text: string;
-    }> = [];
-
-    for (let i = 0; i < captionTexts.length; i++) {
-      const text = captionTexts[i];
-      if (text !== undefined) {
-        validCaptionData.push({
-          resourceIndex: i,
-          filteredIndex: validCaptionData.length,
-          text,
-        });
-      }
-    }
-
-    const validCaptionTexts = validCaptionData.map((item) => item.text);
-
-    // Step 1: Parse captions in batch
-    const parsedCaptions =
-      validCaptionTexts.length > 0
-        ? await this.captionParser!.parseBatch(
-            validCaptionTexts,
-            this.captionParserBatchSize,
-          )
-        : [];
-
-    // Handle length mismatch between parsed results and valid captions
-    let finalValidCaptionData = validCaptionData;
-    let finalParsedCaptions = parsedCaptions;
-
-    if (parsedCaptions.length !== validCaptionData.length) {
-      this.logger.warn(
-        `[DocumentProcessor] Caption parsing length mismatch for ${resourceType}: ` +
-          `expected ${validCaptionData.length}, got ${parsedCaptions.length}. ` +
-          `Attempting recovery by matching fullText...`,
-      );
-
-      // Create a map of fullText -> parsed caption for O(1) lookup
-      const parsedMap = new Map<string, Caption>();
-      for (const parsed of parsedCaptions) {
-        parsedMap.set(parsed.fullText, parsed);
-      }
-
-      // Filter validCaptionData to only include items that were successfully parsed
-      const recoveredData: typeof validCaptionData = [];
-      for (const item of validCaptionData) {
-        if (parsedMap.has(item.text)) {
-          recoveredData.push(item);
-        } else {
-          this.logger.warn(
-            `[DocumentProcessor] Skipping ${resourceType} caption at index ${item.resourceIndex}: "${item.text}" (not found in parsed results)`,
-          );
-        }
-      }
-
-      // Re-map parsedCaptions to match the filtered data
-      /* c8 ignore start - defensive guard: recoveredData only contains items where parsedMap.has() returned true */
-      const recoveredCaptions: Caption[] = [];
-      for (const item of recoveredData) {
-        const caption = parsedMap.get(item.text);
-        if (caption) {
-          recoveredCaptions.push(caption);
-        }
-      }
-      /* c8 ignore stop */
-
-      /* c8 ignore start - defensive guard: recoveredData only contains items where parsedMap.has() returned true */
-      if (recoveredCaptions.length !== recoveredData.length) {
-        throw new Error(
-          `[DocumentProcessor] Failed to recover from length mismatch: ` +
-            `recovered ${recoveredCaptions.length} captions for ${recoveredData.length} valid items`,
-        );
-      }
-      /* c8 ignore stop */
-
-      finalValidCaptionData = recoveredData;
-      finalParsedCaptions = recoveredCaptions;
-
-      this.logger.info(
-        `[DocumentProcessor] Successfully recovered ${finalParsedCaptions.length} ${resourceType} captions after length mismatch`,
-      );
-    }
-
-    // Store parsed captions by resource index
-    for (let i = 0; i < finalParsedCaptions.length; i++) {
-      const resourceIndex = finalValidCaptionData[i].resourceIndex;
-      captionsByIndex.set(resourceIndex, finalParsedCaptions[i]);
-    }
-
-    // Step 2: Validate parsed captions
-    if (finalParsedCaptions.length > 0) {
-      const finalValidCaptionTexts = finalValidCaptionData.map(
-        (item) => item.text,
-      );
-      const validationResults = await this.captionValidator!.validateBatch(
-        finalParsedCaptions,
-        finalValidCaptionTexts,
-        this.captionValidatorBatchSize,
-      );
-
-      // Step 3: Reparse failed captions with fallback model
-      const failedIndices = validationResults
-        .map((isValid, index) => (isValid ? -1 : index))
-        .filter((index) => index !== -1);
-
-      if (failedIndices.length > 0) {
-        for (const filteredIndex of failedIndices) {
-          const captionData = finalValidCaptionData[filteredIndex];
-          const originalText = captionData.text;
-          const parsedNum = finalParsedCaptions[filteredIndex].num;
-          const resourceIndex = captionData.resourceIndex;
-          this.logger.warn(
-            `[DocumentProcessor] Invalid ${resourceType} caption [${resourceIndex}]: "${originalText}" | parsed num="${parsedNum}"`,
-          );
-        }
-
-        // Reparse failed captions with fallback model if enabled
-        if (this.enableFallbackRetry) {
-          this.logger.info(
-            `[DocumentProcessor] Reparsing ${failedIndices.length} failed ${resourceType} captions with fallback model...`,
-          );
-
-          // Collect failed caption texts
-          const failedCaptionTexts = failedIndices.map(
-            (filteredIndex) => finalValidCaptionData[filteredIndex].text,
-          );
-
-          // Create a new CaptionParser instance with fallback model for separate token tracking
-          const fallbackCaptionParser = new CaptionParser(
-            this.logger,
-            this.fallbackModel,
-            {
-              maxRetries: this.maxRetries,
-              componentName: 'CaptionParser-fallback',
-              abortSignal: this.abortSignal,
-            },
-            undefined, // no fallback for the fallback
-            this.usageAggregator,
-          );
-
-          // Reparse with fallback model (sequential processing for better accuracy)
-          const reparsedCaptions = await fallbackCaptionParser.parseBatch(
-            failedCaptionTexts,
-            0, // sequential processing
-          );
-
-          // Update captionsByIndex with reparsed results
-          for (let i = 0; i < failedIndices.length; i++) {
-            const filteredIndex = failedIndices[i];
-            const resourceIndex =
-              finalValidCaptionData[filteredIndex].resourceIndex;
-            captionsByIndex.set(resourceIndex, reparsedCaptions[i]);
-          }
-
-          this.logger.info(
-            `[DocumentProcessor] Reparsed ${reparsedCaptions.length} ${resourceType} captions`,
-          );
-        } else {
-          this.logger.warn(
-            `[DocumentProcessor] ${failedIndices.length} ${resourceType} captions failed validation (kept as-is, fallback retry disabled)`,
-          );
-        }
-      }
-    }
-
-    return captionsByIndex;
-  }
-
-  /**
-   * Extract caption text from resource
-   *
-   * Handles both string references and $ref resolution
-   */
-  private extractCaptionText(
-    captions: Array<string | { $ref: string }> | undefined,
-  ): string | undefined {
-    if (!captions?.[0]) {
-      return undefined;
-    }
-
-    const captionRef = captions[0];
-    if (typeof captionRef === 'string') {
-      return captionRef;
-    }
-
-    if (this.refResolver && '$ref' in captionRef) {
-      const resolved = this.refResolver.resolveText(captionRef.$ref);
-      return resolved?.text;
-    }
-
-    return undefined;
-  }
-
-  /**
    * Convert images
    *
    * Converts pictures from DoclingDocument to ProcessedImage
@@ -839,7 +639,9 @@ export class DocumentProcessor {
       const imageId =
         this.idGenerator?.generateImageId() ?? `img-${images.length + 1}`;
 
-      const captionText = this.extractCaptionText(picture.captions);
+      const captionText = this.captionProcessingPipeline!.extractCaptionText(
+        picture.captions,
+      );
       captionTexts.push(captionText);
 
       images.push({
@@ -851,10 +653,11 @@ export class DocumentProcessor {
     }
 
     // Step 2: Process captions
-    const captionsByIndex = await this.processResourceCaptions(
-      captionTexts,
-      'image',
-    );
+    const captionsByIndex =
+      await this.captionProcessingPipeline!.processResourceCaptions(
+        captionTexts,
+        'image',
+      );
 
     // Step 3: Assign parsed captions to images
     for (let i = 0; i < images.length; i++) {
@@ -897,7 +700,9 @@ export class DocumentProcessor {
         })),
       );
 
-      const captionText = this.extractCaptionText(table.captions);
+      const captionText = this.captionProcessingPipeline!.extractCaptionText(
+        table.captions,
+      );
       captionTexts.push(captionText);
 
       tables.push({
@@ -911,10 +716,11 @@ export class DocumentProcessor {
     }
 
     // Step 2: Process captions
-    const captionsByIndex = await this.processResourceCaptions(
-      captionTexts,
-      'table',
-    );
+    const captionsByIndex =
+      await this.captionProcessingPipeline!.processResourceCaptions(
+        captionTexts,
+        'table',
+      );
 
     // Step 3: Assign parsed captions to tables
     for (let i = 0; i < tables.length; i++) {

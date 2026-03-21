@@ -67,6 +67,9 @@ export type {
   CaptionValidatorOptions,
 } from './validators';
 export { ChapterConverter } from './converters';
-export { TocExtractionPipeline } from './pipelines';
-export type { TocExtractionPipelineDeps } from './pipelines';
+export { CaptionProcessingPipeline, TocExtractionPipeline } from './pipelines';
+export type {
+  CaptionProcessingPipelineDeps,
+  TocExtractionPipelineDeps,
+} from './pipelines';
 export { extractMaxPageNumber } from './utils';
