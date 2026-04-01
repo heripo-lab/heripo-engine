@@ -63,6 +63,15 @@ heripo lab is an open-source R&D group that combines archaeological domain knowl
   - ["Considerations for Structuring Maritime Cultural Heritage Data"](https://doi.org/10.22917/island.2025..66.271) (2025, KCI Listed)
   - ["Semantic Data Design for Maritime Cultural Heritage: Focusing on Ancient Shipwrecks and Wooden Tablets Excavated from the Taean Mado waters"](https://lib.aks.ac.kr/#/search/detail/1036933) (2025, Master's Thesis)
 
+#### Kim, Gaeun (Software Engineer)
+
+- Role: Development of archaeology research platforms
+- Background:
+  - Software Engineer
+  - M.A. in Archaeology (Coursework Completed)
+  - B.A. in Archaeology
+  - B.A. in Library and Information Science
+
 ### Why heripo engine?
 
 Archaeological excavation reports contain valuable cultural heritage information, but are often available only in PDF format, making systematic analysis and utilization difficult. heripo engine solves the following problems:
