@@ -58,7 +58,7 @@ heripo lab is an open-source R&D group that combines archaeological domain knowl
 #### Cho, Hayoung (Domain Researcher)
 
 - Role: Archaeological data ontology design, data schema definition, and academic validation
-- Background: Ph.D. Candidate in Archaeology, M.A. in Cultural Informatics
+- Background: Ph.D. Student in Archaeology, M.A. in Cultural Informatics
 - Research:
   - ["Considerations for Structuring Maritime Cultural Heritage Data"](https://doi.org/10.22917/island.2025..66.271) (2025, KCI Listed)
   - ["Semantic Data Design for Maritime Cultural Heritage: Focusing on Ancient Shipwrecks and Wooden Tablets Excavated from the Taean Mado waters"](https://lib.aks.ac.kr/#/search/detail/1036933) (2025, Master's Thesis)
