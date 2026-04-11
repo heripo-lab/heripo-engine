@@ -71,9 +71,9 @@
   "dependencies": {
     "@heripo/model": "workspace:*",
     "ai": "catalog:",
-    "docling-sdk": "^2.0.4",
+    "docling-sdk": "^2.0.5",
     "es-toolkit": "catalog:",
-    "yauzl": "^3.2.1",
+    "yauzl": "^3.3.0",
     "zod": "catalog:"
   },
   "devDependencies": {
