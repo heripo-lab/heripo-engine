@@ -455,7 +455,7 @@ For academic papers or research documents, you may use the following BibTeX entr
 
 ```bibtex
 @software{heripo_engine,
-  author = {Kim, Hongyeon and Cho, Hayoung},
+  author = {Kim, Hongyeon and Cho, Hayoung and Kim, Gaeun},
   title = {heripo engine: TypeScript Library for Extracting Structured Data from Archaeological Excavation Report PDFs},
   year = {2026},
   url = {https://github.com/heripo-lab/heripo-engine},
