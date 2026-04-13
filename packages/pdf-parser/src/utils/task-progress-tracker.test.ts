@@ -1,5 +1,7 @@
 import type { LoggerMethods } from '@heripo/logger';
 
+import type * as Constants from '../config/constants';
+
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PDF_CONVERTER } from '../config/constants';
@@ -9,6 +11,17 @@ import { trackTaskProgress } from './task-progress-tracker';
 vi.mock('./task-failure-details', () => ({
   getTaskFailureDetails: vi.fn(),
 }));
+
+vi.mock('../config/constants', async (importOriginal) => {
+  const actual = await importOriginal<typeof Constants>();
+  return {
+    ...actual,
+    PDF_CONVERTER: {
+      ...actual.PDF_CONVERTER,
+      POLL_INTERVAL_MS: 0,
+    },
+  };
+});
 
 function createMockTask(overrides?: {
   taskId?: string;
