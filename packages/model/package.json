@@ -24,8 +24,9 @@
   "sideEffects": false,
   "author": "heripo lab",
   "contributors": [
-    "Kim Hongyeon <kimhongyeon89@gmail.com>",
-    "Cho Hayoung <hmys0500@gmail.com>"
+    "Kim, Hongyeon <kimhongyeon89@gmail.com>",
+    "Cho, Hayoung <hmys0500@gmail.com>",
+    "Kim, Gaeun <knospe1@naver.com>"
   ],
   "license": "Apache-2.0",
   "repository": {
