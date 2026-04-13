@@ -162,6 +162,79 @@ describe('PDFConverter', () => {
 
         expect(ChunkedPDFConverter).not.toHaveBeenCalled();
       });
+
+      test('falls back to image PDF when chunked conversion fails', async () => {
+        mockConvertChunked.mockRejectedValue(
+          new Error('Chunk task failed: unable to retrieve error details'),
+        );
+
+        const mockImagePdfConverter = {
+          convert: vi.fn().mockResolvedValue('/tmp/image.pdf'),
+          cleanup: vi.fn(),
+        };
+        vi.mocked(ImagePdfConverter).mockImplementation(function () {
+          return mockImagePdfConverter as any;
+        });
+
+        await converter.convert(
+          'file:///test/input.pdf',
+          'report-fallback',
+          vi.fn(),
+          false,
+          { chunkedConversion: true },
+        );
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          '[PDFConverter] Chunked conversion failed, retrying with image-based PDF...',
+          'Chunk task failed: unable to retrieve error details',
+        );
+        expect(ImagePdfConverter).toHaveBeenCalled();
+        expect(mockImagePdfConverter.convert).toHaveBeenCalled();
+      });
+
+      test('re-throws AbortError without falling back to image PDF', async () => {
+        const abortError = new Error('Chunked PDF conversion was aborted');
+        abortError.name = 'AbortError';
+        mockConvertChunked.mockRejectedValue(abortError);
+
+        await expect(
+          converter.convert(
+            'file:///test/input.pdf',
+            'report-abort',
+            vi.fn(),
+            false,
+            { chunkedConversion: true },
+          ),
+        ).rejects.toThrow('Chunked PDF conversion was aborted');
+
+        expect(ImagePdfConverter).not.toHaveBeenCalled();
+      });
+
+      test('falls back with non-Error thrown value', async () => {
+        mockConvertChunked.mockRejectedValue('string error');
+
+        const mockImagePdfConverter = {
+          convert: vi.fn().mockResolvedValue('/tmp/image.pdf'),
+          cleanup: vi.fn(),
+        };
+        vi.mocked(ImagePdfConverter).mockImplementation(function () {
+          return mockImagePdfConverter as any;
+        });
+
+        await converter.convert(
+          'file:///test/input.pdf',
+          'report-non-error',
+          vi.fn(),
+          false,
+          { chunkedConversion: true },
+        );
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          '[PDFConverter] Chunked conversion failed, retrying with image-based PDF...',
+          'string error',
+        );
+        expect(ImagePdfConverter).toHaveBeenCalled();
+      });
     });
   });
 
