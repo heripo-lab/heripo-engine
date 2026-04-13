@@ -129,7 +129,7 @@ export class PDFConverter {
     // Validate document type before processing
     await this.validateDocumentType(url, options, abortSignal);
 
-    // Chunked conversion for large local PDFs
+    // Chunked conversion for large local PDFs (with image PDF fallback)
     if (options.chunkedConversion && url.startsWith('file://')) {
       const chunked = new ChunkedPDFConverter(
         this.logger,
@@ -141,14 +141,32 @@ export class PDFConverter {
         },
         this.timeout,
       );
-      return chunked.convertChunked(
-        url,
-        reportId,
-        onComplete,
-        cleanupAfterCallback,
-        options,
-        abortSignal,
-      );
+      try {
+        return await chunked.convertChunked(
+          url,
+          reportId,
+          onComplete,
+          cleanupAfterCallback,
+          options,
+          abortSignal,
+        );
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
+        this.logger.warn(
+          '[PDFConverter] Chunked conversion failed, retrying with image-based PDF...',
+          error instanceof Error ? error.message : error,
+        );
+        return this.convertViaImagePdf(
+          url,
+          reportId,
+          onComplete,
+          cleanupAfterCallback,
+          options,
+          abortSignal,
+        );
+      }
     }
 
     // Force image PDF pre-conversion when explicitly requested
