@@ -253,7 +253,7 @@ const commitAndTag = (version) => {
 const main = async () => {
   ensureCleanGit();
   bumpVersions();
-  run('pnpm', ['build']);
+  run('pnpm', ['build:packages:force']);
   await packAndPublish();
 
   if (!noGit) {
