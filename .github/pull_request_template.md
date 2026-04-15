@@ -5,8 +5,8 @@
 - [ ] `@heripo/pdf-parser`
 - [ ] `@heripo/document-processor`
 - [ ] `@heripo/model`
+- [ ] `@heripo/logger`
 - [ ] `@heripo/shared` (internal)
-- [ ] `@heripo/logger` (internal)
 - [ ] `demo-web`
 - [ ] `docs`
 - [ ] Other (root configs, CI, etc.)

@@ -1,9 +1,9 @@
 {
-  "name": "@heripo/document-processor",
+  "name": "@heripo/logger",
   "private": false,
   "type": "module",
   "version": "0.1.21",
-  "description": "Document processor with LLM-based analysis for heripo engine",
+  "description": "Logger interface for heripo engine",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -32,17 +32,16 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/heripo-lab/heripo-engine",
-    "directory": "packages/document-processor"
+    "directory": "packages/logger"
   },
   "bugs": {
     "url": "https://github.com/heripo-lab/heripo-engine/issues"
   },
-  "homepage": "https://github.com/heripo-lab/heripo-engine/tree/main/packages/document-processor",
+  "homepage": "https://github.com/heripo-lab/heripo-engine/tree/main/packages/logger",
   "keywords": [
     "heripo",
-    "document",
-    "processor",
-    "llm",
+    "logger",
+    "typescript",
     "archaeology"
   ],
   "engines": {
@@ -56,28 +55,12 @@
     "build": "pnpm clean && tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:ci": "TEST_MODE=ci vitest run --coverage",
-    "test:coverage": "vitest run --coverage",
-    "test:coverage:watch": "vitest --coverage",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix"
   },
-  "dependencies": {
-    "@heripo/logger": "workspace:*",
-    "@heripo/model": "workspace:*",
-    "ai": "catalog:",
-    "zod": "catalog:"
-  },
   "devDependencies": {
-    "@heripo/shared": "workspace:*",
     "@heripo/tsconfig": "workspace:*",
     "@heripo/tsup-config": "workspace:*",
-    "@heripo/vitest-config": "workspace:*",
-    "@vitest/coverage-v8": "catalog:",
-    "@vitest/expect": "catalog:",
-    "tsup": "catalog:",
-    "vitest": "catalog:"
+    "tsup": "catalog:"
   }
 }

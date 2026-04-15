@@ -34,7 +34,7 @@
     "clsx": "^2.1.1",
     "jose": "^6.2.2",
     "lucide-react": "^1.8.0",
-    "next": "^16.2.3",
+    "next": "^16.2.4",
     "node-cron": "^4.2.1",
     "otplib": "^13.4.0",
     "radix-ui": "^1.4.3",
@@ -52,8 +52,8 @@
     "@types/node-cron": "^3.0.11",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.4.27",
-    "postcss": "^8.5.9",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.10",
     "tailwindcss": "^4.2.2"
   }
 }
