@@ -5,12 +5,12 @@ packages:
 
 catalog:
   "@ai-sdk/anthropic": "^3.0.69"
-  "@ai-sdk/google": "^3.0.62"
-  "@ai-sdk/openai": "^3.0.52"
+  "@ai-sdk/google": "^3.0.63"
+  "@ai-sdk/openai": "^3.0.53"
   "@ai-sdk/togetherai": "^2.0.45"
   "@vitest/coverage-v8": "^4.1.4"
   "@vitest/expect": "^4.1.4"
-  "ai": "^6.0.158"
+  "ai": "^6.0.162"
   "es-toolkit": "^1.45.1"
   "tsup": "^8.5.1"
   "tsx": "^4.21.0"
