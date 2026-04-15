@@ -7,5 +7,5 @@ export default defineConfig({
   clean: true,
   splitting: false,
   sourcemap: true,
-  noExternal: ['@heripo/logger', '@heripo/shared'],
+  noExternal: ['@heripo/shared'],
 });

@@ -70,6 +70,7 @@
     "lint:fix": "eslint src/**/*.ts --fix"
   },
   "dependencies": {
+    "@heripo/logger": "workspace:*",
     "@heripo/model": "workspace:*",
     "ai": "catalog:",
     "docling-sdk": "^2.0.5",
@@ -78,7 +79,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@heripo/logger": "workspace:*",
     "@heripo/shared": "workspace:*",
     "@heripo/tsconfig": "workspace:*",
     "@heripo/tsup-config": "workspace:*",

@@ -4,5 +4,5 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
   },
-  noExternal: ['@heripo/logger', '@heripo/shared'],
+  noExternal: ['@heripo/shared'],
 });

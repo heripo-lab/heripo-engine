@@ -36,6 +36,7 @@ if (distTagIndex >= 0 && !distTag) {
 
 const rootDir = process.cwd();
 const packages = [
+  { name: '@heripo/logger', dir: 'packages/logger' },
   { name: '@heripo/model', dir: 'packages/model' },
   { name: '@heripo/pdf-parser', dir: 'packages/pdf-parser' },
   { name: '@heripo/document-processor', dir: 'packages/document-processor' },
@@ -238,6 +239,7 @@ const commitAndTag = (version) => {
     'add',
     'package.json',
     'pnpm-lock.yaml',
+    'packages/logger/package.json',
     'packages/model/package.json',
     'packages/pdf-parser/package.json',
     'packages/document-processor/package.json',
