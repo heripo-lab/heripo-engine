@@ -123,6 +123,12 @@ export interface DocumentProcessorProcessOptions {
    * When provided, automatic PageRangeParser execution is skipped.
    */
   pageRangeMap?: Record<number, PageRange>;
+
+  /**
+   * Precomputed table of contents entries.
+   * When provided, automatic TOC extraction pipeline execution is skipped.
+   */
+  tocEntries?: TocEntry[];
 }
 
 /**
@@ -268,7 +274,7 @@ export class DocumentProcessor {
    * @param doclingDoc - Original document extracted from Docling SDK
    * @param reportId - Report unique identifier
    * @param artifactDir - Directory containing parser artifacts such as images/, pages/, and result.json
-   * @param processOptions - Per-document processing inputs such as manually verified page range mappings
+   * @param processOptions - Per-document processing inputs such as manually verified page range mappings and TOC entries
    * @returns Document processing result with ProcessedDocument and token usage report
    *
    * @throws {TocExtractError} When TOC extraction fails
@@ -324,10 +330,17 @@ export class DocumentProcessor {
     this.checkAborted();
 
     const startTimeToc = Date.now();
-    const tocEntries = await this.tocExtractionPipeline!.extract(
-      doclingDoc,
-      filtered,
-    );
+    const tocEntries =
+      processOptions.tocEntries !== undefined
+        ? processOptions.tocEntries
+        : await this.tocExtractionPipeline!.extract(doclingDoc, filtered);
+
+    if (processOptions.tocEntries !== undefined) {
+      this.logger.info(
+        `[DocumentProcessor] Using injected TOC entries with ${tocEntries.length} top-level entries`,
+      );
+    }
+
     const tocTime = Date.now() - startTimeToc;
     this.logger.info(`[DocumentProcessor] TOC extraction took ${tocTime}ms`);
     this.emitTokenUsage();

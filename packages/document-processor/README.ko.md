@@ -144,6 +144,50 @@ const { document, usage } = await processor.process(
 );
 ```
 
+### 수동 TOC 항목
+
+목차를 이미 검수했다면 `process()`의 네 번째 인자로 `tocEntries`를 전달해
+자동 TOC 추출을 건너뛸 수 있습니다. 전달한 항목은 추가 추출이나 검증 없이
+그대로 사용됩니다.
+
+```typescript
+import type { TocEntry } from '@heripo/document-processor';
+
+const tocEntries: TocEntry[] = [
+  {
+    title: '제1장 조사 개요',
+    level: 1,
+    pageNo: 1,
+    children: [
+      {
+        title: '1. 조사 경위',
+        level: 2,
+        pageNo: 3,
+      },
+    ],
+  },
+];
+
+const { document, usage } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  { tocEntries },
+);
+```
+
+수동 페이지 범위 매핑과 TOC 항목을 함께 전달하면 두 자동 단계를 모두
+건너뜁니다.
+
+```typescript
+const { document, usage } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  { pageRangeMap, tocEntries },
+);
+```
+
 ## 처리 파이프라인
 
 DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니다:
@@ -246,6 +290,7 @@ DoclingDocument를 ProcessedDocument로 변환합니다.
 ```typescript
 interface DocumentProcessorProcessOptions {
   pageRangeMap?: Record<number, PageRange>;
+  tocEntries?: TocEntry[];
 }
 ```
 
@@ -254,7 +299,7 @@ interface DocumentProcessorProcessOptions {
 - `doclingDoc` (DoclingDocument): PDF 파서의 출력
 - `reportId` (string): 리포트 ID
 - `artifactDir` (string): `images/`, `pages/`, `result.json` 같은 parser 산출물이 들어 있는 디렉토리
-- `processOptions` (DocumentProcessorProcessOptions, 선택): 문서별 처리 입력값. `pageRangeMap`이 제공되면 자동 페이지 범위 파싱을 건너뜁니다.
+- `processOptions` (DocumentProcessorProcessOptions, 선택): 문서별 처리 입력값. `pageRangeMap`이 제공되면 자동 페이지 범위 파싱을 건너뜁니다. `tocEntries`가 제공되면 자동 TOC 추출을 건너뜁니다.
 
 **반환값:**
 

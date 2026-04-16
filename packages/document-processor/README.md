@@ -144,6 +144,50 @@ const { document, usage } = await processor.process(
 );
 ```
 
+### Manual TOC Entries
+
+If the table of contents has already been reviewed, pass `tocEntries` as the
+fourth `process()` argument to skip automatic TOC extraction. The provided
+entries are used as-is without additional extraction or validation.
+
+```typescript
+import type { TocEntry } from '@heripo/document-processor';
+
+const tocEntries: TocEntry[] = [
+  {
+    title: 'Chapter 1. Overview',
+    level: 1,
+    pageNo: 1,
+    children: [
+      {
+        title: '1. Background',
+        level: 2,
+        pageNo: 3,
+      },
+    ],
+  },
+];
+
+const { document, usage } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  { tocEntries },
+);
+```
+
+Manual page range maps and TOC entries can be provided together to skip both
+automatic stages.
+
+```typescript
+const { document, usage } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  { pageRangeMap, tocEntries },
+);
+```
+
 ## Processing Pipeline
 
 DocumentProcessor processes documents through a 5-stage pipeline:
@@ -246,6 +290,7 @@ Transforms DoclingDocument into ProcessedDocument.
 ```typescript
 interface DocumentProcessorProcessOptions {
   pageRangeMap?: Record<number, PageRange>;
+  tocEntries?: TocEntry[];
 }
 ```
 
@@ -254,7 +299,7 @@ interface DocumentProcessorProcessOptions {
 - `doclingDoc` (DoclingDocument): PDF parser output
 - `reportId` (string): Report ID
 - `artifactDir` (string): Artifact directory containing parser outputs such as `images/`, `pages/`, and `result.json`
-- `processOptions` (DocumentProcessorProcessOptions, optional): Per-document processing inputs. When `pageRangeMap` is provided, automatic page range parsing is skipped.
+- `processOptions` (DocumentProcessorProcessOptions, optional): Per-document processing inputs. When `pageRangeMap` is provided, automatic page range parsing is skipped. When `tocEntries` is provided, automatic TOC extraction is skipped.
 
 **Returns:**
 
