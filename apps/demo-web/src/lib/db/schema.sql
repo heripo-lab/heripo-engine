@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   original_filename TEXT NOT NULL,
   file_path TEXT NOT NULL,
   options_json TEXT NOT NULL,
-  output_path TEXT,
+  artifact_dir TEXT,
   result_path TEXT,
   processed_result_path TEXT,
   total_pages INTEGER,

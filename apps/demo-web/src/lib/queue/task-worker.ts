@@ -29,7 +29,7 @@ import {
 import { PDFParserManager } from './pdf-parser-manager';
 
 /**
- * Parse a PDF using the given parser and return the DoclingDocument with output path.
+ * Parse a PDF using the given parser and return the DoclingDocument with artifact directory.
  */
 function parsePdf(
   pdfParser: PDFParser,
@@ -39,21 +39,21 @@ function parsePdf(
   abortSignal?: AbortSignal,
 ): Promise<{
   doclingDocument: DoclingDocument;
-  outputPath: string;
+  artifactDir: string;
   vlmTokenUsage: TokenUsageReport | null;
 }> {
   return new Promise((resolve, reject) => {
     let capturedDoc: DoclingDocument;
-    let capturedPath: string;
+    let artifactDir: string;
     pdfParser
       .parse(
         pdfUrl,
         taskId,
-        (outPath) => {
-          const resultPath = `${outPath}/result.json`;
+        (parserOutputPath) => {
+          const resultPath = `${parserOutputPath}/result.json`;
           const json = readFileSync(resultPath, 'utf8');
           capturedDoc = JSON.parse(json) as DoclingDocument;
-          capturedPath = outPath;
+          artifactDir = parserOutputPath;
         },
         false,
         options,
@@ -62,7 +62,7 @@ function parsePdf(
       .then((vlmTokenUsage) => {
         resolve({
           doclingDocument: capturedDoc,
-          outputPath: capturedPath,
+          artifactDir,
           vlmTokenUsage: vlmTokenUsage ?? null,
         });
       })
@@ -265,7 +265,7 @@ export async function runTaskWorker(
     const pdfUrl = `file://${filePath}`;
 
     let doclingDocument: DoclingDocument;
-    let outputPath: string;
+    let artifactDir: string;
     let vlmTokenUsage: TokenUsageReport | null = null;
 
     // Build PDF convert options with new strategy fields
@@ -315,7 +315,7 @@ export async function runTaskWorker(
       );
 
       doclingDocument = parseResult.doclingDocument;
-      outputPath = parseResult.outputPath;
+      artifactDir = parseResult.artifactDir;
       vlmTokenUsage = parseResult.vlmTokenUsage;
     } finally {
       // Clear task logger after PDF parsing
@@ -342,7 +342,11 @@ export async function runTaskWorker(
     // Step 2-5: Document Processing
     logger.info('Starting document processing...');
 
-    const result = await processor.process(doclingDocument, taskId, outputPath);
+    const result = await processor.process(
+      doclingDocument,
+      taskId,
+      artifactDir,
+    );
 
     // Merge VLM token usage into document-processor report
     if (vlmTokenUsage) {
@@ -352,7 +356,7 @@ export async function runTaskWorker(
     logger.info('Document processing completed');
 
     // Save processed result
-    const processedResultPath = `${outputPath}/result-processed.json`;
+    const processedResultPath = `${artifactDir}/result-processed.json`;
     writeFileSync(
       processedResultPath,
       JSON.stringify(result.document, null, 2),
@@ -360,8 +364,8 @@ export async function runTaskWorker(
 
     // Update task with results
     updateTaskResult(taskId, {
-      outputPath,
-      resultPath: `${outputPath}/result.json`,
+      artifactDir,
+      resultPath: `${artifactDir}/result.json`,
       processedResultPath,
       totalPages: Object.keys(result.document.pageRangeMap).length,
       chaptersCount: result.document.chapters.length,

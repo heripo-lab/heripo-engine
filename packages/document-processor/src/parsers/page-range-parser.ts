@@ -75,7 +75,7 @@ export class PageRangeParser extends VisionLLMComponent {
   constructor(
     logger: LoggerMethods,
     model: LanguageModel,
-    outputPath: string,
+    artifactDir: string,
     maxRetries: number = 3,
     fallbackModel?: LanguageModel,
     aggregator?: LLMTokenUsageAggregator,
@@ -85,7 +85,7 @@ export class PageRangeParser extends VisionLLMComponent {
       logger,
       model,
       'PageRangeParser',
-      outputPath,
+      artifactDir,
       { maxRetries, abortSignal },
       fallbackModel,
       aggregator ?? new LLMTokenUsageAggregatorClass(),
@@ -370,7 +370,7 @@ export class PageRangeParser extends VisionLLMComponent {
       const page = pages[pageNo - 1];
       // Page files are 0-indexed: page_0.png, page_1.png, etc.
       const imagePath = path.resolve(
-        this.outputPath,
+        this.artifactDir,
         `pages/page_${pageNo - 1}.png`,
       );
       const imageData = new Uint8Array(fs.readFileSync(imagePath));

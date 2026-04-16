@@ -48,8 +48,8 @@ class TestVisionComponent extends VisionLLMComponent {
     return this.buildImageContent(imagePath, mimeType);
   }
 
-  public getOutputPath(): string {
-    return this.outputPath;
+  public getArtifactDir(): string {
+    return this.artifactDir;
   }
 }
 
@@ -81,7 +81,7 @@ describe('VisionLLMComponent', () => {
   });
 
   describe('constructor', () => {
-    test('should set outputPath correctly', () => {
+    test('should set artifactDir correctly', () => {
       const component = new TestVisionComponent(
         mockLogger,
         mockModel,
@@ -89,7 +89,7 @@ describe('VisionLLMComponent', () => {
         '/test/output/path',
       );
 
-      expect(component.getOutputPath()).toBe('/test/output/path');
+      expect(component.getArtifactDir()).toBe('/test/output/path');
     });
 
     test('should pass options to base class', () => {
@@ -103,7 +103,7 @@ describe('VisionLLMComponent', () => {
         mockAggregator,
       );
 
-      expect(component.getOutputPath()).toBe('/output');
+      expect(component.getArtifactDir()).toBe('/output');
     });
   });
 
@@ -311,7 +311,7 @@ describe('VisionLLMComponent', () => {
       expect(fs.readFileSync).toHaveBeenCalledWith('/absolute/path/image.png');
     });
 
-    test('should resolve relative paths against outputPath', () => {
+    test('should resolve relative paths against artifactDir', () => {
       const component = new TestVisionComponent(
         mockLogger,
         mockModel,

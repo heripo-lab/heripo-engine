@@ -75,7 +75,7 @@ const processor = new DocumentProcessor({
 const { document, usage } = await processor.process(
   doclingDocument, // PDF 파서 출력
   'report-001', // 리포트 ID
-  outputPath, // 이미지/페이지가 있는 디렉토리
+  artifactDir, // 이미지/페이지 등 parser 산출물이 있는 디렉토리
 );
 
 // 결과 사용
@@ -117,7 +117,7 @@ const processor = new DocumentProcessor({
 const { document, usage } = await processor.process(
   doclingDocument,
   'report-001',
-  outputPath,
+  artifactDir,
 );
 ```
 
@@ -216,7 +216,7 @@ interface DocumentProcessorOptions {
 
 #### 메서드
 
-##### `process(doclingDoc, reportId, outputPath): Promise<DocumentProcessResult>`
+##### `process(doclingDoc, reportId, artifactDir): Promise<DocumentProcessResult>`
 
 DoclingDocument를 ProcessedDocument로 변환합니다.
 
@@ -224,7 +224,7 @@ DoclingDocument를 ProcessedDocument로 변환합니다.
 
 - `doclingDoc` (DoclingDocument): PDF 파서의 출력
 - `reportId` (string): 리포트 ID
-- `outputPath` (string): 이미지/페이지가 있는 출력 디렉토리
+- `artifactDir` (string): `images/`, `pages/`, `result.json` 같은 parser 산출물이 들어 있는 디렉토리
 
 **반환값:**
 
