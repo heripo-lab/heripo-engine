@@ -75,7 +75,7 @@ const processor = new DocumentProcessor({
 const { document, usage } = await processor.process(
   doclingDocument, // PDF parser output
   'report-001', // Report ID
-  outputPath, // Directory containing images/pages
+  artifactDir, // Directory containing parser artifacts such as images/pages
 );
 
 // Use results
@@ -117,7 +117,7 @@ const processor = new DocumentProcessor({
 const { document, usage } = await processor.process(
   doclingDocument,
   'report-001',
-  outputPath,
+  artifactDir,
 );
 ```
 
@@ -216,7 +216,7 @@ interface DocumentProcessorOptions {
 
 #### Methods
 
-##### `process(doclingDoc, reportId, outputPath): Promise<DocumentProcessResult>`
+##### `process(doclingDoc, reportId, artifactDir): Promise<DocumentProcessResult>`
 
 Transforms DoclingDocument into ProcessedDocument.
 
@@ -224,7 +224,7 @@ Transforms DoclingDocument into ProcessedDocument.
 
 - `doclingDoc` (DoclingDocument): PDF parser output
 - `reportId` (string): Report ID
-- `outputPath` (string): Output directory containing images/pages
+- `artifactDir` (string): Artifact directory containing parser outputs such as `images/`, `pages/`, and `result.json`
 
 **Returns:**
 
