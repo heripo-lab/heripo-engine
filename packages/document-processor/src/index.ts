@@ -22,7 +22,10 @@ export type {
   VisionLLMComponentOptions,
   ImageContent,
 } from './core';
-export type { DocumentProcessorOptions } from './document-processor';
+export type {
+  DocumentProcessorOptions,
+  DocumentProcessorProcessOptions,
+} from './document-processor';
 export type { TocEntry, TocAreaResult, PageSizeGroup } from './types';
 export {
   CaptionParser,

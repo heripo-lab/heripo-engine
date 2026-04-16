@@ -121,6 +121,29 @@ const { document, usage } = await processor.process(
 );
 ```
 
+### Manual Page Range Map
+
+If page range mapping has already been reviewed, pass it as the fourth
+`process()` argument to skip automatic PageRangeParser execution. The provided
+map is used as-is without additional post-processing.
+
+```typescript
+import type { PageRange } from '@heripo/model';
+
+const pageRangeMap: Record<number, PageRange> = {
+  1: { startPageNo: 0, endPageNo: 0 },
+  2: { startPageNo: 1, endPageNo: 1 },
+  3: { startPageNo: 2, endPageNo: 3 },
+};
+
+const { document, usage } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  { pageRangeMap },
+);
+```
+
 ## Processing Pipeline
 
 DocumentProcessor processes documents through a 5-stage pipeline:
@@ -216,15 +239,22 @@ interface DocumentProcessorOptions {
 
 #### Methods
 
-##### `process(doclingDoc, reportId, artifactDir): Promise<DocumentProcessResult>`
+##### `process(doclingDoc, reportId, artifactDir, processOptions?): Promise<DocumentProcessResult>`
 
 Transforms DoclingDocument into ProcessedDocument.
+
+```typescript
+interface DocumentProcessorProcessOptions {
+  pageRangeMap?: Record<number, PageRange>;
+}
+```
 
 **Parameters:**
 
 - `doclingDoc` (DoclingDocument): PDF parser output
 - `reportId` (string): Report ID
 - `artifactDir` (string): Artifact directory containing parser outputs such as `images/`, `pages/`, and `result.json`
+- `processOptions` (DocumentProcessorProcessOptions, optional): Per-document processing inputs. When `pageRangeMap` is provided, automatic page range parsing is skipped.
 
 **Returns:**
 

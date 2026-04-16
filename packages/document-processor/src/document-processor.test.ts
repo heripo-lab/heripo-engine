@@ -1,5 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { DoclingDocument } from '@heripo/model';
+import type { DoclingDocument, PageRange } from '@heripo/model';
 import type { LanguageModel } from 'ai';
 
 import { BatchProcessor } from '@heripo/shared';
@@ -160,6 +160,122 @@ describe('DocumentProcessor', () => {
   });
 
   describe('process', () => {
+    const createMockDoc = (): DoclingDocument =>
+      ({
+        schema_name: 'DoclingDocument',
+        version: '1.0.0',
+        name: 'test-doc',
+        origin: {
+          mimetype: 'application/pdf',
+          binary_hash: 123,
+          filename: 'test.pdf',
+        },
+        furniture: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/furniture',
+          children: [],
+          content_layer: 'furniture',
+        },
+        texts: [
+          {
+            text: 'test',
+            self_ref: '#/texts/0',
+            prov: [
+              {
+                page_no: 1,
+                bbox: { l: 0, t: 0, r: 100, b: 100, coord_origin: 'TOPLEFT' },
+                charspan: [0, 4],
+              },
+            ],
+            label: 'text',
+            orig: 'test',
+            children: [],
+            content_layer: 'body',
+          },
+        ],
+        pictures: [],
+        tables: [],
+        groups: [],
+        body: {
+          name: '_root_',
+          label: 'unspecified',
+          self_ref: '#/body',
+          children: [],
+          content_layer: 'body',
+        },
+        pages: { '1': {} as any },
+      }) as DoclingDocument;
+
+    const createProcessor = (): DocumentProcessor =>
+      new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+      });
+
+    const stubSuccessfulProcessing = (
+      processor: DocumentProcessor,
+      pageRangeParseMock = vi.fn().mockResolvedValue({
+        pageRangeMap: { 1: { startPageNo: 1, endPageNo: 1 } },
+        usage: [],
+      }),
+    ) => {
+      const tocExtractMock = vi
+        .fn()
+        .mockResolvedValue([{ title: 'Chapter 1', level: 1, pageNo: 1 }]);
+      const convertAllMock = vi.fn().mockResolvedValue({
+        images: [],
+        tables: [],
+        footnotes: [],
+      });
+      const chapterConvertMock = vi.fn().mockReturnValue([
+        {
+          id: 'ch-001',
+          originTitle: 'Chapter 1',
+          title: 'Chapter 1',
+          pageNo: 1,
+          level: 1,
+          textBlocks: [],
+          imageIds: [],
+          tableIds: [],
+          footnoteIds: [],
+          children: [],
+        },
+      ]);
+      const originalInit = (processor as any).initializeProcessors.bind(
+        processor,
+      );
+
+      vi.spyOn(processor as any, 'initializeProcessors').mockImplementation(
+        (...args: any[]) => {
+          originalInit(...args);
+
+          (processor as any).pageRangeParser = {
+            parse: pageRangeParseMock,
+          };
+          (processor as any).tocExtractionPipeline = {
+            extract: tocExtractMock,
+          };
+          (processor as any).resourceConverter = {
+            convertAll: convertAllMock,
+          };
+          (processor as any).chapterConverter = {
+            convert: chapterConvertMock,
+          };
+        },
+      );
+
+      return {
+        pageRangeParseMock,
+        tocExtractMock,
+        convertAllMock,
+        chapterConvertMock,
+      };
+    };
+
     test('should throw TocNotFoundError when TOC extraction fails', async () => {
       const processor = new DocumentProcessor({
         logger: mockLogger,
@@ -372,6 +488,81 @@ describe('DocumentProcessor', () => {
       expect(result.document.footnotes).toEqual([]);
       expect(result.document.pageRangeMap).toBeDefined();
       expect(result.usage).toBeDefined();
+    });
+
+    test('should use injected pageRangeMap without parsing page ranges', async () => {
+      const processor = createProcessor();
+      const pageRangeMap: Record<number, PageRange> = {
+        1: { startPageNo: 10, endPageNo: 11 },
+      };
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        vi.fn().mockRejectedValue(new Error('Should not parse page ranges')),
+      );
+      const mockDoc = createMockDoc();
+
+      const result = await processor.process(mockDoc, 'report-001', '/path', {
+        pageRangeMap,
+      });
+
+      expect(mocks.pageRangeParseMock).not.toHaveBeenCalled();
+      expect(result.document.pageRangeMap).toBe(pageRangeMap);
+      expect(mocks.tocExtractMock).toHaveBeenCalledWith(mockDoc, ['test']);
+      expect(mocks.chapterConvertMock).toHaveBeenCalledWith(
+        expect.any(Array),
+        mockDoc.texts,
+        pageRangeMap,
+        [],
+        [],
+        [],
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[DocumentProcessor] Using injected page range map with 1 entries',
+      );
+    });
+
+    test('should still extract TOC when only pageRangeMap is injected', async () => {
+      const processor = createProcessor();
+      const pageRangeMap: Record<number, PageRange> = {
+        1: { startPageNo: 1, endPageNo: 1 },
+      };
+      const mocks = stubSuccessfulProcessing(processor);
+      const mockDoc = createMockDoc();
+
+      await processor.process(mockDoc, 'report-001', '/path', {
+        pageRangeMap,
+      });
+
+      expect(mocks.pageRangeParseMock).not.toHaveBeenCalled();
+      expect(mocks.tocExtractMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('should treat an empty injected pageRangeMap as manual input', async () => {
+      const processor = createProcessor();
+      const pageRangeMap: Record<number, PageRange> = {};
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        vi.fn().mockRejectedValue(new Error('Should not parse page ranges')),
+      );
+      const mockDoc = createMockDoc();
+
+      const result = await processor.process(mockDoc, 'report-001', '/path', {
+        pageRangeMap,
+      });
+
+      expect(mocks.pageRangeParseMock).not.toHaveBeenCalled();
+      expect(result.document.pageRangeMap).toBe(pageRangeMap);
+      expect(mocks.chapterConvertMock).toHaveBeenCalledWith(
+        expect.any(Array),
+        mockDoc.texts,
+        pageRangeMap,
+        [],
+        [],
+        [],
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[DocumentProcessor] Using injected page range map with 0 entries',
+      );
     });
   });
 

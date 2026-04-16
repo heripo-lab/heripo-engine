@@ -115,6 +115,17 @@ export interface DocumentProcessorOptions {
 }
 
 /**
+ * Per-document processing inputs.
+ */
+export interface DocumentProcessorProcessOptions {
+  /**
+   * Precomputed PDF page number to actual document page range mapping.
+   * When provided, automatic PageRangeParser execution is skipped.
+   */
+  pageRangeMap?: Record<number, PageRange>;
+}
+
+/**
  * DocumentProcessor
  *
  * Main class that converts DoclingDocument to ProcessedDocument.
@@ -247,7 +258,7 @@ export class DocumentProcessor {
    * Conversion process:
    * 1. Initialize processors and resolvers
    * 2. Normalize and filter texts
-   * 3. Clean texts and parse page ranges (parallel)
+   * 3. Clean texts and resolve page ranges
    * 4. Extract table of contents
    * 5. Convert images and tables (parallel)
    * 6. Convert chapters and link resources
@@ -257,6 +268,7 @@ export class DocumentProcessor {
    * @param doclingDoc - Original document extracted from Docling SDK
    * @param reportId - Report unique identifier
    * @param artifactDir - Directory containing parser artifacts such as images/, pages/, and result.json
+   * @param processOptions - Per-document processing inputs such as manually verified page range mappings
    * @returns Document processing result with ProcessedDocument and token usage report
    *
    * @throws {TocExtractError} When TOC extraction fails
@@ -267,6 +279,7 @@ export class DocumentProcessor {
     doclingDoc: DoclingDocument,
     reportId: string,
     artifactDir: string,
+    processOptions: DocumentProcessorProcessOptions = {},
   ): Promise<DocumentProcessResult> {
     this.logger.info('[DocumentProcessor] Starting document processing...');
     this.logger.info('[DocumentProcessor] Report ID:', reportId);
@@ -290,10 +303,20 @@ export class DocumentProcessor {
     this.checkAborted();
 
     const startTimePageRange = Date.now();
-    const pageRangeMap = await this.parsePageRanges(doclingDoc);
+    const pageRangeMap =
+      processOptions.pageRangeMap !== undefined
+        ? processOptions.pageRangeMap
+        : await this.parsePageRanges(doclingDoc);
+
+    if (processOptions.pageRangeMap !== undefined) {
+      this.logger.info(
+        `[DocumentProcessor] Using injected page range map with ${Object.keys(pageRangeMap).length} entries`,
+      );
+    }
+
     const pageRangeTime = Date.now() - startTimePageRange;
     this.logger.info(
-      `[DocumentProcessor] Page range parsing took ${pageRangeTime}ms`,
+      `[DocumentProcessor] Page range resolution took ${pageRangeTime}ms`,
     );
     this.emitTokenUsage();
 
