@@ -40,7 +40,7 @@ export class ResourceConverter {
    */
   async convertAll(
     doclingDoc: DoclingDocument,
-    outputPath: string,
+    artifactDir: string,
   ): Promise<{
     images: ProcessedImage[];
     tables: ProcessedTable[];
@@ -51,7 +51,7 @@ export class ResourceConverter {
     );
 
     const [images, tables] = await Promise.all([
-      this.convertImages(doclingDoc, outputPath),
+      this.convertImages(doclingDoc, artifactDir),
       this.convertTables(doclingDoc),
     ]);
 
@@ -69,7 +69,7 @@ export class ResourceConverter {
    */
   async convertImages(
     doclingDoc: DoclingDocument,
-    outputPath: string,
+    artifactDir: string,
   ): Promise<ProcessedImage[]> {
     this.logger.info(
       `[ResourceConverter] Converting ${doclingDoc.pictures.length} images...`,
@@ -83,7 +83,7 @@ export class ResourceConverter {
     const images: ProcessedImage[] = doclingDoc.pictures.map(
       (picture, index) => ({
         id: this.idGenerator.generateImageId(),
-        path: `${outputPath}/images/image_${index}.png`,
+        path: `${artifactDir}/images/image_${index}.png`,
         pdfPageNo: picture.prov?.[0]?.page_no ?? 0,
       }),
     );

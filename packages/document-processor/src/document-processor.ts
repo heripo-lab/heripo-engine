@@ -164,7 +164,7 @@ export interface DocumentProcessorOptions {
  * const result = await processor.process(
  *   doclingDoc,
  *   'report-001',
- *   outputPath
+ *   artifactDir
  * );
  * ```
  */
@@ -256,7 +256,7 @@ export class DocumentProcessor {
    *
    * @param doclingDoc - Original document extracted from Docling SDK
    * @param reportId - Report unique identifier
-   * @param outputPath - Path containing images and pages subdirectories (images/image_0.png, pages/page_0.png, etc.)
+   * @param artifactDir - Directory containing parser artifacts such as images/, pages/, and result.json
    * @returns Document processing result with ProcessedDocument and token usage report
    *
    * @throws {TocExtractError} When TOC extraction fails
@@ -266,7 +266,7 @@ export class DocumentProcessor {
   async process(
     doclingDoc: DoclingDocument,
     reportId: string,
-    outputPath: string,
+    artifactDir: string,
   ): Promise<DocumentProcessResult> {
     this.logger.info('[DocumentProcessor] Starting document processing...');
     this.logger.info('[DocumentProcessor] Report ID:', reportId);
@@ -277,7 +277,7 @@ export class DocumentProcessor {
     // Check abort before starting
     this.checkAborted();
 
-    this.initializeProcessors(doclingDoc, outputPath);
+    this.initializeProcessors(doclingDoc, artifactDir);
 
     const startTimeFilter = Date.now();
     const filtered = this.normalizeAndFilterTexts(doclingDoc);
@@ -314,7 +314,7 @@ export class DocumentProcessor {
 
     const startTimeResources = Date.now();
     const { images, tables, footnotes } =
-      await this.resourceConverter!.convertAll(doclingDoc, outputPath);
+      await this.resourceConverter!.convertAll(doclingDoc, artifactDir);
     const resourcesTime = Date.now() - startTimeResources;
     this.logger.info(
       `[DocumentProcessor] Resource conversion took ${resourcesTime}ms`,
@@ -367,7 +367,7 @@ export class DocumentProcessor {
    */
   private initializeProcessors(
     doclingDoc: DoclingDocument,
-    outputPath: string,
+    artifactDir: string,
   ): void {
     this.logger.info('[DocumentProcessor] Initializing processors...');
 
@@ -378,7 +378,7 @@ export class DocumentProcessor {
     this.pageRangeParser = new PageRangeParser(
       this.logger,
       this.pageRangeParserModel,
-      outputPath,
+      artifactDir,
       this.maxRetries,
       this.enableFallbackRetry ? this.fallbackModel : undefined,
       this.usageAggregator,
@@ -421,7 +421,7 @@ export class DocumentProcessor {
     this.visionTocExtractor = new VisionTocExtractor(
       this.logger,
       this.visionTocExtractorModel,
-      outputPath,
+      artifactDir,
       { maxRetries: this.maxRetries, abortSignal: this.abortSignal },
       this.enableFallbackRetry ? this.fallbackModel : undefined,
       this.usageAggregator,

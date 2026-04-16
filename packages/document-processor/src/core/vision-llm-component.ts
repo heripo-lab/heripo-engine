@@ -40,19 +40,19 @@ export interface ImageContent {
  * Subclasses: PageRangeParser, VisionTocExtractor
  */
 export abstract class VisionLLMComponent extends BaseLLMComponent {
-  protected readonly outputPath: string;
+  protected readonly artifactDir: string;
 
   constructor(
     logger: LoggerMethods,
     model: LanguageModel,
     componentName: string,
-    outputPath: string,
+    artifactDir: string,
     options?: VisionLLMComponentOptions,
     fallbackModel?: LanguageModel,
     aggregator?: LLMTokenUsageAggregator,
   ) {
     super(logger, model, componentName, options, fallbackModel, aggregator);
-    this.outputPath = outputPath;
+    this.artifactDir = artifactDir;
   }
 
   /**
@@ -95,7 +95,7 @@ export abstract class VisionLLMComponent extends BaseLLMComponent {
   /**
    * Build image content object for vision LLM messages
    *
-   * @param imagePath - Path to the image file (relative to outputPath or absolute)
+   * @param imagePath - Path to the image file (relative to artifactDir or absolute)
    * @param mimeType - MIME type of the image (default: 'image/png')
    * @returns ImageContent object for LLM message
    */
@@ -105,7 +105,7 @@ export abstract class VisionLLMComponent extends BaseLLMComponent {
   ): ImageContent {
     const absolutePath = path.isAbsolute(imagePath)
       ? imagePath
-      : path.resolve(this.outputPath, imagePath);
+      : path.resolve(this.artifactDir, imagePath);
     const imageData = new Uint8Array(fs.readFileSync(absolutePath));
     return {
       type: 'image',

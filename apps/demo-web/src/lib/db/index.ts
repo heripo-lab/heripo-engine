@@ -11,7 +11,7 @@ export interface TaskRecord {
   original_filename: string;
   file_path: string;
   options_json: string;
-  output_path: string | null;
+  artifact_dir: string | null;
   result_path: string | null;
   processed_result_path: string | null;
   total_pages: number | null;
@@ -124,6 +124,16 @@ export function readDatabase(): Database {
   // Migration: add session_id to existing tasks and convert legacy to sample
   let needsWrite = false;
   for (const task of db.tasks) {
+    const legacyTask = task as TaskRecord & { output_path?: string | null };
+
+    if (task.artifact_dir === undefined) {
+      task.artifact_dir = legacyTask.output_path ?? null;
+      needsWrite = true;
+    }
+    if (legacyTask.output_path !== undefined) {
+      delete legacyTask.output_path;
+      needsWrite = true;
+    }
     if ((task as { session_id?: string }).session_id === undefined) {
       (task as TaskRecord).session_id = 'legacy';
       needsWrite = true;

@@ -21,7 +21,7 @@ export interface Task {
   originalFilename: string;
   filePath: string;
   options: ProcessingOptions;
-  outputPath: string | null;
+  artifactDir: string | null;
   resultPath: string | null;
   processedResultPath: string | null;
   totalPages: number | null;
@@ -52,7 +52,7 @@ function recordToTask(row: TaskRecord): Task {
     originalFilename: row.original_filename,
     filePath: row.file_path,
     options: JSON.parse(row.options_json) as ProcessingOptions,
-    outputPath: row.output_path,
+    artifactDir: row.artifact_dir,
     resultPath: row.result_path,
     processedResultPath: row.processed_result_path,
     totalPages: row.total_pages,
@@ -95,7 +95,7 @@ export function createTask(input: CreateTaskInput): Task {
     original_filename: input.originalFilename,
     file_path: input.filePath,
     options_json: JSON.stringify(input.options),
-    output_path: null,
+    artifact_dir: null,
     result_path: null,
     processed_result_path: null,
     total_pages: null,
@@ -235,7 +235,7 @@ export function updateTaskProgress(
 export function updateTaskResult(
   id: string,
   result: {
-    outputPath: string;
+    artifactDir: string;
     resultPath: string;
     processedResultPath: string;
     totalPages: number;
@@ -249,7 +249,7 @@ export function updateTaskResult(
   const record = db.tasks.find((t) => t.id === id);
   if (!record) return;
 
-  record.output_path = result.outputPath;
+  record.artifact_dir = result.artifactDir;
   record.result_path = result.resultPath;
   record.processed_result_path = result.processedResultPath;
   record.total_pages = result.totalPages;
