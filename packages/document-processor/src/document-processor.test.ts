@@ -2,6 +2,8 @@ import type { LoggerMethods } from '@heripo/logger';
 import type { DoclingDocument, PageRange } from '@heripo/model';
 import type { LanguageModel } from 'ai';
 
+import type { TocEntry } from './types';
+
 import { BatchProcessor } from '@heripo/shared';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -562,6 +564,130 @@ describe('DocumentProcessor', () => {
       );
       expect(mockLogger.info).toHaveBeenCalledWith(
         '[DocumentProcessor] Using injected page range map with 0 entries',
+      );
+    });
+
+    test('should use injected tocEntries without extracting TOC', async () => {
+      const processor = createProcessor();
+      const pageRangeMap: Record<number, PageRange> = {
+        1: { startPageNo: 1, endPageNo: 1 },
+      };
+      const tocEntries: TocEntry[] = [
+        { title: 'Injected Chapter', level: 1, pageNo: 1 },
+      ];
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        vi.fn().mockResolvedValue({
+          pageRangeMap,
+          usage: [],
+        }),
+      );
+      const mockDoc = createMockDoc();
+
+      await processor.process(mockDoc, 'report-001', '/path', {
+        tocEntries,
+      });
+
+      expect(mocks.pageRangeParseMock).toHaveBeenCalledTimes(1);
+      expect(mocks.tocExtractMock).not.toHaveBeenCalled();
+      expect(mocks.chapterConvertMock).toHaveBeenCalledWith(
+        tocEntries,
+        mockDoc.texts,
+        pageRangeMap,
+        [],
+        [],
+        [],
+      );
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[DocumentProcessor] Using injected TOC entries with 1 top-level entries',
+      );
+    });
+
+    test('should still parse page ranges when only tocEntries is injected', async () => {
+      const processor = createProcessor();
+      const tocEntries: TocEntry[] = [
+        { title: 'Injected Chapter', level: 1, pageNo: 1 },
+      ];
+      const mocks = stubSuccessfulProcessing(processor);
+      const mockDoc = createMockDoc();
+
+      await processor.process(mockDoc, 'report-001', '/path', {
+        tocEntries,
+      });
+
+      expect(mocks.pageRangeParseMock).toHaveBeenCalledTimes(1);
+      expect(mocks.tocExtractMock).not.toHaveBeenCalled();
+    });
+
+    test('should extract TOC when tocEntries is explicitly undefined', async () => {
+      const processor = createProcessor();
+      const mocks = stubSuccessfulProcessing(processor);
+      const mockDoc = createMockDoc();
+
+      await processor.process(mockDoc, 'report-001', '/path', {
+        tocEntries: undefined,
+      });
+
+      expect(mocks.tocExtractMock).toHaveBeenCalledWith(mockDoc, ['test']);
+      expect(mockLogger.info).not.toHaveBeenCalledWith(
+        expect.stringContaining('Using injected TOC entries'),
+      );
+    });
+
+    test('should skip both automatic steps when pageRangeMap and tocEntries are injected', async () => {
+      const processor = createProcessor();
+      const pageRangeMap: Record<number, PageRange> = {
+        1: { startPageNo: 10, endPageNo: 11 },
+      };
+      const tocEntries: TocEntry[] = [
+        { title: 'Injected Chapter', level: 1, pageNo: 10 },
+      ];
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        vi.fn().mockRejectedValue(new Error('Should not parse page ranges')),
+      );
+      const mockDoc = createMockDoc();
+
+      const result = await processor.process(mockDoc, 'report-001', '/path', {
+        pageRangeMap,
+        tocEntries,
+      });
+
+      expect(mocks.pageRangeParseMock).not.toHaveBeenCalled();
+      expect(mocks.tocExtractMock).not.toHaveBeenCalled();
+      expect(result.document.pageRangeMap).toBe(pageRangeMap);
+      expect(mocks.chapterConvertMock).toHaveBeenCalledWith(
+        tocEntries,
+        mockDoc.texts,
+        pageRangeMap,
+        [],
+        [],
+        [],
+      );
+    });
+
+    test('should treat empty injected tocEntries as manual input and throw TocNotFoundError', async () => {
+      const processor = createProcessor();
+      const tocEntries: TocEntry[] = [];
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        vi.fn().mockResolvedValue({
+          pageRangeMap: { 1: { startPageNo: 1, endPageNo: 1 } },
+          usage: [],
+        }),
+      );
+      const mockDoc = createMockDoc();
+
+      await expect(
+        processor.process(mockDoc, 'report-001', '/path', {
+          tocEntries,
+        }),
+      ).rejects.toThrow(TocNotFoundError);
+
+      expect(mocks.pageRangeParseMock).toHaveBeenCalledTimes(1);
+      expect(mocks.tocExtractMock).not.toHaveBeenCalled();
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[DocumentProcessor] Using injected TOC entries with 0 top-level entries',
       );
     });
   });
