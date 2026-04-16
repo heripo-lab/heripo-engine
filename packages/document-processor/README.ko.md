@@ -121,6 +121,29 @@ const { document, usage } = await processor.process(
 );
 ```
 
+### 수동 페이지 범위 매핑
+
+페이지 범위 매핑을 이미 검수했다면 `process()`의 네 번째 인자로 전달해
+PageRangeParser 자동 실행을 건너뛸 수 있습니다. 전달한 매핑은 추가 후처리 없이
+그대로 사용됩니다.
+
+```typescript
+import type { PageRange } from '@heripo/model';
+
+const pageRangeMap: Record<number, PageRange> = {
+  1: { startPageNo: 0, endPageNo: 0 },
+  2: { startPageNo: 1, endPageNo: 1 },
+  3: { startPageNo: 2, endPageNo: 3 },
+};
+
+const { document, usage } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  { pageRangeMap },
+);
+```
+
 ## 처리 파이프라인
 
 DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니다:
@@ -216,15 +239,22 @@ interface DocumentProcessorOptions {
 
 #### 메서드
 
-##### `process(doclingDoc, reportId, artifactDir): Promise<DocumentProcessResult>`
+##### `process(doclingDoc, reportId, artifactDir, processOptions?): Promise<DocumentProcessResult>`
 
 DoclingDocument를 ProcessedDocument로 변환합니다.
+
+```typescript
+interface DocumentProcessorProcessOptions {
+  pageRangeMap?: Record<number, PageRange>;
+}
+```
 
 **파라미터:**
 
 - `doclingDoc` (DoclingDocument): PDF 파서의 출력
 - `reportId` (string): 리포트 ID
 - `artifactDir` (string): `images/`, `pages/`, `result.json` 같은 parser 산출물이 들어 있는 디렉토리
+- `processOptions` (DocumentProcessorProcessOptions, 선택): 문서별 처리 입력값. `pageRangeMap`이 제공되면 자동 페이지 범위 파싱을 건너뜁니다.
 
 **반환값:**
 
