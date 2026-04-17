@@ -279,6 +279,7 @@ const processor = new DocumentProcessor({
   captionParserBatchSize: 10,
   captionValidatorBatchSize: 10,
   maxRetries: 3,
+  maxValidationRetries: 3,
   enableFallbackRetry: true, // 실패 시 fallbackModel로 자동 재시도 (기본값: false)
   onTokenUsage: (report) => console.log('토큰 사용량:', report.total),
 });
