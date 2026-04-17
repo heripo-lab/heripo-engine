@@ -94,6 +94,7 @@ describe('DocumentProcessor', () => {
         captionParserBatchSize: 15,
         captionValidatorBatchSize: 10,
         maxRetries: 5,
+        maxValidationRetries: 2,
       });
 
       expect(processor).toBeDefined();
@@ -217,6 +218,29 @@ describe('DocumentProcessor', () => {
         captionParserBatchSize: 5,
         captionValidatorBatchSize: 5,
       });
+
+    test('uses default maxValidationRetries when initializing TocExtractor', () => {
+      const processor = createProcessor();
+
+      (processor as any).initializeProcessors(createMockDoc(), '/tmp');
+
+      expect((processor as any).tocExtractor.maxValidationRetries).toBe(3);
+    });
+
+    test('passes custom maxValidationRetries to TocExtractor', () => {
+      const processor = new DocumentProcessor({
+        logger: mockLogger,
+        fallbackModel: mockModel,
+        textCleanerBatchSize: 10,
+        captionParserBatchSize: 5,
+        captionValidatorBatchSize: 5,
+        maxValidationRetries: 1,
+      });
+
+      (processor as any).initializeProcessors(createMockDoc(), '/tmp');
+
+      expect((processor as any).tocExtractor.maxValidationRetries).toBe(1);
+    });
 
     const stubSuccessfulProcessing = (
       processor: DocumentProcessor,

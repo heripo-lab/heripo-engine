@@ -15,8 +15,7 @@ import {
 import { TocParseError, TocValidationError } from './toc-extract-error';
 import { TocValidator } from './toc-validator';
 
-// TODO: Make configurable via TocExtractorOptions when exposing to DocumentProcessorOptions
-const MAX_VALIDATION_RETRIES = 3;
+const DEFAULT_MAX_VALIDATION_RETRIES = 3;
 
 /**
  * Validation error code descriptions for correction prompts
@@ -87,6 +86,11 @@ export interface TocExtractorOptions extends BaseLLMComponentOptions {
    * Whether to skip validation entirely (default: false)
    */
   skipValidation?: boolean;
+
+  /**
+   * Maximum retry count for TOC validation correction feedback (default: 3)
+   */
+  maxValidationRetries?: number;
 }
 
 /**
@@ -96,11 +100,12 @@ export interface TocExtractorOptions extends BaseLLMComponentOptions {
  * Extends TextLLMComponent for standardized LLM call handling.
  *
  * When validation fails, automatically retries with correction feedback
- * up to MAX_VALIDATION_RETRIES times before throwing.
+ * up to maxValidationRetries times before throwing.
  */
 export class TocExtractor extends TextLLMComponent {
   private readonly validationOptions?: TocValidationOptions;
   private readonly skipValidation: boolean;
+  private readonly maxValidationRetries: number;
 
   constructor(
     logger: LoggerMethods,
@@ -118,12 +123,14 @@ export class TocExtractor extends TextLLMComponent {
     );
     this.validationOptions = options?.validation;
     this.skipValidation = options?.skipValidation ?? false;
+    this.maxValidationRetries =
+      options?.maxValidationRetries ?? DEFAULT_MAX_VALIDATION_RETRIES;
   }
 
   /**
    * Extract TOC structure from Markdown
    *
-   * When validation fails, retries with correction feedback up to MAX_VALIDATION_RETRIES times.
+   * When validation fails, retries with correction feedback up to maxValidationRetries times.
    *
    * @param markdown - Markdown representation of TOC area
    * @param validationOverrides - Optional overrides for validation options (merged with constructor options)
@@ -166,12 +173,12 @@ export class TocExtractor extends TextLLMComponent {
         // Retry loop with correction feedback
         for (
           let attempt = 1;
-          attempt <= MAX_VALIDATION_RETRIES && validationError !== null;
+          attempt <= this.maxValidationRetries && validationError !== null;
           attempt++
         ) {
           this.log(
             'warn',
-            `Validation failed (attempt ${attempt}/${MAX_VALIDATION_RETRIES}), retrying with correction feedback`,
+            `Validation failed (attempt ${attempt}/${this.maxValidationRetries}), retrying with correction feedback`,
           );
 
           const correctionPrompt = this.buildCorrectionPrompt(
@@ -199,7 +206,7 @@ export class TocExtractor extends TextLLMComponent {
         if (validationError !== null) {
           this.log(
             'error',
-            `Validation failed after ${MAX_VALIDATION_RETRIES} retries:\n${validationError.getSummary()}`,
+            `Validation failed after ${this.maxValidationRetries} retries:\n${validationError.getSummary()}`,
           );
           throw validationError;
         }

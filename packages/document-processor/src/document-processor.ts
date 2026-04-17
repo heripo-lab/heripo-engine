@@ -95,6 +95,11 @@ export interface DocumentProcessorOptions {
   maxRetries?: number;
 
   /**
+   * Maximum retry count for TOC validation correction feedback (default: 3)
+   */
+  maxValidationRetries?: number;
+
+  /**
    * Enable fallback retry mechanism - automatically retries with fallback model on failure (default: false)
    * Set to true to enable automatic fallback retry with fallback model on component-specific model errors
    */
@@ -176,6 +181,7 @@ export interface DocumentProcessorProcessOptions {
  *   captionParserBatchSize: 10,    // LLM caption parsing
  *   captionValidatorBatchSize: 10, // LLM caption validation
  *   maxRetries: 3,
+ *   maxValidationRetries: 3,
  * });
  *
  * const result = await processor.process(
@@ -197,6 +203,7 @@ export class DocumentProcessor {
   private readonly captionParserBatchSize: number;
   private readonly captionValidatorBatchSize: number;
   private readonly maxRetries: number;
+  private readonly maxValidationRetries: number;
   private readonly enableFallbackRetry: boolean;
   private readonly abortSignal?: AbortSignal;
   private readonly onTokenUsage?: (report: TokenUsageReport) => void;
@@ -230,6 +237,7 @@ export class DocumentProcessor {
     this.captionParserBatchSize = options.captionParserBatchSize;
     this.captionValidatorBatchSize = options.captionValidatorBatchSize;
     this.maxRetries = options.maxRetries ?? 3;
+    this.maxValidationRetries = options.maxValidationRetries ?? 3;
     this.enableFallbackRetry = options.enableFallbackRetry ?? false;
     this.abortSignal = options.abortSignal;
     this.onTokenUsage = options.onTokenUsage;
@@ -430,6 +438,7 @@ export class DocumentProcessor {
       this.tocExtractorModel,
       {
         maxRetries: this.maxRetries,
+        maxValidationRetries: this.maxValidationRetries,
       },
       this.enableFallbackRetry ? this.fallbackModel : undefined,
       this.abortSignal,
