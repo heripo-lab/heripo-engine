@@ -111,6 +111,7 @@ const processor = new DocumentProcessor({
 
   // 재시도 설정
   maxRetries: 3,
+  maxValidationRetries: 3,
   enableFallbackRetry: true, // fallback 모델로 자동 재시도 (기본값: false)
 });
 
@@ -273,6 +274,7 @@ interface DocumentProcessorOptions {
 
   // 재시도 설정
   maxRetries?: number; // LLM API 재시도 횟수 (기본값: 3)
+  maxValidationRetries?: number; // TOC 검증 보정 재시도 횟수 (기본값: 3)
   enableFallbackRetry?: boolean; // Fallback 재시도 활성화 (기본값: false)
 
   // 고급 옵션

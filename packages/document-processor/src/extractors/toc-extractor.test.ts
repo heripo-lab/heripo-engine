@@ -713,6 +713,93 @@ describe('TocExtractor', () => {
       );
     });
 
+    test('uses custom maxValidationRetries for correction retry limit', async () => {
+      const extractorWithValidation = new TocExtractor(mockLogger, mockModel, {
+        skipValidation: false,
+        maxValidationRetries: 1,
+      });
+
+      const badEntries = [
+        { title: 'Chapter 1', level: 1, pageNo: 10 },
+        { title: 'Chapter 2', level: 1, pageNo: 5 },
+      ];
+
+      // Initial + 1 retry = 2 LLM calls
+      mockLLMCaller
+        .mockResolvedValueOnce(makeLLMResult(badEntries))
+        .mockResolvedValueOnce(makeLLMResult(badEntries, 'correction-1'));
+
+      const mockValidate = vi.fn().mockReturnValue({
+        valid: false,
+        errorCount: 1,
+        issues: [
+          {
+            code: 'V001',
+            message: 'Page number decreased from 10 to 5',
+            path: '[1]',
+            entry: { title: 'Chapter 2', level: 1, pageNo: 5 },
+          },
+        ],
+      });
+
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
+
+      await expect(
+        extractorWithValidation.extract('- some markdown'),
+      ).rejects.toThrow(TocValidationError);
+
+      expect(mockLLMCaller).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Validation failed (attempt 1/1)'),
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Validation failed after 1 retries'),
+      );
+    });
+
+    test('does not run correction retry when maxValidationRetries is 0', async () => {
+      const extractorWithValidation = new TocExtractor(mockLogger, mockModel, {
+        skipValidation: false,
+        maxValidationRetries: 0,
+      });
+
+      const badEntries = [
+        { title: 'Chapter 1', level: 1, pageNo: 10 },
+        { title: 'Chapter 2', level: 1, pageNo: 5 },
+      ];
+
+      mockLLMCaller.mockResolvedValueOnce(makeLLMResult(badEntries));
+
+      const mockValidate = vi.fn().mockReturnValue({
+        valid: false,
+        errorCount: 1,
+        issues: [
+          {
+            code: 'V001',
+            message: 'Page number decreased from 10 to 5',
+            path: '[1]',
+            entry: { title: 'Chapter 2', level: 1, pageNo: 5 },
+          },
+        ],
+      });
+
+      vi.mocked(TocValidator).mockImplementation(function () {
+        return { validate: mockValidate } as any;
+      });
+
+      await expect(
+        extractorWithValidation.extract('- some markdown'),
+      ).rejects.toThrow(TocValidationError);
+
+      expect(mockLLMCaller).toHaveBeenCalledTimes(1);
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Validation failed after 0 retries'),
+      );
+    });
+
     test('does not retry when skipValidation is true', async () => {
       mockLLMCaller.mockResolvedValueOnce(
         makeLLMResult([{ title: 'Chapter 1', level: 1, pageNo: 1 }]),

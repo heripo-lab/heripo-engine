@@ -283,6 +283,7 @@ const processor = new DocumentProcessor({
   captionParserBatchSize: 10,
   captionValidatorBatchSize: 10,
   maxRetries: 3,
+  maxValidationRetries: 3,
   enableFallbackRetry: true, // Automatically retry with fallbackModel on failure (default: false)
   onTokenUsage: (report) => console.log('Token usage:', report.total),
 });

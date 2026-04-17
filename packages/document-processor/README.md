@@ -111,6 +111,7 @@ const processor = new DocumentProcessor({
 
   // Retry settings
   maxRetries: 3,
+  maxValidationRetries: 3,
   enableFallbackRetry: true, // Automatic retry with fallback model (default: false)
 });
 
@@ -273,6 +274,7 @@ interface DocumentProcessorOptions {
 
   // Retry settings
   maxRetries?: number; // LLM API retry count (default: 3)
+  maxValidationRetries?: number; // TOC validation correction retry count (default: 3)
   enableFallbackRetry?: boolean; // Enable fallback retry (default: false)
 
   // Advanced options
