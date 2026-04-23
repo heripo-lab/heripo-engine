@@ -89,7 +89,12 @@ describe('PythonEnvironment', () => {
       expect(mockSpawnAsync).toHaveBeenNthCalledWith(7, '/test/venv/bin/pip', [
         'install',
         '--upgrade',
-        'docling-serve',
+        'docling-serve==1.16.1',
+        'docling-jobkit==1.17.0',
+        'docling==2.90.0',
+        'docling-core==2.74.0',
+        'docling-ibm-models==3.13.0',
+        'docling-parse==5.9.0',
       ]);
     });
   });
