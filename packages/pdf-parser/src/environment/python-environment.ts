@@ -10,6 +10,15 @@ import {
   validatePythonVersion,
 } from '../utils/python-version';
 
+const DOCLING_RUNTIME_PACKAGES = [
+  'docling-serve==1.16.1',
+  'docling-jobkit==1.17.0',
+  'docling==2.90.0',
+  'docling-core==2.74.0',
+  'docling-ibm-models==3.13.0',
+  'docling-parse==5.9.0',
+];
+
 export class PythonEnvironment {
   constructor(
     private readonly logger: LoggerMethods,
@@ -142,7 +151,7 @@ export class PythonEnvironment {
     const result = await spawnAsync(pipPath, [
       'install',
       '--upgrade',
-      'docling-serve',
+      ...DOCLING_RUNTIME_PACKAGES,
     ]);
 
     if (result.code !== 0) {
