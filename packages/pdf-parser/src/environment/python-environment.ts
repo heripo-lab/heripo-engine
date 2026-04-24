@@ -16,9 +16,9 @@ const DOCLING_SERVE_PACKAGE = 'docling-serve==1.16.1';
 // into resolution-too-deep failures. Install the known runtime set explicitly,
 // then install docling-serve itself with --no-deps.
 const DOCLING_RUNTIME_PACKAGES = [
-  'docling-jobkit==1.17.0',
-  'docling==2.90.0',
-  'docling-core==2.74.0',
+  'docling-jobkit==1.16.0',
+  'docling==2.88.0',
+  'docling-core==2.73.0',
   'docling-ibm-models==3.13.0',
   'docling-parse==5.9.0',
 ];
