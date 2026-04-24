@@ -93,6 +93,7 @@ export class PDFParser {
   private readonly enableImagePdfFallback: boolean;
   private client: DoclingAPIClient | null = null;
   private environment?: DoclingEnvironment;
+  private recoveryPromise: Promise<void> | null = null;
 
   constructor(options: Options) {
     const {
@@ -193,18 +194,46 @@ export class PDFParser {
    */
   private isConnectionRefusedError(error: unknown): boolean {
     if (error instanceof Error) {
-      // Check message and cause chain for ECONNREFUSED
+      const errorWithMetadata = error as Error & {
+        cause?: unknown;
+        code?: string;
+      };
+
       if (error.message.includes('ECONNREFUSED')) {
         return true;
       }
+      if (errorWithMetadata.code === 'ECONNREFUSED') {
+        return true;
+      }
+
+      return this.isConnectionRefusedError(errorWithMetadata.cause);
+    }
+
+    if (typeof error === 'object' && error !== null) {
+      const errorLike = error as {
+        cause?: unknown;
+        code?: unknown;
+        message?: unknown;
+      };
+
+      if (errorLike.code === 'ECONNREFUSED') {
+        return true;
+      }
       if (
-        error.cause instanceof Error &&
-        error.cause.message.includes('ECONNREFUSED')
+        typeof errorLike.message === 'string' &&
+        errorLike.message.includes('ECONNREFUSED')
       ) {
         return true;
       }
+
+      return this.isConnectionRefusedError(errorLike.cause);
     }
+
     return false;
+  }
+
+  private canRecoverLocalServer(): boolean {
+    return !this.baseUrl && this.port !== undefined;
   }
 
   /**
@@ -243,6 +272,54 @@ export class PDFParser {
 
     await this.waitForServerReady();
     this.logger.info('[PDFParser] Server restarted successfully');
+  }
+
+  private async recoverServer(message: string): Promise<void> {
+    this.logger.warn(message);
+
+    if (!this.recoveryPromise) {
+      this.recoveryPromise = this.restartServer().finally(() => {
+        this.recoveryPromise = null;
+      });
+    } else {
+      this.logger.warn('[PDFParser] Server recovery already in progress...');
+    }
+
+    await this.recoveryPromise;
+  }
+
+  public async isReady(): Promise<boolean> {
+    if (!this.client) {
+      return false;
+    }
+
+    try {
+      await this.client.health();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public async ensureReady(): Promise<void> {
+    if (!this.client) {
+      throw new Error(
+        'PDFParser is not initialized. Call init() before checking readiness',
+      );
+    }
+
+    try {
+      await this.client.health();
+    } catch (error) {
+      if (this.canRecoverLocalServer()) {
+        await this.recoverServer(
+          '[PDFParser] Health check failed, attempting server recovery...',
+        );
+        return;
+      }
+
+      throw error;
+    }
   }
 
   private async waitForServerReady(): Promise<void> {
@@ -359,7 +436,6 @@ export class PDFParser {
     fn: () => Promise<T>,
     abortSignal?: AbortSignal,
   ): Promise<T> {
-    const canRecover = !this.baseUrl && this.port !== undefined;
     const maxAttempts = PDF_PARSER.MAX_SERVER_RECOVERY_ATTEMPTS;
 
     const tryExecute = async (attempt: number): Promise<T> => {
@@ -368,14 +444,13 @@ export class PDFParser {
       } catch (error) {
         if (abortSignal?.aborted) throw error;
         if (
-          canRecover &&
+          this.canRecoverLocalServer() &&
           this.isConnectionRefusedError(error) &&
           attempt < maxAttempts
         ) {
-          this.logger.warn(
+          await this.recoverServer(
             '[PDFParser] Connection refused, attempting server recovery...',
           );
-          await this.restartServer();
           return tryExecute(attempt + 1);
         }
         throw error;

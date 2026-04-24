@@ -70,6 +70,19 @@ const convertMock = (ConvMod as any).__convertMock as any;
 const convertWithStrategyMock = (ConvMod as any)
   .__convertWithStrategyMock as any;
 
+const mockDoclingEnvironment = (
+  startServerMock = vi.fn().mockResolvedValue(undefined),
+) => {
+  (DoclingEnvironment as any).mockImplementation(function () {
+    return {
+      setup: envMocks.setupMock,
+      startServer: startServerMock,
+    };
+  });
+
+  return startServerMock;
+};
+
 describe('PDFParser', () => {
   test('init with external server (baseUrl) succeeds and waits for health', async () => {
     doclingClient.health.mockResolvedValueOnce();
@@ -567,6 +580,70 @@ describe('PDFParser', () => {
     expect(doclingClient.destroy).toHaveBeenCalledTimes(1);
   });
 
+  test('isReady returns false before init', async () => {
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, port: 5001 });
+
+    await expect(parser.isReady()).resolves.toBe(false);
+  });
+
+  test('isReady checks the live Docling health endpoint', async () => {
+    doclingClient.health
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('down'));
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await parser.init();
+
+    await expect(parser.isReady()).resolves.toBe(false);
+  });
+
+  test('ensureReady succeeds when health check passes', async () => {
+    doclingClient.health.mockResolvedValue(undefined);
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await parser.init();
+
+    await expect(parser.ensureReady()).resolves.toBeUndefined();
+  });
+
+  test('ensureReady recovers local server when health check fails', async () => {
+    doclingClient.health
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('down'))
+      .mockResolvedValueOnce(undefined);
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+    const startServerMock = mockDoclingEnvironment();
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, port: 5001 });
+    await parser.init();
+
+    await expect(parser.ensureReady()).resolves.toBeUndefined();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[PDFParser] Health check failed, attempting server recovery...',
+    );
+    expect(startServerMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('ensureReady does not recover external server health failures', async () => {
+    doclingClient.health
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('down'));
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+    await parser.init();
+
+    await expect(parser.ensureReady()).rejects.toThrow('down');
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      '[PDFParser] Health check failed, attempting server recovery...',
+    );
+  });
+
   describe('server recovery', () => {
     test('parse recovers from ECONNREFUSED error on local server', async () => {
       doclingClient.health.mockResolvedValue(undefined);
@@ -583,13 +660,7 @@ describe('PDFParser', () => {
         .mockResolvedValueOnce('OK');
 
       // Mock for startServer call during recovery
-      const startServerMock = vi.fn().mockResolvedValue(undefined);
-      (DoclingEnvironment as any).mockImplementation(function () {
-        return {
-          setup: envMocks.setupMock,
-          startServer: startServerMock,
-        };
-      });
+      mockDoclingEnvironment();
 
       const logger = makeLogger();
       const parser = new PDFParser({ logger, port: 5001 });
@@ -647,13 +718,7 @@ describe('PDFParser', () => {
         .mockRejectedValueOnce(econnRefusedError);
 
       // Mock for startServer call during recovery
-      const startServerMock = vi.fn().mockResolvedValue(undefined);
-      (DoclingEnvironment as any).mockImplementation(function () {
-        return {
-          setup: envMocks.setupMock,
-          startServer: startServerMock,
-        };
-      });
+      mockDoclingEnvironment();
 
       const logger = makeLogger();
       const parser = new PDFParser({ logger, port: 5001 });
@@ -723,13 +788,7 @@ describe('PDFParser', () => {
       const fetchError = new Error('fetch failed', { cause: causeError });
       convertMock.mockRejectedValueOnce(fetchError).mockResolvedValueOnce('OK');
 
-      const startServerMock = vi.fn().mockResolvedValue(undefined);
-      (DoclingEnvironment as any).mockImplementation(function () {
-        return {
-          setup: envMocks.setupMock,
-          startServer: startServerMock,
-        };
-      });
+      mockDoclingEnvironment();
 
       const logger = makeLogger();
       const parser = new PDFParser({ logger, port: 5001 });
@@ -905,13 +964,7 @@ describe('PDFParser', () => {
           tokenUsageReport: null,
         });
 
-      const startServerMock = vi.fn().mockResolvedValue(undefined);
-      (DoclingEnvironment as any).mockImplementation(function () {
-        return {
-          setup: envMocks.setupMock,
-          startServer: startServerMock,
-        };
-      });
+      mockDoclingEnvironment();
 
       const logger = makeLogger();
       const parser = new PDFParser({ logger, port: 5001 });
@@ -994,13 +1047,7 @@ describe('PDFParser', () => {
         .mockRejectedValueOnce(econnRefusedError)
         .mockRejectedValueOnce(econnRefusedError);
 
-      const startServerMock = vi.fn().mockResolvedValue(undefined);
-      (DoclingEnvironment as any).mockImplementation(function () {
-        return {
-          setup: envMocks.setupMock,
-          startServer: startServerMock,
-        };
-      });
+      mockDoclingEnvironment();
 
       const logger = makeLogger();
       const parser = new PDFParser({ logger, port: 5001 });
