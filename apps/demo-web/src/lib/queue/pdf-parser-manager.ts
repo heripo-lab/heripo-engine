@@ -3,6 +3,8 @@ import type { LoggerMethods } from '@heripo/logger';
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { TaskQueueManager } from './task-queue-manager';
 
@@ -11,6 +13,9 @@ const PDF_PARSER_TIMEOUT = parseInt(
   process.env.PDF_PARSER_TIMEOUT || '10000000',
   10,
 );
+const PDF_PARSER_VENV_PATH =
+  process.env.PDF_PARSER_VENV_PATH ||
+  join(homedir(), '.heripo', 'pdf-parser-venv');
 
 class PDFParserManager {
   private static instance: PDFParserManager | null = null;
@@ -113,12 +118,17 @@ class PDFParserManager {
     });
 
     logger.info('[PDFParserManager] Initializing PDFParser...');
+    logger.info(
+      '[PDFParserManager] Using PDFParser venv:',
+      PDF_PARSER_VENV_PATH,
+    );
 
     try {
       this.parser = new PDFParser({
         logger,
         port: PDF_PARSER_PORT,
         timeout: PDF_PARSER_TIMEOUT,
+        venvPath: PDF_PARSER_VENV_PATH,
         killExistingProcess: false,
         enableImagePdfFallback: true,
       });

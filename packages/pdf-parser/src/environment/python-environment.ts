@@ -10,13 +10,36 @@ import {
   validatePythonVersion,
 } from '../utils/python-version';
 
+const DOCLING_SERVE_PACKAGE = 'docling-serve==1.16.1';
+
+// docling-serve depends on docling-jobkit[kfp,ray,rq,vlm], which can push pip
+// into resolution-too-deep failures. Install the known runtime set explicitly,
+// then install docling-serve itself with --no-deps.
 const DOCLING_RUNTIME_PACKAGES = [
-  'docling-serve==1.16.1',
   'docling-jobkit==1.17.0',
   'docling==2.90.0',
   'docling-core==2.74.0',
   'docling-ibm-models==3.13.0',
   'docling-parse==5.9.0',
+];
+
+const DOCLING_SERVE_RUNTIME_PACKAGES = [
+  'fastapi[standard]<0.130.0',
+  'httpx~=0.28',
+  'pydantic~=2.10',
+  'pydantic-settings~=2.4',
+  'python-multipart<0.1.0,>=0.0.14',
+  'typer~=0.12',
+  'uvicorn[standard]<1.0.0,>=0.29.0',
+  'websockets<17.0,>=14.0',
+  'scalar-fastapi>=1.0.3',
+  'docling-mcp>=1.0.0',
+  'opentelemetry-api==1.36.0',
+  'opentelemetry-sdk==1.36.0',
+  'opentelemetry-exporter-otlp==1.36.0',
+  'opentelemetry-instrumentation-fastapi==0.57b0',
+  'opentelemetry-exporter-prometheus==0.57b0',
+  'prometheus-client>=0.21.0',
 ];
 
 export class PythonEnvironment {
@@ -31,6 +54,8 @@ export class PythonEnvironment {
     await this.upgradePip();
     await this.installSetuptools();
     await this.installPyArrow();
+    await this.installDoclingRuntimePackages();
+    await this.installDoclingServeRuntimePackages();
     await this.installDoclingServe();
   }
 
@@ -146,7 +171,7 @@ export class PythonEnvironment {
     }
   }
 
-  private async installDoclingServe(): Promise<void> {
+  private async installDoclingRuntimePackages(): Promise<void> {
     const pipPath = join(this.venvPath, 'bin', 'pip');
     const result = await spawnAsync(pipPath, [
       'install',
@@ -156,11 +181,50 @@ export class PythonEnvironment {
 
     if (result.code !== 0) {
       this.logger.error(
+        '[DoclingEnvironment] Failed to install docling runtime packages:',
+        result.stderr,
+      );
+      throw new Error(
+        `Failed to install docling runtime packages. Exit code: ${result.code}`,
+      );
+    }
+  }
+
+  private async installDoclingServe(): Promise<void> {
+    const pipPath = join(this.venvPath, 'bin', 'pip');
+    const result = await spawnAsync(pipPath, [
+      'install',
+      '--upgrade',
+      '--no-deps',
+      DOCLING_SERVE_PACKAGE,
+    ]);
+
+    if (result.code !== 0) {
+      this.logger.error(
         '[DoclingEnvironment] Failed to install docling-serve:',
         result.stderr,
       );
       throw new Error(
         `Failed to install docling-serve. Exit code: ${result.code}`,
+      );
+    }
+  }
+
+  private async installDoclingServeRuntimePackages(): Promise<void> {
+    const pipPath = join(this.venvPath, 'bin', 'pip');
+    const result = await spawnAsync(pipPath, [
+      'install',
+      '--upgrade',
+      ...DOCLING_SERVE_RUNTIME_PACKAGES,
+    ]);
+
+    if (result.code !== 0) {
+      this.logger.error(
+        '[DoclingEnvironment] Failed to install docling-serve runtime packages:',
+        result.stderr,
+      );
+      throw new Error(
+        `Failed to install docling-serve runtime packages. Exit code: ${result.code}`,
       );
     }
   }
