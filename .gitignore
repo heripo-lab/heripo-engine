@@ -57,6 +57,7 @@ AGENTS.md
 .aider*
 .claude/
 *.ai.md
+.agents/
 
 # Package tarballs
 *.tgz
