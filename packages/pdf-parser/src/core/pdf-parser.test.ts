@@ -808,6 +808,180 @@ describe('PDFParser', () => {
       expect(result).toBe('OK');
     });
 
+    test('parse recovers from ECONNREFUSED via Error.code property', async () => {
+      doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+      const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
+      killSpy.mockResolvedValue(undefined);
+
+      // Error object whose message does NOT contain ECONNREFUSED but code does
+      const err = new Error('fetch failed') as Error & { code?: string };
+      err.code = 'ECONNREFUSED';
+      convertMock.mockRejectedValueOnce(err).mockResolvedValueOnce('OK');
+
+      mockDoclingEnvironment();
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { num_threads: 4 },
+      );
+
+      expect(result).toBe('OK');
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFParser] Connection refused, attempting server recovery...',
+      );
+    });
+
+    test('parse recovers from ECONNREFUSED on plain object error via code', async () => {
+      doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+      vi.mocked(
+        (DoclingEnvironment as any).killProcessOnPort,
+      ).mockResolvedValue(undefined);
+
+      convertMock
+        .mockRejectedValueOnce({ code: 'ECONNREFUSED' })
+        .mockResolvedValueOnce('OK');
+
+      mockDoclingEnvironment();
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { num_threads: 4 },
+      );
+
+      expect(result).toBe('OK');
+    });
+
+    test('parse recovers from ECONNREFUSED on plain object error via message', async () => {
+      doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+      vi.mocked(
+        (DoclingEnvironment as any).killProcessOnPort,
+      ).mockResolvedValue(undefined);
+
+      convertMock
+        .mockRejectedValueOnce({ message: 'connect ECONNREFUSED 127.0.0.1' })
+        .mockResolvedValueOnce('OK');
+
+      mockDoclingEnvironment();
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { num_threads: 4 },
+      );
+
+      expect(result).toBe('OK');
+    });
+
+    test('parse recovers from ECONNREFUSED on plain object error via cause chain', async () => {
+      doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+      vi.mocked(
+        (DoclingEnvironment as any).killProcessOnPort,
+      ).mockResolvedValue(undefined);
+
+      convertMock
+        .mockRejectedValueOnce({
+          cause: { code: 'ECONNREFUSED' },
+        })
+        .mockResolvedValueOnce('OK');
+
+      mockDoclingEnvironment();
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { num_threads: 4 },
+      );
+
+      expect(result).toBe('OK');
+    });
+
+    test('isReady returns true when health check succeeds', async () => {
+      doclingClient.health.mockResolvedValue(undefined);
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      await expect(parser.isReady()).resolves.toBe(true);
+    });
+
+    test('ensureReady throws when parser is not initialized', async () => {
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+
+      await expect(parser.ensureReady()).rejects.toThrow(
+        'PDFParser is not initialized',
+      );
+    });
+
+    test('recoverServer reuses in-flight recovery promise for concurrent calls', async () => {
+      doclingClient.health
+        .mockResolvedValueOnce(undefined) // init
+        .mockRejectedValueOnce(new Error('down')) // ensureReady #1
+        .mockRejectedValueOnce(new Error('down')) // ensureReady #2
+        .mockResolvedValue(undefined); // waitForServerReady during restart
+      vi.mocked(envMocks.setupMock).mockResolvedValue(undefined);
+
+      // Delay startServer so both recoverServer calls overlap
+      let resolveStart: () => void;
+      const startGate = new Promise<void>((resolve) => {
+        resolveStart = resolve;
+      });
+      const startServerMock = vi
+        .fn<() => Promise<void>>()
+        .mockImplementation(() => startGate);
+      mockDoclingEnvironment(startServerMock);
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, port: 5001 });
+      await parser.init();
+
+      const p1 = parser.ensureReady();
+      const p2 = parser.ensureReady();
+
+      // Let the concurrent call hit the "already in progress" branch
+      await Promise.resolve();
+      await Promise.resolve();
+
+      resolveStart!();
+      await Promise.all([p1, p2]);
+
+      expect(startServerMock).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PDFParser] Server recovery already in progress...',
+      );
+    });
+
     test('parse throws immediately when abortSignal is already aborted', async () => {
       doclingClient.health.mockResolvedValueOnce();
       vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
