@@ -50,12 +50,14 @@ describe('PythonEnvironment', () => {
         .mockResolvedValueOnce(createSpawnResult({})) // upgradePip
         .mockResolvedValueOnce(createSpawnResult({})) // installSetuptools
         .mockResolvedValueOnce(createSpawnResult({})) // installPyArrow
+        .mockResolvedValueOnce(createSpawnResult({})) // installDoclingRuntimePackages
+        .mockResolvedValueOnce(createSpawnResult({})) // installDoclingServeRuntimePackages
         .mockResolvedValueOnce(createSpawnResult({})); // installDoclingServe
 
       const env = new PythonEnvironment(logger, '/test/venv');
       await env.setup();
 
-      expect(mockSpawnAsync).toHaveBeenCalledTimes(7);
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(9);
       expect(mockSpawnAsync).toHaveBeenNthCalledWith(1, 'python3', [
         '--version',
       ]);
@@ -89,12 +91,37 @@ describe('PythonEnvironment', () => {
       expect(mockSpawnAsync).toHaveBeenNthCalledWith(7, '/test/venv/bin/pip', [
         'install',
         '--upgrade',
-        'docling-serve==1.16.1',
-        'docling-jobkit==1.17.0',
-        'docling==2.90.0',
-        'docling-core==2.74.0',
+        'docling-jobkit==1.16.0',
+        'docling==2.88.0',
+        'docling-core==2.73.0',
         'docling-ibm-models==3.13.0',
         'docling-parse==5.9.0',
+      ]);
+      expect(mockSpawnAsync).toHaveBeenNthCalledWith(8, '/test/venv/bin/pip', [
+        'install',
+        '--upgrade',
+        'fastapi[standard]<0.130.0',
+        'httpx~=0.28',
+        'pydantic~=2.10',
+        'pydantic-settings~=2.4',
+        'python-multipart<0.1.0,>=0.0.14',
+        'typer~=0.12',
+        'uvicorn[standard]<1.0.0,>=0.29.0',
+        'websockets<17.0,>=14.0',
+        'scalar-fastapi>=1.0.3',
+        'docling-mcp>=1.0.0',
+        'opentelemetry-api==1.36.0',
+        'opentelemetry-sdk==1.36.0',
+        'opentelemetry-exporter-otlp==1.36.0',
+        'opentelemetry-instrumentation-fastapi==0.57b0',
+        'opentelemetry-exporter-prometheus==0.57b0',
+        'prometheus-client>=0.21.0',
+      ]);
+      expect(mockSpawnAsync).toHaveBeenNthCalledWith(9, '/test/venv/bin/pip', [
+        'install',
+        '--upgrade',
+        '--no-deps',
+        'docling-serve==1.16.1',
       ]);
     });
   });
@@ -105,6 +132,8 @@ describe('PythonEnvironment', () => {
         .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.9.0' }))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.9.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
@@ -124,6 +153,8 @@ describe('PythonEnvironment', () => {
         .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.12.0' }))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.12.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
@@ -213,6 +244,8 @@ describe('PythonEnvironment', () => {
         .mockResolvedValueOnce(createSpawnResult({ stderr: 'Python 3.11.0' }))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
@@ -324,12 +357,14 @@ describe('PythonEnvironment', () => {
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
         .mockResolvedValueOnce(createSpawnResult({}));
 
       const env = new PythonEnvironment(logger, '/test/venv');
       await env.setup();
 
-      expect(mockSpawnAsync).toHaveBeenCalledTimes(7);
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(9);
     });
   });
 
@@ -441,8 +476,8 @@ describe('PythonEnvironment', () => {
     });
   });
 
-  describe('installDoclingServe', () => {
-    test('should handle docling-serve installation failure', async () => {
+  describe('installDoclingRuntimePackages', () => {
+    test('should handle docling runtime package installation failure', async () => {
       mockSpawnAsync
         .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
         .mockResolvedValueOnce(createSpawnResult({}))
@@ -457,15 +492,15 @@ describe('PythonEnvironment', () => {
       const env = new PythonEnvironment(logger, '/test/venv');
 
       await expect(env.setup()).rejects.toThrow(
-        'Failed to install docling-serve. Exit code: 1',
+        'Failed to install docling runtime packages. Exit code: 1',
       );
       expect(logger.error).toHaveBeenCalledWith(
-        '[DoclingEnvironment] Failed to install docling-serve:',
+        '[DoclingEnvironment] Failed to install docling runtime packages:',
         'Docling error',
       );
     });
 
-    test('should handle docling-serve installation process error', async () => {
+    test('should handle docling runtime package installation process error', async () => {
       mockSpawnAsync
         .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
         .mockResolvedValueOnce(createSpawnResult({}))
@@ -478,6 +513,92 @@ describe('PythonEnvironment', () => {
       const env = new PythonEnvironment(logger, '/test/venv');
 
       await expect(env.setup()).rejects.toThrow('Docling error');
+    });
+  });
+
+  describe('installDoclingServeRuntimePackages', () => {
+    test('should handle docling-serve runtime package installation failure', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(
+          createSpawnResult({ stderr: 'Docling serve deps error', code: 1 }),
+        );
+
+      const env = new PythonEnvironment(logger, '/test/venv');
+
+      await expect(env.setup()).rejects.toThrow(
+        'Failed to install docling-serve runtime packages. Exit code: 1',
+      );
+      expect(logger.error).toHaveBeenCalledWith(
+        '[DoclingEnvironment] Failed to install docling-serve runtime packages:',
+        'Docling serve deps error',
+      );
+    });
+
+    test('should handle docling-serve runtime package installation process error', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockRejectedValueOnce(new Error('Docling serve deps error'));
+
+      const env = new PythonEnvironment(logger, '/test/venv');
+
+      await expect(env.setup()).rejects.toThrow('Docling serve deps error');
+    });
+  });
+
+  describe('installDoclingServe', () => {
+    test('should handle docling-serve installation failure', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(
+          createSpawnResult({ stderr: 'Docling serve error', code: 1 }),
+        );
+
+      const env = new PythonEnvironment(logger, '/test/venv');
+
+      await expect(env.setup()).rejects.toThrow(
+        'Failed to install docling-serve. Exit code: 1',
+      );
+      expect(logger.error).toHaveBeenCalledWith(
+        '[DoclingEnvironment] Failed to install docling-serve:',
+        'Docling serve error',
+      );
+    });
+
+    test('should handle docling-serve installation process error', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: 'Python 3.11.0' }))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockResolvedValueOnce(createSpawnResult({}))
+        .mockRejectedValueOnce(new Error('Docling serve error'));
+
+      const env = new PythonEnvironment(logger, '/test/venv');
+
+      await expect(env.setup()).rejects.toThrow('Docling serve error');
     });
   });
 });

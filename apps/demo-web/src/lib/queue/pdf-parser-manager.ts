@@ -3,6 +3,8 @@ import type { LoggerMethods } from '@heripo/logger';
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { TaskQueueManager } from './task-queue-manager';
 
@@ -11,11 +13,22 @@ const PDF_PARSER_TIMEOUT = parseInt(
   process.env.PDF_PARSER_TIMEOUT || '10000000',
   10,
 );
+const PDF_PARSER_VENV_PATH =
+  process.env.PDF_PARSER_VENV_PATH ||
+  join(homedir(), '.heripo', 'pdf-parser-venv');
+
+type PDFParserStatus =
+  | 'ready'
+  | 'initializing'
+  | 'not_initialized'
+  | 'unhealthy'
+  | 'shutting_down';
 
 class PDFParserManager {
   private static instance: PDFParserManager | null = null;
   private parser: PDFParser | null = null;
   private initPromise: Promise<void> | null = null;
+  private readinessPromise: Promise<void> | null = null;
   private initialized = false;
   private isShuttingDown = false;
 
@@ -62,6 +75,7 @@ class PDFParserManager {
     }
 
     if (this.parser && this.initialized) {
+      await this.ensureCachedParserReady();
       return this.parser;
     }
 
@@ -74,8 +88,47 @@ class PDFParserManager {
     }
 
     this.initPromise = this.initialize();
-    await this.initPromise;
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+
+    if (!this.parser || !this.initialized) {
+      throw new Error('PDFParser initialization failed');
+    }
+
     return this.parser!;
+  }
+
+  private async ensureCachedParserReady(): Promise<void> {
+    if (!this.parser || !this.initialized) {
+      return;
+    }
+
+    if (!this.readinessPromise) {
+      const parser = this.parser;
+      this.readinessPromise = parser
+        .ensureReady()
+        .catch(async (error: unknown) => {
+          this.initialized = false;
+          this.parser = null;
+          try {
+            await parser.dispose();
+          } catch (disposeError) {
+            console.error(
+              '[PDFParserManager] Failed to dispose unhealthy parser:',
+              disposeError,
+            );
+          }
+          throw error;
+        })
+        .finally(() => {
+          this.readinessPromise = null;
+        });
+    }
+
+    await this.readinessPromise;
   }
 
   private async initialize(): Promise<void> {
@@ -113,12 +166,17 @@ class PDFParserManager {
     });
 
     logger.info('[PDFParserManager] Initializing PDFParser...');
+    logger.info(
+      '[PDFParserManager] Using PDFParser venv:',
+      PDF_PARSER_VENV_PATH,
+    );
 
     try {
       this.parser = new PDFParser({
         logger,
         port: PDF_PARSER_PORT,
         timeout: PDF_PARSER_TIMEOUT,
+        venvPath: PDF_PARSER_VENV_PATH,
         killExistingProcess: false,
         enableImagePdfFallback: true,
       });
@@ -168,12 +226,20 @@ class PDFParserManager {
     process.on('SIGINT', shutdown);
   }
 
-  isReady(): boolean {
-    return this.initialized && this.parser !== null && !this.isShuttingDown;
-  }
+  async getStatus(): Promise<PDFParserStatus> {
+    if (this.isShuttingDown) {
+      return 'shutting_down';
+    }
 
-  isInitializing(): boolean {
-    return this.initPromise !== null && !this.initialized;
+    if (this.initPromise && !this.initialized) {
+      return 'initializing';
+    }
+
+    if (!this.parser || !this.initialized) {
+      return 'not_initialized';
+    }
+
+    return (await this.parser.isReady()) ? 'ready' : 'unhealthy';
   }
 }
 

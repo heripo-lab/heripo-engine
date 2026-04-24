@@ -13,8 +13,9 @@ export async function GET() {
 
     // Check PDFParser status
     const pdfParserManager = PDFParserManager.getInstance();
-    const pdfParserReady = pdfParserManager.isReady();
-    const pdfParserInitializing = pdfParserManager.isInitializing();
+    const pdfParserStatus = await pdfParserManager.getStatus();
+    const pdfParserReady = pdfParserStatus === 'ready';
+    const pdfParserInitializing = pdfParserStatus === 'initializing';
 
     // Get queue status
     const queueManager = TaskQueueManager.getInstance();
@@ -30,11 +31,7 @@ export async function GET() {
           status: dbExists ? 'connected' : 'disconnected',
         },
         pdfParser: {
-          status: pdfParserReady
-            ? 'ready'
-            : pdfParserInitializing
-              ? 'initializing'
-              : 'not_initialized',
+          status: pdfParserStatus,
         },
         queue: {
           queueLength: queueStatus.queueLength,
