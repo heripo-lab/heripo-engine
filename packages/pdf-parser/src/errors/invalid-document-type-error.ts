@@ -1,6 +1,6 @@
 /**
  * Error thrown when the uploaded PDF does not appear to be
- * a Korean archaeological investigation report.
+ * an archaeological investigation report.
  */
 export class InvalidDocumentTypeError extends Error {
   public readonly name = 'InvalidDocumentTypeError';
@@ -8,7 +8,7 @@ export class InvalidDocumentTypeError extends Error {
 
   constructor(public readonly reason: string) {
     super(
-      `The uploaded PDF does not appear to be a Korean archaeological investigation report. Reason: ${reason}`,
+      `The uploaded PDF does not appear to be an archaeological investigation report. Reason: ${reason}`,
     );
   }
 }

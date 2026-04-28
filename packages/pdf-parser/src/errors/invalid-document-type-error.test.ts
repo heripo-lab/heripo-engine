@@ -16,7 +16,8 @@ describe('InvalidDocumentTypeError', () => {
   test('should include reason in message', () => {
     const error = new InvalidDocumentTypeError('not an archaeological report');
     expect(error.message).toBe(
-      'The uploaded PDF does not appear to be a Korean archaeological investigation report. Reason: not an archaeological report',
+      'The uploaded PDF does not appear to be an archaeological investigation report. Reason: not an' +
+        ' archaeological report',
     );
   });
 
