@@ -92,7 +92,7 @@ export class PDFConverter {
   ) {}
 
   /**
-   * Validate that the PDF is a Korean archaeological investigation report.
+   * Validate that the PDF is an archaeological investigation report.
    * Skipped when no documentValidationModel is configured or for non-local URLs.
    * Only runs once per converter instance (flag prevents duplicate checks on recursive calls).
    */
