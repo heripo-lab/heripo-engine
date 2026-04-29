@@ -131,7 +131,10 @@ export interface ReviewAssistanceDecisionEvidence {
 export interface ReviewAssistanceDecision {
   id: string;
   pageNo: number;
-  command: ReviewAssistanceCommand;
+  /** Present only when validation produced a normalized command. */
+  command?: ReviewAssistanceCommand;
+  /** Original op when validation rejected the payload before normalization. */
+  invalidOp?: string;
   confidence: number;
   disposition: ReviewAssistanceDisposition;
   reasons: string[];

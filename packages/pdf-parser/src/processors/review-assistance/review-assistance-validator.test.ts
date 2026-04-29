@@ -476,7 +476,7 @@ describe('ReviewAssistanceValidator', () => {
         )[0],
     );
 
-    expect(decisions.map((decision) => decision.command.op)).toEqual(
+    expect(decisions.map((decision) => decision.command?.op)).toEqual(
       commands.map((command) => command.op),
     );
     expect(
@@ -629,9 +629,12 @@ describe('ReviewAssistanceValidator', () => {
     expect(
       decisions.every((decision) => decision.disposition === 'skipped'),
     ).toBe(true);
-    expect(
-      decisions.every((decision) => decision.command.op === 'addText'),
-    ).toBe(true);
+    expect(decisions.every((decision) => decision.command === undefined)).toBe(
+      true,
+    );
+    expect(decisions.map((decision) => decision.invalidOp)).toEqual(
+      commands.map((command) => command.op),
+    );
   });
 
   test('reports validation failures for risky command shapes', () => {

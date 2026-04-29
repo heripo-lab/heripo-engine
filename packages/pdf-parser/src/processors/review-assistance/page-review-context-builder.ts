@@ -430,7 +430,7 @@ export class PageReviewContextBuilder {
         orderIndex >= 0 && orderIndex < readingOrderRefs.length - 1
           ? readingOrderRefs[orderIndex + 1]
           : undefined,
-      repeatedAcrossPages: facts.repeatedTextRefs.has(ref) || undefined,
+      repeatedAcrossPages: facts.repeatedTextRefs.has(ref),
       suspectReasons,
     };
   }
@@ -515,7 +515,6 @@ export class PageReviewContextBuilder {
     facts: DocumentFacts,
   ): PageReviewPicture {
     const caption = this.resolveCaptionRefs(item.captions, facts);
-    const image = (item as unknown as { image?: { uri?: string } }).image;
     const suspectReasons = caption ? [] : ['image_missing_caption'];
     const bbox = this.getProvForPage(item.prov, pageNo)?.bbox;
     if (bbox && this.isLargePictureBbox(bbox)) {
@@ -524,7 +523,7 @@ export class PageReviewContextBuilder {
     return {
       ref: `#/pictures/${index}`,
       caption,
-      imageUri: image?.uri,
+      imageUri: item.image?.uri,
       bbox,
       suspectReasons,
     };

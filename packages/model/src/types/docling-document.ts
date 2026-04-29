@@ -69,6 +69,12 @@ export interface DoclingPictureItem extends DoclingBaseNode {
   references: any[]; // any[] if structure is undefined, otherwise specific type
   footnotes: any[];
   annotations: any[];
+  image?: {
+    mimetype?: string;
+    dpi?: number;
+    size?: { width: number; height: number };
+    uri?: string;
+  };
 }
 
 // Table cell information (Table Cell)

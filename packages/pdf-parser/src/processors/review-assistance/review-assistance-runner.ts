@@ -16,6 +16,7 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
 import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { buildReviewAssistancePrompt } from '../../prompts/review-assistance-prompt';
@@ -174,7 +175,7 @@ export class ReviewAssistanceRunner {
     });
 
     try {
-      const image = new Uint8Array(readFileSync(context.pageImagePath));
+      const image = new Uint8Array(await readFile(context.pageImagePath));
       const prompt = buildReviewAssistancePrompt(context);
       const result = await LLMCaller.callVision({
         schema: reviewAssistancePageSchema as any,

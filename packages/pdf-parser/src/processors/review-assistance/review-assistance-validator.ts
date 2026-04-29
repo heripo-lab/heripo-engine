@@ -45,16 +45,15 @@ export class ReviewAssistanceValidator {
         : rawCommand.confidence;
       const disposition = this.getDisposition(valid, confidence, options);
 
-      if (valid && validation.touchedRef) {
-        touchedRefs.add(validation.touchedRef);
+      if (valid) {
+        validation.touchedRefs?.forEach((ref) => touchedRefs.add(ref));
       }
 
       return {
         id: `ra-${context.pageNo}-${index + 1}`,
         pageNo: context.pageNo,
-        command:
-          validation.command ??
-          this.buildSkippedCommand(context.pageNo, rawCommand),
+        command: validation.command,
+        invalidOp: validation.command ? undefined : rawCommand.op,
         confidence,
         disposition,
         reasons: this.buildReasons(rawCommand, validationReasons, disposition),
@@ -72,7 +71,7 @@ export class ReviewAssistanceValidator {
     valid: boolean;
     reasons: string[];
     command?: ReviewAssistanceCommand;
-    touchedRef?: string;
+    touchedRefs?: string[];
   } {
     const reasons: string[] = [];
     const command = this.toCommand(context, rawCommand, reasons);
@@ -80,12 +79,12 @@ export class ReviewAssistanceValidator {
       return { valid: false, reasons };
     }
 
-    const targetRef = this.getPrimaryTargetRef(command);
-    if (targetRef) {
-      if (!this.refExistsForCommand(command, targetRef, refs)) {
+    const ownTouchedRefs = this.getOwnedTouchedRefs(command);
+    for (const ref of ownTouchedRefs) {
+      if (!this.refExistsForCommand(command, ref, refs)) {
         reasons.push('target_ref_not_found');
       }
-      if (touchedRefs.has(targetRef)) {
+      if (touchedRefs.has(ref)) {
         reasons.push('target_already_modified');
       }
     }
@@ -96,7 +95,7 @@ export class ReviewAssistanceValidator {
       valid: reasons.length === 0,
       reasons,
       command,
-      touchedRef: targetRef,
+      touchedRefs: ownTouchedRefs,
     };
   }
 
@@ -329,7 +328,10 @@ export class ReviewAssistanceValidator {
         command.textRefs.forEach((ref) =>
           this.validateTextRef(ref, refs, reasons),
         );
-        this.validateTextRef(command.keepRef, refs, reasons);
+        if (!command.textRefs.includes(command.keepRef)) {
+          reasons.push('merge_keep_ref_not_in_text_refs');
+          this.validateTextRef(command.keepRef, refs, reasons);
+        }
         break;
       case 'splitText':
         this.validateSplitText(
@@ -457,19 +459,6 @@ export class ReviewAssistanceValidator {
     };
   }
 
-  private buildSkippedCommand(
-    pageNo: number,
-    rawCommand: ReviewAssistanceRawCommand,
-  ): ReviewAssistanceCommand {
-    return {
-      op: 'addText',
-      pageNo,
-      bbox: { l: 0, t: 0, r: 1, b: 1, coord_origin: 'TOPLEFT' },
-      text: '',
-      label: `invalid:${rawCommand.op}`,
-    };
-  }
-
   private buildRefSet(context: PageReviewContext): RefSet {
     const adjacentTables = new Set(
       context.tables.flatMap((table) => [
@@ -488,32 +477,38 @@ export class ReviewAssistanceValidator {
   private getPrimaryTargetRef(
     command: ReviewAssistanceCommand,
   ): string | undefined {
+    return this.getOwnedTouchedRefs(command)[0];
+  }
+
+  private getOwnedTouchedRefs(command: ReviewAssistanceCommand): string[] {
     switch (command.op) {
       case 'replaceText':
       case 'updateTextRole':
       case 'removeText':
       case 'splitText':
-        return command.textRef;
+        return [command.textRef];
       case 'mergeTexts':
-        return command.keepRef;
+        return [command.keepRef];
       case 'updateTableCell':
       case 'replaceTable':
-        return command.tableRef;
+        return [command.tableRef];
       case 'linkContinuedTable':
-        return command.sourceTableRef;
+        // continuedTableRef may live on an adjacent page; its existence is
+        // checked by validateCommandShape with allowAdjacent.
+        return [command.sourceTableRef];
       case 'updatePictureCaption':
       case 'splitPicture':
       case 'hidePicture':
-        return command.pictureRef;
+        return [command.pictureRef];
       case 'updateBbox':
-        return command.targetRef;
+        return [command.targetRef];
       case 'linkFootnote':
-        return command.footnoteTextRef;
+        return [command.markerTextRef, command.footnoteTextRef];
       case 'moveNode':
-        return command.sourceRef;
+        return [command.sourceRef];
       case 'addText':
       case 'addPicture':
-        return undefined;
+        return [];
     }
   }
 
@@ -753,6 +748,10 @@ export class ReviewAssistanceValidator {
     }
   }
 
+  // TODO(Phase C): before flipping `allowAutoApply` to true, add op-specific
+  // gates required by plan A.3/B.5: splitPicture min-edge, linkContinuedTable
+  // column/header compatibility, replaceTable cell-shrink ratio, addText image
+  // evidence presence, mergeTexts/splitText text-layer adjacency.
   private getRiskPenalty(command: ReviewAssistanceCommand): number {
     switch (command.op) {
       case 'removeText':
