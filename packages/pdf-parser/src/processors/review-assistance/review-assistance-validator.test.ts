@@ -38,6 +38,7 @@ function makeContext(
         suspectReasons: ['footnote_like_body_text'],
       },
     ],
+    missingTextCandidates: [],
     tables: [
       {
         ref: '#/tables/0',
@@ -178,6 +179,34 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.reasons).toContain('target_ref_not_found');
   });
 
+  test('skips every command when model returns a mismatched page number', () => {
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 2,
+        commands: [
+          {
+            op: 'replaceText',
+            targetRef: '#/texts/0',
+            payload: { text: 'Test' },
+            confidence: 0.95,
+            rationale: 'OCR spacing noise',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.disposition).toBe('skipped');
+    expect(decision.reasons).toContain('page_number_mismatch');
+  });
+
   test('skips removeText without deterministic suspect evidence', () => {
     const [decision] = new ReviewAssistanceValidator().validatePageOutput(
       makeContext([]),
@@ -222,6 +251,43 @@ describe('ReviewAssistanceValidator', () => {
 
     expect(decision.disposition).toBe('skipped');
     expect(decision.reasons).toContain('table_grid_not_rectangular');
+  });
+
+  test('allows updating existing empty table cells', () => {
+    const context = makeContext();
+    context.tables[0].gridPreview[0][0] = '';
+
+    const decision = validateWithContext(context, {
+      op: 'updateTableCell',
+      targetRef: '#/tables/0',
+      payload: { row: 0, col: 0, text: 'Filled' },
+      confidence: 0.9,
+      rationale: 'Visible cell text',
+      evidence: null,
+    });
+
+    expect(decision.disposition).toBe('proposal');
+    expect(decision.reasons).not.toContain('table_cell_out_of_preview_range');
+  });
+
+  test('allows continued-table links to adjacent page table refs', () => {
+    const context = makeContext();
+    context.tables[0].nextPageTableRefs = ['#/tables/99'];
+
+    const decision = validateWithContext(context, {
+      op: 'linkContinuedTable',
+      targetRef: '#/tables/0',
+      payload: {
+        continuedTableRef: '#/tables/99',
+        relation: 'continues_on_next_page',
+      },
+      confidence: 0.95,
+      rationale: 'Compatible adjacent table',
+      evidence: null,
+    });
+
+    expect(decision.disposition).toBe('proposal');
+    expect(decision.reasons).not.toContain('table_ref_not_found');
   });
 
   test('maps every supported command operation', () => {

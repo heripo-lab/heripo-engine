@@ -347,6 +347,16 @@ export class ReviewAssistanceRunner {
         );
       }
     }
+    for (const candidate of context.missingTextCandidates) {
+      push(
+        'text_integrity',
+        candidate.reason,
+        `Text layer block is missing from Docling text: ${candidate.text}`,
+        undefined,
+        undefined,
+        [candidate.reason],
+      );
+    }
     for (const table of context.tables) {
       for (const reason of table.suspectReasons) {
         push(

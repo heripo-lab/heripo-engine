@@ -33,13 +33,22 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
           suspectReasons: ['ocr_noise'],
         },
       ],
+      missingTextCandidates: [
+        {
+          text: 'Visible but absent text',
+          source: 'text_layer',
+          reason: 'unmatched_text_layer_block',
+        },
+      ],
       tables: [
         {
           ref: '#/tables/0',
           caption: 'Table 1',
           gridPreview: [['A']],
           emptyCellRatio: 0,
+          previousPageTableRefs: ['#/tables/prev'],
           previousPageTableSummary: 'prev',
+          nextPageTableRefs: ['#/tables/next'],
           nextPageTableSummary: 'next',
           suspectReasons: [],
         },
@@ -78,6 +87,8 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
 
     expect(prompt).toContain('PAGE CONTEXT JSON:');
     expect(prompt).toContain('"orphanCaptions"');
+    expect(prompt).toContain('"missingTextCandidates"');
+    expect(prompt).toContain('"nextPageTableRefs"');
     expect(prompt).toContain('"domainPatterns"');
     expect(prompt).toContain('"pictures"');
   });

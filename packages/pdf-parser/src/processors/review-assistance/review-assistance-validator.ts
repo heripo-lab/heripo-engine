@@ -28,6 +28,8 @@ export class ReviewAssistanceValidator {
   ): ReviewAssistanceDecision[] {
     const refs = this.buildRefSet(context);
     const touchedRefs = new Set<string>();
+    const pageReasons =
+      output.pageNo === context.pageNo ? [] : ['page_number_mismatch'];
 
     return output.commands.map((rawCommand, index) => {
       const validation = this.validateCommand(
@@ -36,16 +38,14 @@ export class ReviewAssistanceValidator {
         refs,
         touchedRefs,
       );
-      const confidence = validation.valid
+      const valid = validation.valid && pageReasons.length === 0;
+      const validationReasons = [...pageReasons, ...validation.reasons];
+      const confidence = valid
         ? this.computeFinalConfidence(rawCommand, validation.command)
         : rawCommand.confidence;
-      const disposition = this.getDisposition(
-        validation.valid,
-        confidence,
-        options,
-      );
+      const disposition = this.getDisposition(valid, confidence, options);
 
-      if (validation.valid && validation.touchedRef) {
+      if (valid && validation.touchedRef) {
         touchedRefs.add(validation.touchedRef);
       }
 
@@ -57,7 +57,7 @@ export class ReviewAssistanceValidator {
           this.buildSkippedCommand(context.pageNo, rawCommand),
         confidence,
         disposition,
-        reasons: this.buildReasons(rawCommand, validation.reasons, disposition),
+        reasons: this.buildReasons(rawCommand, validationReasons, disposition),
         evidence: this.buildEvidence(context, rawCommand, validation.command),
       };
     });
@@ -352,8 +352,12 @@ export class ReviewAssistanceValidator {
         this.validateTableGrid(command.grid, reasons);
         break;
       case 'linkContinuedTable':
-        this.validateTableRef(command.sourceTableRef, refs, reasons);
-        this.validateTableRef(command.continuedTableRef, refs, reasons);
+        this.validateTableRef(command.sourceTableRef, refs, reasons, {
+          allowAdjacent: true,
+        });
+        this.validateTableRef(command.continuedTableRef, refs, reasons, {
+          allowAdjacent: true,
+        });
         break;
       case 'updatePictureCaption':
         this.validateCaptionText(command.caption, reasons);
@@ -469,9 +473,16 @@ export class ReviewAssistanceValidator {
   }
 
   private buildRefSet(context: PageReviewContext): RefSet {
+    const adjacentTables = new Set(
+      context.tables.flatMap((table) => [
+        ...(table.previousPageTableRefs ?? []),
+        ...(table.nextPageTableRefs ?? []),
+      ]),
+    );
     return {
       texts: new Set(context.textBlocks.map((block) => block.ref)),
       tables: new Set(context.tables.map((table) => table.ref)),
+      adjacentTables,
       pictures: new Set(context.pictures.map((picture) => picture.ref)),
     };
   }
@@ -523,12 +534,11 @@ export class ReviewAssistanceValidator {
     ) {
       return refs.texts.has(ref);
     }
-    if (
-      command.op === 'updateTableCell' ||
-      command.op === 'replaceTable' ||
-      command.op === 'linkContinuedTable'
-    ) {
+    if (command.op === 'updateTableCell' || command.op === 'replaceTable') {
       return refs.tables.has(ref);
+    }
+    if (command.op === 'linkContinuedTable') {
+      return this.tableRefExists(ref, refs, { allowAdjacent: true });
     }
     if (
       command.op === 'updatePictureCaption' ||
@@ -552,10 +562,26 @@ export class ReviewAssistanceValidator {
     }
   }
 
-  private validateTableRef(ref: string, refs: RefSet, reasons: string[]): void {
-    if (!refs.tables.has(ref)) {
+  private validateTableRef(
+    ref: string,
+    refs: RefSet,
+    reasons: string[],
+    options: { allowAdjacent?: boolean } = {},
+  ): void {
+    if (!this.tableRefExists(ref, refs, options)) {
       reasons.push('table_ref_not_found');
     }
+  }
+
+  private tableRefExists(
+    ref: string,
+    refs: RefSet,
+    options: { allowAdjacent?: boolean } = {},
+  ): boolean {
+    return (
+      refs.tables.has(ref) ||
+      (options.allowAdjacent === true && refs.adjacentTables.has(ref))
+    );
   }
 
   private validatePageNumber(
@@ -679,7 +705,10 @@ export class ReviewAssistanceValidator {
       reasons.push('table_cell_negative_index');
       return;
     }
-    if (!table.gridPreview[row]?.[col]) {
+    if (
+      row >= table.gridPreview.length ||
+      col >= table.gridPreview[row].length
+    ) {
       reasons.push('table_cell_out_of_preview_range');
     }
   }
@@ -868,5 +897,6 @@ export class ReviewAssistanceValidator {
 interface RefSet {
   texts: Set<string>;
   tables: Set<string>;
+  adjacentTables: Set<string>;
   pictures: Set<string>;
 }

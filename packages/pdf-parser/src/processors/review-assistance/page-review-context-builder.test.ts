@@ -201,7 +201,7 @@ function makeDoc(): DoclingDocument {
 describe('PageReviewContextBuilder', () => {
   test('builds page context with text, media, layout, and suspect hints', () => {
     const [context] = new PageReviewContextBuilder().build(makeDoc(), '/out', {
-      pageTexts: new Map([[1, 'Title\n\nFigure 1. Trench']]),
+      pageTexts: new Map([[1, 'Title\n\nFigure 1. Trench\n\nMissing line']]),
     });
 
     expect(context.pageNo).toBe(1);
@@ -210,6 +210,13 @@ describe('PageReviewContextBuilder', () => {
       ref: '#/texts/0',
       textLayerReference: 'Title',
     });
+    expect(context.missingTextCandidates).toEqual([
+      {
+        text: 'Missing line',
+        source: 'text_layer',
+        reason: 'unmatched_text_layer_block',
+      },
+    ]);
     expect(context.textBlocks[1].suspectReasons).toContain(
       'caption_like_body_text',
     );
@@ -422,6 +429,8 @@ describe('PageReviewContextBuilder', () => {
     expect(first.tables[0].suspectReasons).toContain(
       'multi_page_table_candidate',
     );
+    expect(first.tables[0].nextPageTableRefs).toEqual(['#/tables/1']);
+    expect(second.tables[0].previousPageTableRefs).toEqual(['#/tables/0']);
     expect(first.pictures[0].caption).toBe('Table 1');
     expect(first.pictures[0].suspectReasons).toContain(
       'large_picture_split_candidate',

@@ -31,7 +31,9 @@ export interface PageReviewTable {
   bbox?: DoclingBBox;
   gridPreview: string[][];
   emptyCellRatio: number;
+  previousPageTableRefs?: string[];
   previousPageTableSummary?: string;
+  nextPageTableRefs?: string[];
   nextPageTableSummary?: string;
   suspectReasons: string[];
 }
@@ -57,11 +59,18 @@ export interface PageReviewOrphanCaption {
   }>;
 }
 
+export interface PageReviewMissingTextCandidate {
+  text: string;
+  source: 'text_layer';
+  reason: 'unmatched_text_layer_block';
+}
+
 export interface PageReviewContext {
   pageNo: number;
   pageSize: { width: number; height: number } | null;
   pageImagePath: string;
   textBlocks: PageReviewTextBlock[];
+  missingTextCandidates: PageReviewMissingTextCandidate[];
   tables: PageReviewTable[];
   pictures: PageReviewPicture[];
   orphanCaptions: PageReviewOrphanCaption[];
@@ -105,6 +114,7 @@ interface DocumentFacts {
   repeatedTextRefs: Set<string>;
   linkedCaptionRefs: Set<string>;
   textByRef: Map<string, string>;
+  tableRefsByPage: Map<number, string[]>;
   tableSummariesByPage: Map<number, string[]>;
 }
 
@@ -137,24 +147,25 @@ export class PageReviewContextBuilder {
       this.refBelongsToPage(doc, ref, pageNo),
     );
     const pageTextEntries = this.getPageTextEntries(doc, pageNo);
-    const references = this.buildTextLayerReferences(
+    const textLayerMatches = this.buildTextLayerMatches(
       pageTextEntries,
       pageNo,
       options.pageTexts,
     );
 
+    const pageTableEntries = this.getPageTableEntries(doc, pageNo);
     const textBlocks = pageTextEntries.map((entry, promptIndex) =>
       this.buildTextBlock(
         entry.index,
         entry.item,
         pageNo,
         readingOrderRefs,
-        references,
+        textLayerMatches?.references,
         promptIndex,
         facts,
       ),
     );
-    const tables = this.getPageTableEntries(doc, pageNo).map((entry) =>
+    const tables = pageTableEntries.map((entry) =>
       this.buildTable(entry.index, entry.item, pageNo, facts),
     );
     const pictures = this.getPagePictureEntries(doc, pageNo).map((entry) =>
@@ -172,6 +183,10 @@ export class PageReviewContextBuilder {
       pageSize,
       pageImagePath: this.getPageImagePath(doc, outputDir, pageNo),
       textBlocks,
+      missingTextCandidates: this.buildMissingTextCandidates(
+        textLayerMatches?.unusedBlocks,
+        pageTableEntries,
+      ),
       tables,
       pictures,
       orphanCaptions: this.buildOrphanCaptions(
@@ -221,6 +236,7 @@ export class PageReviewContextBuilder {
       repeatedTextRefs: this.detectRepeatedTextRefs(doc),
       linkedCaptionRefs,
       textByRef: new Map(doc.texts.map((text) => [text.self_ref, text.text])),
+      tableRefsByPage: this.buildTableRefsByPage(doc),
       tableSummariesByPage: this.buildTableSummariesByPage(doc),
     };
   }
@@ -273,6 +289,19 @@ export class PageReviewContextBuilder {
       entries.forEach((entry) => repeated.add(entry.ref));
     }
     return repeated;
+  }
+
+  private buildTableRefsByPage(doc: DoclingDocument): Map<number, string[]> {
+    const byPage = new Map<number, string[]>();
+    doc.tables.forEach((table, index) => {
+      const ref = `#/tables/${index}`;
+      for (const pageNo of this.getProvPageNumbers(table.prov)) {
+        const entries = byPage.get(pageNo) ?? [];
+        entries.push(ref);
+        byPage.set(pageNo, entries);
+      }
+    });
+    return byPage;
   }
 
   private buildTableSummariesByPage(
@@ -342,14 +371,38 @@ export class PageReviewContextBuilder {
       .filter(({ item }) => item.prov.some((prov) => prov.page_no === pageNo));
   }
 
-  private buildTextLayerReferences(
+  private buildTextLayerMatches(
     pageTextEntries: Array<{ index: number; item: DoclingTextItem }>,
     pageNo: number,
     pageTexts?: Map<number, string>,
-  ): Map<number, string> | undefined {
+  ): { references: Map<number, string>; unusedBlocks: string[] } | undefined {
     const pageText = pageTexts?.get(pageNo);
     if (!pageText) return undefined;
-    return matchTextToReferenceWithUnused(pageTextEntries, pageText).references;
+    return matchTextToReferenceWithUnused(pageTextEntries, pageText);
+  }
+
+  private buildMissingTextCandidates(
+    unusedBlocks: string[] | undefined,
+    pageTableEntries: Array<{ index: number; item: DoclingTableItem }>,
+  ): PageReviewMissingTextCandidate[] {
+    const tableText = this.normalizeText(
+      pageTableEntries
+        .flatMap((entry) => entry.item.data.grid)
+        .flatMap((row) => row.map((cell) => cell.text ?? ''))
+        .join(' '),
+    );
+    return (unusedBlocks ?? [])
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .filter((text) => {
+        const normalized = this.normalizeText(text);
+        return !tableText.includes(normalized);
+      })
+      .map((text) => ({
+        text,
+        source: 'text_layer' as const,
+        reason: 'unmatched_text_layer_block' as const,
+      }));
   }
 
   private buildTextBlock(
@@ -443,9 +496,11 @@ export class PageReviewContextBuilder {
       bbox: this.getProvForPage(item.prov, pageNo)?.bbox,
       gridPreview,
       emptyCellRatio,
+      previousPageTableRefs: facts.tableRefsByPage.get(pageNo - 1),
       previousPageTableSummary: facts.tableSummariesByPage
         .get(pageNo - 1)
         ?.join('\n'),
+      nextPageTableRefs: facts.tableRefsByPage.get(pageNo + 1),
       nextPageTableSummary: facts.tableSummariesByPage
         .get(pageNo + 1)
         ?.join('\n'),
