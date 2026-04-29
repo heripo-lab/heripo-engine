@@ -683,8 +683,101 @@ describe('ReviewAssistancePatcher', () => {
       splitPicture: {
         sourcePictureRef: '#/pictures/0',
         replacementRefs: ['#/pictures/1', '#/pictures/2'],
+        preservedCaptionRefs: [],
       },
     });
+  });
+
+  test('preserves an existing source picture caption on split replacements', async () => {
+    mockSpawnAsync
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '60x60+0+0', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '60x60+0+0', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 });
+    const doc = makeDoc();
+    doc.pictures[0].captions = [{ $ref: '#/texts/1' }];
+    const context = makeContext(outputDir);
+    context.orphanCaptions = [];
+
+    const result = await new ReviewAssistancePatcher(makeLogger()).apply(
+      doc,
+      [
+        makePageResult([
+          {
+            op: 'splitPicture',
+            pictureRef: '#/pictures/0',
+            regions: [
+              {
+                bbox: { l: 10, t: 10, r: 70, b: 70, coord_origin: 'TOPLEFT' },
+                caption: 'Figure 1-A',
+              },
+              {
+                id: 'right-panel',
+                bbox: { l: 30, t: 30, r: 90, b: 90, coord_origin: 'TOPLEFT' },
+              },
+            ],
+          },
+        ]),
+      ],
+      { outputDir, contexts: [context] },
+    );
+
+    expect(result.doc.pictures[1].captions).toHaveLength(1);
+    expect(result.doc.pictures[2].captions).toEqual([{ $ref: '#/texts/1' }]);
+    expect(result.doc.texts[1].label).toBe('caption');
+    expect(result.pages[0].decisions[0].metadata).toMatchObject({
+      splitPicture: {
+        preservedCaptionRefs: ['#/texts/1'],
+      },
+    });
+  });
+
+  test('leaves the document unchanged when split picture preparation fails', async () => {
+    mockSpawnAsync
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '60x60+0+0', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '60x60+0+0', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '', stderr: 'crop failed', code: 1 });
+    const logger = makeLogger();
+    const doc = makeDoc();
+
+    const result = await new ReviewAssistancePatcher(logger).apply(
+      doc,
+      [
+        makePageResult([
+          {
+            op: 'splitPicture',
+            pictureRef: '#/pictures/0',
+            regions: [
+              {
+                bbox: { l: 10, t: 10, r: 70, b: 70, coord_origin: 'TOPLEFT' },
+              },
+              {
+                bbox: { l: 30, t: 30, r: 90, b: 90, coord_origin: 'TOPLEFT' },
+              },
+            ],
+          },
+        ]),
+      ],
+      { outputDir, contexts: [makeContext(outputDir)] },
+    );
+
+    expect(result.doc.pictures).toHaveLength(1);
+    expect(result.doc.body.children.map((child) => child.$ref)).toContain(
+      '#/pictures/0',
+    );
+    expect(result.pages[0].decisions[0].disposition).toBe('skipped');
+    expect(result.pages[0].decisions[0].reasons).toContain(
+      'patch_skipped: [ImageCropWriter] Failed to write crop: crop failed',
+    );
   });
 
   test('adds a picture with an explicit caption', async () => {
@@ -741,6 +834,11 @@ describe('ReviewAssistancePatcher', () => {
         doc: DoclingDocument,
         context: PageReviewContext,
         targets: Array<{ ref: string; kind: 'table'; bbox?: DoclingBBox }>,
+      ) => string[];
+      preserveSourceCaptionRefs: (
+        doc: DoclingDocument,
+        sourcePicture: DoclingDocument['pictures'][number],
+        replacementRefs: string[],
       ) => string[];
       insertByPagePosition: (
         doc: DoclingDocument,
@@ -875,6 +973,27 @@ describe('ReviewAssistancePatcher', () => {
         { ref: '#/tables/0', kind: 'table', bbox },
       ]),
     ).toEqual([]);
+    doc.pictures[0].captions = [{ $ref: '#/texts/404' }];
+    expect(patcher.preserveSourceCaptionRefs(doc, doc.pictures[0], [])).toEqual(
+      [],
+    );
+    doc.pictures[0].captions = [{ $ref: '#/texts/1' }];
+    expect(patcher.preserveSourceCaptionRefs(doc, doc.pictures[0], [])).toEqual(
+      [],
+    );
+    expect(
+      patcher.preserveSourceCaptionRefs(doc, doc.pictures[0], [
+        '#/pictures/404',
+      ]),
+    ).toEqual([]);
+    doc.pictures[1].captions = [{ $ref: '#/texts/2' }];
+    expect(
+      patcher.preserveSourceCaptionRefs(doc, doc.pictures[0], ['#/pictures/1']),
+    ).toEqual(['#/texts/1']);
+    expect(doc.pictures[1].captions).toEqual([
+      { $ref: '#/texts/2' },
+      { $ref: '#/texts/1' },
+    ]);
 
     patcher.insertByPagePosition(doc, '#/texts/404', 1, {
       l: 10,
@@ -1043,7 +1162,10 @@ describe('ReviewAssistancePatcher', () => {
       apply: ReviewAssistancePatcher['apply'];
       applyCommand: unknown;
     };
-    patcher.applyCommand = vi.fn().mockRejectedValue('string failure');
+    patcher.applyCommand = vi.fn(async (docArg: DoclingDocument) => {
+      docArg.texts[0].text = 'mutated before failure';
+      throw 'string failure';
+    });
 
     const result = await patcher.apply(
       makeDoc(),
@@ -1059,5 +1181,6 @@ describe('ReviewAssistancePatcher', () => {
       disposition: 'skipped',
       reasons: ['test', 'patch_skipped: string failure'],
     });
+    expect(result.doc.texts[0].text).toBe('Old text');
   });
 });

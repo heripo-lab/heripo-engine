@@ -78,6 +78,7 @@ export class ReviewAssistancePatcher {
           continue;
         }
 
+        const beforeCommand = this.cloneDoc(doc);
         try {
           const metadata = await this.applyCommand(
             doc,
@@ -91,6 +92,7 @@ export class ReviewAssistancePatcher {
             `[ReviewAssistancePatcher] Command ${decision.id} skipped`,
             error,
           );
+          this.restoreDoc(doc, beforeCommand);
           decisions.push(
             this.skipDecision(
               decision,
@@ -454,6 +456,12 @@ export class ReviewAssistancePatcher {
     const generatedRefs: string[] = [];
     const pictureRefs: string[] = [];
     const snappedRegions: Array<Record<string, unknown>> = [];
+    const preparedRegions: Array<{
+      region: ReviewAssistanceImageRegion;
+      snappedBbox: DoclingBBox;
+      imageUri: string;
+      snapMetadata: Record<string, unknown>;
+    }> = [];
     const captionTargets: Array<{
       ref: string;
       kind: 'picture';
@@ -476,35 +484,50 @@ export class ReviewAssistancePatcher {
         decisionId,
         regionId: region.id ?? String(index + 1),
       });
+      preparedRegions.push({
+        region,
+        snappedBbox: snapped.snappedBbox,
+        imageUri: crop.imageUri,
+        snapMetadata: {
+          regionId: region.id,
+          source: snapped.source,
+          originalBbox: snapped.originalBbox,
+          snappedBbox: snapped.snappedBbox,
+          imageUri: crop.imageUri,
+          warnings: snapped.warnings,
+        },
+      });
+    }
+
+    for (const prepared of preparedRegions) {
       const pictureRef = this.appendPicture(
         doc,
         context.pageNo,
-        snapped.snappedBbox,
-        crop.imageUri,
+        prepared.snappedBbox,
+        prepared.imageUri,
       );
       pictureRefs.push(pictureRef);
       generatedRefs.push(pictureRef);
       captionTargets.push({
         ref: pictureRef,
         kind: 'picture',
-        bbox: snapped.snappedBbox,
-        caption: region.caption,
+        bbox: prepared.snappedBbox,
+        caption: prepared.region.caption,
       });
-      if (region.caption?.trim()) {
+      if (prepared.region.caption?.trim()) {
         generatedRefs.push(
-          this.setPictureCaption(doc, pictureRef, region.caption),
+          this.setPictureCaption(doc, pictureRef, prepared.region.caption),
         );
       }
-      snappedRegions.push({
-        regionId: region.id,
-        source: snapped.source,
-        originalBbox: snapped.originalBbox,
-        snappedBbox: snapped.snappedBbox,
-        imageUri: crop.imageUri,
-        warnings: snapped.warnings,
-      });
+      snappedRegions.push(prepared.snapMetadata);
     }
 
+    const preservedCaptionRefs = this.preserveSourceCaptionRefs(
+      doc,
+      sourcePicture,
+      pictureRefs,
+    );
+    generatedRefs.push(...preservedCaptionRefs);
     this.replaceRefInContainers(doc, sourcePictureRef, pictureRefs);
     generatedRefs.push(
       ...this.resolveOrphanCaptions(doc, context, captionTargets),
@@ -519,6 +542,7 @@ export class ReviewAssistancePatcher {
           replacementRefs: generatedRefs.filter((ref) =>
             ref.startsWith('#/pictures/'),
           ),
+          preservedCaptionRefs,
           regions: snappedRegions,
         },
       },
@@ -632,6 +656,38 @@ export class ReviewAssistancePatcher {
     };
     doc.pictures.push(picture);
     return ref;
+  }
+
+  private preserveSourceCaptionRefs(
+    doc: DoclingDocument,
+    sourcePicture: DoclingPictureItem,
+    replacementRefs: string[],
+  ): string[] {
+    const captionRefs = sourcePicture.captions
+      .map((caption) => caption.$ref)
+      .filter((ref) => {
+        const caption = this.resolveText(doc, ref);
+        if (!caption) return false;
+        caption.label = 'caption';
+        return true;
+      });
+    if (captionRefs.length === 0) return [];
+    if (replacementRefs.length === 0) return [];
+
+    const targetPicture =
+      replacementRefs
+        .map((ref) => this.resolvePicture(doc, ref))
+        .find((picture) => picture && picture.captions.length === 0) ??
+      this.resolvePicture(doc, replacementRefs[0]);
+    if (!targetPicture) return [];
+
+    for (const ref of captionRefs) {
+      targetPicture.captions = this.appendUniqueRef(
+        targetPicture.captions,
+        ref,
+      );
+    }
+    return captionRefs;
   }
 
   private setPictureCaption(
@@ -989,5 +1045,16 @@ export class ReviewAssistancePatcher {
       disposition: 'skipped',
       reasons: [...decision.reasons, `patch_skipped: ${reason}`],
     };
+  }
+
+  private cloneDoc(doc: DoclingDocument): DoclingDocument {
+    return JSON.parse(JSON.stringify(doc)) as DoclingDocument;
+  }
+
+  private restoreDoc(target: DoclingDocument, snapshot: DoclingDocument): void {
+    for (const key of Object.keys(target)) {
+      delete (target as unknown as Record<string, unknown>)[key];
+    }
+    Object.assign(target, snapshot);
   }
 }

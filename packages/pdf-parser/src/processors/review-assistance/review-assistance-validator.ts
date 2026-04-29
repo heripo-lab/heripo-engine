@@ -45,7 +45,16 @@ export class ReviewAssistanceValidator {
       const confidence = valid
         ? this.computeFinalConfidence(rawCommand, validation.command)
         : rawCommand.confidence;
-      const disposition = this.getDisposition(valid, confidence, options);
+      const autoApplyBlockReason =
+        valid && confidence >= options.autoApplyThreshold
+          ? this.getAutoApplyBlockReason(context, validation.command)
+          : undefined;
+      const disposition = this.getDisposition(
+        valid,
+        confidence,
+        options,
+        autoApplyBlockReason,
+      );
 
       if (valid) {
         validation.touchedRefs?.forEach((ref) => touchedRefs.add(ref));
@@ -62,7 +71,11 @@ export class ReviewAssistanceValidator {
         invalidOp: validation.command ? undefined : rawCommand.op,
         confidence,
         disposition,
-        reasons: this.buildReasons(rawCommand, validationReasons, disposition),
+        reasons: this.buildReasons(rawCommand, validationReasons, disposition, {
+          autoApplyEnabled: options.allowAutoApply === true,
+          belowAutoApplyThreshold: confidence < options.autoApplyThreshold,
+          autoApplyBlockReason,
+        }),
         evidence: this.buildEvidence(context, rawCommand, validation.command),
       };
     });
@@ -417,11 +430,16 @@ export class ReviewAssistanceValidator {
     valid: boolean,
     confidence: number,
     options: ReviewAssistanceValidatorOptions,
+    autoApplyBlockReason?: string,
   ): ReviewAssistanceDisposition {
     if (!valid || confidence < options.proposalThreshold) {
       return 'skipped';
     }
-    if (options.allowAutoApply && confidence >= options.autoApplyThreshold) {
+    if (
+      options.allowAutoApply &&
+      confidence >= options.autoApplyThreshold &&
+      !autoApplyBlockReason
+    ) {
       return 'auto_applied';
     }
     return 'proposal';
@@ -431,6 +449,11 @@ export class ReviewAssistanceValidator {
     rawCommand: ReviewAssistanceRawCommand,
     validationReasons: string[],
     disposition: ReviewAssistanceDisposition,
+    options: {
+      autoApplyEnabled: boolean;
+      belowAutoApplyThreshold: boolean;
+      autoApplyBlockReason?: string;
+    },
   ): string[] {
     const reasons = [
       rawCommand.rationale,
@@ -438,12 +461,60 @@ export class ReviewAssistanceValidator {
       ...(rawCommand.evidence ? [`evidence: ${rawCommand.evidence}`] : []),
     ].filter(Boolean);
     if (disposition === 'proposal') {
-      reasons.push('below_auto_apply_threshold');
+      if (!options.autoApplyEnabled) {
+        reasons.push('auto_apply_disabled');
+      } else if (options.belowAutoApplyThreshold) {
+        reasons.push('below_auto_apply_threshold');
+      } else if (options.autoApplyBlockReason) {
+        reasons.push(options.autoApplyBlockReason);
+      }
     }
     if (disposition === 'auto_applied') {
       reasons.push('auto_apply_pending_patcher_phase');
     }
     return reasons;
+  }
+
+  private getAutoApplyBlockReason(
+    context: PageReviewContext,
+    command?: ReviewAssistanceCommand,
+  ): string | undefined {
+    if (!command) return 'auto_apply_requires_valid_command';
+    switch (command.op) {
+      case 'replaceText':
+      case 'updateTextRole':
+      case 'updateTableCell':
+      case 'updatePictureCaption':
+        return undefined;
+      case 'removeText':
+        return undefined;
+      case 'addText':
+        return this.missingTextMatches(context, command.text)
+          ? undefined
+          : 'add_text_requires_missing_text_candidate';
+      case 'updateBbox':
+        return context.layout.bboxWarnings.some(
+          (warning) => warning.targetRef === command.targetRef,
+        )
+          ? undefined
+          : 'update_bbox_requires_bbox_warning';
+      case 'linkFootnote':
+        return this.isFootnoteCandidate(context, command.footnoteTextRef)
+          ? undefined
+          : 'link_footnote_requires_footnote_candidate';
+      case 'moveNode':
+        return this.hasReadingOrderMismatch(context)
+          ? undefined
+          : 'move_node_requires_reading_order_mismatch';
+      case 'addPicture':
+      case 'splitPicture':
+      case 'hidePicture':
+      case 'mergeTexts':
+      case 'splitText':
+      case 'replaceTable':
+      case 'linkContinuedTable':
+        return 'structural_command_requires_manual_review';
+    }
   }
 
   private buildEvidence(
@@ -755,6 +826,36 @@ export class ReviewAssistanceValidator {
         }
       }
     }
+  }
+
+  private missingTextMatches(
+    context: PageReviewContext,
+    text: string,
+  ): boolean {
+    const normalizedText = this.normalizeText(text);
+    return context.missingTextCandidates.some(
+      (candidate) => this.normalizeText(candidate.text) === normalizedText,
+    );
+  }
+
+  private isFootnoteCandidate(
+    context: PageReviewContext,
+    textRef: string,
+  ): boolean {
+    return context.footnotes.some((footnote) => footnote.ref === textRef);
+  }
+
+  private hasReadingOrderMismatch(context: PageReviewContext): boolean {
+    if (context.layout.readingOrderRefs.length === 0) return false;
+    if (
+      context.layout.readingOrderRefs.length !==
+      context.layout.visualOrderRefs.length
+    ) {
+      return true;
+    }
+    return context.layout.readingOrderRefs.some(
+      (ref, index) => context.layout.visualOrderRefs[index] !== ref,
+    );
   }
 
   private getRiskPenalty(command: ReviewAssistanceCommand): number {

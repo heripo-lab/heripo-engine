@@ -116,7 +116,7 @@ describe('ReviewAssistanceValidator', () => {
       textRef: '#/texts/0',
       text: 'Test',
     });
-    expect(decision.reasons).toContain('below_auto_apply_threshold');
+    expect(decision.reasons).toContain('auto_apply_disabled');
     expect(decision.evidence?.suspectReasons).toContain('ocr_noise');
   });
 
@@ -161,6 +161,181 @@ describe('ReviewAssistanceValidator', () => {
     );
 
     expect(decision.disposition).toBe('auto_applied');
+  });
+
+  test('defers high-confidence structural commands to manual review', () => {
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'replaceTable',
+            targetRef: '#/tables/0',
+            payload: { grid: [[{ text: 'A' }]] },
+            confidence: 0.95,
+            rationale: 'Visible table differs',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.disposition).toBe('proposal');
+    expect(decision.reasons).toContain(
+      'structural_command_requires_manual_review',
+    );
+  });
+
+  test('auto-applies addText, updateBbox, linkFootnote, and moveNode only with deterministic gates', () => {
+    const context = makeContext();
+    context.missingTextCandidates = [
+      {
+        text: 'Missing line',
+        source: 'text_layer',
+        reason: 'unmatched_text_layer_block',
+      },
+    ];
+    context.layout.bboxWarnings = [
+      { targetRef: '#/texts/0', reason: 'bbox_outside_page' },
+    ];
+    context.layout.visualOrderRefs = [
+      '#/tables/0',
+      '#/texts/0',
+      '#/pictures/0',
+    ];
+    context.footnotes = [
+      { ref: '#/texts/1', text: '1) Footnote', marker: '1)', bbox },
+    ];
+
+    const commands: ReviewAssistanceRawCommand[] = [
+      {
+        op: 'addText',
+        targetRef: null,
+        payload: { bbox, text: 'Missing line', label: 'text' },
+        confidence: 0.95,
+        rationale: 'Missing text is present in text layer',
+        evidence: null,
+      },
+      {
+        op: 'updateBbox',
+        targetRef: '#/texts/0',
+        payload: { bbox },
+        confidence: 0.95,
+        rationale: 'Bbox warning matches',
+        evidence: null,
+      },
+      {
+        op: 'linkFootnote',
+        targetRef: null,
+        payload: { markerTextRef: '#/texts/0', footnoteTextRef: '#/texts/1' },
+        confidence: 0.95,
+        rationale: 'Footnote candidate',
+        evidence: null,
+      },
+      {
+        op: 'moveNode',
+        targetRef: '#/texts/0',
+        payload: { targetRef: '#/tables/0', position: 'after' },
+        confidence: 0.95,
+        rationale: 'Reading order mismatch',
+        evidence: null,
+      },
+    ];
+
+    const decisions = commands.map(
+      (command) =>
+        new ReviewAssistanceValidator().validatePageOutput(
+          context,
+          { pageNo: 1, commands: [command], pageNotes: [] },
+          {
+            autoApplyThreshold: 0.85,
+            proposalThreshold: 0.5,
+            allowAutoApply: true,
+          },
+        )[0],
+    );
+
+    expect(decisions.map((decision) => decision.disposition)).toEqual([
+      'auto_applied',
+      'auto_applied',
+      'auto_applied',
+      'auto_applied',
+    ]);
+  });
+
+  test('records auto-apply gate reasons for otherwise valid commands', () => {
+    const commands: ReviewAssistanceRawCommand[] = [
+      {
+        op: 'addText',
+        targetRef: null,
+        payload: {
+          bbox,
+          text: 'Unmatched by deterministic text layer',
+          label: 'text',
+        },
+        confidence: 0.95,
+        rationale: 'Visible text',
+        evidence: null,
+      },
+      {
+        op: 'updateBbox',
+        targetRef: '#/texts/0',
+        payload: { bbox },
+        confidence: 0.95,
+        rationale: 'Bbox update',
+        evidence: null,
+      },
+      {
+        op: 'linkFootnote',
+        targetRef: null,
+        payload: { markerTextRef: '#/texts/0', footnoteTextRef: '#/texts/1' },
+        confidence: 0.95,
+        rationale: 'Footnote link',
+        evidence: null,
+      },
+      {
+        op: 'moveNode',
+        targetRef: '#/texts/0',
+        payload: { targetRef: '#/tables/0', position: 'after' },
+        confidence: 0.95,
+        rationale: 'Reading order',
+        evidence: null,
+      },
+    ];
+
+    const decisions = commands.map(
+      (command) =>
+        new ReviewAssistanceValidator().validatePageOutput(
+          makeContext(),
+          { pageNo: 1, commands: [command], pageNotes: [] },
+          {
+            autoApplyThreshold: 0.85,
+            proposalThreshold: 0.5,
+            allowAutoApply: true,
+          },
+        )[0],
+    );
+    const reasons = decisions.map((decision) => decision.reasons.at(-1));
+
+    expect(decisions.map((decision) => decision.disposition)).toEqual([
+      'proposal',
+      'proposal',
+      'proposal',
+      'proposal',
+    ]);
+    expect(reasons).toEqual([
+      'add_text_requires_missing_text_candidate',
+      'update_bbox_requires_bbox_warning',
+      'link_footnote_requires_footnote_candidate',
+      'move_node_requires_reading_order_mismatch',
+    ]);
   });
 
   test('skips commands that target unknown refs', () => {
@@ -800,6 +975,64 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.disposition).toBe('skipped');
   });
 
+  test('keeps valid commands as proposals below the auto-apply threshold', () => {
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'updateTextRole',
+            targetRef: '#/texts/0',
+            payload: { label: 'caption' },
+            confidence: 0.7,
+            rationale: 'Plausible caption',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.disposition).toBe('proposal');
+    expect(decision.reasons).toContain('below_auto_apply_threshold');
+  });
+
+  test('allows moveNode auto-apply when visual and reading order lengths differ', () => {
+    const context = makeContext();
+    context.layout.visualOrderRefs = ['#/tables/0'];
+
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      context,
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'moveNode',
+            targetRef: '#/texts/0',
+            payload: { targetRef: '#/tables/0', position: 'after' },
+            confidence: 0.95,
+            rationale: 'Reading order mismatch',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.disposition).toBe('auto_applied');
+  });
+
   test('detects command conflicts and additional ref/bbox edge cases', () => {
     const noPageSize = makeContext();
     noPageSize.pageSize = null;
@@ -946,6 +1179,21 @@ describe('ReviewAssistanceValidator', () => {
         rawCommand: ReviewAssistanceRawCommand,
         command?: undefined,
       ) => number;
+      buildReasons: (
+        rawCommand: ReviewAssistanceRawCommand,
+        validationReasons: string[],
+        disposition: 'proposal',
+        options: {
+          autoApplyEnabled: boolean;
+          belowAutoApplyThreshold: boolean;
+          autoApplyBlockReason?: string;
+        },
+      ) => string[];
+      getAutoApplyBlockReason: (
+        context: PageReviewContext,
+        command?: undefined,
+      ) => string | undefined;
+      hasReadingOrderMismatch: (context: PageReviewContext) => boolean;
       getRiskPenalty: (command: any) => number;
       iou: (a: DoclingBBox, b: DoclingBBox) => number;
     };
@@ -1046,6 +1294,30 @@ describe('ReviewAssistanceValidator', () => {
         undefined,
       ),
     ).toBe(0.42);
+    expect(
+      validator.buildReasons(
+        {
+          op: 'replaceText',
+          targetRef: '#/texts/0',
+          payload: { text: 'A' },
+          confidence: 0.9,
+          rationale: 'manual proposal',
+          evidence: null,
+        },
+        [],
+        'proposal',
+        {
+          autoApplyEnabled: true,
+          belowAutoApplyThreshold: false,
+        },
+      ),
+    ).toEqual(['manual proposal']);
+    expect(validator.getAutoApplyBlockReason(makeContext(), undefined)).toBe(
+      'auto_apply_requires_valid_command',
+    );
+    const emptyOrderContext = makeContext();
+    emptyOrderContext.layout.readingOrderRefs = [];
+    expect(validator.hasReadingOrderMismatch(emptyOrderContext)).toBe(false);
     expect(
       validator.iou(bbox, {
         l: 200,
