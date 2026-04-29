@@ -78,6 +78,23 @@ describe('VlmConversionPipeline', () => {
       );
     });
 
+    test('returns original callback and skips legacy correction when Review Assistance is enabled', () => {
+      const originalCallback = vi.fn();
+
+      const wrapped = pipeline.wrapCallback(
+        '/tmp/test.pdf',
+        { reviewAssistance: true },
+        originalCallback,
+      );
+
+      expect(wrapped).toBe(originalCallback);
+      expect(VlmTextCorrector).not.toHaveBeenCalled();
+      expect(PdfTextExtractor).not.toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith(
+        '[VlmConversionPipeline] Review Assistance enabled; legacy VLM text correction skipped',
+      );
+    });
+
     test('returns a callback function', () => {
       const wrapped = pipeline.wrapCallback(
         '/tmp/test.pdf',

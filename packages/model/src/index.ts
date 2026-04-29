@@ -17,4 +17,5 @@ export type * from './types/docling-document';
 export type * from './types/document-process-result';
 export type * from './types/ocr-strategy';
 export type * from './types/processed-document';
+export type * from './types/review-assistance';
 export type * from './types/token-usage-report';

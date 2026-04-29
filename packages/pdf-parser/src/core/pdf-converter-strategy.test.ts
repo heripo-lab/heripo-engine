@@ -254,6 +254,40 @@ describe('PDFConverter.convertWithStrategy', () => {
       convertSpy.mockRestore();
     });
 
+    test('skips legacy VLM text correction when Review Assistance is enabled', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          forcedMethod: 'vlm',
+          reviewAssistance: true,
+        },
+      );
+
+      expect(VlmConversionPipeline).not.toHaveBeenCalled();
+      expect(mockWrapCallback).not.toHaveBeenCalled();
+      expect(convertSpy).toHaveBeenCalledWith(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        expect.objectContaining({
+          forcedMethod: 'vlm',
+          reviewAssistance: true,
+        }),
+        undefined,
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        '[PDFConverter] Review Assistance enabled; skipping legacy VLM text correction',
+      );
+
+      convertSpy.mockRestore();
+    });
+
     test('throws error when URL is not a local file', async () => {
       mockResolve.mockResolvedValue({
         method: 'vlm',
@@ -548,6 +582,24 @@ describe('PDFConverter.convertWithStrategy', () => {
 
       expect(logger.info).toHaveBeenCalledWith(
         '[PDFConverter] VLM conversion completed successfully',
+      );
+
+      convertSpy.mockRestore();
+    });
+
+    test('logs Review Assistance for ocrmac strategy', async () => {
+      const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
+
+      await converter.convertWithStrategy(
+        'file:///tmp/test.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        { forcedMethod: 'ocrmac', reviewAssistance: true },
+      );
+
+      expect(logger.info).toHaveBeenCalledWith(
+        '[PDFConverter] Review Assistance enabled for ocrmac strategy',
       );
 
       convertSpy.mockRestore();

@@ -1,6 +1,6 @@
 import type { LoggerMethods } from '@heripo/logger';
 
-import type { ExtendedTokenUsage } from './llm-caller';
+import type { ExtendedTokenUsage, TokenUsageMetadata } from './llm-caller';
 
 /**
  * Token usage totals
@@ -46,6 +46,7 @@ interface ComponentAggregate {
         outputTokens: number;
         totalTokens: number;
       };
+      metadata: TokenUsageMetadata[];
     }
   >;
   total: {
@@ -137,10 +138,14 @@ export class LLMTokenUsageAggregator {
           outputTokens: 0,
           totalTokens: 0,
         },
+        metadata: [],
       };
     }
 
     const phase = component.phases[usage.phase];
+    if (usage.metadata) {
+      phase.metadata.push(usage.metadata);
+    }
 
     // Track by model type
     if (usage.model === 'primary') {
@@ -222,6 +227,7 @@ export class LLMTokenUsageAggregator {
           outputTokens: number;
           totalTokens: number;
         };
+        metadata?: TokenUsageMetadata[];
       }>;
       total: {
         inputTokens: number;
@@ -280,6 +286,7 @@ export class LLMTokenUsageAggregator {
           outputTokens: number;
           totalTokens: number;
         };
+        metadata?: TokenUsageMetadata[];
       }> = [];
 
       for (const [phaseName, phaseData] of Object.entries(component.phases)) {
@@ -302,6 +309,7 @@ export class LLMTokenUsageAggregator {
             outputTokens: number;
             totalTokens: number;
           };
+          metadata?: TokenUsageMetadata[];
         } = {
           phase: phaseName,
           total: {
@@ -310,6 +318,10 @@ export class LLMTokenUsageAggregator {
             totalTokens: phaseData.total.totalTokens,
           },
         };
+
+        if (phaseData.metadata.length > 0) {
+          phaseReport.metadata = [...phaseData.metadata];
+        }
 
         if (phaseData.primary) {
           phaseReport.primary = {

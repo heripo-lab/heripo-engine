@@ -12,6 +12,11 @@ import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { DoclingConversionExecutor } from './docling-conversion-executor';
 import { ImagePdfConverter } from './image-pdf-converter';
+import {
+  type ReviewAssistanceOptions,
+  type ReviewAssistanceProgressEvent,
+  normalizeReviewAssistanceOptions,
+} from './review-assistance-options';
 import { StrategyResolver } from './strategy-resolver';
 import { VlmConversionPipeline } from './vlm-conversion-pipeline';
 
@@ -53,6 +58,13 @@ export type PDFConvertOptions = Omit<
   vlmProcessorModel?: LanguageModel;
   /** Concurrency for VLM page processing (default: 1) */
   vlmConcurrency?: number;
+  /**
+   * Optional page-level review assistance.
+   * Boolean true enables defaults; object form still requires enabled: true.
+   */
+  reviewAssistance?: boolean | ReviewAssistanceOptions;
+  /** Top-level alias for reviewAssistance.concurrency. */
+  reviewAssistanceConcurrency?: number;
   /** Skip sampling and default to ocrmac */
   skipSampling?: boolean;
   /** Force a specific OCR method, bypassing sampling */
@@ -61,6 +73,8 @@ export type PDFConvertOptions = Omit<
   aggregator?: LLMTokenUsageAggregator;
   /** Callback fired after each batch of VLM pages completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
+  /** Callback fired when Review Assistance advances through parser substages */
+  onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void;
   /** Document processing timeout in seconds for the Docling server (default: server default) */
   document_timeout?: number;
   /** Enable chunked conversion for large PDFs (local files only) */
@@ -216,6 +230,10 @@ export class PDFConverter {
     // sampling + VLM processing token usage is always captured.
     const aggregator = options.aggregator ?? new LLMTokenUsageAggregator();
     const trackedOptions: PDFConvertOptions = { ...options, aggregator };
+    const reviewAssistanceOptions = normalizeReviewAssistanceOptions(
+      trackedOptions.reviewAssistance,
+      trackedOptions.reviewAssistanceConcurrency,
+    );
 
     const pdfPath = url.startsWith('file://') ? url.slice(7) : null;
 
@@ -248,15 +266,22 @@ export class PDFConverter {
         throw new Error('VLM conversion requires a local file (file:// URL)');
       }
 
-      const pipeline = new VlmConversionPipeline(this.logger);
-      const wrappedCallback = pipeline.wrapCallback(
-        pdfPath,
-        trackedOptions,
-        onComplete,
-        abortSignal,
-        strategy.detectedLanguages,
-        strategy.koreanHanjaMixPages,
-      );
+      const wrappedCallback = reviewAssistanceOptions.enabled
+        ? onComplete
+        : new VlmConversionPipeline(this.logger).wrapCallback(
+            pdfPath,
+            trackedOptions,
+            onComplete,
+            abortSignal,
+            strategy.detectedLanguages,
+            strategy.koreanHanjaMixPages,
+          );
+
+      if (reviewAssistanceOptions.enabled) {
+        this.logger.info(
+          '[PDFConverter] Review Assistance enabled; skipping legacy VLM text correction',
+        );
+      }
 
       const vlmOptions: PDFConvertOptions = strategy.detectedLanguages
         ? { ...trackedOptions, ocr_lang: strategy.detectedLanguages }
@@ -278,6 +303,11 @@ export class PDFConverter {
     }
 
     // ocrmac path: delegate to existing Docling conversion
+    if (reviewAssistanceOptions.enabled) {
+      this.logger.info(
+        '[PDFConverter] Review Assistance enabled for ocrmac strategy',
+      );
+    }
     const ocrmacOptions: PDFConvertOptions = strategy.detectedLanguages
       ? { ...trackedOptions, ocr_lang: strategy.detectedLanguages }
       : trackedOptions;
