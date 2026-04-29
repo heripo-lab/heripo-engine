@@ -116,9 +116,7 @@ describe('ReviewAssistanceValidator', () => {
       textRef: '#/texts/0',
       text: 'Test',
     });
-    expect(decision.reasons).toContain(
-      'auto_apply_deferred_until_patcher_phase',
-    );
+    expect(decision.reasons).toContain('below_auto_apply_threshold');
     expect(decision.evidence?.suspectReasons).toContain('ocr_noise');
   });
 

@@ -15,7 +15,7 @@ import type { NormalizedReviewAssistanceOptions } from '../../core/review-assist
 import type { PageReviewContext } from './page-review-context-builder';
 
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
-import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -26,6 +26,7 @@ import {
 } from '../../types/review-assistance-schema';
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
+import { ReviewAssistancePatcher } from './review-assistance-patcher';
 import { ReviewAssistanceValidator } from './review-assistance-validator';
 
 export interface ReviewAssistanceRunnerOptions extends NormalizedReviewAssistanceOptions {
@@ -54,8 +55,17 @@ export class ReviewAssistanceRunner {
     });
 
     const resultPath = join(outputDir, 'result.json');
-    const doc: DoclingDocument = JSON.parse(readFileSync(resultPath, 'utf-8'));
-    copyFileSync(resultPath, join(outputDir, 'result_review_origin.json'));
+    const ocrOriginPath = join(outputDir, 'result_ocr_origin.json');
+    const reviewOriginPath = join(outputDir, 'result_review_origin.json');
+    if (!existsSync(reviewOriginPath)) {
+      copyFileSync(resultPath, reviewOriginPath);
+    }
+    if (!existsSync(ocrOriginPath)) {
+      copyFileSync(reviewOriginPath, ocrOriginPath);
+    }
+    const doc: DoclingDocument = JSON.parse(
+      readFileSync(reviewOriginPath, 'utf-8'),
+    );
     const pageTexts =
       options.pageTexts ??
       (await this.extractPageTexts(
@@ -113,7 +123,42 @@ export class ReviewAssistanceRunner {
       },
     );
 
-    const report = this.buildReport(reportId, options, pageResults);
+    this.emitProgress(options, {
+      substage: 'review-assistance:patch',
+      status: 'started',
+      reportId,
+      pageCount: contexts.length,
+    });
+    const patcher = new ReviewAssistancePatcher(this.logger);
+    const patched = await patcher.apply(doc, pageResults, {
+      outputDir,
+      contexts,
+    });
+    writeFileSync(resultPath, JSON.stringify(patched.doc, null, 2));
+    this.emitProgress(options, {
+      substage: 'review-assistance:patch',
+      status: 'completed',
+      reportId,
+      pageCount: contexts.length,
+      autoAppliedCount: patched.pages.reduce(
+        (sum, page) =>
+          sum +
+          page.decisions.filter(
+            (decision) => decision.disposition === 'auto_applied',
+          ).length,
+        0,
+      ),
+      proposalCount: patched.pages.reduce(
+        (sum, page) =>
+          sum +
+          page.decisions.filter(
+            (decision) => decision.disposition === 'proposal',
+          ).length,
+        0,
+      ),
+    });
+
+    const report = this.buildReport(reportId, options, patched.pages);
     this.emitProgress(options, {
       substage: 'review-assistance:write-report',
       status: 'started',
@@ -208,7 +253,7 @@ export class ReviewAssistanceRunner {
       const decisions = validator.validatePageOutput(context, output, {
         autoApplyThreshold: options.autoApplyThreshold,
         proposalThreshold: options.proposalThreshold,
-        allowAutoApply: false,
+        allowAutoApply: true,
       });
 
       return {
@@ -286,6 +331,7 @@ export class ReviewAssistanceRunner {
       reportId,
       source: {
         doclingResult: 'result.json',
+        ocrOriginSnapshot: 'result_ocr_origin.json',
         originSnapshot: 'result_review_origin.json',
       },
       options: {

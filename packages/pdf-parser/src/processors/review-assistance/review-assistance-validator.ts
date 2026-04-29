@@ -14,6 +14,8 @@ import type {
 } from '../../types/review-assistance-schema';
 import type { PageReviewContext } from './page-review-context-builder';
 
+import { createHash } from 'node:crypto';
+
 export interface ReviewAssistanceValidatorOptions {
   autoApplyThreshold: number;
   proposalThreshold: number;
@@ -31,7 +33,7 @@ export class ReviewAssistanceValidator {
     const pageReasons =
       output.pageNo === context.pageNo ? [] : ['page_number_mismatch'];
 
-    return output.commands.map((rawCommand, index) => {
+    return output.commands.map((rawCommand) => {
       const validation = this.validateCommand(
         context,
         rawCommand,
@@ -50,7 +52,11 @@ export class ReviewAssistanceValidator {
       }
 
       return {
-        id: `ra-${context.pageNo}-${index + 1}`,
+        id: this.buildDecisionId(
+          context.pageNo,
+          rawCommand,
+          validation.command,
+        ),
         pageNo: context.pageNo,
         command: validation.command,
         invalidOp: validation.command ? undefined : rawCommand.op,
@@ -432,7 +438,10 @@ export class ReviewAssistanceValidator {
       ...(rawCommand.evidence ? [`evidence: ${rawCommand.evidence}`] : []),
     ].filter(Boolean);
     if (disposition === 'proposal') {
-      reasons.push('auto_apply_deferred_until_patcher_phase');
+      reasons.push('below_auto_apply_threshold');
+    }
+    if (disposition === 'auto_applied') {
+      reasons.push('auto_apply_pending_patcher_phase');
     }
     return reasons;
   }
@@ -748,10 +757,6 @@ export class ReviewAssistanceValidator {
     }
   }
 
-  // TODO(Phase C): before flipping `allowAutoApply` to true, add op-specific
-  // gates required by plan A.3/B.5: splitPicture min-edge, linkContinuedTable
-  // column/header compatibility, replaceTable cell-shrink ratio, addText image
-  // evidence presence, mergeTexts/splitText text-layer adjacency.
   private getRiskPenalty(command: ReviewAssistanceCommand): number {
     switch (command.op) {
       case 'removeText':
@@ -888,6 +893,42 @@ export class ReviewAssistanceValidator {
       if (text === undefined) return [];
       return [{ text, label: this.stringValue(record.label) }];
     });
+  }
+
+  private buildDecisionId(
+    pageNo: number,
+    rawCommand: ReviewAssistanceRawCommand,
+    command?: ReviewAssistanceCommand,
+  ): string {
+    const hash = createHash('sha1')
+      .update(
+        this.stableStringify({
+          pageNo,
+          op: rawCommand.op,
+          targetRef: rawCommand.targetRef,
+          payload: rawCommand.payload,
+          command,
+        }),
+      )
+      .digest('hex')
+      .slice(0, 12);
+    return `ra-${pageNo}-${hash}`;
+  }
+
+  private stableStringify(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((entry) => this.stableStringify(entry)).join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+      return `{${Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(
+          ([key, entry]) =>
+            `${JSON.stringify(key)}:${this.stableStringify(entry)}`,
+        )
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
   }
 }
 

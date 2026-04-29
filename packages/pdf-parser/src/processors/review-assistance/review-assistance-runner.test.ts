@@ -175,7 +175,8 @@ describe('ReviewAssistanceRunner', () => {
     expect(report.summary).toMatchObject({
       pageCount: 1,
       pagesSucceeded: 1,
-      proposalCount: 1,
+      autoAppliedCount: 1,
+      proposalCount: 0,
       skippedCount: 0,
     });
     expect(LLMCaller.callVision).toHaveBeenCalledWith(
@@ -202,11 +203,13 @@ describe('ReviewAssistanceRunner', () => {
       readFileSync(join(outputDir, 'review_assistance.json'), 'utf-8'),
     );
     expect(sidecar.source.originSnapshot).toBe('result_review_origin.json');
+    expect(sidecar.source.ocrOriginSnapshot).toBe('result_ocr_origin.json');
     expect(sidecar.pages[0].decisions[0].command).toEqual({
       op: 'replaceText',
       textRef: '#/texts/0',
       text: 'Test',
     });
+    expect(sidecar.pages[0].decisions[0].disposition).toBe('auto_applied');
     expect(sidecar.pages[0].issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -218,7 +221,20 @@ describe('ReviewAssistanceRunner', () => {
         }),
       ]),
     );
+    const patchedDoc = JSON.parse(
+      readFileSync(join(outputDir, 'result.json'), 'utf-8'),
+    );
+    const originDoc = JSON.parse(
+      readFileSync(join(outputDir, 'result_review_origin.json'), 'utf-8'),
+    );
+    const ocrOriginDoc = JSON.parse(
+      readFileSync(join(outputDir, 'result_ocr_origin.json'), 'utf-8'),
+    );
+    expect(patchedDoc.texts[0].text).toBe('Test');
+    expect(originDoc.texts[0].text).toBe('T e s t');
+    expect(ocrOriginDoc.texts[0].text).toBe('T e s t');
     expect(existsSync(join(outputDir, 'result_review_origin.json'))).toBe(true);
+    expect(existsSync(join(outputDir, 'result_ocr_origin.json'))).toBe(true);
   });
 
   test('extracts text reference when pdfPath is provided', async () => {
@@ -238,6 +254,51 @@ describe('ReviewAssistanceRunner', () => {
     });
 
     expect(mockExtractText).toHaveBeenCalledWith('/tmp/input.pdf', 1);
+  });
+
+  test('keeps existing origin snapshots when rerun in the same output directory', async () => {
+    const reviewOrigin = makeDoc();
+    reviewOrigin.texts[0].text = 'Existing review origin';
+    const ocrOrigin = makeDoc();
+    ocrOrigin.texts[0].text = 'Existing OCR origin';
+    writeFileSync(
+      join(outputDir, 'result_review_origin.json'),
+      JSON.stringify(reviewOrigin),
+    );
+    writeFileSync(
+      join(outputDir, 'result_ocr_origin.json'),
+      JSON.stringify(ocrOrigin),
+    );
+    vi.mocked(LLMCaller.callVision).mockResolvedValue({
+      output: { pageNo: 1, commands: [], pageNotes: [] },
+      usage,
+      usedFallback: false,
+    });
+
+    await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
+      enabled: true,
+      concurrency: 1,
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      maxRetries: 3,
+      temperature: 0,
+    });
+
+    expect(
+      JSON.parse(
+        readFileSync(join(outputDir, 'result_review_origin.json'), 'utf-8'),
+      ).texts[0].text,
+    ).toBe('Existing review origin');
+    expect(
+      JSON.parse(
+        readFileSync(join(outputDir, 'result_ocr_origin.json'), 'utf-8'),
+      ).texts[0].text,
+    ).toBe('Existing OCR origin');
   });
 
   test('continues without text reference when pdftotext extraction fails', async () => {

@@ -126,6 +126,9 @@ export interface ReviewAssistanceDecisionEvidence {
   imageEvidence?: string;
   textLayerEvidence?: string;
   suspectReasons?: string[];
+  previousBbox?: DoclingBBox;
+  snappedBbox?: DoclingBBox;
+  generatedRefs?: string[];
 }
 
 export interface ReviewAssistanceDecision {
@@ -139,6 +142,7 @@ export interface ReviewAssistanceDecision {
   disposition: ReviewAssistanceDisposition;
   reasons: string[];
   evidence?: ReviewAssistanceDecisionEvidence;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ReviewAssistanceIssue {
@@ -171,6 +175,7 @@ export interface ReviewAssistanceReport {
   reportId: string;
   source: {
     doclingResult: 'result.json';
+    ocrOriginSnapshot?: 'result_ocr_origin.json';
     originSnapshot?: 'result_review_origin.json';
   };
   options: {
