@@ -352,9 +352,7 @@ export class ReviewAssistanceValidator {
         this.validateTableGrid(command.grid, reasons);
         break;
       case 'linkContinuedTable':
-        this.validateTableRef(command.sourceTableRef, refs, reasons, {
-          allowAdjacent: true,
-        });
+        this.validateTableRef(command.sourceTableRef, refs, reasons);
         this.validateTableRef(command.continuedTableRef, refs, reasons, {
           allowAdjacent: true,
         });
@@ -538,7 +536,7 @@ export class ReviewAssistanceValidator {
       return refs.tables.has(ref);
     }
     if (command.op === 'linkContinuedTable') {
-      return this.tableRefExists(ref, refs, { allowAdjacent: true });
+      return refs.tables.has(ref);
     }
     if (
       command.op === 'updatePictureCaption' ||

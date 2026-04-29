@@ -290,6 +290,36 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.reasons).not.toContain('table_ref_not_found');
   });
 
+  test('requires continued-table source ref to belong to the current page', () => {
+    const context = makeContext();
+    context.tables = [
+      {
+        ref: '#/tables/0',
+        bbox,
+        gridPreview: [['A', 'B']],
+        emptyCellRatio: 0,
+        nextPageTableRefs: ['#/tables/99'],
+        suspectReasons: ['multi_page_table_candidate'],
+      },
+    ];
+
+    const decision = validateWithContext(context, {
+      op: 'linkContinuedTable',
+      targetRef: '#/tables/99',
+      payload: {
+        continuedTableRef: '#/tables/0',
+        relation: 'continued_from_previous_page',
+      },
+      confidence: 0.95,
+      rationale: 'Wrong source ref',
+      evidence: null,
+    });
+
+    expect(decision.disposition).toBe('skipped');
+    expect(decision.reasons).toContain('target_ref_not_found');
+    expect(decision.reasons).toContain('table_ref_not_found');
+  });
+
   test('maps every supported command operation', () => {
     const commands: ReviewAssistanceRawCommand[] = [
       {

@@ -169,7 +169,7 @@ describe('ReviewAssistanceRunner', () => {
       aggregator,
       onTokenUsage,
       onProgress,
-      pageTexts: new Map([[1, 'Test']]),
+      pageTexts: new Map([[1, 'Test\n\nMissing line']]),
     });
 
     expect(report.summary).toMatchObject({
@@ -207,6 +207,17 @@ describe('ReviewAssistanceRunner', () => {
       textRef: '#/texts/0',
       text: 'Test',
     });
+    expect(sidecar.pages[0].issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: 'text_integrity',
+          type: 'unmatched_text_layer_block',
+          description:
+            'Text layer block is missing from Docling text: Missing line',
+          reasons: ['unmatched_text_layer_block'],
+        }),
+      ]),
+    );
     expect(existsSync(join(outputDir, 'result_review_origin.json'))).toBe(true);
   });
 
