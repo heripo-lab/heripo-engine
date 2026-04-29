@@ -1077,7 +1077,13 @@ describe('ReviewAssistancePatcher', () => {
     const positionedDoc = makeDoc();
     positionedDoc.texts[2].prov = [];
     positionedDoc.body.children = [{ $ref: '#/texts/2' }];
-    patcher.insertByPagePosition(positionedDoc, '#/texts/404', 99, bbox);
+    patcher.insertByPagePosition(positionedDoc, '#/texts/404', 99, {
+      l: 10,
+      t: 90,
+      r: 90,
+      b: 50,
+      coord_origin: 'BOTTOMLEFT',
+    });
 
     const fallbackParentDoc = makeDoc();
     patcher.insertRef(
