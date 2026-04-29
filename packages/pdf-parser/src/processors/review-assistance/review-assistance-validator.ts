@@ -485,8 +485,12 @@ export class ReviewAssistanceValidator {
       case 'updateTextRole':
       case 'updateTableCell':
       case 'updatePictureCaption':
+        // Localized text/cell mutations: validation already guards against
+        // invalid refs and excessive deletion, so no extra block reason.
         return undefined;
       case 'removeText':
+        // validateRemoveText enforces deterministic suspect reasons before
+        // a removal is considered valid; no further block needed here.
         return undefined;
       case 'addText':
         return this.missingTextMatches(context, command.text)

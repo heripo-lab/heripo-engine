@@ -23,6 +23,10 @@ export interface OrphanCaptionResolution {
 const CAPTION_PATTERN =
   /^(?:fig(?:ure)?\.?|photo|plate|drawing|table|도면|사진|그림|삽도|표)\s*[\dⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ-]*[.)．:]?/iu;
 
+// Page-diagonal-normalized distance: 0.35 keeps captions within roughly the
+// closest third of the page from a candidate media element.
+const MAX_CANDIDATE_DISTANCE = 0.35;
+
 export class OrphanCaptionResolver {
   resolve(
     context: PageReviewContext,
@@ -69,7 +73,7 @@ export class OrphanCaptionResolver {
           this.bboxDistance(caption.bbox, target.bbox, context.pageSize),
       }))
       .sort((a, b) => a.distance - b.distance)
-      .find(({ distance }) => distance < 0.35)?.caption;
+      .find(({ distance }) => distance < MAX_CANDIDATE_DISTANCE)?.caption;
   }
 
   private scoreCandidate(

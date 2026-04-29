@@ -44,6 +44,13 @@ interface PatchMetadata {
   metadata?: Record<string, unknown>;
 }
 
+// Docling allows an optional inline image payload that is not part of the
+// shared DoclingPictureItem type; we keep the augmentation local to avoid
+// modifying the canonical Docling schema.
+type PictureWithImage = DoclingPictureItem & {
+  image?: { uri: string; mimetype: string };
+};
+
 const FURNITURE_LABELS = new Set(['page_header', 'page_footer']);
 
 export class ReviewAssistancePatcher {
@@ -53,7 +60,7 @@ export class ReviewAssistancePatcher {
 
   constructor(private readonly logger: LoggerMethods) {
     this.snapper = new ImageRegionSnapper(logger);
-    this.cropWriter = new ImageCropWriter(logger);
+    this.cropWriter = new ImageCropWriter(logger, this.snapper);
   }
 
   async apply(
@@ -304,6 +311,7 @@ export class ReviewAssistancePatcher {
     const text = this.resolveText(doc, command.textRef);
     if (!text) throw new Error('split_text_ref_not_found');
     const [first, ...rest] = command.parts;
+    const fallbackLabel = text.label;
     text.text = first.text;
     text.orig = first.text;
     if (first.label) {
@@ -325,7 +333,7 @@ export class ReviewAssistancePatcher {
         },
         {
           text: part.text,
-          label: part.label ?? text.label,
+          label: part.label ?? fallbackLabel,
           afterRef,
         },
       );
@@ -596,13 +604,16 @@ export class ReviewAssistancePatcher {
     const target = this.findContainer(doc, command.targetRef);
     if (!source || !target) throw new Error('move_ref_not_found');
     source.container.children.splice(source.index, 1);
-    const targetIndex = target.container.children.findIndex(
+    // Re-resolve target index after the source splice; same-container moves
+    // shift indices.
+    const targetContainer = target.container;
+    const targetIndex = targetContainer.children.findIndex(
       (child) => child.$ref === command.targetRef,
     );
     const insertAt =
       command.position === 'before' ? targetIndex : targetIndex + 1;
-    target.container.children.splice(insertAt, 0, { $ref: command.sourceRef });
-    this.setParent(doc, command.sourceRef, target.container.self_ref);
+    targetContainer.children.splice(insertAt, 0, { $ref: command.sourceRef });
+    this.setParent(doc, command.sourceRef, targetContainer.self_ref);
   }
 
   private buildTableData(
@@ -650,9 +661,7 @@ export class ReviewAssistancePatcher {
     if (existing) return existing;
 
     const ref = `#/pictures/${doc.pictures.length}`;
-    const picture: DoclingPictureItem & {
-      image?: { uri: string; mimetype: string };
-    } = {
+    const picture: PictureWithImage = {
       self_ref: ref,
       parent: { $ref: '#/body' },
       children: [],
@@ -707,6 +716,7 @@ export class ReviewAssistancePatcher {
         ref,
       );
     }
+    sourcePicture.captions = [];
     return captionRefs;
   }
 
@@ -1005,10 +1015,9 @@ export class ReviewAssistancePatcher {
     doc: DoclingDocument,
     imageUri: string,
   ): string | undefined {
-    const index = doc.pictures.findIndex((picture) => {
-      const image = (picture as unknown as { image?: { uri?: string } }).image;
-      return image?.uri === imageUri;
-    });
+    const index = doc.pictures.findIndex(
+      (picture) => (picture as PictureWithImage).image?.uri === imageUri,
+    );
     return index >= 0 ? `#/pictures/${index}` : undefined;
   }
 
@@ -1026,8 +1035,12 @@ export class ReviewAssistancePatcher {
     bbox: DoclingBBox,
     pageSize: { width: number; height: number } | null,
   ): number {
-    if (bbox.coord_origin === 'BOTTOMLEFT' && pageSize) {
-      return pageSize.height - Math.max(bbox.t, bbox.b);
+    if (bbox.coord_origin === 'BOTTOMLEFT') {
+      // In BOTTOMLEFT, larger y is higher on the page; without pageSize we
+      // cannot translate to pixel-top, so order by inverted max(t,b).
+      return pageSize
+        ? pageSize.height - Math.max(bbox.t, bbox.b)
+        : -Math.max(bbox.t, bbox.b);
     }
     return Math.min(bbox.t, bbox.b);
   }

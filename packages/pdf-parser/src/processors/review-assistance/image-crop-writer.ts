@@ -26,8 +26,11 @@ export interface ImageCropWriteResult {
 export class ImageCropWriter {
   private readonly snapper: ImageRegionSnapper;
 
-  constructor(private readonly logger: LoggerMethods) {
-    this.snapper = new ImageRegionSnapper(logger);
+  constructor(
+    private readonly logger: LoggerMethods,
+    snapper?: ImageRegionSnapper,
+  ) {
+    this.snapper = snapper ?? new ImageRegionSnapper(logger);
   }
 
   async writeCrop(input: ImageCropWriteInput): Promise<ImageCropWriteResult> {
