@@ -515,6 +515,7 @@ export class PageReviewContextBuilder {
     facts: DocumentFacts,
   ): PageReviewPicture {
     const caption = this.resolveCaptionRefs(item.captions, facts);
+    const image = (item as unknown as { image?: { uri?: string } }).image;
     const suspectReasons = caption ? [] : ['image_missing_caption'];
     const bbox = this.getProvForPage(item.prov, pageNo)?.bbox;
     if (bbox && this.isLargePictureBbox(bbox)) {
@@ -523,7 +524,7 @@ export class PageReviewContextBuilder {
     return {
       ref: `#/pictures/${index}`,
       caption,
-      imageUri: item.image?.uri,
+      imageUri: image?.uri,
       bbox,
       suspectReasons,
     };

@@ -674,6 +674,18 @@ describe('ReviewAssistanceValidator', () => {
         evidence: null,
       },
       {
+        op: 'mergeTexts',
+        targetRef: '#/texts/0',
+        payload: {
+          textRefs: ['#/texts/0', '#/texts/1'],
+          text: 'Merged',
+          keepRef: '#/texts/99',
+        },
+        confidence: 0.99,
+        rationale: 'bad keep ref',
+        evidence: null,
+      },
+      {
         op: 'addPicture',
         targetRef: null,
         payload: {
@@ -765,6 +777,7 @@ describe('ReviewAssistanceValidator', () => {
     expect(reasons).toContain('bbox_non_finite');
     expect(reasons).toContain('bbox_outside_page');
     expect(reasons).toContain('split_text_parts_do_not_match_original_length');
+    expect(reasons).toContain('merge_keep_ref_not_in_text_refs');
     expect(reasons).toContain('table_cell_negative_index');
     expect(reasons).toContain('table_cell_out_of_preview_range');
     expect(reasons).toContain('caption_empty');
