@@ -503,9 +503,9 @@ export class ReviewAssistanceValidator {
           ? undefined
           : 'link_footnote_requires_footnote_candidate';
       case 'moveNode':
-        return this.hasReadingOrderMismatch(context)
+        return this.moveNodeImprovesReadingOrder(context, command)
           ? undefined
-          : 'move_node_requires_reading_order_mismatch';
+          : 'move_node_requires_visual_order_improvement';
       case 'addPicture':
       case 'splitPicture':
       case 'hidePicture':
@@ -856,6 +856,50 @@ export class ReviewAssistanceValidator {
     return context.layout.readingOrderRefs.some(
       (ref, index) => context.layout.visualOrderRefs[index] !== ref,
     );
+  }
+
+  private moveNodeImprovesReadingOrder(
+    context: PageReviewContext,
+    command: Extract<ReviewAssistanceCommand, { op: 'moveNode' }>,
+  ): boolean {
+    if (!this.hasReadingOrderMismatch(context)) return false;
+    const movedRefs = this.moveOrderRefs(
+      context.layout.readingOrderRefs,
+      command,
+    );
+    if (!movedRefs) return false;
+    return (
+      this.orderMismatchScore(movedRefs, context.layout.visualOrderRefs) <
+      this.orderMismatchScore(
+        context.layout.readingOrderRefs,
+        context.layout.visualOrderRefs,
+      )
+    );
+  }
+
+  private moveOrderRefs(
+    refs: string[],
+    command: Extract<ReviewAssistanceCommand, { op: 'moveNode' }>,
+  ): string[] | undefined {
+    const sourceIndex = refs.indexOf(command.sourceRef);
+    const targetIndex = refs.indexOf(command.targetRef);
+    if (sourceIndex < 0 || targetIndex < 0) return undefined;
+
+    const movedRefs = refs.filter((ref) => ref !== command.sourceRef);
+    const movedTargetIndex = movedRefs.indexOf(command.targetRef);
+    const insertAt =
+      command.position === 'before' ? movedTargetIndex : movedTargetIndex + 1;
+    movedRefs.splice(insertAt, 0, command.sourceRef);
+    return movedRefs;
+  }
+
+  private orderMismatchScore(actual: string[], expected: string[]): number {
+    let score = 0;
+    const length = Math.max(actual.length, expected.length);
+    for (let index = 0; index < length; index++) {
+      if (actual[index] !== expected[index]) score++;
+    }
+    return score;
   }
 
   private getRiskPenalty(command: ReviewAssistanceCommand): number {

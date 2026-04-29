@@ -2,7 +2,7 @@ import type { LoggerMethods } from '@heripo/logger';
 import type { DoclingBBox } from '@heripo/model';
 
 import { spawnAsync } from '@heripo/shared';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ImageRegionSnapper } from './image-region-snapper';
@@ -20,6 +20,7 @@ export interface ImageCropWriteInput {
 export interface ImageCropWriteResult {
   imageUri: string;
   outputPath: string;
+  created: boolean;
 }
 
 export class ImageCropWriter {
@@ -39,7 +40,7 @@ export class ImageCropWriter {
     const imageUri = `images/${filename}`;
     const outputPath = join(input.outputDir, imageUri);
     if (existsSync(outputPath)) {
-      return { imageUri, outputPath };
+      return { imageUri, outputPath, created: false };
     }
 
     const dims = await this.snapper.getImageDimensions(input.pageImagePath);
@@ -65,13 +66,14 @@ export class ImageCropWriter {
     ]);
 
     if (result.code !== 0) {
+      rmSync(outputPath, { force: true });
       throw new Error(
         `[ImageCropWriter] Failed to write crop: ${result.stderr || 'Unknown error'}`,
       );
     }
 
     this.logger.info(`[ImageCropWriter] Wrote assisted image ${imageUri}`);
-    return { imageUri, outputPath };
+    return { imageUri, outputPath, created: true };
   }
 
   private buildFilename(input: ImageCropWriteInput): string {

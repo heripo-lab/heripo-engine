@@ -10,7 +10,13 @@ import type {
 
 import type { PageReviewContext } from './page-review-context-builder';
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -648,6 +654,16 @@ describe('ReviewAssistancePatcher', () => {
       .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
       .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 });
     const doc = makeDoc();
+    const imagesDir = join(outputDir, 'images');
+    mkdirSync(imagesDir, { recursive: true });
+    writeFileSync(
+      join(imagesDir, 'assisted_page1_ra-test-1_1.png'),
+      Buffer.from([1]),
+    );
+    writeFileSync(
+      join(imagesDir, 'assisted_page1_ra-test-1_right-panel.png'),
+      Buffer.from([1]),
+    );
 
     const result = await new ReviewAssistancePatcher(makeLogger()).apply(
       doc,
@@ -741,7 +757,10 @@ describe('ReviewAssistancePatcher', () => {
       .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
       .mockResolvedValueOnce({ stdout: '60x60+0+0', stderr: '', code: 0 })
       .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
-      .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 })
+      .mockImplementationOnce(async (_command, args: string[]) => {
+        writeFileSync(args.at(-1)!, Buffer.from([1]));
+        return { stdout: '', stderr: '', code: 0 };
+      })
       .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
       .mockResolvedValueOnce({ stdout: '60x60+0+0', stderr: '', code: 0 })
       .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
@@ -778,6 +797,9 @@ describe('ReviewAssistancePatcher', () => {
     expect(result.pages[0].decisions[0].reasons).toContain(
       'patch_skipped: [ImageCropWriter] Failed to write crop: crop failed',
     );
+    expect(
+      existsSync(join(outputDir, 'images', 'assisted_page1_ra-test-1_1.png')),
+    ).toBe(false);
   });
 
   test('adds a picture with an explicit caption', async () => {
@@ -788,6 +810,12 @@ describe('ReviewAssistancePatcher', () => {
       .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 });
     const doc = makeDoc();
     doc.pictures = [];
+    const imagesDir = join(outputDir, 'images');
+    mkdirSync(imagesDir, { recursive: true });
+    writeFileSync(
+      join(imagesDir, 'assisted_page1_ra-test-1.png'),
+      Buffer.from([1]),
+    );
 
     const result = await new ReviewAssistancePatcher(makeLogger()).apply(
       doc,
@@ -810,6 +838,49 @@ describe('ReviewAssistancePatcher', () => {
       text: 'Figure 2',
       label: 'caption',
     });
+  });
+
+  test('removes a newly written addPicture crop when later patching fails', async () => {
+    mockSpawnAsync
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '80x70+10+20', stderr: '', code: 0 })
+      .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
+      .mockImplementationOnce(async (_command, args: string[]) => {
+        writeFileSync(args.at(-1)!, Buffer.from([1]));
+        return { stdout: '', stderr: '', code: 0 };
+      });
+    const patcher = new ReviewAssistancePatcher(makeLogger()) as unknown as {
+      apply: ReviewAssistancePatcher['apply'];
+      setPictureCaption: unknown;
+    };
+    patcher.setPictureCaption = vi.fn(() => {
+      throw new Error('caption failed');
+    });
+    const doc = makeDoc();
+
+    const result = await patcher.apply(
+      doc,
+      [
+        makePageResult([
+          {
+            op: 'addPicture',
+            pageNo: 1,
+            bbox: { l: 10, t: 10, r: 90, b: 90, coord_origin: 'TOPLEFT' },
+            imageUri: '',
+            caption: 'Figure 2',
+          },
+        ]),
+      ],
+      { outputDir, contexts: [makeContext(outputDir)] },
+    );
+
+    expect(result.doc.pictures).toHaveLength(1);
+    expect(result.pages[0].decisions[0].reasons).toContain(
+      'patch_skipped: caption failed',
+    );
+    expect(
+      existsSync(join(outputDir, 'images', 'assisted_page1_ra-test-1.png')),
+    ).toBe(false);
   });
 
   test('covers defensive fallback branches in patch helpers', async () => {
@@ -863,6 +934,7 @@ describe('ReviewAssistancePatcher', () => {
         caption: string,
       ) => string;
       refIndex: (ref: string, collection: string) => number | undefined;
+      removeFiles: (paths: string[]) => void;
     };
     const doc = makeDoc();
     doc.groups = [
@@ -1021,6 +1093,13 @@ describe('ReviewAssistancePatcher', () => {
     expect(() =>
       patcher.setTableCaption(doc, '#/tables/404', 'Missing table'),
     ).toThrow('table_ref_not_found');
+    const cleanupDir = join(outputDir, 'cleanup-dir');
+    mkdirSync(cleanupDir);
+    patcher.removeFiles([cleanupDir]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      `[ReviewAssistancePatcher] Failed to remove generated artifact ${cleanupDir}`,
+      expect.any(Error),
+    );
     expect(patcher.refIndex(`#/texts/${'9'.repeat(400)}`, 'texts')).toBe(
       undefined,
     );

@@ -17,6 +17,8 @@ import type {
 
 import type { PageReviewContext } from './page-review-context-builder';
 
+import { rmSync } from 'node:fs';
+
 import { ImageCropWriter } from './image-crop-writer';
 import { ImageRegionSnapper } from './image-region-snapper';
 import { OrphanCaptionResolver } from './orphan-caption-resolver';
@@ -386,60 +388,69 @@ export class ReviewAssistancePatcher {
     command: Extract<ReviewAssistanceCommand, { op: 'addPicture' }>,
     outputDir: string,
   ): Promise<PatchMetadata> {
-    const snapped = await this.snapper.snap(
-      context.pageImagePath,
-      context.pageSize,
-      command.bbox,
-    );
-    const crop = await this.cropWriter.writeCrop({
-      outputDir,
-      pageNo: command.pageNo,
-      pageImagePath: context.pageImagePath,
-      pageSize: context.pageSize,
-      bbox: snapped.snappedBbox,
-      decisionId,
-    });
-    const pictureRef = this.appendPicture(
-      doc,
-      command.pageNo,
-      snapped.snappedBbox,
-      crop.imageUri,
-    );
-    this.insertByPagePosition(
-      doc,
-      pictureRef,
-      command.pageNo,
-      snapped.snappedBbox,
-    );
-
-    const generatedRefs = [pictureRef];
-    if (command.caption?.trim()) {
-      generatedRefs.push(
-        this.setPictureCaption(doc, pictureRef, command.caption),
+    const createdCropPaths: string[] = [];
+    try {
+      const snapped = await this.snapper.snap(
+        context.pageImagePath,
+        context.pageSize,
+        command.bbox,
       );
-    } else {
-      generatedRefs.push(
-        ...this.resolveOrphanCaptions(doc, context, [
-          { ref: pictureRef, kind: 'picture', bbox: snapped.snappedBbox },
-        ]),
+      const crop = await this.cropWriter.writeCrop({
+        outputDir,
+        pageNo: command.pageNo,
+        pageImagePath: context.pageImagePath,
+        pageSize: context.pageSize,
+        bbox: snapped.snappedBbox,
+        decisionId,
+      });
+      if (crop.created) {
+        createdCropPaths.push(crop.outputPath);
+      }
+      const pictureRef = this.appendPicture(
+        doc,
+        command.pageNo,
+        snapped.snappedBbox,
+        crop.imageUri,
       );
-    }
+      this.insertByPagePosition(
+        doc,
+        pictureRef,
+        command.pageNo,
+        snapped.snappedBbox,
+      );
 
-    return {
-      reasons: snapped.warnings,
-      evidence: {
-        snappedBbox: snapped.snappedBbox,
-        generatedRefs,
-      },
-      metadata: {
-        image: {
-          source: snapped.source,
-          originalBbox: snapped.originalBbox,
-          imageUri: crop.imageUri,
-          snapConfidence: snapped.confidence,
+      const generatedRefs = [pictureRef];
+      if (command.caption?.trim()) {
+        generatedRefs.push(
+          this.setPictureCaption(doc, pictureRef, command.caption),
+        );
+      } else {
+        generatedRefs.push(
+          ...this.resolveOrphanCaptions(doc, context, [
+            { ref: pictureRef, kind: 'picture', bbox: snapped.snappedBbox },
+          ]),
+        );
+      }
+
+      return {
+        reasons: snapped.warnings,
+        evidence: {
+          snappedBbox: snapped.snappedBbox,
+          generatedRefs,
         },
-      },
-    };
+        metadata: {
+          image: {
+            source: snapped.source,
+            originalBbox: snapped.originalBbox,
+            imageUri: crop.imageUri,
+            snapConfidence: snapped.confidence,
+          },
+        },
+      };
+    } catch (error) {
+      this.removeFiles(createdCropPaths);
+      throw error;
+    }
   }
 
   private async applySplitPicture(
@@ -453,6 +464,7 @@ export class ReviewAssistancePatcher {
     const sourcePicture = this.resolvePicture(doc, sourcePictureRef);
     if (!sourcePicture) throw new Error('picture_ref_not_found');
 
+    const createdCropPaths: string[] = [];
     const generatedRefs: string[] = [];
     const pictureRefs: string[] = [];
     const snappedRegions: Array<Record<string, unknown>> = [];
@@ -469,84 +481,92 @@ export class ReviewAssistancePatcher {
       caption?: string;
     }> = [];
 
-    for (const [index, region] of regions.entries()) {
-      const snapped = await this.snapper.snap(
-        context.pageImagePath,
-        context.pageSize,
-        region.bbox,
-      );
-      const crop = await this.cropWriter.writeCrop({
-        outputDir,
-        pageNo: context.pageNo,
-        pageImagePath: context.pageImagePath,
-        pageSize: context.pageSize,
-        bbox: snapped.snappedBbox,
-        decisionId,
-        regionId: region.id ?? String(index + 1),
-      });
-      preparedRegions.push({
-        region,
-        snappedBbox: snapped.snappedBbox,
-        imageUri: crop.imageUri,
-        snapMetadata: {
-          regionId: region.id,
-          source: snapped.source,
-          originalBbox: snapped.originalBbox,
+    try {
+      for (const [index, region] of regions.entries()) {
+        const snapped = await this.snapper.snap(
+          context.pageImagePath,
+          context.pageSize,
+          region.bbox,
+        );
+        const crop = await this.cropWriter.writeCrop({
+          outputDir,
+          pageNo: context.pageNo,
+          pageImagePath: context.pageImagePath,
+          pageSize: context.pageSize,
+          bbox: snapped.snappedBbox,
+          decisionId,
+          regionId: region.id ?? String(index + 1),
+        });
+        if (crop.created) {
+          createdCropPaths.push(crop.outputPath);
+        }
+        preparedRegions.push({
+          region,
           snappedBbox: snapped.snappedBbox,
           imageUri: crop.imageUri,
-          warnings: snapped.warnings,
-        },
-      });
-    }
-
-    for (const prepared of preparedRegions) {
-      const pictureRef = this.appendPicture(
-        doc,
-        context.pageNo,
-        prepared.snappedBbox,
-        prepared.imageUri,
-      );
-      pictureRefs.push(pictureRef);
-      generatedRefs.push(pictureRef);
-      captionTargets.push({
-        ref: pictureRef,
-        kind: 'picture',
-        bbox: prepared.snappedBbox,
-        caption: prepared.region.caption,
-      });
-      if (prepared.region.caption?.trim()) {
-        generatedRefs.push(
-          this.setPictureCaption(doc, pictureRef, prepared.region.caption),
-        );
+          snapMetadata: {
+            regionId: region.id,
+            source: snapped.source,
+            originalBbox: snapped.originalBbox,
+            snappedBbox: snapped.snappedBbox,
+            imageUri: crop.imageUri,
+            warnings: snapped.warnings,
+          },
+        });
       }
-      snappedRegions.push(prepared.snapMetadata);
-    }
 
-    const preservedCaptionRefs = this.preserveSourceCaptionRefs(
-      doc,
-      sourcePicture,
-      pictureRefs,
-    );
-    generatedRefs.push(...preservedCaptionRefs);
-    this.replaceRefInContainers(doc, sourcePictureRef, pictureRefs);
-    generatedRefs.push(
-      ...this.resolveOrphanCaptions(doc, context, captionTargets),
-    );
+      for (const prepared of preparedRegions) {
+        const pictureRef = this.appendPicture(
+          doc,
+          context.pageNo,
+          prepared.snappedBbox,
+          prepared.imageUri,
+        );
+        pictureRefs.push(pictureRef);
+        generatedRefs.push(pictureRef);
+        captionTargets.push({
+          ref: pictureRef,
+          kind: 'picture',
+          bbox: prepared.snappedBbox,
+          caption: prepared.region.caption,
+        });
+        if (prepared.region.caption?.trim()) {
+          generatedRefs.push(
+            this.setPictureCaption(doc, pictureRef, prepared.region.caption),
+          );
+        }
+        snappedRegions.push(prepared.snapMetadata);
+      }
 
-    return {
-      reasons: ['picture_split_replaced_source_in_reading_order'],
-      evidence: { generatedRefs },
-      metadata: {
-        splitPicture: {
-          sourcePictureRef,
-          replacementRefs: generatedRefs.filter((ref) =>
-            ref.startsWith('#/pictures/'),
-          ),
-          preservedCaptionRefs,
-          regions: snappedRegions,
+      const preservedCaptionRefs = this.preserveSourceCaptionRefs(
+        doc,
+        sourcePicture,
+        pictureRefs,
+      );
+      generatedRefs.push(...preservedCaptionRefs);
+      this.replaceRefInContainers(doc, sourcePictureRef, pictureRefs);
+      generatedRefs.push(
+        ...this.resolveOrphanCaptions(doc, context, captionTargets),
+      );
+
+      return {
+        reasons: ['picture_split_replaced_source_in_reading_order'],
+        evidence: { generatedRefs },
+        metadata: {
+          splitPicture: {
+            sourcePictureRef,
+            replacementRefs: generatedRefs.filter((ref) =>
+              ref.startsWith('#/pictures/'),
+            ),
+            preservedCaptionRefs,
+            regions: snappedRegions,
+          },
         },
-      },
-    };
+      };
+    } catch (error) {
+      this.removeFiles(createdCropPaths);
+      throw error;
+    }
   }
 
   private applyUpdateBbox(
@@ -1056,5 +1076,18 @@ export class ReviewAssistancePatcher {
       delete (target as unknown as Record<string, unknown>)[key];
     }
     Object.assign(target, snapshot);
+  }
+
+  private removeFiles(paths: string[]): void {
+    for (const path of paths) {
+      try {
+        rmSync(path, { force: true });
+      } catch (error) {
+        this.logger.warn(
+          `[ReviewAssistancePatcher] Failed to remove generated artifact ${path}`,
+          error,
+        );
+      }
+    }
   }
 }

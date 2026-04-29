@@ -1,6 +1,12 @@
 import type { DoclingBBox } from '@heripo/model';
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -64,6 +70,7 @@ describe('ImageCropWriter', () => {
     expect(result.imageUri).toBe(
       'images/assisted_page1_ra_test_1_left_panel.png',
     );
+    expect(result.created).toBe(true);
     expect(mockSpawnAsync).toHaveBeenLastCalledWith('magick', [
       pageImagePath,
       '-crop',
@@ -94,6 +101,7 @@ describe('ImageCropWriter', () => {
     expect(result).toEqual({
       imageUri: 'images/assisted_page1_existing.png',
       outputPath,
+      created: false,
     });
     expect(mockSpawnAsync).not.toHaveBeenCalled();
   });
@@ -102,7 +110,10 @@ describe('ImageCropWriter', () => {
     mockSpawnAsync
       .mockResolvedValueOnce({ stdout: '', stderr: 'identify failed', code: 1 })
       .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })
-      .mockResolvedValueOnce({ stdout: '', stderr: 'crop failed', code: 1 });
+      .mockImplementationOnce(async (_command, args: string[]) => {
+        writeFileSync(args.at(-1)!, Buffer.from([1]));
+        return { stdout: '', stderr: 'crop failed', code: 1 };
+      });
     const writer = new ImageCropWriter(logger);
 
     await expect(
@@ -126,6 +137,9 @@ describe('ImageCropWriter', () => {
         decisionId: 'crop-failure',
       }),
     ).rejects.toThrow('[ImageCropWriter] Failed to write crop: crop failed');
+    expect(
+      existsSync(join(outputDir, 'images', 'assisted_page1_crop-failure.png')),
+    ).toBe(false);
 
     mockSpawnAsync
       .mockResolvedValueOnce({ stdout: '200 200', stderr: '', code: 0 })

@@ -334,8 +334,45 @@ describe('ReviewAssistanceValidator', () => {
       'add_text_requires_missing_text_candidate',
       'update_bbox_requires_bbox_warning',
       'link_footnote_requires_footnote_candidate',
-      'move_node_requires_reading_order_mismatch',
+      'move_node_requires_visual_order_improvement',
     ]);
+  });
+
+  test('blocks moveNode auto-apply when the requested move does not improve visual order', () => {
+    const context = makeContext();
+    context.layout.visualOrderRefs = [
+      '#/tables/0',
+      '#/texts/0',
+      '#/pictures/0',
+    ];
+
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      context,
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'moveNode',
+            targetRef: '#/pictures/0',
+            payload: { targetRef: '#/texts/0', position: 'before' },
+            confidence: 0.95,
+            rationale: 'Wrong move',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.disposition).toBe('proposal');
+    expect(decision.reasons).toContain(
+      'move_node_requires_visual_order_improvement',
+    );
   });
 
   test('skips commands that target unknown refs', () => {
@@ -1194,6 +1231,15 @@ describe('ReviewAssistanceValidator', () => {
         command?: undefined,
       ) => string | undefined;
       hasReadingOrderMismatch: (context: PageReviewContext) => boolean;
+      moveNodeImprovesReadingOrder: (
+        context: PageReviewContext,
+        command: {
+          op: 'moveNode';
+          sourceRef: string;
+          targetRef: string;
+          position: 'before' | 'after';
+        },
+      ) => boolean;
       getRiskPenalty: (command: any) => number;
       iou: (a: DoclingBBox, b: DoclingBBox) => number;
     };
@@ -1318,6 +1364,17 @@ describe('ReviewAssistanceValidator', () => {
     const emptyOrderContext = makeContext();
     emptyOrderContext.layout.readingOrderRefs = [];
     expect(validator.hasReadingOrderMismatch(emptyOrderContext)).toBe(false);
+    const missingOrderRefContext = makeContext();
+    missingOrderRefContext.layout.readingOrderRefs = ['#/texts/0'];
+    missingOrderRefContext.layout.visualOrderRefs = ['#/tables/0', '#/texts/0'];
+    expect(
+      validator.moveNodeImprovesReadingOrder(missingOrderRefContext, {
+        op: 'moveNode',
+        sourceRef: '#/texts/0',
+        targetRef: '#/tables/0',
+        position: 'after',
+      }),
+    ).toBe(false);
     expect(
       validator.iou(bbox, {
         l: 200,
