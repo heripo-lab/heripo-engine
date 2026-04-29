@@ -1,3 +1,9 @@
+export type {
+  ReviewAssistanceProgressEvent,
+  ReviewAssistanceProgressStatus,
+  ReviewAssistanceProgressSubstage,
+} from '@heripo/model';
+
 export const REVIEW_ASSISTANCE_MIN_CONCURRENCY = 1;
 export const REVIEW_ASSISTANCE_MAX_CONCURRENCY = 10;
 
@@ -23,32 +29,6 @@ export interface NormalizedReviewAssistanceOptions {
   proposalThreshold: number;
   maxRetries: number;
   temperature: number;
-}
-
-export type ReviewAssistanceProgressSubstage =
-  | 'review-assistance:prepare'
-  | 'review-assistance:page'
-  | 'review-assistance:patch'
-  | 'review-assistance:write-report';
-
-export type ReviewAssistanceProgressStatus =
-  | 'started'
-  | 'progress'
-  | 'completed'
-  | 'failed';
-
-export interface ReviewAssistanceProgressEvent {
-  substage: ReviewAssistanceProgressSubstage;
-  status: ReviewAssistanceProgressStatus;
-  reportId: string;
-  pageNo?: number;
-  pageCount?: number;
-  completedPages?: number;
-  failedPages?: number;
-  commandCount?: number;
-  autoAppliedCount?: number;
-  proposalCount?: number;
-  message?: string;
 }
 
 export type ReviewAssistanceOptionInput =
