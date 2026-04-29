@@ -8,11 +8,13 @@ import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { CHUNKED_CONVERSION, PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+import { ReviewAssistanceRunner } from '../processors/review-assistance/review-assistance-runner';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { DoclingConversionExecutor } from './docling-conversion-executor';
 import { ImagePdfConverter } from './image-pdf-converter';
 import {
+  type NormalizedReviewAssistanceOptions,
   type ReviewAssistanceOptions,
   type ReviewAssistanceProgressEvent,
   normalizeReviewAssistanceOptions,
@@ -267,7 +269,14 @@ export class PDFConverter {
       }
 
       const wrappedCallback = reviewAssistanceOptions.enabled
-        ? onComplete
+        ? this.wrapReviewAssistanceCallback(
+            pdfPath,
+            reportId,
+            trackedOptions,
+            reviewAssistanceOptions,
+            onComplete,
+            abortSignal,
+          )
         : new VlmConversionPipeline(this.logger).wrapCallback(
             pdfPath,
             trackedOptions,
@@ -311,10 +320,20 @@ export class PDFConverter {
     const ocrmacOptions: PDFConvertOptions = strategy.detectedLanguages
       ? { ...trackedOptions, ocr_lang: strategy.detectedLanguages }
       : trackedOptions;
+    const ocrmacCallback = reviewAssistanceOptions.enabled
+      ? this.wrapReviewAssistanceCallback(
+          pdfPath,
+          reportId,
+          ocrmacOptions,
+          reviewAssistanceOptions,
+          onComplete,
+          abortSignal,
+        )
+      : onComplete;
     await this.convert(
       url,
       reportId,
-      onComplete,
+      ocrmacCallback,
       cleanupAfterCallback,
       ocrmacOptions,
       abortSignal,
@@ -322,6 +341,39 @@ export class PDFConverter {
     return {
       strategy,
       tokenUsageReport: this.buildTokenReport(aggregator),
+    };
+  }
+
+  private wrapReviewAssistanceCallback(
+    pdfPath: string | null,
+    reportId: string,
+    options: PDFConvertOptions,
+    reviewOptions: NormalizedReviewAssistanceOptions,
+    originalCallback: ConversionCompleteCallback,
+    abortSignal?: AbortSignal,
+  ): ConversionCompleteCallback {
+    if (!pdfPath) {
+      throw new Error('Review Assistance requires a local file (file:// URL)');
+    }
+
+    const model = options.vlmProcessorModel ?? options.strategySamplerModel;
+    if (!model) {
+      throw new Error(
+        'vlmProcessorModel or strategySamplerModel is required when Review Assistance is enabled',
+      );
+    }
+
+    return async (outputDir: string) => {
+      const runner = new ReviewAssistanceRunner(this.logger);
+      await runner.analyzeAndSave(outputDir, reportId, model, {
+        ...reviewOptions,
+        pdfPath,
+        aggregator: options.aggregator,
+        abortSignal,
+        onTokenUsage: options.onTokenUsage,
+        onProgress: options.onReviewAssistanceProgress,
+      });
+      await originalCallback(outputDir);
     };
   }
 

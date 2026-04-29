@@ -8,6 +8,10 @@ import { PDFConverter } from './pdf-converter';
 import { StrategyResolver } from './strategy-resolver';
 import { VlmConversionPipeline } from './vlm-conversion-pipeline';
 
+const { mockAnalyzeAndSave } = vi.hoisted(() => ({
+  mockAnalyzeAndSave: vi.fn(),
+}));
+
 vi.mock('./strategy-resolver', () => ({
   StrategyResolver: vi.fn(),
 }));
@@ -34,6 +38,12 @@ vi.mock('../validators/document-type-validator', () => ({
 
 vi.mock('../processors/pdf-text-extractor', () => ({
   PdfTextExtractor: vi.fn(),
+}));
+
+vi.mock('../processors/review-assistance/review-assistance-runner', () => ({
+  ReviewAssistanceRunner: class {
+    analyzeAndSave = mockAnalyzeAndSave;
+  },
 }));
 
 const mockModel = { modelId: 'test-model' } as any;
@@ -66,6 +76,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     converter = new PDFConverter(logger, client);
 
     mockOnComplete = vi.fn();
+    mockAnalyzeAndSave.mockResolvedValue({ summary: {} });
 
     // Mock StrategyResolver
     mockResolve = vi.fn().mockResolvedValue({
@@ -265,6 +276,7 @@ describe('PDFConverter.convertWithStrategy', () => {
         {
           forcedMethod: 'vlm',
           reviewAssistance: true,
+          vlmProcessorModel: mockModel,
         },
       );
 
@@ -273,7 +285,7 @@ describe('PDFConverter.convertWithStrategy', () => {
       expect(convertSpy).toHaveBeenCalledWith(
         'file:///tmp/report.pdf',
         'report-1',
-        mockOnComplete,
+        expect.any(Function),
         false,
         expect.objectContaining({
           forcedMethod: 'vlm',
@@ -286,6 +298,66 @@ describe('PDFConverter.convertWithStrategy', () => {
       );
 
       convertSpy.mockRestore();
+    });
+
+    test('runs Review Assistance callback before original callback', async () => {
+      const convertSpy = vi
+        .spyOn(converter, 'convert')
+        .mockImplementation(
+          async (
+            _url,
+            _reportId,
+            onComplete,
+            _cleanupAfterCallback,
+            _options,
+            _abortSignal,
+          ) => {
+            await onComplete('/tmp/output');
+            return null;
+          },
+        );
+
+      await converter.convertWithStrategy(
+        'file:///tmp/report.pdf',
+        'report-1',
+        mockOnComplete,
+        false,
+        {
+          forcedMethod: 'vlm',
+          reviewAssistance: true,
+          vlmProcessorModel: mockModel,
+        },
+      );
+
+      expect(mockAnalyzeAndSave).toHaveBeenCalledWith(
+        '/tmp/output',
+        'report-1',
+        mockModel,
+        expect.objectContaining({
+          enabled: true,
+          pdfPath: '/tmp/report.pdf',
+        }),
+      );
+      expect(mockOnComplete).toHaveBeenCalledWith('/tmp/output');
+
+      convertSpy.mockRestore();
+    });
+
+    test('requires a model when Review Assistance is enabled', async () => {
+      await expect(
+        converter.convertWithStrategy(
+          'file:///tmp/report.pdf',
+          'report-1',
+          mockOnComplete,
+          false,
+          {
+            forcedMethod: 'vlm',
+            reviewAssistance: true,
+          },
+        ),
+      ).rejects.toThrow(
+        'vlmProcessorModel or strategySamplerModel is required when Review Assistance is enabled',
+      );
     });
 
     test('throws error when URL is not a local file', async () => {
@@ -595,7 +667,11 @@ describe('PDFConverter.convertWithStrategy', () => {
         'report-1',
         mockOnComplete,
         false,
-        { forcedMethod: 'ocrmac', reviewAssistance: true },
+        {
+          forcedMethod: 'ocrmac',
+          reviewAssistance: true,
+          vlmProcessorModel: mockModel,
+        },
       );
 
       expect(logger.info).toHaveBeenCalledWith(
@@ -603,6 +679,22 @@ describe('PDFConverter.convertWithStrategy', () => {
       );
 
       convertSpy.mockRestore();
+    });
+
+    test('requires local file for Review Assistance on ocrmac strategy', async () => {
+      await expect(
+        converter.convertWithStrategy(
+          'http://example.com/test.pdf',
+          'report-1',
+          mockOnComplete,
+          false,
+          {
+            forcedMethod: 'ocrmac',
+            reviewAssistance: true,
+            vlmProcessorModel: mockModel,
+          },
+        ),
+      ).rejects.toThrow('Review Assistance requires a local file');
     });
   });
 
