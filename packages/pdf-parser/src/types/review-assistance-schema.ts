@@ -1,8 +1,8 @@
 import { z } from 'zod/v4';
 
-export const REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH = 200;
+export const REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH = 2_000;
 export const REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH = 2_000;
-export const REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH = 200;
+export const REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH = 2_000;
 
 export const reviewAssistanceCommandOpSchema = z.enum([
   'replaceText',

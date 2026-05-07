@@ -25,7 +25,8 @@ export type ReviewAssistanceIssueCategory =
   | 'footnote'
   | 'bbox'
   | 'multi_page_table'
-  | 'domain_pattern';
+  | 'domain_pattern'
+  | 'review_execution';
 
 export type ReviewAssistanceIssueSeverity = 'info' | 'warning' | 'error';
 

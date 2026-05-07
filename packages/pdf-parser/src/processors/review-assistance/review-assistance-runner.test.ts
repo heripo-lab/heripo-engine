@@ -405,6 +405,52 @@ describe('ReviewAssistanceRunner', () => {
     expect(report.pages[0].error?.message).toBe('model failed');
   });
 
+  test('treats no structured output as no-op review result with issue hint', async () => {
+    vi.mocked(LLMCaller.callVision).mockRejectedValue(
+      new Error('No output generated.'),
+    );
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
+
+    const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      {
+        enabled: true,
+        concurrency: 1,
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        maxRetries: 3,
+        temperature: 0,
+      },
+    );
+
+    expect(report.summary.pagesSucceeded).toBe(1);
+    expect(report.summary.pagesFailed).toBe(0);
+    expect(report.pages[0].status).toBe('succeeded');
+    expect(report.pages[0].decisions).toEqual([]);
+    expect(report.pages[0].error).toBeUndefined();
+    expect(report.pages[0].issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: 'review_execution',
+          type: 'empty_model_output',
+          severity: 'warning',
+          reasons: ['no_output_generated'],
+        }),
+      ]),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: review produced no structured output; recording no-op result',
+      expect.any(Error),
+    );
+  });
+
   test('rethrows abort errors from page review', async () => {
     const abortController = new AbortController();
     abortController.abort();

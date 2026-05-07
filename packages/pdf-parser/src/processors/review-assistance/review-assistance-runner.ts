@@ -277,6 +277,23 @@ export class ReviewAssistanceRunner {
       if (options.abortSignal?.aborted) {
         throw error;
       }
+
+      if (this.isNoOutputGeneratedError(error)) {
+        this.logger.warn(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review produced no structured output; recording no-op result`,
+          error,
+        );
+        return {
+          pageNo: context.pageNo,
+          status: 'succeeded',
+          decisions: [],
+          issues: [
+            ...this.buildIssues(context),
+            this.buildNoOutputIssue(context),
+          ],
+        };
+      }
+
       this.logger.warn(
         `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review failed`,
         error,
@@ -287,10 +304,40 @@ export class ReviewAssistanceRunner {
         decisions: [],
         issues: this.buildIssues(context),
         error: {
-          message: error instanceof Error ? error.message : String(error),
+          message: this.errorMessage(error),
         },
       };
     }
+  }
+
+  private isNoOutputGeneratedError(error: unknown): boolean {
+    const message = this.errorMessage(error);
+    const name =
+      typeof error === 'object' && error !== null && 'name' in error
+        ? String((error as { name?: unknown }).name ?? '')
+        : '';
+    return (
+      /No output generated/i.test(message) || /NoOutputGenerated/i.test(name)
+    );
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private buildNoOutputIssue(
+    context: PageReviewContext,
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-execution-${context.pageNo}-empty-output`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'empty_model_output',
+      severity: 'warning',
+      description:
+        'AI가 빈 구조화 응답을 반환해 자동 제안이 없습니다. 페이지를 직접 확인하세요.',
+      reasons: ['no_output_generated'],
+    };
   }
 
   private buildReport(

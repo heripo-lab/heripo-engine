@@ -19,6 +19,10 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       'payload must be {"text"',
     );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain('This is not a Q&A task');
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      '"commands": [], "pageNotes": []',
+    );
   });
 
   test('serializes all page review context sections into prompt JSON', () => {
