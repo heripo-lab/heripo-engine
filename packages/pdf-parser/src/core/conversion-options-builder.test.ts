@@ -88,7 +88,7 @@ describe('buildConversionOptions', () => {
       chunkSize: 20,
       chunkMaxRetries: 5,
       documentValidationModel: {} as any,
-    });
+    } as any);
 
     expect(result).not.toHaveProperty('forceImagePdf');
     expect(result).not.toHaveProperty('strategySamplerModel');

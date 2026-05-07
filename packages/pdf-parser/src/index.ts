@@ -6,8 +6,6 @@ export type {
 } from './core/pdf-converter';
 export {
   REVIEW_ASSISTANCE_DEFAULTS,
-  REVIEW_ASSISTANCE_MAX_CONCURRENCY,
-  REVIEW_ASSISTANCE_MIN_CONCURRENCY,
   isReviewAssistanceEnabled,
   normalizeReviewAssistanceOptions,
 } from './core/review-assistance-options';

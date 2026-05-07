@@ -1131,7 +1131,7 @@ describe('PDFParser', () => {
         'report-1',
         vi.fn(),
         false,
-        { reviewAssistance: { concurrency: 4 } },
+        { reviewAssistance: {} },
       );
 
       expect(convertMock).toHaveBeenCalled();

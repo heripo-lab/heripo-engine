@@ -395,10 +395,7 @@ export class PDFParser {
     const useStrategyFlow =
       options.strategySamplerModel !== undefined ||
       options.forcedMethod !== undefined ||
-      isReviewAssistanceEnabled(
-        options.reviewAssistance,
-        options.reviewAssistanceConcurrency,
-      );
+      isReviewAssistanceEnabled(options.reviewAssistance);
 
     return this.executeWithRecovery(async () => {
       const effectiveFallbackEnabled =

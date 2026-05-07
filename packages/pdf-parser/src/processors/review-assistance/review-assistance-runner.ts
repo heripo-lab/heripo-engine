@@ -38,6 +38,8 @@ export interface ReviewAssistanceRunnerOptions extends NormalizedReviewAssistanc
   pageTexts?: Map<number, string>;
 }
 
+const REVIEW_ASSISTANCE_PAGE_CONCURRENCY = 1;
+
 export class ReviewAssistanceRunner {
   constructor(private readonly logger: LoggerMethods) {}
 
@@ -84,14 +86,14 @@ export class ReviewAssistanceRunner {
     });
 
     this.logger.info(
-      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (concurrency: ${options.concurrency})...`,
+      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (concurrency: ${REVIEW_ASSISTANCE_PAGE_CONCURRENCY})...`,
     );
 
     let completedPages = 0;
     let failedPages = 0;
     const pageResults = await ConcurrentPool.run(
       contexts,
-      options.concurrency,
+      REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
       (context) =>
         this.reviewPage(context, reportId, model, options, contexts.length),
       (result) => {
@@ -423,7 +425,7 @@ export class ReviewAssistanceRunner {
       },
       options: {
         enabled: true,
-        concurrency: options.concurrency,
+        concurrency: REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
         autoApplyThreshold: options.autoApplyThreshold,
         proposalThreshold: options.proposalThreshold,
         maxRetries: options.maxRetries,

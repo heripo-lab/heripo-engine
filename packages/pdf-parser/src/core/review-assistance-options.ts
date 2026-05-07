@@ -4,14 +4,9 @@ export type {
   ReviewAssistanceProgressSubstage,
 } from '@heripo/model';
 
-export const REVIEW_ASSISTANCE_MIN_CONCURRENCY = 1;
-export const REVIEW_ASSISTANCE_MAX_CONCURRENCY = 10;
-
 export interface ReviewAssistanceOptions {
   /** Enable page-level review assistance. Defaults to false. */
   enabled?: boolean;
-  /** Concurrent page-level review calls. Defaults to 1 and clamps to 1..10. */
-  concurrency?: number;
   /** Minimum final confidence for direct mutation. Defaults to 0.85. */
   autoApplyThreshold?: number;
   /** Minimum final confidence for sidecar proposals. Defaults to 0.5. */
@@ -53,16 +48,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizeConcurrency(value: number | undefined): number {
-  return Math.floor(
-    clamp(
-      normalizeNumber(value, REVIEW_ASSISTANCE_DEFAULTS.concurrency),
-      REVIEW_ASSISTANCE_MIN_CONCURRENCY,
-      REVIEW_ASSISTANCE_MAX_CONCURRENCY,
-    ),
-  );
-}
-
 function normalizeThreshold(
   value: number | undefined,
   fallback: number,
@@ -78,7 +63,6 @@ function normalizeMaxRetries(value: number | undefined): number {
 
 export function normalizeReviewAssistanceOptions(
   value: ReviewAssistanceOptionInput,
-  concurrencyAlias?: number,
 ): NormalizedReviewAssistanceOptions {
   const objectOptions =
     typeof value === 'object' && value !== null ? value : undefined;
@@ -99,9 +83,7 @@ export function normalizeReviewAssistanceOptions(
       typeof value === 'boolean'
         ? value
         : (objectOptions?.enabled ?? REVIEW_ASSISTANCE_DEFAULTS.enabled),
-    concurrency: normalizeConcurrency(
-      objectOptions?.concurrency ?? concurrencyAlias,
-    ),
+    concurrency: REVIEW_ASSISTANCE_DEFAULTS.concurrency,
     autoApplyThreshold,
     proposalThreshold,
     maxRetries: normalizeMaxRetries(objectOptions?.maxRetries),
@@ -114,7 +96,6 @@ export function normalizeReviewAssistanceOptions(
 
 export function isReviewAssistanceEnabled(
   value: ReviewAssistanceOptionInput,
-  concurrencyAlias?: number,
 ): boolean {
-  return normalizeReviewAssistanceOptions(value, concurrencyAlias).enabled;
+  return normalizeReviewAssistanceOptions(value).enabled;
 }

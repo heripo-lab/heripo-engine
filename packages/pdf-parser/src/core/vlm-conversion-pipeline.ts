@@ -35,12 +35,7 @@ export class VlmConversionPipeline {
     detectedLanguages?: string[],
     koreanHanjaMixPages?: number[],
   ): ConversionCompleteCallback {
-    if (
-      isReviewAssistanceEnabled(
-        options.reviewAssistance,
-        options.reviewAssistanceConcurrency,
-      )
-    ) {
+    if (isReviewAssistanceEnabled(options.reviewAssistance)) {
       this.logger.info(
         '[VlmConversionPipeline] Review Assistance enabled; legacy VLM text correction skipped',
       );

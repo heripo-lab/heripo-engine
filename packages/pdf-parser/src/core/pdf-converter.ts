@@ -65,8 +65,6 @@ export type PDFConvertOptions = Omit<
    * Boolean true enables defaults; object form still requires enabled: true.
    */
   reviewAssistance?: boolean | ReviewAssistanceOptions;
-  /** Top-level alias for reviewAssistance.concurrency. */
-  reviewAssistanceConcurrency?: number;
   /** Skip sampling and default to ocrmac */
   skipSampling?: boolean;
   /** Force a specific OCR method, bypassing sampling */
@@ -234,7 +232,6 @@ export class PDFConverter {
     const trackedOptions: PDFConvertOptions = { ...options, aggregator };
     const reviewAssistanceOptions = normalizeReviewAssistanceOptions(
       trackedOptions.reviewAssistance,
-      trackedOptions.reviewAssistanceConcurrency,
     );
 
     const pdfPath = url.startsWith('file://') ? url.slice(7) : null;

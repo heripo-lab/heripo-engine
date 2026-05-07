@@ -21,9 +21,8 @@ describe('normalizeReviewAssistanceOptions', () => {
   });
 
   test('keeps disabled defaults when value is false', () => {
-    expect(normalizeReviewAssistanceOptions(false, 7)).toEqual({
+    expect(normalizeReviewAssistanceOptions(false)).toEqual({
       ...REVIEW_ASSISTANCE_DEFAULTS,
-      concurrency: 7,
       enabled: false,
     });
   });
@@ -31,7 +30,6 @@ describe('normalizeReviewAssistanceOptions', () => {
   test('uses object options with enabled defaulting to false', () => {
     expect(
       normalizeReviewAssistanceOptions({
-        concurrency: 4,
         autoApplyThreshold: 0.9,
         proposalThreshold: 0.6,
         maxRetries: 2,
@@ -39,7 +37,7 @@ describe('normalizeReviewAssistanceOptions', () => {
       }),
     ).toEqual({
       enabled: false,
-      concurrency: 4,
+      concurrency: 1,
       autoApplyThreshold: 0.9,
       proposalThreshold: 0.6,
       maxRetries: 2,
@@ -54,30 +52,12 @@ describe('normalizeReviewAssistanceOptions', () => {
     });
   });
 
-  test('uses top-level concurrency alias when nested concurrency is absent', () => {
-    expect(normalizeReviewAssistanceOptions(true, 6).concurrency).toBe(6);
-  });
-
-  test('prefers nested concurrency over top-level alias', () => {
+  test('ignores legacy concurrency input and always runs one page at a time', () => {
     expect(
-      normalizeReviewAssistanceOptions({ enabled: true, concurrency: 3 }, 6)
-        .concurrency,
-    ).toBe(3);
-  });
-
-  test('clamps concurrency to 1..10 and floors decimal values', () => {
-    expect(normalizeReviewAssistanceOptions(true, 0).concurrency).toBe(1);
-    expect(normalizeReviewAssistanceOptions(true, 20).concurrency).toBe(10);
-    expect(normalizeReviewAssistanceOptions(true, 4.9).concurrency).toBe(4);
-  });
-
-  test('falls back for non-finite concurrency values', () => {
-    expect(normalizeReviewAssistanceOptions(true, Number.NaN).concurrency).toBe(
-      1,
-    );
-    expect(
-      normalizeReviewAssistanceOptions(true, Number.POSITIVE_INFINITY)
-        .concurrency,
+      normalizeReviewAssistanceOptions({
+        enabled: true,
+        concurrency: 8,
+      } as any).concurrency,
     ).toBe(1);
   });
 
@@ -139,6 +119,6 @@ describe('isReviewAssistanceEnabled', () => {
   test('detects disabled values', () => {
     expect(isReviewAssistanceEnabled(undefined)).toBe(false);
     expect(isReviewAssistanceEnabled(false)).toBe(false);
-    expect(isReviewAssistanceEnabled({ concurrency: 3 })).toBe(false);
+    expect(isReviewAssistanceEnabled({})).toBe(false);
   });
 });
