@@ -120,6 +120,26 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.evidence?.suspectReasons).toContain('ocr_noise');
   });
 
+  test('replaceText payload가 비어도 evidence가 교정문이면 복구한다', () => {
+    const decision = validate({
+      op: 'replaceText',
+      targetRef: '#/texts/0',
+      payload: {},
+      confidence: 0.95,
+      rationale: '한자 OCR 후보',
+      evidence: '분지상(盆地床)에는 구릉지와 범람원이 발달해 있다.',
+    });
+
+    expect(decision.command).toEqual({
+      op: 'replaceText',
+      textRef: '#/texts/0',
+      text: '분지상(盆地床)에는 구릉지와 범람원이 발달해 있다.',
+    });
+    expect(decision.reasons).toContain(
+      'replace_text_payload_recovered_from_evidence',
+    );
+  });
+
   test('includes image-only evidence when a command has no target suspect reasons', () => {
     const decision = validate({
       op: 'addText',

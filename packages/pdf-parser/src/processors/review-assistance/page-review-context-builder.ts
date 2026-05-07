@@ -448,6 +448,9 @@ export class PageReviewContextBuilder {
     if (this.looksLikeOcrNoise(item.text)) {
       reasons.push('ocr_noise');
     }
+    if (this.looksLikeHanjaOcrCandidate(trimmed)) {
+      reasons.push('hanja_ocr_candidate');
+    }
     if (
       item.label === 'section_header' &&
       trimmed.length > HEADING_MAX_LENGTH
@@ -788,6 +791,18 @@ export class PageReviewContextBuilder {
     return /^(?:도면|도판|사진|삽도|그림|표|Fig\.?|Figure|Plate|Photo|Table)\s*[\dⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ-]/iu.test(
       text,
     );
+  }
+
+  private looksLikeHanjaOcrCandidate(text: string): boolean {
+    if (!text) return false;
+    if (/[一-龯]/u.test(text)) return false;
+    if (/[（(][A-Za-z0-9Il|!*_+\-=\\/?:;,.]{2,}[）)]/u.test(text)) {
+      return true;
+    }
+    if (/[A-Za-z0-9Il|!*_+\-=\\/?:;,.]{3,}[）)]/u.test(text)) {
+      return true;
+    }
+    return /[（(](?:주|재|사)[）)]/u.test(text);
   }
 
   private looksLikeFootnote(text: string): boolean {

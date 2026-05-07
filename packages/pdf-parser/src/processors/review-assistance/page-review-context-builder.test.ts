@@ -252,6 +252,17 @@ describe('PageReviewContextBuilder', () => {
     expect(patterns).toContain('institution_name');
   });
 
+  test('한자 OCR 후보 텍스트를 의심 사유로 표시한다', () => {
+    const doc = makeDoc();
+    doc.texts[0].text = '분지상(ALL)*에는 구릉지와 범람원이 발달해 있다.';
+
+    const [context] = new PageReviewContextBuilder().build(doc, '/out');
+
+    expect(context.textBlocks[0].suspectReasons).toContain(
+      'hanja_ocr_candidate',
+    );
+  });
+
   test('covers groups, linked captions, repeated text, adjacent tables, and bbox warnings', () => {
     const doc = makeDoc();
     doc.pages['2'] = {

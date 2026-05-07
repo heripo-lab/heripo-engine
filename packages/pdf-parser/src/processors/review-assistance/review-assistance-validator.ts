@@ -129,7 +129,16 @@ export class ReviewAssistanceValidator {
     switch (rawCommand.op) {
       case 'replaceText': {
         const textRef = this.stringValue(payload.textRef) ?? targetRef;
-        const text = this.stringValue(payload.text);
+        const text =
+          this.stringValue(payload.text) ??
+          this.replacementTextFromEvidence(
+            context,
+            textRef,
+            rawCommand.evidence,
+          );
+        if (text !== undefined && !this.stringValue(payload.text)) {
+          reasons.push('replace_text_payload_recovered_from_evidence');
+        }
         if (!textRef || text === undefined) {
           reasons.push('invalid_replace_text_payload');
           return undefined;
@@ -729,6 +738,33 @@ export class ReviewAssistanceValidator {
     if (original.length > 20 && replacement.length < original.length * 0.3) {
       reasons.push('replacement_deletes_too_much_text');
     }
+  }
+
+  private replacementTextFromEvidence(
+    context: PageReviewContext,
+    textRef: string | undefined,
+    evidence: string | null,
+  ): string | undefined {
+    if (!textRef || !evidence) return undefined;
+    const original = context.textBlocks.find(
+      (block) => block.ref === textRef,
+    )?.text;
+    if (!original) return undefined;
+
+    const candidate = evidence.trim();
+    if (candidate.length < 2) return undefined;
+    if (!/[0-9A-Za-z가-힣一-龯]/u.test(candidate)) return undefined;
+    if (
+      /^(?:image reads|visible text|correct(?:ed)? ocr|add missing|fix|the image|이미지|보이는|수정|교정|근거)[:\s]/iu.test(
+        candidate,
+      )
+    ) {
+      return undefined;
+    }
+    if (candidate.length > Math.max(original.length * 4, 400)) {
+      return undefined;
+    }
+    return candidate;
   }
 
   private validateRemoveText(

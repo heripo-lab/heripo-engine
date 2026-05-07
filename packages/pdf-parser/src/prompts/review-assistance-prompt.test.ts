@@ -15,6 +15,10 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       'archaeological and cultural heritage report PDFs',
     );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain('Hanja correction');
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'payload must be {"text"',
+    );
   });
 
   test('serializes all page review context sections into prompt JSON', () => {

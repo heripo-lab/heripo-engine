@@ -398,7 +398,7 @@ export class ReviewAssistanceRunner {
         push(
           this.issueCategoryForReason(reason),
           reason,
-          `Text block has suspect reason: ${reason}`,
+          this.issueDescriptionForReason(reason, block.text),
           [block.ref],
           block.bbox,
           [reason],
@@ -422,7 +422,7 @@ export class ReviewAssistanceRunner {
             ? 'multi_page_table'
             : 'table',
           reason,
-          `Table has suspect reason: ${reason}`,
+          this.issueDescriptionForReason(reason, table.caption ?? table.ref),
           [table.ref],
           table.bbox,
           [reason],
@@ -434,7 +434,10 @@ export class ReviewAssistanceRunner {
         push(
           'picture',
           reason,
-          `Picture has suspect reason: ${reason}`,
+          this.issueDescriptionForReason(
+            reason,
+            picture.caption ?? picture.ref,
+          ),
           [picture.ref],
           picture.bbox,
           [reason],
@@ -455,7 +458,7 @@ export class ReviewAssistanceRunner {
       push(
         'domain_pattern',
         pattern.pattern,
-        `Domain OCR pattern detected: ${pattern.value}`,
+        this.issueDescriptionForReason(pattern.pattern, pattern.value),
         [pattern.targetRef],
         undefined,
         [pattern.pattern],
@@ -470,8 +473,52 @@ export class ReviewAssistanceRunner {
     if (reason.includes('caption')) return 'caption';
     if (reason.includes('footnote')) return 'footnote';
     if (reason.includes('repeated')) return 'text_integrity';
+    if (reason.includes('hanja')) return 'domain_pattern';
     if (reason.includes('heading')) return 'role';
     return 'text';
+  }
+
+  private issueDescriptionForReason(reason: string, value?: string): string {
+    const preview = value?.trim() ? `: ${value.trim().slice(0, 120)}` : '';
+    switch (reason) {
+      case 'empty_text':
+        return `본문이 비어있거나 너무 짧습니다${preview}`;
+      case 'ocr_noise':
+        return `한 글자 단위 공백 패턴이라 OCR 노이즈가 의심됩니다${preview}`;
+      case 'hanja_ocr_candidate':
+        return `한자 OCR 오류 후보입니다. 이미지 원문을 직접 확인해야 합니다${preview}`;
+      case 'heading_too_long':
+        return `헤딩이 비정상적으로 깁니다${preview}`;
+      case 'repeated_across_pages':
+        return `여러 페이지에 반복되는 header/footer 후보입니다${preview}`;
+      case 'caption_like_body_text':
+        return `본문으로 남은 캡션 후보입니다${preview}`;
+      case 'footnote_like_body_text':
+        return `본문으로 남은 각주 후보입니다${preview}`;
+      case 'orphan_caption':
+        return `인접한 이미지/표 없이 캡션이 단독으로 남아 있습니다${preview}`;
+      case 'table_missing_caption':
+        return `캡션이 없는 표입니다${preview}`;
+      case 'table_many_empty_cells':
+        return `빈 셀이 절반 이상인 표입니다${preview}`;
+      case 'multi_page_table_candidate':
+        return `앞뒤 페이지 표와 이어질 가능성이 있습니다${preview}`;
+      case 'image_missing_caption':
+        return `캡션이 없는 이미지입니다${preview}`;
+      case 'large_picture_split_candidate':
+        return `큰 이미지 bbox라 복합 이미지 분할 후보입니다${preview}`;
+      case 'hanja_term':
+        return `한자 용어가 포함되어 이미지 대조가 필요합니다${preview}`;
+      case 'institution_name':
+        return `기관명 OCR 확인이 필요한 패턴입니다${preview}`;
+      case 'roman_numeral':
+      case 'layer_code':
+      case 'unit':
+      case 'feature_number':
+        return `도메인 OCR 패턴 확인이 필요합니다${preview}`;
+      default:
+        return `${reason}${preview}`;
+    }
   }
 
   private emitProgress(
