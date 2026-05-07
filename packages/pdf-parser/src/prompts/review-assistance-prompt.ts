@@ -1,5 +1,11 @@
 import type { PageReviewContext } from '../processors/review-assistance/page-review-context-builder';
 
+import {
+  REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH,
+  REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH,
+  REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH,
+} from '../types/review-assistance-schema';
+
 export const REVIEW_ASSISTANCE_SYSTEM_PROMPT = `You are a review assistance engine for Docling JSON produced from archaeological and cultural heritage report PDFs.
 
 Analyze one page image together with the provided Docling refs and page context. Return only correction or review commands that are grounded in the image, text layer, or deterministic issue hints.
@@ -37,7 +43,8 @@ Rules:
 - Suggest updateBbox only when the existing bbox is clearly outside the visual element.
 - Suggest linkContinuedTable only for adjacent-page tables with compatible columns, headers, or captions.
 - Keep confidence conservative for delete, hide, merge, split, replaceTable, updateBbox, and continued-table commands.
-- Keep payloads small and concrete. Do not include unrelated paragraphs as captions.`;
+- Keep payloads small and concrete. Do not include unrelated paragraphs as captions.
+- Keep rationale <= ${REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH} characters, evidence <= ${REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH} characters, and each page note <= ${REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH} characters.`;
 
 export function buildReviewAssistancePrompt(
   context: PageReviewContext,

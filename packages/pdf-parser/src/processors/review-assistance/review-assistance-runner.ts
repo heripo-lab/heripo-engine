@@ -92,7 +92,8 @@ export class ReviewAssistanceRunner {
     const pageResults = await ConcurrentPool.run(
       contexts,
       options.concurrency,
-      (context) => this.reviewPage(context, reportId, model, options),
+      (context) =>
+        this.reviewPage(context, reportId, model, options, contexts.length),
       (result) => {
         completedPages += 1;
         if (result.status === 'failed') {
@@ -211,15 +212,21 @@ export class ReviewAssistanceRunner {
     reportId: string,
     model: LanguageModel,
     options: ReviewAssistanceRunnerOptions,
+    pageCount: number,
   ): Promise<ReviewAssistancePageResult> {
     this.emitProgress(options, {
       substage: 'review-assistance:page',
       status: 'started',
       reportId,
       pageNo: context.pageNo,
+      pageCount,
     });
 
     try {
+      this.logger.info(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review started`,
+      );
+
       const image = new Uint8Array(await readFile(context.pageImagePath));
       const prompt = buildReviewAssistancePrompt(context);
       const result = await LLMCaller.callVision({
@@ -243,7 +250,7 @@ export class ReviewAssistanceRunner {
         abortSignal: options.abortSignal,
         component: 'ReviewAssistance',
         phase: 'page-review',
-        metadata: { pageNo: context.pageNo },
+        metadata: { pageNo: context.pageNo, pageCount },
       });
 
       options.aggregator?.track(result.usage);
@@ -256,6 +263,10 @@ export class ReviewAssistanceRunner {
         allowAutoApply: true,
       });
 
+      this.logger.info(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${decisions.length} decisions)`,
+      );
+
       return {
         pageNo: context.pageNo,
         status: 'succeeded',
@@ -267,7 +278,7 @@ export class ReviewAssistanceRunner {
         throw error;
       }
       this.logger.warn(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}: review failed`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review failed`,
         error,
       );
       return {

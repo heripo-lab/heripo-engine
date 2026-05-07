@@ -153,24 +153,30 @@ describe('ReviewAssistanceRunner', () => {
     const aggregator = new LLMTokenUsageAggregator();
     const onTokenUsage = vi.fn();
     const onProgress = vi.fn();
-
-    const report = await new ReviewAssistanceRunner({
+    const logger = {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
-    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-      aggregator,
-      onTokenUsage,
-      onProgress,
-      pageTexts: new Map([[1, 'Test\n\nMissing line']]),
-    });
+    };
+
+    const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      {
+        enabled: true,
+        concurrency: 1,
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        maxRetries: 3,
+        temperature: 0,
+        aggregator,
+        onTokenUsage,
+        onProgress,
+        pageTexts: new Map([[1, 'Test\n\nMissing line']]),
+      },
+    );
 
     expect(report.summary).toMatchObject({
       pageCount: 1,
@@ -183,7 +189,21 @@ describe('ReviewAssistanceRunner', () => {
       expect.objectContaining({
         component: 'ReviewAssistance',
         phase: 'page-review',
-        metadata: { pageNo: 1 },
+        metadata: { pageNo: 1, pageCount: 1 },
+      }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: review started',
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: review completed (1 decisions)',
+    );
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        substage: 'review-assistance:page',
+        status: 'started',
+        pageNo: 1,
+        pageCount: 1,
       }),
     );
     expect(onTokenUsage).toHaveBeenCalledWith(
@@ -334,23 +354,33 @@ describe('ReviewAssistanceRunner', () => {
 
   test('records page failure for non-abort VLM errors', async () => {
     vi.mocked(LLMCaller.callVision).mockRejectedValue('vlm failed');
-
-    const report = await new ReviewAssistanceRunner({
+    const logger = {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
-    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-    });
+    };
+
+    const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      {
+        enabled: true,
+        concurrency: 1,
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        maxRetries: 3,
+        temperature: 0,
+      },
+    );
 
     expect(report.summary.pagesFailed).toBe(1);
     expect(report.pages[0].error?.message).toBe('vlm failed');
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: review failed',
+      'vlm failed',
+    );
   });
 
   test('records Error instances from failed page review', async () => {
