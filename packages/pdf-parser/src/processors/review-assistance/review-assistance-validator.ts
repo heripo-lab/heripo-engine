@@ -778,6 +778,7 @@ export class ReviewAssistanceValidator {
       'ocr_noise',
       'orphan_caption',
       'caption_like_body_text',
+      'picture_internal_text',
       'repeated_across_pages',
     ];
     if (!suspectReasons.some((reason) => allowed.includes(reason))) {

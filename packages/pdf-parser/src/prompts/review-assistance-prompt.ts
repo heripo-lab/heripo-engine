@@ -35,13 +35,16 @@ Rules:
 - Correct mixed-script OCR errors, including dropped CJK characters, mojibake, and phonetic substitutions when the image supports the correction.
 - Hanja correction is high priority. When suspectReasons includes "hanja_ocr_candidate" or domainPatterns includes "hanja_term", inspect the image directly and restore supported Hanja such as 山, 峰, 川, 橋, 洞, 里, 面, 邑, 寺, 城, 墓, 窯, 遺蹟, 文化財, 硏究院, 財團.
 - If no grounded correction or review command is needed, return {"pageNo": <current pageNo>, "commands": [], "pageNotes": []}.
+- Treat each picture bbox as an opaque image. Do not extract, add, correct, split, or reclassify labels, legends, handwriting, signs, or other text inside a picture as document text.
+- Only external captions outside or directly adjacent to a picture should become text captions. Use updatePictureCaption only for the caption, and do not put picture-internal labels into captions.
+- If a Docling text block is clearly inside a picture and is not an external caption, prefer removeText or a manual review proposal over preserving it as body text.
 - For table cell text errors, prefer updateTableCell. Use replaceTable only when the visible grid structure is clearly wrong.
 - Suggest updatePictureCaption when a nearby caption is visible or already extracted but unlinked.
 - If a caption remains as body text, connect it to the nearest matching table or picture; do not rewrite the caption text unless OCR is visibly wrong.
 - Suggest moveNode for obvious reading-order mistakes inside the current page only.
 - Suggest updateTextRole for repeated page headers, page footers, footnotes, and captions misclassified as body text.
-- Suggest addText only when visible page text is missing from Docling and the bbox is clear.
-- Suggest removeText only for clear duplicate, empty, or OCR-noise text.
+- Suggest addText only when visible document text outside picture regions is missing from Docling and the bbox is clear.
+- Suggest removeText only for clear duplicate, empty, OCR-noise, or picture-internal non-caption text.
 - Suggest addPicture or splitPicture with page-coordinate bboxes when the page image clearly shows missing or combined pictures.
 - Suggest updateBbox only when the existing bbox is clearly outside the visual element.
 - Suggest linkContinuedTable only for adjacent-page tables with compatible columns, headers, or captions.

@@ -263,6 +263,34 @@ describe('PageReviewContextBuilder', () => {
     );
   });
 
+  test('이미지 내부 텍스트를 본문 추출 후보가 아니라 이미지 내부 후보로 표시한다', () => {
+    const doc = makeDoc();
+    doc.body.children.splice(2, 0, { $ref: '#/texts/2' });
+    doc.texts.push({
+      self_ref: '#/texts/2',
+      parent: { $ref: '#/body' },
+      children: [],
+      content_layer: 'body',
+      label: 'text',
+      prov: [
+        {
+          page_no: 1,
+          bbox: { l: 30, t: 110, r: 120, b: 130, coord_origin: 'TOPLEFT' },
+          charspan: [0, 8],
+        },
+      ],
+      orig: '내부 라벨',
+      text: '내부 라벨',
+    });
+
+    const [context] = new PageReviewContextBuilder().build(doc, '/out');
+
+    expect(
+      context.textBlocks.find((block) => block.ref === '#/texts/2')
+        ?.suspectReasons,
+    ).toContain('picture_internal_text');
+  });
+
   test('covers groups, linked captions, repeated text, adjacent tables, and bbox warnings', () => {
     const doc = makeDoc();
     doc.pages['2'] = {

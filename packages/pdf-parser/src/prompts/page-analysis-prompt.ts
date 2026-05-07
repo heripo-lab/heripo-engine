@@ -30,18 +30,21 @@ For a page with a header, paragraph, picture, caption, and footer:
 - Follow natural reading order (top→bottom, left→right for multi-column)
 - Always include bounding box for picture elements
 - For tables: extract visible cell text as content
-- For text-heavy pages: extract ALL visible text as "tx" elements. Never return an empty array if the page contains visible text.
+- For text-heavy pages: extract ALL visible text outside picture regions as "tx" elements. Never return an empty array if the page contains visible document text outside pictures.
 - If the page contains only body text paragraphs, output each paragraph as a separate "tx" element
-- CRITICAL: You are an OCR engine, NOT an image describer. The "c" field must contain the ACTUAL text characters visible on the page, transcribed verbatim. NEVER output meta-descriptions such as "The image contains...", "The text is not legible...", or "exact transcription is not possible". Always attempt to read and transcribe every visible character, regardless of text size, contrast, or resolution.
-- If text appears blurry or low-contrast, still output your best-effort transcription of the actual characters rather than a description of the image.`;
+- Treat photos, maps, drawings, diagrams, plates, and other picture regions as opaque "pi" elements. Do NOT extract labels, legends, handwriting, signs, or other text inside a picture as "tx", "li", "sh", "fn", or "ca".
+- Only text outside or directly adjacent to a picture that functions as its caption should be emitted as "ca". Do not put picture-internal labels into the caption.
+- CRITICAL: You are an OCR engine, NOT an image describer. The "c" field must contain the ACTUAL text characters visible in document text regions, transcribed verbatim. NEVER output meta-descriptions such as "The image contains...", "The text is not legible...", or "exact transcription is not possible". Always attempt to read and transcribe every visible document-text character outside picture regions, regardless of text size, contrast, or resolution.
+- If document text outside picture regions appears blurry or low-contrast, still output your best-effort transcription of the actual characters rather than a description of the image.`;
 
 /** Prompt block for injecting pdftotext reference text */
 export const TEXT_REFERENCE_PROMPT =
   `TEXT REFERENCE: The following text was extracted from the PDF text layer of this page. ` +
   `This text may be accurate, partially correct, or completely garbled/empty depending ` +
   `on how the PDF was created. Scanned or image-based PDFs may produce no text or garbage characters.\n\n` +
-  `- If the extracted text looks correct and matches the page image, use it as-is for the "c" field. ` +
+  `- If the extracted text looks correct and matches document text outside picture regions, use it as-is for the "c" field. ` +
   `Focus on identifying element types, reading order, and bounding boxes.\n` +
+  `- Ignore text-layer snippets that belong inside picture regions; keep the picture as one opaque element and extract only its external caption.\n` +
   `- If the extracted text is garbled, empty, or clearly wrong, IGNORE it entirely ` +
   `and perform OCR from the image as usual.\n` +
   `- Do NOT blindly trust the extracted text — always verify against what you see in the image.`;

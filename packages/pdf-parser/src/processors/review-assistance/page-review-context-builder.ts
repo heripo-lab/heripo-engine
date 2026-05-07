@@ -154,23 +154,28 @@ export class PageReviewContextBuilder {
     );
 
     const pageTableEntries = this.getPageTableEntries(doc, pageNo);
-    const textBlocks = pageTextEntries.map((entry, promptIndex) =>
-      this.buildTextBlock(
-        entry.index,
-        entry.item,
-        pageNo,
-        readingOrderRefs,
-        textLayerMatches?.references,
-        promptIndex,
-        facts,
-      ),
-    );
+    const pagePictureEntries = this.getPagePictureEntries(doc, pageNo);
     const tables = pageTableEntries.map((entry) =>
       this.buildTable(entry.index, entry.item, pageNo, facts),
     );
-    const pictures = this.getPagePictureEntries(doc, pageNo).map((entry) =>
+    const pictures = pagePictureEntries.map((entry) =>
       this.buildPicture(entry.index, entry.item, pageNo, facts),
     );
+    const textBlocks = pageTextEntries
+      .map((entry, promptIndex) =>
+        this.buildTextBlock(
+          entry.index,
+          entry.item,
+          pageNo,
+          readingOrderRefs,
+          textLayerMatches?.references,
+          promptIndex,
+          facts,
+        ),
+      )
+      .map((block) =>
+        this.withPictureInternalTextReason(block, pictures, pageSize),
+      );
     const geometries = this.buildPageGeometries(doc, pageNo);
     const visualOrderRefs = this.buildVisualOrder(geometries, pageSize);
     const bboxWarnings = geometries.flatMap((entry) => {
@@ -470,6 +475,28 @@ export class PageReviewContextBuilder {
       reasons.push('orphan_caption');
     }
     return reasons;
+  }
+
+  private withPictureInternalTextReason(
+    block: PageReviewTextBlock,
+    pictures: PageReviewPicture[],
+    pageSize: { width: number; height: number } | null,
+  ): PageReviewTextBlock {
+    if (!block.bbox) return block;
+    if (block.label === 'caption' || this.looksLikeCaption(block.text.trim())) {
+      return block;
+    }
+    const insidePicture = pictures.some(
+      (picture) =>
+        picture.bbox &&
+        this.containmentRatio(block.bbox!, picture.bbox, pageSize) >= 0.8,
+    );
+    if (!insidePicture) return block;
+    if (block.suspectReasons.includes('picture_internal_text')) return block;
+    return {
+      ...block,
+      suspectReasons: [...block.suspectReasons, 'picture_internal_text'],
+    };
   }
 
   private buildTable(
@@ -860,6 +887,29 @@ export class PageReviewContextBuilder {
       y: (rectB.top + rectB.bottom) / 2,
     };
     return Math.hypot(centerA.x - centerB.x, centerA.y - centerB.y);
+  }
+
+  private containmentRatio(
+    inner: DoclingBBox,
+    outer: DoclingBBox,
+    pageSize: { width: number; height: number } | null,
+  ): number {
+    const innerRect = this.toTopLeftRect(inner, pageSize);
+    const outerRect = this.toTopLeftRect(outer, pageSize);
+    const intersectionWidth = Math.max(
+      0,
+      Math.min(innerRect.right, outerRect.right) -
+        Math.max(innerRect.left, outerRect.left),
+    );
+    const intersectionHeight = Math.max(
+      0,
+      Math.min(innerRect.bottom, outerRect.bottom) -
+        Math.max(innerRect.top, outerRect.top),
+    );
+    const innerArea =
+      (innerRect.right - innerRect.left) * (innerRect.bottom - innerRect.top);
+    if (innerArea <= 0) return 0;
+    return (intersectionWidth * intersectionHeight) / innerArea;
   }
 
   private toTopLeftRect(

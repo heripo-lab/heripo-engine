@@ -23,6 +23,12 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       '"commands": [], "pageNotes": []',
     );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'Treat each picture bbox as an opaque image',
+    );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'Only external captions outside or directly adjacent to a picture',
+    );
   });
 
   test('serializes all page review context sections into prompt JSON', () => {

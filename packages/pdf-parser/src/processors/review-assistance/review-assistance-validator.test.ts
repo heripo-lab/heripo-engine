@@ -467,6 +467,39 @@ describe('ReviewAssistanceValidator', () => {
     );
   });
 
+  test('이미지 내부 텍스트 후보는 removeText 검증 근거로 인정한다', () => {
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(['picture_internal_text']),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'removeText',
+            targetRef: '#/texts/0',
+            payload: {},
+            confidence: 0.99,
+            rationale: '이미지 내부 라벨은 본문 텍스트가 아니다.',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.command).toEqual({
+      op: 'removeText',
+      textRef: '#/texts/0',
+    });
+    expect(decision.reasons).not.toContain(
+      'remove_text_without_deterministic_suspect_reason',
+    );
+  });
+
   test('skips malformed replacement tables', () => {
     const decision = validate({
       op: 'replaceTable',

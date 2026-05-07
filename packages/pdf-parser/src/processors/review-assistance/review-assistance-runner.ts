@@ -281,7 +281,7 @@ export class ReviewAssistanceRunner {
       if (this.isNoOutputGeneratedError(error)) {
         this.logger.warn(
           `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review produced no structured output; recording no-op result`,
-          error,
+          this.errorLogBinding(error),
         );
         return {
           pageNo: context.pageNo,
@@ -296,7 +296,7 @@ export class ReviewAssistanceRunner {
 
       this.logger.warn(
         `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review failed`,
-        error,
+        this.errorLogBinding(error),
       );
       return {
         pageNo: context.pageNo,
@@ -304,14 +304,14 @@ export class ReviewAssistanceRunner {
         decisions: [],
         issues: this.buildIssues(context),
         error: {
-          message: this.errorMessage(error),
+          message: this.safeErrorMessage(error),
         },
       };
     }
   }
 
   private isNoOutputGeneratedError(error: unknown): boolean {
-    const message = this.errorMessage(error);
+    const message = this.safeErrorMessage(error);
     const name =
       typeof error === 'object' && error !== null && 'name' in error
         ? String((error as { name?: unknown }).name ?? '')
@@ -321,8 +321,37 @@ export class ReviewAssistanceRunner {
     );
   }
 
-  private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+  private safeErrorMessage(error: unknown): string {
+    return this.sanitizeLogText(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  private errorLogBinding(error: unknown): {
+    err: { type: string; message: string; stack?: string };
+  } {
+    const type =
+      error instanceof Error
+        ? error.name || error.constructor.name
+        : typeof error;
+    return {
+      err: {
+        type,
+        message: this.safeErrorMessage(error),
+        stack:
+          error instanceof Error && error.stack
+            ? error.stack
+                .split('\n')
+                .slice(0, 8)
+                .map((line) => this.sanitizeLogText(line))
+                .join('\n')
+            : undefined,
+      },
+    };
+  }
+
+  private sanitizeLogText(value: string): string {
+    return value.replace(/[A-Za-z0-9+/]{240,}={0,2}/g, '[redacted-large-data]');
   }
 
   private buildNoOutputIssue(
@@ -520,6 +549,7 @@ export class ReviewAssistanceRunner {
     if (reason.includes('caption')) return 'caption';
     if (reason.includes('footnote')) return 'footnote';
     if (reason.includes('repeated')) return 'text_integrity';
+    if (reason.includes('picture_internal')) return 'picture';
     if (reason.includes('hanja')) return 'domain_pattern';
     if (reason.includes('heading')) return 'role';
     return 'text';
@@ -540,6 +570,8 @@ export class ReviewAssistanceRunner {
         return `여러 페이지에 반복되는 header/footer 후보입니다${preview}`;
       case 'caption_like_body_text':
         return `본문으로 남은 캡션 후보입니다${preview}`;
+      case 'picture_internal_text':
+        return `이미지 내부 텍스트 후보입니다. 본문 텍스트가 아니라 이미지 일부로 취급해야 합니다${preview}`;
       case 'footnote_like_body_text':
         return `본문으로 남은 각주 후보입니다${preview}`;
       case 'orphan_caption':

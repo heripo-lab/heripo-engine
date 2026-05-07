@@ -379,7 +379,12 @@ describe('ReviewAssistanceRunner', () => {
     expect(report.pages[0].error?.message).toBe('vlm failed');
     expect(logger.warn).toHaveBeenCalledWith(
       '[ReviewAssistanceRunner] Page 1/1: review failed',
-      'vlm failed',
+      {
+        err: expect.objectContaining({
+          type: 'string',
+          message: 'vlm failed',
+        }),
+      },
     );
   });
 
@@ -403,6 +408,46 @@ describe('ReviewAssistanceRunner', () => {
     });
 
     expect(report.pages[0].error?.message).toBe('model failed');
+  });
+
+  test('리뷰 실패 로그와 리포트 에러에서 긴 base64성 데이터를 제거한다', async () => {
+    const base64Like = 'a'.repeat(260);
+    vi.mocked(LLMCaller.callVision).mockRejectedValue(
+      new Error(`Headers Timeout ${base64Like}`),
+    );
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
+
+    const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      {
+        enabled: true,
+        concurrency: 1,
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        maxRetries: 3,
+        temperature: 0,
+      },
+    );
+
+    expect(report.pages[0].error?.message).toBe(
+      'Headers Timeout [redacted-large-data]',
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: review failed',
+      {
+        err: expect.objectContaining({
+          message: 'Headers Timeout [redacted-large-data]',
+          stack: expect.not.stringContaining(base64Like),
+        }),
+      },
+    );
   });
 
   test('treats no structured output as no-op review result with issue hint', async () => {
@@ -447,7 +492,12 @@ describe('ReviewAssistanceRunner', () => {
     );
     expect(logger.warn).toHaveBeenCalledWith(
       '[ReviewAssistanceRunner] Page 1/1: review produced no structured output; recording no-op result',
-      expect.any(Error),
+      {
+        err: expect.objectContaining({
+          type: 'Error',
+          message: 'No output generated.',
+        }),
+      },
     );
   });
 

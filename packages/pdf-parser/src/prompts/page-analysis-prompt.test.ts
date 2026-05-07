@@ -30,6 +30,18 @@ describe('PAGE_ANALYSIS_PROMPT', () => {
   test('contains rules section', () => {
     expect(PAGE_ANALYSIS_PROMPT).toContain('## Rules');
   });
+
+  test('이미지 내부 텍스트는 추출하지 않고 외부 캡션만 추출하도록 안내한다', () => {
+    expect(PAGE_ANALYSIS_PROMPT).toContain(
+      'Treat photos, maps, drawings, diagrams, plates',
+    );
+    expect(PAGE_ANALYSIS_PROMPT).toContain(
+      'Do NOT extract labels, legends, handwriting, signs',
+    );
+    expect(PAGE_ANALYSIS_PROMPT).toContain(
+      'Only text outside or directly adjacent to a picture',
+    );
+  });
 });
 
 describe('TEXT_REFERENCE_PROMPT', () => {
@@ -46,5 +58,8 @@ describe('TEXT_REFERENCE_PROMPT', () => {
     expect(TEXT_REFERENCE_PROMPT).toContain('use it as-is');
     expect(TEXT_REFERENCE_PROMPT).toContain('IGNORE it entirely');
     expect(TEXT_REFERENCE_PROMPT).toContain('Do NOT blindly trust');
+    expect(TEXT_REFERENCE_PROMPT).toContain(
+      'Ignore text-layer snippets that belong inside picture regions',
+    );
   });
 });
