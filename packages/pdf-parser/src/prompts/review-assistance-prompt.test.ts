@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   REVIEW_ASSISTANCE_SYSTEM_PROMPT,
+  REVIEW_ASSISTANCE_TASKS,
   buildReviewAssistancePrompt,
 } from './review-assistance-prompt';
 
@@ -105,5 +106,56 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('"nextPageTableRefs"');
     expect(prompt).toContain('"domainPatterns"');
     expect(prompt).toContain('"pictures"');
+  });
+
+  test('task prompt narrows allowed ops and focused context', () => {
+    const context: PageReviewContext = {
+      pageNo: 1,
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [
+        {
+          ref: '#/texts/0',
+          label: 'text',
+          text: 'Test',
+          suspectReasons: ['hanja_ocr_candidate'],
+        },
+      ],
+      missingTextCandidates: [],
+      tables: [
+        {
+          ref: '#/tables/0',
+          gridPreview: [['A']],
+          emptyCellRatio: 0,
+          suspectReasons: [],
+        },
+      ],
+      pictures: [
+        {
+          ref: '#/pictures/0',
+          suspectReasons: ['image_missing_caption'],
+        },
+      ],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: ['#/texts/0'],
+        visualOrderRefs: ['#/texts/0'],
+        bboxWarnings: [],
+      },
+      domainPatterns: [
+        { targetRef: '#/texts/0', pattern: 'hanja_term', value: '山' },
+      ],
+    };
+
+    const task = REVIEW_ASSISTANCE_TASKS.find(
+      (entry) => entry.id === 'text_ocr_hanja',
+    )!;
+    const prompt = buildReviewAssistancePrompt(context, task);
+
+    expect(prompt).toContain('TASK: Text OCR and Hanja correction');
+    expect(prompt).toContain('Allowed ops for this task: replaceText');
+    expect(prompt).toContain('"domainPatterns"');
+    expect(prompt).not.toContain('"gridPreview"');
   });
 });

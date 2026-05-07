@@ -1,4 +1,5 @@
 import type { PageReviewContext } from '../processors/review-assistance/page-review-context-builder';
+import type { ReviewAssistanceCommandOp } from '../types/review-assistance-schema';
 
 import {
   REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH,
@@ -55,54 +56,260 @@ Rules:
 - Keep rationale and pageNotes concise. Do not include chain-of-thought, user-intent analysis, or summaries of unrelated document content.
 - Keep rationale <= ${REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH} characters, evidence <= ${REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH} characters, and each page note <= ${REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH} characters.`;
 
-export function buildReviewAssistancePrompt(
-  context: PageReviewContext,
-): string {
-  return [
-    REVIEW_ASSISTANCE_SYSTEM_PROMPT,
-    'PAGE CONTEXT JSON:',
-    JSON.stringify(toPromptContext(context)),
-  ].join('\n\n');
+export type ReviewAssistanceTaskId =
+  | 'text_ocr_hanja'
+  | 'text_integrity'
+  | 'text_role_footnote'
+  | 'tables'
+  | 'pictures_captions'
+  | 'layout_bbox_order';
+
+export interface ReviewAssistanceTaskDefinition {
+  id: ReviewAssistanceTaskId;
+  label: string;
+  allowedOps: readonly ReviewAssistanceCommandOp[];
+  focus: string;
 }
 
-function toPromptContext(context: PageReviewContext): unknown {
+export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] =
+  [
+    {
+      id: 'text_ocr_hanja',
+      label: 'Text OCR and Hanja correction',
+      allowedOps: ['replaceText'],
+      focus:
+        'Correct OCR text only when the page image or text layer clearly supports the full replacement. Prioritize Hanja restoration, CJK mojibake, coordinates, units, numerals, institution names, feature names, and domain terms. Do not add, remove, split, merge, relabel, move, or touch tables/pictures.',
+    },
+    {
+      id: 'text_integrity',
+      label: 'Missing, noisy, duplicate, split, and merged text',
+      allowedOps: ['addText', 'removeText', 'mergeTexts', 'splitText'],
+      focus:
+        'Find visible non-picture document text that is missing, duplicated, empty, OCR-noise, wrongly merged, or wrongly split. Do not rewrite normal OCR wording here; use only structural text integrity commands.',
+    },
+    {
+      id: 'text_role_footnote',
+      label: 'Text roles and footnotes',
+      allowedOps: ['updateTextRole', 'linkFootnote'],
+      focus:
+        'Classify repeated page headers/footers, body text, captions, and footnotes correctly. Link footnote markers to footnote text when both refs are present. Do not change text content.',
+    },
+    {
+      id: 'tables',
+      label: 'Tables and continued tables',
+      allowedOps: ['updateTableCell', 'replaceTable', 'linkContinuedTable'],
+      focus:
+        'Inspect table OCR, visible grid structure, captions, empty cells, and adjacent-page table continuation hints. Prefer updateTableCell for localized text errors. Use replaceTable only for clear grid failures.',
+    },
+    {
+      id: 'pictures_captions',
+      label: 'Pictures and external captions',
+      allowedOps: [
+        'updatePictureCaption',
+        'addPicture',
+        'splitPicture',
+        'hidePicture',
+        'removeText',
+      ],
+      focus:
+        'Inspect picture regions and external captions only. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures when they are not external captions.',
+    },
+    {
+      id: 'layout_bbox_order',
+      label: 'Layout, bounding boxes, and reading order',
+      allowedOps: ['updateBbox', 'moveNode'],
+      focus:
+        'Fix only obvious bbox problems and page-local reading-order mistakes. Do not rewrite text, tables, or captions.',
+    },
+  ];
+
+export function buildReviewAssistancePrompt(
+  context: PageReviewContext,
+  task?: ReviewAssistanceTaskDefinition,
+): string {
+  const taskPrompt = task
+    ? [
+        `TASK: ${task.label} (${task.id})`,
+        `Focus: ${task.focus}`,
+        `Allowed ops for this task: ${task.allowedOps.join(', ')}`,
+        'If the needed correction is outside this task or outside the allowed ops, return no commands.',
+      ].join('\n')
+    : undefined;
+  return [
+    REVIEW_ASSISTANCE_SYSTEM_PROMPT,
+    taskPrompt,
+    'PAGE CONTEXT JSON:',
+    JSON.stringify(toPromptContext(context, task)),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function toPromptContext(
+  context: PageReviewContext,
+  task?: ReviewAssistanceTaskDefinition,
+): unknown {
+  if (!task) return toFullPromptContext(context);
+
+  const base = {
+    pageNo: context.pageNo,
+    pageSize: context.pageSize,
+  };
+
+  switch (task.id) {
+    case 'text_ocr_hanja':
+      return {
+        ...base,
+        textBlocks: context.textBlocks.map(toPromptTextBlock),
+        domainPatterns: context.domainPatterns,
+      };
+    case 'text_integrity':
+      return {
+        ...base,
+        textBlocks: context.textBlocks.map(toPromptTextBlock),
+        missingTextCandidates: context.missingTextCandidates,
+        pictures: context.pictures.map(toPromptPictureGeometry),
+      };
+    case 'text_role_footnote':
+      return {
+        ...base,
+        textBlocks: context.textBlocks.map(toPromptTextBlock),
+        orphanCaptions: context.orphanCaptions,
+        footnotes: context.footnotes,
+        tables: context.tables.map(toPromptTableCaptionTarget),
+        pictures: context.pictures.map(toPromptPictureCaptionTarget),
+      };
+    case 'tables':
+      return {
+        ...base,
+        tables: context.tables.map(toPromptTable),
+        orphanCaptions: context.orphanCaptions.filter((caption) =>
+          caption.nearestMediaRefs.some((ref) => ref.kind === 'table'),
+        ),
+      };
+    case 'pictures_captions':
+      return {
+        ...base,
+        pictures: context.pictures.map(toPromptPicture),
+        orphanCaptions: context.orphanCaptions.filter((caption) =>
+          caption.nearestMediaRefs.some((ref) => ref.kind === 'picture'),
+        ),
+        textBlocks: context.textBlocks
+          .filter(
+            (block) =>
+              block.suspectReasons.includes('picture_internal_text') ||
+              block.suspectReasons.includes('caption_like_body_text') ||
+              block.label === 'caption',
+          )
+          .map(toPromptTextBlock),
+      };
+    case 'layout_bbox_order':
+      return {
+        ...base,
+        textBlocks: context.textBlocks.map(toPromptGeometryTextBlock),
+        tables: context.tables.map(toPromptTableCaptionTarget),
+        pictures: context.pictures.map(toPromptPictureCaptionTarget),
+        layout: context.layout,
+      };
+  }
+}
+
+function toFullPromptContext(context: PageReviewContext): unknown {
   return {
     pageNo: context.pageNo,
     pageSize: context.pageSize,
-    textBlocks: context.textBlocks.map((block) => ({
-      ref: block.ref,
-      label: block.label,
-      text: block.text,
-      bbox: block.bbox,
-      textLayerReference: block.textLayerReference,
-      previousRef: block.previousRef,
-      nextRef: block.nextRef,
-      repeatedAcrossPages: block.repeatedAcrossPages,
-      suspectReasons: block.suspectReasons,
-    })),
+    textBlocks: context.textBlocks.map(toPromptTextBlock),
     missingTextCandidates: context.missingTextCandidates,
-    tables: context.tables.map((table) => ({
-      ref: table.ref,
-      caption: table.caption,
-      bbox: table.bbox,
-      gridPreview: table.gridPreview,
-      emptyCellRatio: table.emptyCellRatio,
-      previousPageTableRefs: table.previousPageTableRefs,
-      previousPageTableSummary: table.previousPageTableSummary,
-      nextPageTableRefs: table.nextPageTableRefs,
-      nextPageTableSummary: table.nextPageTableSummary,
-      suspectReasons: table.suspectReasons,
-    })),
-    pictures: context.pictures.map((picture) => ({
-      ref: picture.ref,
-      caption: picture.caption,
-      imageUri: picture.imageUri,
-      bbox: picture.bbox,
-      suspectReasons: picture.suspectReasons,
-    })),
+    tables: context.tables.map(toPromptTable),
+    pictures: context.pictures.map(toPromptPicture),
     orphanCaptions: context.orphanCaptions,
     footnotes: context.footnotes,
     layout: context.layout,
     domainPatterns: context.domainPatterns,
+  };
+}
+
+function toPromptTextBlock(block: PageReviewContext['textBlocks'][number]) {
+  return {
+    ref: block.ref,
+    label: block.label,
+    text: block.text,
+    bbox: block.bbox,
+    textLayerReference: block.textLayerReference,
+    previousRef: block.previousRef,
+    nextRef: block.nextRef,
+    repeatedAcrossPages: block.repeatedAcrossPages,
+    suspectReasons: block.suspectReasons,
+  };
+}
+
+function toPromptGeometryTextBlock(
+  block: PageReviewContext['textBlocks'][number],
+) {
+  return {
+    ref: block.ref,
+    label: block.label,
+    text: block.text.slice(0, 120),
+    bbox: block.bbox,
+    previousRef: block.previousRef,
+    nextRef: block.nextRef,
+    suspectReasons: block.suspectReasons,
+  };
+}
+
+function toPromptTable(table: PageReviewContext['tables'][number]) {
+  return {
+    ref: table.ref,
+    caption: table.caption,
+    bbox: table.bbox,
+    gridPreview: table.gridPreview,
+    emptyCellRatio: table.emptyCellRatio,
+    previousPageTableRefs: table.previousPageTableRefs,
+    previousPageTableSummary: table.previousPageTableSummary,
+    nextPageTableRefs: table.nextPageTableRefs,
+    nextPageTableSummary: table.nextPageTableSummary,
+    suspectReasons: table.suspectReasons,
+  };
+}
+
+function toPromptTableCaptionTarget(
+  table: PageReviewContext['tables'][number],
+) {
+  return {
+    ref: table.ref,
+    caption: table.caption,
+    bbox: table.bbox,
+    suspectReasons: table.suspectReasons,
+  };
+}
+
+function toPromptPicture(picture: PageReviewContext['pictures'][number]) {
+  return {
+    ref: picture.ref,
+    caption: picture.caption,
+    imageUri: picture.imageUri,
+    bbox: picture.bbox,
+    suspectReasons: picture.suspectReasons,
+  };
+}
+
+function toPromptPictureGeometry(
+  picture: PageReviewContext['pictures'][number],
+) {
+  return {
+    ref: picture.ref,
+    bbox: picture.bbox,
+    suspectReasons: picture.suspectReasons,
+  };
+}
+
+function toPromptPictureCaptionTarget(
+  picture: PageReviewContext['pictures'][number],
+) {
+  return {
+    ref: picture.ref,
+    caption: picture.caption,
+    bbox: picture.bbox,
+    suspectReasons: picture.suspectReasons,
   };
 }

@@ -1,6 +1,8 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type {
   DoclingDocument,
+  ReviewAssistanceCommand,
+  ReviewAssistanceDecision,
   ReviewAssistanceIssue,
   ReviewAssistanceIssueCategory,
   ReviewAssistancePageResult,
@@ -19,7 +21,11 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { buildReviewAssistancePrompt } from '../../prompts/review-assistance-prompt';
+import {
+  REVIEW_ASSISTANCE_TASKS,
+  type ReviewAssistanceTaskDefinition,
+  buildReviewAssistancePrompt,
+} from '../../prompts/review-assistance-prompt';
 import {
   type ReviewAssistancePageOutput,
   reviewAssistancePageSchema,
@@ -39,6 +45,15 @@ export interface ReviewAssistanceRunnerOptions extends NormalizedReviewAssistanc
 }
 
 const REVIEW_ASSISTANCE_PAGE_CONCURRENCY = 1;
+const REVIEW_ASSISTANCE_TASK_CONCURRENCY = REVIEW_ASSISTANCE_TASKS.length;
+
+interface ReviewAssistanceTaskResult {
+  task: ReviewAssistanceTaskDefinition;
+  status: 'succeeded' | 'empty' | 'failed';
+  decisions: ReviewAssistanceDecision[];
+  issue?: ReviewAssistanceIssue;
+  errorMessage?: string;
+}
 
 export class ReviewAssistanceRunner {
   constructor(private readonly logger: LoggerMethods) {}
@@ -86,7 +101,7 @@ export class ReviewAssistanceRunner {
     });
 
     this.logger.info(
-      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (concurrency: ${REVIEW_ASSISTANCE_PAGE_CONCURRENCY})...`,
+      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${REVIEW_ASSISTANCE_PAGE_CONCURRENCY}, task concurrency: ${REVIEW_ASSISTANCE_TASK_CONCURRENCY})...`,
     );
 
     let completedPages = 0;
@@ -230,50 +245,72 @@ export class ReviewAssistanceRunner {
       );
 
       const image = new Uint8Array(await readFile(context.pageImagePath));
-      const prompt = buildReviewAssistancePrompt(context);
-      const result = await LLMCaller.callVision({
-        schema: reviewAssistancePageSchema as any,
-        messages: [
+      const taskResults = await Promise.all(
+        REVIEW_ASSISTANCE_TASKS.map((task) =>
+          this.reviewPageTask(context, task, image, pageCount, model, options),
+        ),
+      );
+      const succeededTaskCount = taskResults.filter(
+        (result) => result.status !== 'failed',
+      ).length;
+      const failedTaskResults = taskResults.filter(
+        (result) => result.status === 'failed',
+      );
+
+      if (succeededTaskCount === 0) {
+        this.logger.warn(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: all review tasks failed`,
           {
-            role: 'user' as const,
-            content: [
-              { type: 'text' as const, text: prompt },
-              {
-                type: 'image' as const,
-                image,
-                mediaType: 'image/png' as const,
-              },
-            ],
+            err: {
+              type: 'ReviewAssistanceTaskFailure',
+              message: failedTaskResults
+                .map(
+                  (result) =>
+                    `${result.task.id}: ${result.errorMessage ?? 'failed'}`,
+                )
+                .join('; '),
+            },
           },
-        ],
-        primaryModel: model,
-        maxRetries: options.maxRetries,
-        temperature: options.temperature,
-        abortSignal: options.abortSignal,
-        component: 'ReviewAssistance',
-        phase: 'page-review',
-        metadata: { pageNo: context.pageNo, pageCount },
-      });
+        );
+        return {
+          pageNo: context.pageNo,
+          status: 'failed',
+          decisions: [],
+          issues: [
+            ...this.buildIssues(context),
+            ...taskResults.flatMap((result) =>
+              result.issue ? [result.issue] : [],
+            ),
+          ],
+          error: {
+            message: failedTaskResults
+              .map(
+                (result) =>
+                  `${result.task.id}: ${result.errorMessage ?? 'failed'}`,
+              )
+              .join('; '),
+          },
+        };
+      }
 
-      options.aggregator?.track(result.usage);
-
-      const output = result.output as ReviewAssistancePageOutput;
-      const validator = new ReviewAssistanceValidator();
-      const decisions = validator.validatePageOutput(context, output, {
-        autoApplyThreshold: options.autoApplyThreshold,
-        proposalThreshold: options.proposalThreshold,
-        allowAutoApply: true,
-      });
+      const decisions = this.mergeTaskDecisions(
+        taskResults.flatMap((result) => result.decisions),
+      );
 
       this.logger.info(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${decisions.length} decisions)`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${decisions.length} decisions from ${succeededTaskCount}/${REVIEW_ASSISTANCE_TASKS.length} tasks)`,
       );
 
       return {
         pageNo: context.pageNo,
         status: 'succeeded',
         decisions,
-        issues: this.buildIssues(context),
+        issues: [
+          ...this.buildIssues(context),
+          ...taskResults.flatMap((result) =>
+            result.issue ? [result.issue] : [],
+          ),
+        ],
       };
     } catch (error) {
       if (options.abortSignal?.aborted) {
@@ -308,6 +345,98 @@ export class ReviewAssistanceRunner {
         error: {
           message: this.safeErrorMessage(error),
         },
+      };
+    }
+  }
+
+  private async reviewPageTask(
+    context: PageReviewContext,
+    task: ReviewAssistanceTaskDefinition,
+    image: Uint8Array,
+    pageCount: number,
+    model: LanguageModel,
+    options: ReviewAssistanceRunnerOptions,
+  ): Promise<ReviewAssistanceTaskResult> {
+    try {
+      this.logger.info(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task started`,
+      );
+
+      const prompt = buildReviewAssistancePrompt(context, task);
+      const result = await LLMCaller.callVision({
+        schema: reviewAssistancePageSchema as any,
+        messages: [
+          {
+            role: 'user' as const,
+            content: [
+              { type: 'text' as const, text: prompt },
+              {
+                type: 'image' as const,
+                image,
+                mediaType: 'image/png' as const,
+              },
+            ],
+          },
+        ],
+        primaryModel: model,
+        maxRetries: options.maxRetries,
+        temperature: options.temperature,
+        abortSignal: options.abortSignal,
+        component: 'ReviewAssistance',
+        phase: 'page-review',
+        metadata: { pageNo: context.pageNo, pageCount, task: task.id },
+      });
+
+      options.aggregator?.track(result.usage);
+
+      const output = result.output as ReviewAssistancePageOutput;
+      const validator = new ReviewAssistanceValidator();
+      const decisions = validator
+        .validatePageOutput(context, output, {
+          autoApplyThreshold: options.autoApplyThreshold,
+          proposalThreshold: options.proposalThreshold,
+          allowAutoApply: true,
+        })
+        .map((decision) => this.withTaskMetadata(decision, task))
+        .map((decision) => this.enforceTaskAllowedOps(decision, task));
+
+      this.logger.info(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task completed (${decisions.length} decisions)`,
+      );
+
+      return {
+        task,
+        status: 'succeeded',
+        decisions,
+      };
+    } catch (error) {
+      if (options.abortSignal?.aborted) {
+        throw error;
+      }
+
+      if (this.isNoOutputGeneratedError(error)) {
+        this.logger.warn(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task produced no structured output; recording no-op result`,
+          this.errorLogBinding(error),
+        );
+        return {
+          task,
+          status: 'empty',
+          decisions: [],
+          issue: this.buildNoOutputIssue(context, task),
+        };
+      }
+
+      this.logger.warn(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task failed`,
+        this.errorLogBinding(error),
+      );
+      return {
+        task,
+        status: 'failed',
+        decisions: [],
+        issue: this.buildTaskFailureIssue(context, task, error),
+        errorMessage: this.safeErrorMessage(error),
       };
     }
   }
@@ -358,17 +487,249 @@ export class ReviewAssistanceRunner {
 
   private buildNoOutputIssue(
     context: PageReviewContext,
+    task?: ReviewAssistanceTaskDefinition,
   ): ReviewAssistanceIssue {
     return {
-      id: `review-execution-${context.pageNo}-empty-output`,
+      id: `review-execution-${context.pageNo}${task ? `-${task.id}` : ''}-empty-output`,
       pageNo: context.pageNo,
       category: 'review_execution',
       type: 'empty_model_output',
       severity: 'warning',
       description:
-        'AI가 빈 구조화 응답을 반환해 자동 제안이 없습니다. 페이지를 직접 확인하세요.',
-      reasons: ['no_output_generated'],
+        task === undefined
+          ? 'AI가 빈 구조화 응답을 반환해 자동 제안이 없습니다. 페이지를 직접 확인하세요.'
+          : `AI가 ${task.label} 작업에서 빈 구조화 응답을 반환했습니다. 해당 영역을 직접 확인하세요.`,
+      reasons: [
+        'no_output_generated',
+        ...(task ? [`review_task:${task.id}`] : []),
+      ],
     };
+  }
+
+  private buildTaskFailureIssue(
+    context: PageReviewContext,
+    task: ReviewAssistanceTaskDefinition,
+    error: unknown,
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-execution-${context.pageNo}-${task.id}-failed`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'task_model_error',
+      severity: 'warning',
+      description: `${task.label} 작업이 실패했습니다. 해당 영역을 직접 확인하세요.`,
+      reasons: [`review_task:${task.id}`, this.safeErrorMessage(error)],
+    };
+  }
+
+  private withTaskMetadata(
+    decision: ReviewAssistanceDecision,
+    task: ReviewAssistanceTaskDefinition,
+  ): ReviewAssistanceDecision {
+    return {
+      ...decision,
+      reasons: [`review_task:${task.id}`, ...decision.reasons],
+      metadata: {
+        ...decision.metadata,
+        reviewTask: task.id,
+        reviewTaskLabel: task.label,
+      },
+    };
+  }
+
+  private enforceTaskAllowedOps(
+    decision: ReviewAssistanceDecision,
+    task: ReviewAssistanceTaskDefinition,
+  ): ReviewAssistanceDecision {
+    const op = decision.command?.op ?? decision.invalidOp;
+    if (!op || task.allowedOps.includes(op as never)) {
+      return decision;
+    }
+    return {
+      ...decision,
+      disposition: 'skipped',
+      reasons: [...decision.reasons, `task_op_not_allowed:${task.id}:${op}`],
+      metadata: {
+        ...decision.metadata,
+        taskOpNotAllowed: {
+          task: task.id,
+          op,
+          allowedOps: [...task.allowedOps],
+        },
+      },
+    };
+  }
+
+  private mergeTaskDecisions(
+    decisions: ReviewAssistanceDecision[],
+  ): ReviewAssistanceDecision[] {
+    const merged: ReviewAssistanceDecision[] = [];
+    const signatureToIndex = new Map<string, number>();
+    const refToIndex = new Map<string, number>();
+
+    for (const decision of decisions) {
+      if (!decision.command) {
+        merged.push(decision);
+        continue;
+      }
+
+      const signature = this.commandSignature(decision.command);
+      const duplicateIndex = signatureToIndex.get(signature);
+      if (duplicateIndex !== undefined) {
+        merged[duplicateIndex] = this.mergeDuplicateDecision(
+          merged[duplicateIndex],
+          decision,
+        );
+        continue;
+      }
+
+      const touchedRefs = this.getTouchedRefs(decision.command);
+      const conflictIndexes = [
+        ...new Set(
+          touchedRefs
+            .map((ref) => refToIndex.get(ref))
+            .filter((index): index is number => index !== undefined),
+        ),
+      ];
+      let nextDecision = decision;
+      if (conflictIndexes.length > 0) {
+        const conflictIds = conflictIndexes.map((index) => merged[index].id);
+        nextDecision = this.markTaskConflict(nextDecision, conflictIds);
+        for (const index of conflictIndexes) {
+          merged[index] = this.markTaskConflict(merged[index], [
+            nextDecision.id,
+          ]);
+        }
+      }
+
+      const nextIndex = merged.length;
+      merged.push(nextDecision);
+      signatureToIndex.set(signature, nextIndex);
+      for (const ref of touchedRefs) {
+        if (!refToIndex.has(ref)) {
+          refToIndex.set(ref, nextIndex);
+        }
+      }
+    }
+
+    return merged;
+  }
+
+  private mergeDuplicateDecision(
+    existing: ReviewAssistanceDecision,
+    duplicate: ReviewAssistanceDecision,
+  ): ReviewAssistanceDecision {
+    const keeper =
+      duplicate.confidence > existing.confidence ? duplicate : existing;
+    const other = keeper === existing ? duplicate : existing;
+    const taskIds = [
+      ...new Set(
+        [keeper.metadata?.reviewTask, other.metadata?.reviewTask].filter(
+          (value): value is string => typeof value === 'string',
+        ),
+      ),
+    ];
+    return {
+      ...keeper,
+      confidence: Math.max(existing.confidence, duplicate.confidence),
+      reasons: [
+        ...new Set([
+          ...keeper.reasons,
+          ...other.reasons,
+          `duplicate_review_task:${other.metadata?.reviewTask ?? 'unknown'}`,
+        ]),
+      ],
+      metadata: {
+        ...keeper.metadata,
+        duplicateReviewTasks: taskIds,
+      },
+    };
+  }
+
+  private markTaskConflict(
+    decision: ReviewAssistanceDecision,
+    conflictIds: string[],
+  ): ReviewAssistanceDecision {
+    return {
+      ...decision,
+      disposition:
+        decision.disposition === 'auto_applied'
+          ? 'proposal'
+          : decision.disposition,
+      reasons: [
+        ...new Set([
+          ...decision.reasons,
+          'task_conflict_same_target_ref',
+          ...conflictIds.map((id) => `conflicts_with_decision:${id}`),
+        ]),
+      ],
+      metadata: {
+        ...decision.metadata,
+        taskConflict: {
+          sameTargetRef: true,
+          conflictDecisionIds: [
+            ...new Set([
+              ...((
+                decision.metadata?.taskConflict as
+                  | { conflictDecisionIds?: string[] }
+                  | undefined
+              )?.conflictDecisionIds ?? []),
+              ...conflictIds,
+            ]),
+          ],
+        },
+      },
+    };
+  }
+
+  private commandSignature(command: ReviewAssistanceCommand): string {
+    return this.stableStringify(command);
+  }
+
+  private stableStringify(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((entry) => this.stableStringify(entry)).join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+      return `{${Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(
+          ([key, entry]) =>
+            `${JSON.stringify(key)}:${this.stableStringify(entry)}`,
+        )
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
+  }
+
+  private getTouchedRefs(command: ReviewAssistanceCommand): string[] {
+    switch (command.op) {
+      case 'replaceText':
+      case 'updateTextRole':
+      case 'removeText':
+      case 'splitText':
+        return [command.textRef];
+      case 'mergeTexts':
+        return [...new Set([command.keepRef, ...command.textRefs])];
+      case 'updateTableCell':
+      case 'replaceTable':
+        return [command.tableRef];
+      case 'linkContinuedTable':
+        return [command.sourceTableRef];
+      case 'updatePictureCaption':
+      case 'splitPicture':
+      case 'hidePicture':
+        return [command.pictureRef];
+      case 'updateBbox':
+        return [command.targetRef];
+      case 'linkFootnote':
+        return [command.markerTextRef, command.footnoteTextRef];
+      case 'moveNode':
+        return [command.sourceRef];
+      case 'addText':
+      case 'addPicture':
+        return [];
+    }
   }
 
   private buildReport(

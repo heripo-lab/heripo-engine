@@ -185,18 +185,23 @@ describe('ReviewAssistanceRunner', () => {
       proposalCount: 0,
       skippedCount: 0,
     });
+    expect(LLMCaller.callVision).toHaveBeenCalledTimes(6);
     expect(LLMCaller.callVision).toHaveBeenCalledWith(
       expect.objectContaining({
         component: 'ReviewAssistance',
         phase: 'page-review',
-        metadata: { pageNo: 1, pageCount: 1 },
+        metadata: {
+          pageNo: 1,
+          pageCount: 1,
+          task: 'text_ocr_hanja',
+        },
       }),
     );
     expect(logger.info).toHaveBeenCalledWith(
       '[ReviewAssistanceRunner] Page 1/1: review started',
     );
     expect(logger.info).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: review completed (1 decisions)',
+      '[ReviewAssistanceRunner] Page 1/1: review completed (1 decisions from 6/6 tasks)',
     );
     expect(onProgress).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -208,7 +213,7 @@ describe('ReviewAssistanceRunner', () => {
     );
     expect(onTokenUsage).toHaveBeenCalledWith(
       expect.objectContaining({
-        total: expect.objectContaining({ totalTokens: 15 }),
+        total: expect.objectContaining({ totalTokens: 90 }),
       }),
     );
     expect(onProgress).toHaveBeenCalledWith(
@@ -274,6 +279,98 @@ describe('ReviewAssistanceRunner', () => {
     });
 
     expect(mockExtractText).toHaveBeenCalledWith('/tmp/input.pdf', 1);
+  });
+
+  test('같은 ref를 건드리는 task 충돌은 자동 반영하지 않고 proposal로 낮춘다', async () => {
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      const task = input.metadata.task;
+      if (task === 'text_ocr_hanja') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'replaceText',
+                targetRef: '#/texts/0',
+                payload: { text: 'Test' },
+                confidence: 0.95,
+                rationale: 'Correct OCR spacing',
+                evidence: 'Test',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      if (task === 'layout_bbox_order') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'updateBbox',
+                targetRef: '#/texts/0',
+                payload: {
+                  bbox: {
+                    l: 12,
+                    t: 12,
+                    r: 82,
+                    b: 42,
+                    coord_origin: 'TOPLEFT',
+                  },
+                },
+                confidence: 0.95,
+                rationale: 'Bbox aligns better with visual text',
+                evidence: 'Text box shifted',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return {
+        output: { pageNo: 1, commands: [], pageNotes: [] },
+        usage,
+        usedFallback: false,
+      };
+    });
+
+    const report = await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
+      enabled: true,
+      concurrency: 1,
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      maxRetries: 3,
+      temperature: 0,
+    });
+
+    expect(report.summary.autoAppliedCount).toBe(0);
+    expect(report.summary.proposalCount).toBe(2);
+    expect(report.pages[0].decisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          disposition: 'proposal',
+          reasons: expect.arrayContaining(['task_conflict_same_target_ref']),
+          metadata: expect.objectContaining({ reviewTask: 'text_ocr_hanja' }),
+        }),
+        expect.objectContaining({
+          disposition: 'proposal',
+          reasons: expect.arrayContaining(['task_conflict_same_target_ref']),
+          metadata: expect.objectContaining({
+            reviewTask: 'layout_bbox_order',
+          }),
+        }),
+      ]),
+    );
   });
 
   test('keeps existing origin snapshots when rerun in the same output directory', async () => {
@@ -376,13 +473,15 @@ describe('ReviewAssistanceRunner', () => {
     );
 
     expect(report.summary.pagesFailed).toBe(1);
-    expect(report.pages[0].error?.message).toBe('vlm failed');
+    expect(report.pages[0].error?.message).toContain(
+      'text_ocr_hanja: vlm failed',
+    );
     expect(logger.warn).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: review failed',
+      '[ReviewAssistanceRunner] Page 1/1: all review tasks failed',
       {
         err: expect.objectContaining({
-          type: 'string',
-          message: 'vlm failed',
+          type: 'ReviewAssistanceTaskFailure',
+          message: expect.stringContaining('text_ocr_hanja: vlm failed'),
         }),
       },
     );
@@ -407,7 +506,9 @@ describe('ReviewAssistanceRunner', () => {
       temperature: 0,
     });
 
-    expect(report.pages[0].error?.message).toBe('model failed');
+    expect(report.pages[0].error?.message).toContain(
+      'text_ocr_hanja: model failed',
+    );
   });
 
   test('리뷰 실패 로그와 리포트 에러에서 긴 base64성 데이터를 제거한다', async () => {
@@ -436,11 +537,11 @@ describe('ReviewAssistanceRunner', () => {
       },
     );
 
-    expect(report.pages[0].error?.message).toBe(
-      'Headers Timeout [redacted-large-data]',
+    expect(report.pages[0].error?.message).toContain(
+      'text_ocr_hanja: Headers Timeout [redacted-large-data]',
     );
     expect(logger.warn).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: review failed',
+      '[ReviewAssistanceRunner] Page 1/1: text_ocr_hanja task failed',
       {
         err: expect.objectContaining({
           message: 'Headers Timeout [redacted-large-data]',
@@ -486,12 +587,12 @@ describe('ReviewAssistanceRunner', () => {
           category: 'review_execution',
           type: 'empty_model_output',
           severity: 'warning',
-          reasons: ['no_output_generated'],
+          reasons: expect.arrayContaining(['no_output_generated']),
         }),
       ]),
     );
     expect(logger.warn).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: review produced no structured output; recording no-op result',
+      '[ReviewAssistanceRunner] Page 1/1: text_ocr_hanja task produced no structured output; recording no-op result',
       {
         err: expect.objectContaining({
           type: 'Error',
