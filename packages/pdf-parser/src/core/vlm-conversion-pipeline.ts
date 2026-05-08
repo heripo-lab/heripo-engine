@@ -12,7 +12,6 @@ import { join } from 'node:path';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { runJqFileJson } from '../utils/jq';
-import { isReviewAssistanceEnabled } from './review-assistance-options';
 
 /**
  * Wraps the standard OCR callback with VLM text correction.
@@ -35,13 +34,6 @@ export class VlmConversionPipeline {
     detectedLanguages?: string[],
     koreanHanjaMixPages?: number[],
   ): ConversionCompleteCallback {
-    if (isReviewAssistanceEnabled(options.reviewAssistance)) {
-      this.logger.info(
-        '[VlmConversionPipeline] Review Assistance enabled; legacy VLM text correction skipped',
-      );
-      return originalCallback;
-    }
-
     if (!options.vlmProcessorModel) {
       throw new Error('vlmProcessorModel is required when OCR strategy is VLM');
     }

@@ -265,7 +265,7 @@ export class PDFConverter {
         throw new Error('VLM conversion requires a local file (file:// URL)');
       }
 
-      const wrappedCallback = reviewAssistanceOptions.enabled
+      const postCorrectionCallback = reviewAssistanceOptions.enabled
         ? this.wrapReviewAssistanceCallback(
             pdfPath,
             reportId,
@@ -274,20 +274,24 @@ export class PDFConverter {
             onComplete,
             abortSignal,
           )
-        : new VlmConversionPipeline(this.logger).wrapCallback(
-            pdfPath,
-            trackedOptions,
-            onComplete,
-            abortSignal,
-            strategy.detectedLanguages,
-            strategy.koreanHanjaMixPages,
-          );
+        : onComplete;
 
       if (reviewAssistanceOptions.enabled) {
         this.logger.info(
-          '[PDFConverter] Review Assistance enabled; skipping legacy VLM text correction',
+          '[PDFConverter] Review Assistance enabled; running VLM text correction before Review Assistance',
         );
       }
+
+      const wrappedCallback = new VlmConversionPipeline(
+        this.logger,
+      ).wrapCallback(
+        pdfPath,
+        trackedOptions,
+        postCorrectionCallback,
+        abortSignal,
+        strategy.detectedLanguages,
+        strategy.koreanHanjaMixPages,
+      );
 
       const vlmOptions: PDFConvertOptions = strategy.detectedLanguages
         ? { ...trackedOptions, ocr_lang: strategy.detectedLanguages }

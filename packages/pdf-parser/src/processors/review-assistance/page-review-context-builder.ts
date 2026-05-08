@@ -682,6 +682,9 @@ export class PageReviewContextBuilder {
       /(?:feature|pit|ditch|burial|tomb|grave|wall|kiln|hearth|house|structure|trench|locus|context|unit|遺構|住居|墓|窯|溝|土坑|竪穴|주거지|수혈|토광묘|유구|구상유구)\s?(?:no\.?|#)?\s?\d*/giu,
     );
     this.pushPattern(patterns, targetRef, 'hanja_term', text, /[一-龯]+/gu);
+    for (const value of this.detectHanjaOcrPatternValues(text)) {
+      patterns.push({ targetRef, pattern: 'hanja_term', value });
+    }
     this.pushPattern(
       patterns,
       targetRef,
@@ -822,14 +825,61 @@ export class PageReviewContextBuilder {
 
   private looksLikeHanjaOcrCandidate(text: string): boolean {
     if (!text) return false;
-    if (/[一-龯]/u.test(text)) return false;
-    if (/[（(][A-Za-z0-9Il|!*_+\-=\\/?:;,.]{2,}[）)]/u.test(text)) {
-      return true;
+    return this.detectHanjaOcrPatternValues(text).length > 0;
+  }
+
+  private detectHanjaOcrPatternValues(text: string): string[] {
+    const values: string[] = [];
+    this.collectHanjaOcrPatternValues(
+      values,
+      text,
+      /[（(]([A-Za-z0-9Il|!*_+\-=\\/?:;,. ]{1,16})[）)]/gu,
+    );
+    this.collectHanjaOcrPatternValues(
+      values,
+      text,
+      /([A-Za-z0-9Il|!*_+\-=\\/?:;,.]{3,16})[）)]/gu,
+    );
+
+    if (/[（(](?:주|재|사)[）)]/u.test(text)) {
+      values.push(text.match(/[（(](?:주|재|사)[）)]/u)?.[0] ?? '');
     }
-    if (/[A-Za-z0-9Il|!*_+\-=\\/?:;,.]{3,}[）)]/u.test(text)) {
-      return true;
+
+    return [...new Set(values.filter(Boolean))].slice(0, 5);
+  }
+
+  private collectHanjaOcrPatternValues(
+    values: string[],
+    text: string,
+    regex: RegExp,
+  ): void {
+    for (const match of text.matchAll(regex)) {
+      const token = match[1]?.trim();
+      if (token && this.isLikelyHanjaOcrNoiseToken(text, token)) {
+        values.push(match[0]);
+      }
     }
-    return /[（(](?:주|재|사)[）)]/u.test(text);
+  }
+
+  private isLikelyHanjaOcrNoiseToken(text: string, token: string): boolean {
+    if (this.isNumericUnitToken(token)) return false;
+    if (!this.hasHanjaRestorationContext(text)) return false;
+    return /[A-ZIl|!*_+\-=\\/?:;]/u.test(token) || /\d[A-Za-z]/u.test(token);
+  }
+
+  private isNumericUnitToken(token: string): boolean {
+    return /^[\d\s.,]+(?:cm|m|km|㎝|㎡|㎢|m²)?$/iu.test(token);
+  }
+
+  private hasHanjaRestorationContext(text: string): boolean {
+    if (/[一-龯]/u.test(text)) return true;
+    if (/[（(](?:주|재|사)[）)]/u.test(text)) return true;
+    return (
+      /[가-힣]/u.test(text) &&
+      /(?:산|봉|강|천|교|동|리|면|읍|사|성|묘|요|유적|유물|문화재|연구원|재단|분지|층|토기|구릉|범람|고분|성곽|유구|기관|조사|지역|지형|고도|하천|시대|읍성|사찰|향교|서원|군|시|구|마을)/u.test(
+        text,
+      )
+    );
   }
 
   private looksLikeFootnote(text: string): boolean {

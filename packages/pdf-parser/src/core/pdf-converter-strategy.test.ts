@@ -265,7 +265,7 @@ describe('PDFConverter.convertWithStrategy', () => {
       convertSpy.mockRestore();
     });
 
-    test('skips legacy VLM text correction when Review Assistance is enabled', async () => {
+    test('runs VLM text correction before Review Assistance when enabled', async () => {
       const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
 
       await converter.convertWithStrategy(
@@ -280,8 +280,19 @@ describe('PDFConverter.convertWithStrategy', () => {
         },
       );
 
-      expect(VlmConversionPipeline).not.toHaveBeenCalled();
-      expect(mockWrapCallback).not.toHaveBeenCalled();
+      expect(VlmConversionPipeline).toHaveBeenCalledWith(logger);
+      expect(mockWrapCallback).toHaveBeenCalledWith(
+        '/tmp/report.pdf',
+        expect.objectContaining({
+          forcedMethod: 'vlm',
+          reviewAssistance: true,
+          vlmProcessorModel: mockModel,
+        }),
+        expect.any(Function),
+        undefined,
+        undefined,
+        undefined,
+      );
       expect(convertSpy).toHaveBeenCalledWith(
         'file:///tmp/report.pdf',
         'report-1',
@@ -294,13 +305,23 @@ describe('PDFConverter.convertWithStrategy', () => {
         undefined,
       );
       expect(logger.info).toHaveBeenCalledWith(
-        '[PDFConverter] Review Assistance enabled; skipping legacy VLM text correction',
+        '[PDFConverter] Review Assistance enabled; running VLM text correction before Review Assistance',
       );
 
       convertSpy.mockRestore();
     });
 
     test('runs Review Assistance callback before original callback', async () => {
+      mockWrapCallback.mockImplementation(
+        (
+          _pdfPath: string,
+          _options: unknown,
+          postCorrectionCallback: (outputDir: string) => Promise<void> | void,
+        ) =>
+          async (outputDir: string) => {
+            await postCorrectionCallback(outputDir);
+          },
+      );
       const convertSpy = vi
         .spyOn(converter, 'convert')
         .mockImplementation(

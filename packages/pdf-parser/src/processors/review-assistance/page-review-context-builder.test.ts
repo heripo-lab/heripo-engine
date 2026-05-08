@@ -263,6 +263,27 @@ describe('PageReviewContextBuilder', () => {
     );
   });
 
+  test('marks garbled Hanja candidates even when the line already has Hanja', () => {
+    const doc = makeDoc();
+    doc.texts[0].text =
+      '초례봉(醮禮峰)과 응해산(ALL)은 팔공산괴(八公山塊)에 속한다.';
+
+    const [context] = new PageReviewContextBuilder().build(doc, '/out');
+
+    expect(context.textBlocks[0].suspectReasons).toContain(
+      'hanja_ocr_candidate',
+    );
+    expect(context.domainPatterns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetRef: '#/texts/0',
+          pattern: 'hanja_term',
+          value: '(ALL)',
+        }),
+      ]),
+    );
+  });
+
   test('이미지 내부 텍스트를 본문 추출 후보가 아니라 이미지 내부 후보로 표시한다', () => {
     const doc = makeDoc();
     doc.body.children.splice(2, 0, { $ref: '#/texts/2' });

@@ -78,21 +78,25 @@ describe('VlmConversionPipeline', () => {
       );
     });
 
-    test('returns original callback and skips legacy correction when Review Assistance is enabled', () => {
+    test('still runs VLM correction when Review Assistance is enabled', async () => {
       const originalCallback = vi.fn();
 
       const wrapped = pipeline.wrapCallback(
         '/tmp/test.pdf',
-        { reviewAssistance: true },
+        { reviewAssistance: true, vlmProcessorModel: mockModel },
         originalCallback,
       );
 
-      expect(wrapped).toBe(originalCallback);
-      expect(VlmTextCorrector).not.toHaveBeenCalled();
-      expect(PdfTextExtractor).not.toHaveBeenCalled();
-      expect(logger.info).toHaveBeenCalledWith(
-        '[VlmConversionPipeline] Review Assistance enabled; legacy VLM text correction skipped',
+      await wrapped('/test/output');
+
+      expect(wrapped).not.toBe(originalCallback);
+      expect(VlmTextCorrector).toHaveBeenCalledWith(logger);
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
+        mockModel,
+        expect.objectContaining({ aggregator: undefined }),
       );
+      expect(originalCallback).toHaveBeenCalledWith('/test/output');
     });
 
     test('returns a callback function', () => {
