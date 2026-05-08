@@ -362,7 +362,9 @@ export class ReviewAssistanceRunner {
         `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task started`,
       );
 
-      const prompt = buildReviewAssistancePrompt(context, task);
+      const prompt = buildReviewAssistancePrompt(context, task, {
+        outputLanguage: options.outputLanguage,
+      });
       const result = await LLMCaller.callVision({
         schema: reviewAssistancePageSchema as any,
         messages: [
@@ -791,6 +793,7 @@ export class ReviewAssistanceRunner {
         proposalThreshold: options.proposalThreshold,
         maxRetries: options.maxRetries,
         temperature: options.temperature,
+        outputLanguage: options.outputLanguage,
         failurePolicy: 'partial_page',
       },
       summary: {

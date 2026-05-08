@@ -34,6 +34,7 @@ describe('normalizeReviewAssistanceOptions', () => {
         proposalThreshold: 0.6,
         maxRetries: 2,
         temperature: 0.2,
+        outputLanguage: 'ko-KR',
       }),
     ).toEqual({
       enabled: false,
@@ -42,6 +43,7 @@ describe('normalizeReviewAssistanceOptions', () => {
       proposalThreshold: 0.6,
       maxRetries: 2,
       temperature: 0.2,
+      outputLanguage: 'ko-KR',
     });
   });
 
@@ -106,6 +108,23 @@ describe('normalizeReviewAssistanceOptions', () => {
     ).toMatchObject({
       maxRetries: 0,
       temperature: 0,
+    });
+  });
+
+  test('normalizes output language', () => {
+    expect(
+      normalizeReviewAssistanceOptions({
+        enabled: true,
+        outputLanguage: ' ko-KR ',
+      }),
+    ).toMatchObject({ outputLanguage: 'ko-KR' });
+    expect(
+      normalizeReviewAssistanceOptions({
+        enabled: true,
+        outputLanguage: '',
+      }),
+    ).toMatchObject({
+      outputLanguage: REVIEW_ASSISTANCE_DEFAULTS.outputLanguage,
     });
   });
 });

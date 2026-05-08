@@ -15,6 +15,8 @@ export interface ReviewAssistanceOptions {
   maxRetries?: number;
   /** VLM generation temperature. Defaults to 0. */
   temperature?: number;
+  /** Language for human-readable review reasons. Defaults to English. */
+  outputLanguage?: string;
 }
 
 export interface NormalizedReviewAssistanceOptions {
@@ -24,6 +26,7 @@ export interface NormalizedReviewAssistanceOptions {
   proposalThreshold: number;
   maxRetries: number;
   temperature: number;
+  outputLanguage: string;
 }
 
 export type ReviewAssistanceOptionInput =
@@ -38,6 +41,7 @@ export const REVIEW_ASSISTANCE_DEFAULTS: NormalizedReviewAssistanceOptions = {
   proposalThreshold: 0.5,
   maxRetries: 3,
   temperature: 0,
+  outputLanguage: 'en-US',
 };
 
 function normalizeNumber(value: number | undefined, fallback: number): number {
@@ -59,6 +63,11 @@ function normalizeMaxRetries(value: number | undefined): number {
   return Math.floor(
     Math.max(0, normalizeNumber(value, REVIEW_ASSISTANCE_DEFAULTS.maxRetries)),
   );
+}
+
+function normalizeOutputLanguage(value: string | undefined): string {
+  const normalized = value?.trim();
+  return normalized || REVIEW_ASSISTANCE_DEFAULTS.outputLanguage;
 }
 
 export function normalizeReviewAssistanceOptions(
@@ -91,6 +100,7 @@ export function normalizeReviewAssistanceOptions(
       objectOptions?.temperature,
       REVIEW_ASSISTANCE_DEFAULTS.temperature,
     ),
+    outputLanguage: normalizeOutputLanguage(objectOptions?.outputLanguage),
   };
 }
 

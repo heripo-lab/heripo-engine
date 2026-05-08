@@ -158,4 +158,33 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('"domainPatterns"');
     expect(prompt).not.toContain('"gridPreview"');
   });
+
+  test('출력 언어 지시를 포함한다', () => {
+    const context: PageReviewContext = {
+      pageNo: 1,
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [],
+      missingTextCandidates: [],
+      tables: [],
+      pictures: [],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: [],
+        visualOrderRefs: [],
+        bboxWarnings: [],
+      },
+      domainPatterns: [],
+    };
+    const prompt = buildReviewAssistancePrompt(context, undefined, {
+      outputLanguage: 'ko-KR',
+    });
+
+    expect(prompt).toContain('OUTPUT LANGUAGE: ko-KR');
+    expect(prompt).toContain('Write rationale and pageNotes in ko-KR');
+    expect(prompt).toContain(
+      'Keep evidence as a short verbatim source snippet when possible',
+    );
+  });
 });

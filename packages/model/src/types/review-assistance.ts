@@ -186,6 +186,7 @@ export interface ReviewAssistanceReport {
     proposalThreshold: number;
     maxRetries: number;
     temperature: number;
+    outputLanguage: string;
     failurePolicy: ReviewAssistanceFailurePolicy;
   };
   summary: {

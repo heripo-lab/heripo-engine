@@ -171,6 +171,7 @@ describe('ReviewAssistanceRunner', () => {
         proposalThreshold: 0.5,
         maxRetries: 3,
         temperature: 0,
+        outputLanguage: 'en-US',
         aggregator,
         onTokenUsage,
         onProgress,
@@ -275,6 +276,7 @@ describe('ReviewAssistanceRunner', () => {
       proposalThreshold: 0.5,
       maxRetries: 3,
       temperature: 0,
+      outputLanguage: 'en-US',
       pdfPath: '/tmp/input.pdf',
     });
 
@@ -351,6 +353,7 @@ describe('ReviewAssistanceRunner', () => {
       proposalThreshold: 0.5,
       maxRetries: 3,
       temperature: 0,
+      outputLanguage: 'en-US',
     });
 
     expect(report.summary.autoAppliedCount).toBe(0);
@@ -404,6 +407,7 @@ describe('ReviewAssistanceRunner', () => {
       proposalThreshold: 0.5,
       maxRetries: 3,
       temperature: 0,
+      outputLanguage: 'en-US',
     });
 
     expect(
@@ -438,6 +442,7 @@ describe('ReviewAssistanceRunner', () => {
         proposalThreshold: 0.5,
         maxRetries: 3,
         temperature: 0,
+        outputLanguage: 'en-US',
         pdfPath: '/tmp/input.pdf',
       },
     );
@@ -469,6 +474,7 @@ describe('ReviewAssistanceRunner', () => {
         proposalThreshold: 0.5,
         maxRetries: 3,
         temperature: 0,
+        outputLanguage: 'en-US',
       },
     );
 
@@ -504,6 +510,7 @@ describe('ReviewAssistanceRunner', () => {
       proposalThreshold: 0.5,
       maxRetries: 3,
       temperature: 0,
+      outputLanguage: 'en-US',
     });
 
     expect(report.pages[0].error?.message).toContain(
@@ -534,6 +541,7 @@ describe('ReviewAssistanceRunner', () => {
         proposalThreshold: 0.5,
         maxRetries: 3,
         temperature: 0,
+        outputLanguage: 'en-US',
       },
     );
 
@@ -573,6 +581,7 @@ describe('ReviewAssistanceRunner', () => {
         proposalThreshold: 0.5,
         maxRetries: 3,
         temperature: 0,
+        outputLanguage: 'en-US',
       },
     );
 
@@ -624,6 +633,7 @@ describe('ReviewAssistanceRunner', () => {
           proposalThreshold: 0.5,
           maxRetries: 3,
           temperature: 0,
+          outputLanguage: 'en-US',
           abortSignal: abortController.signal,
         },
       ),
@@ -810,6 +820,7 @@ describe('ReviewAssistanceRunner', () => {
       proposalThreshold: 0.5,
       maxRetries: 3,
       temperature: 0,
+      outputLanguage: 'en-US',
     });
     const categories = report.pages.flatMap((page) =>
       page.issues.map((issue) => issue.category),

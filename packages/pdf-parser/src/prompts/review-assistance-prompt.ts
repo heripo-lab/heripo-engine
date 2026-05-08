@@ -126,6 +126,7 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
 export function buildReviewAssistancePrompt(
   context: PageReviewContext,
   task?: ReviewAssistanceTaskDefinition,
+  options: { outputLanguage?: string } = {},
 ): string {
   const taskPrompt = task
     ? [
@@ -135,8 +136,16 @@ export function buildReviewAssistancePrompt(
         'If the needed correction is outside this task or outside the allowed ops, return no commands.',
       ].join('\n')
     : undefined;
+  const outputLanguage = options.outputLanguage?.trim();
+  const languagePrompt = outputLanguage
+    ? [
+        `OUTPUT LANGUAGE: ${outputLanguage}`,
+        `Write rationale and pageNotes in ${outputLanguage}. Keep evidence as a short verbatim source snippet when possible. Keep JSON keys, op names, refs, and payload text unchanged.`,
+      ].join('\n')
+    : undefined;
   return [
     REVIEW_ASSISTANCE_SYSTEM_PROMPT,
+    languagePrompt,
     taskPrompt,
     'PAGE CONTEXT JSON:',
     JSON.stringify(toPromptContext(context, task)),
