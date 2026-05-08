@@ -836,7 +836,13 @@ export class ReviewAssistanceRunner {
     };
 
     for (const block of context.textBlocks) {
+      if (this.isTrustedVlmTextHint(block.suspectReasons)) {
+        continue;
+      }
       for (const reason of block.suspectReasons) {
+        if (this.isTrustedVlmTextIssueReason(reason)) {
+          continue;
+        }
         push(
           this.issueCategoryForReason(reason),
           reason,
@@ -897,6 +903,9 @@ export class ReviewAssistanceRunner {
       );
     }
     for (const pattern of context.domainPatterns) {
+      if (this.isTrustedVlmDomainPattern(pattern.pattern)) {
+        continue;
+      }
       push(
         'domain_pattern',
         pattern.pattern,
@@ -907,6 +916,20 @@ export class ReviewAssistanceRunner {
       );
     }
     return issues;
+  }
+
+  private isTrustedVlmTextHint(reasons: string[]): boolean {
+    return reasons.includes('picture_internal_text');
+  }
+
+  private isTrustedVlmTextIssueReason(reason: string): boolean {
+    return reason === 'hanja_ocr_candidate';
+  }
+
+  private isTrustedVlmDomainPattern(
+    pattern: PageReviewContext['domainPatterns'][number]['pattern'],
+  ): boolean {
+    return pattern === 'hanja_term';
   }
 
   private issueCategoryForReason(

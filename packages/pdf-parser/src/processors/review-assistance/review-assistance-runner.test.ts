@@ -1,5 +1,7 @@
 import type { DoclingDocument } from '@heripo/model';
 
+import type { PageReviewContext } from './page-review-context-builder';
+
 import { LLMCaller, LLMTokenUsageAggregator } from '@heripo/shared';
 import {
   existsSync,
@@ -611,6 +613,64 @@ describe('ReviewAssistanceRunner', () => {
     );
   });
 
+  test('한자 후보와 이미지 내부 텍스트 후보는 별도 확인 이슈로 남기지 않는다', () => {
+    const context: PageReviewContext = {
+      pageNo: 1,
+      pageSize: { width: 100, height: 100 },
+      pageImagePath: '/tmp/page_0.png',
+      textBlocks: [
+        {
+          ref: '#/texts/0',
+          label: 'text',
+          text: 'ALL)*',
+          bbox: { l: 10, t: 10, r: 80, b: 40, coord_origin: 'TOPLEFT' },
+          suspectReasons: ['hanja_ocr_candidate'],
+        },
+        {
+          ref: '#/texts/1',
+          label: 'text',
+          text: 'image label',
+          bbox: { l: 12, t: 12, r: 50, b: 30, coord_origin: 'TOPLEFT' },
+          suspectReasons: ['picture_internal_text', 'ocr_noise'],
+        },
+        {
+          ref: '#/texts/2',
+          label: 'text',
+          text: 'T e s t',
+          bbox: { l: 10, t: 50, r: 80, b: 70, coord_origin: 'TOPLEFT' },
+          suspectReasons: ['ocr_noise'],
+        },
+      ],
+      missingTextCandidates: [],
+      tables: [],
+      pictures: [],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: [],
+        visualOrderRefs: [],
+        bboxWarnings: [],
+      },
+      domainPatterns: [
+        { targetRef: '#/texts/0', pattern: 'hanja_term', value: '山' },
+        { targetRef: '#/texts/2', pattern: 'unit', value: '10 cm' },
+      ],
+    };
+
+    const issues = (
+      new ReviewAssistanceRunner({
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      }) as unknown as {
+        buildIssues(context: PageReviewContext): Array<{ type: string }>;
+      }
+    ).buildIssues(context);
+
+    expect(issues.map((issue) => issue.type)).toEqual(['ocr_noise', 'unit']);
+  });
+
   test('rethrows abort errors from page review', async () => {
     const abortController = new AbortController();
     abortController.abort();
@@ -829,8 +889,6 @@ describe('ReviewAssistanceRunner', () => {
     expect(categories).toEqual(
       expect.arrayContaining([
         'caption',
-        'footnote',
-        'role',
         'text_integrity',
         'picture',
         'table',

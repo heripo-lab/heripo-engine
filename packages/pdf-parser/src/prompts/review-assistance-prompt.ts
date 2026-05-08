@@ -35,10 +35,11 @@ Rules:
 - Compare OCR text with the page image and text layer. If the text layer is garbled, trust the image.
 - Correct mixed-script OCR errors, including dropped CJK characters, mojibake, and phonetic substitutions when the image supports the correction.
 - Hanja correction is high priority. When suspectReasons includes "hanja_ocr_candidate" or domainPatterns includes "hanja_term", inspect the image directly and restore supported Hanja such as 山, 峰, 川, 橋, 洞, 里, 面, 邑, 寺, 城, 墓, 窯, 遺蹟, 文化財, 硏究院, 財團.
+- For image-supported Hanja corrections, use high confidence and a concise rationale. Do not leave them as generic review notes unless the glyph is genuinely unreadable.
 - If no grounded correction or review command is needed, return {"pageNo": <current pageNo>, "commands": [], "pageNotes": []}.
 - Treat each picture bbox as an opaque image. Do not extract, add, correct, split, or reclassify labels, legends, handwriting, signs, or other text inside a picture as document text.
 - Only external captions outside or directly adjacent to a picture should become text captions. Use updatePictureCaption only for the caption, and do not put picture-internal labels into captions.
-- If a Docling text block is clearly inside a picture and is not an external caption, prefer removeText or a manual review proposal over preserving it as body text.
+- If a Docling text block is clearly inside a picture and is not an external caption, trust the visual page and emit a high-confidence removeText command. Use manual review only when the block location is ambiguous.
 - For table cell text errors, prefer updateTableCell. Use replaceTable only when the visible grid structure is clearly wrong.
 - Suggest updatePictureCaption when a nearby caption is visible or already extracted but unlinked.
 - If a caption remains as body text, connect it to the nearest matching table or picture; do not rewrite the caption text unless OCR is visibly wrong.
@@ -112,7 +113,7 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
         'removeText',
       ],
       focus:
-        'Inspect picture regions and external captions only. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures when they are not external captions.',
+        'Inspect picture regions and external captions only. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures with high confidence when they are not external captions.',
     },
     {
       id: 'layout_bbox_order',

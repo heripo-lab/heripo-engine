@@ -30,6 +30,12 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       'Only external captions outside or directly adjacent to a picture',
     );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'emit a high-confidence removeText command',
+    );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'Do not leave them as generic review notes',
+    );
   });
 
   test('serializes all page review context sections into prompt JSON', () => {

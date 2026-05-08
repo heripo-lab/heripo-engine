@@ -16,6 +16,8 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { createHash } from 'node:crypto';
 
+const TRUSTED_VLM_AUTO_APPLY_THRESHOLD = 0.7;
+
 export interface ReviewAssistanceValidatorOptions {
   autoApplyThreshold: number;
   proposalThreshold: number;
@@ -43,16 +45,23 @@ export class ReviewAssistanceValidator {
       const valid = validation.valid && pageReasons.length === 0;
       const validationReasons = [...pageReasons, ...validation.reasons];
       const confidence = valid
-        ? this.computeFinalConfidence(rawCommand, validation.command)
+        ? this.computeFinalConfidence(context, rawCommand, validation.command)
         : rawCommand.confidence;
+      const autoApplyThreshold = valid
+        ? this.getEffectiveAutoApplyThreshold(
+            context,
+            validation.command,
+            options.autoApplyThreshold,
+          )
+        : options.autoApplyThreshold;
       const autoApplyBlockReason =
-        valid && confidence >= options.autoApplyThreshold
+        valid && confidence >= autoApplyThreshold
           ? this.getAutoApplyBlockReason(context, validation.command)
           : undefined;
       const disposition = this.getDisposition(
         valid,
         confidence,
-        options,
+        { ...options, autoApplyThreshold },
         autoApplyBlockReason,
       );
 
@@ -73,7 +82,7 @@ export class ReviewAssistanceValidator {
         disposition,
         reasons: this.buildReasons(rawCommand, validationReasons, disposition, {
           autoApplyEnabled: options.allowAutoApply === true,
-          belowAutoApplyThreshold: confidence < options.autoApplyThreshold,
+          belowAutoApplyThreshold: confidence < autoApplyThreshold,
           autoApplyBlockReason,
         }),
         evidence: this.buildEvidence(context, rawCommand, validation.command),
@@ -428,11 +437,26 @@ export class ReviewAssistanceValidator {
   }
 
   private computeFinalConfidence(
+    context: PageReviewContext,
     rawCommand: ReviewAssistanceRawCommand,
     command?: ReviewAssistanceCommand,
   ): number {
-    const riskPenalty = command ? this.getRiskPenalty(command) : 0;
+    const riskPenalty = command ? this.getRiskPenalty(context, command) : 0;
     return Math.max(0, Math.min(1, rawCommand.confidence - riskPenalty));
+  }
+
+  private getEffectiveAutoApplyThreshold(
+    context: PageReviewContext,
+    command: ReviewAssistanceCommand | undefined,
+    defaultThreshold: number,
+  ): number {
+    if (
+      this.isHanjaCorrectionCommand(context, command) ||
+      this.isPictureInternalTextRemoval(context, command)
+    ) {
+      return Math.min(defaultThreshold, TRUSTED_VLM_AUTO_APPLY_THRESHOLD);
+    }
+    return defaultThreshold;
   }
 
   private getDisposition(
@@ -943,9 +967,13 @@ export class ReviewAssistanceValidator {
     return score;
   }
 
-  private getRiskPenalty(command: ReviewAssistanceCommand): number {
+  private getRiskPenalty(
+    context: PageReviewContext,
+    command: ReviewAssistanceCommand,
+  ): number {
     switch (command.op) {
       case 'removeText':
+        return this.isPictureInternalTextRemoval(context, command) ? 0 : 0.12;
       case 'hidePicture':
         return 0.12;
       case 'replaceTable':
@@ -970,6 +998,38 @@ export class ReviewAssistanceValidator {
     const picture = context.pictures.find((entry) => entry.ref === ref);
     if (picture) return picture.suspectReasons;
     return [];
+  }
+
+  private isHanjaCorrectionCommand(
+    context: PageReviewContext,
+    command: ReviewAssistanceCommand | undefined,
+  ): boolean {
+    if (command?.op !== 'replaceText') return false;
+    return (
+      this.getSuspectReasons(context, command.textRef).includes(
+        'hanja_ocr_candidate',
+      ) || this.hasDomainPattern(context, command.textRef, 'hanja_term')
+    );
+  }
+
+  private isPictureInternalTextRemoval(
+    context: PageReviewContext,
+    command: ReviewAssistanceCommand | undefined,
+  ): boolean {
+    if (command?.op !== 'removeText') return false;
+    return this.getSuspectReasons(context, command.textRef).includes(
+      'picture_internal_text',
+    );
+  }
+
+  private hasDomainPattern(
+    context: PageReviewContext,
+    targetRef: string,
+    pattern: PageReviewContext['domainPatterns'][number]['pattern'],
+  ): boolean {
+    return context.domainPatterns.some(
+      (entry) => entry.targetRef === targetRef && entry.pattern === pattern,
+    );
   }
 
   private iou(a: DoclingBBox, b: DoclingBBox): number {

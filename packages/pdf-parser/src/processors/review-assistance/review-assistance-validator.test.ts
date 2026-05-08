@@ -183,6 +183,63 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.disposition).toBe('auto_applied');
   });
 
+  test('한자 보정 후보는 VLM 판단을 더 신뢰해서 자동 반영한다', () => {
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(['hanja_ocr_candidate']),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'replaceText',
+            targetRef: '#/texts/0',
+            payload: { text: '분지상(盆地床)' },
+            confidence: 0.72,
+            rationale: '이미지에서 한자 표기가 확인됩니다.',
+            evidence: '분지상(盆地床)',
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.disposition).toBe('auto_applied');
+    expect(decision.reasons).not.toContain('below_auto_apply_threshold');
+  });
+
+  test('이미지 내부 텍스트 삭제는 VLM 판단을 더 신뢰해서 자동 반영한다', () => {
+    const [decision] = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(['picture_internal_text']),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'removeText',
+            targetRef: '#/texts/0',
+            payload: {},
+            confidence: 0.72,
+            rationale: '이미지 내부 라벨이라 본문 텍스트에서 제외합니다.',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.disposition).toBe('auto_applied');
+    expect(decision.confidence).toBe(0.72);
+    expect(decision.reasons).not.toContain('below_auto_apply_threshold');
+  });
+
   test('defers high-confidence structural commands to manual review', () => {
     const [decision] = new ReviewAssistanceValidator().validatePageOutput(
       makeContext(),
@@ -1266,6 +1323,7 @@ describe('ReviewAssistanceValidator', () => {
       ) => void;
       getSuspectReasons: (context: PageReviewContext, ref: string) => string[];
       computeFinalConfidence: (
+        context: PageReviewContext,
         rawCommand: ReviewAssistanceRawCommand,
         command?: undefined,
       ) => number;
@@ -1293,7 +1351,7 @@ describe('ReviewAssistanceValidator', () => {
           position: 'before' | 'after';
         },
       ) => boolean;
-      getRiskPenalty: (command: any) => number;
+      getRiskPenalty: (context: PageReviewContext, command: any) => number;
       iou: (a: DoclingBBox, b: DoclingBBox) => number;
     };
     const reasons: string[] = [];
@@ -1352,13 +1410,13 @@ describe('ReviewAssistanceValidator', () => {
       ]),
     ).toEqual([{ text: 'A' }, { text: 'B', label: 'body' }]);
     expect(
-      validator.getRiskPenalty({
+      validator.getRiskPenalty(makeContext(), {
         op: 'removeText',
         textRef: '#/texts/0',
       }),
     ).toBe(0.12);
     expect(
-      validator.getRiskPenalty({
+      validator.getRiskPenalty(makeContext(), {
         op: 'moveNode',
         sourceRef: '#/texts/0',
         targetRef: '#/texts/1',
@@ -1366,7 +1424,7 @@ describe('ReviewAssistanceValidator', () => {
       }),
     ).toBe(0.05);
     expect(
-      validator.getRiskPenalty({
+      validator.getRiskPenalty(makeContext(), {
         op: 'addText',
         pageNo: 1,
         bbox,
@@ -1382,6 +1440,7 @@ describe('ReviewAssistanceValidator', () => {
     );
     expect(
       validator.computeFinalConfidence(
+        makeContext(),
         {
           op: 'replaceText',
           targetRef: '#/texts/0',
