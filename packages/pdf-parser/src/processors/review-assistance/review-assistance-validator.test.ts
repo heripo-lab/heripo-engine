@@ -1522,4 +1522,63 @@ describe('ReviewAssistanceValidator', () => {
       ),
     ).toEqual([]);
   });
+
+  test('rejects invalid evidence-derived replacements and detects domain patterns', () => {
+    const validator = new ReviewAssistanceValidator() as unknown as {
+      replacementTextFromEvidence: (
+        context: PageReviewContext,
+        textRef: string | undefined,
+        evidence: string | null,
+      ) => string | undefined;
+      hasDomainPattern: (
+        context: PageReviewContext,
+        targetRef: string,
+        pattern: PageReviewContext['domainPatterns'][number]['pattern'],
+      ) => boolean;
+    };
+    const context = makeContext();
+
+    expect(
+      validator.replacementTextFromEvidence(context, undefined, 'Test'),
+    ).toBeUndefined();
+    expect(
+      validator.replacementTextFromEvidence(context, '#/texts/0', null),
+    ).toBeUndefined();
+    expect(
+      validator.replacementTextFromEvidence(context, '#/texts/99', 'Test'),
+    ).toBeUndefined();
+    expect(
+      validator.replacementTextFromEvidence(context, '#/texts/0', ' A '),
+    ).toBeUndefined();
+    expect(
+      validator.replacementTextFromEvidence(context, '#/texts/0', '---'),
+    ).toBeUndefined();
+    expect(
+      validator.replacementTextFromEvidence(
+        context,
+        '#/texts/0',
+        'Image reads Test',
+      ),
+    ).toBeUndefined();
+    expect(
+      validator.replacementTextFromEvidence(
+        context,
+        '#/texts/0',
+        'x'.repeat(401),
+      ),
+    ).toBeUndefined();
+
+    context.domainPatterns = [
+      { targetRef: '#/texts/99', pattern: 'hanja_term', value: '山' },
+      { targetRef: '#/texts/0', pattern: 'unit', value: '10 cm' },
+      { targetRef: '#/texts/0', pattern: 'hanja_term', value: '山' },
+    ];
+
+    expect(validator.hasDomainPattern(context, '#/texts/0', 'hanja_term')).toBe(
+      true,
+    );
+    expect(
+      validator.hasDomainPattern(context, '#/texts/0', 'institution_name'),
+    ).toBe(false);
+  });
 });

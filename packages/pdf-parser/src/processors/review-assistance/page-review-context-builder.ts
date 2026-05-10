@@ -841,8 +841,9 @@ export class PageReviewContextBuilder {
       /([A-Za-z0-9Il|!*_+\-=\\/?:;,.]{3,16})[）)]/gu,
     );
 
-    if (/[（(](?:주|재|사)[）)]/u.test(text)) {
-      values.push(text.match(/[（(](?:주|재|사)[）)]/u)?.[0] ?? '');
+    const compactMarkerMatch = text.match(/[（(](?:주|재|사)[）)]/u);
+    if (compactMarkerMatch) {
+      values.push(compactMarkerMatch[0]);
     }
 
     return [...new Set(values.filter(Boolean))].slice(0, 5);

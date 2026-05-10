@@ -1,5 +1,10 @@
 import type { DoclingBBox, DoclingDocument, DoclingProv } from '@heripo/model';
 
+import type {
+  PageReviewPicture,
+  PageReviewTextBlock,
+} from './page-review-context-builder';
+
 import { describe, expect, test } from 'vitest';
 
 import { PageReviewContextBuilder } from './page-review-context-builder';
@@ -606,5 +611,50 @@ describe('PageReviewContextBuilder', () => {
     expect(emptyContext.tables[0].suspectReasons).not.toContain(
       'multi_page_table_candidate',
     );
+  });
+
+  test('keeps existing picture-internal text hints and covers Hanja OCR guards', () => {
+    const builder = new PageReviewContextBuilder() as unknown as {
+      withPictureInternalTextReason: (
+        block: PageReviewTextBlock,
+        pictures: PageReviewPicture[],
+        pageSize: { width: number; height: number } | null,
+      ) => PageReviewTextBlock;
+      detectHanjaOcrPatternValues: (text: string) => string[];
+      isLikelyHanjaOcrNoiseToken: (text: string, token: string) => boolean;
+    };
+    const block: PageReviewTextBlock = {
+      ref: '#/texts/0',
+      label: 'text',
+      text: 'image label',
+      bbox,
+      suspectReasons: ['picture_internal_text'],
+    };
+    const picture: PageReviewPicture = {
+      ref: '#/pictures/0',
+      bbox,
+      suspectReasons: [],
+    };
+
+    expect(
+      builder.withPictureInternalTextReason(block, [picture], {
+        width: 200,
+        height: 300,
+      }),
+    ).toBe(block);
+    expect(builder.detectHanjaOcrPatternValues('조사기관(재) 보고서')).toEqual([
+      '(재)',
+    ]);
+    expect(builder.detectHanjaOcrPatternValues('조사기관(   ) 보고서')).toEqual(
+      [],
+    );
+    expect(
+      builder.isLikelyHanjaOcrNoiseToken('초례봉(醮禮峰) 35 cm', '35 cm'),
+    ).toBe(false);
+    expect(builder.isLikelyHanjaOcrNoiseToken('plain text', 'ALL')).toBe(false);
+    expect(builder.isLikelyHanjaOcrNoiseToken('조사기관(재)', 'abc')).toBe(
+      false,
+    );
+    expect(builder.isLikelyHanjaOcrNoiseToken('조사기관(재)', '3a')).toBe(true);
   });
 });

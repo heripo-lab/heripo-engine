@@ -1,4 +1,12 @@
-import type { DoclingDocument } from '@heripo/model';
+import type {
+  DoclingBBox,
+  DoclingDocument,
+  ReviewAssistanceCommand,
+  ReviewAssistanceDecision,
+  ReviewAssistanceIssue,
+  ReviewAssistanceIssueCategory,
+  ReviewAssistancePageResult,
+} from '@heripo/model';
 
 import type { PageReviewContext } from './page-review-context-builder';
 
@@ -49,6 +57,14 @@ const usage = {
   inputTokens: 10,
   outputTokens: 5,
   totalTokens: 15,
+};
+
+const reviewBBox: DoclingBBox = {
+  l: 10,
+  t: 10,
+  r: 80,
+  b: 40,
+  coord_origin: 'TOPLEFT',
 };
 
 function makeDoc(): DoclingDocument {
@@ -108,6 +124,92 @@ function makeDoc(): DoclingDocument {
         },
       },
     },
+  };
+}
+
+function makePageContext(pageImagePath: string): PageReviewContext {
+  return {
+    pageNo: 1,
+    pageSize: { width: 100, height: 100 },
+    pageImagePath,
+    textBlocks: [
+      {
+        ref: '#/texts/0',
+        label: 'text',
+        text: 'T e s t',
+        bbox: reviewBBox,
+        suspectReasons: ['ocr_noise'],
+      },
+    ],
+    missingTextCandidates: [],
+    tables: [
+      {
+        ref: '#/tables/0',
+        bbox: reviewBBox,
+        gridPreview: [['A']],
+        emptyCellRatio: 0,
+        suspectReasons: [],
+      },
+    ],
+    pictures: [
+      {
+        ref: '#/pictures/0',
+        bbox: reviewBBox,
+        suspectReasons: ['image_missing_caption'],
+      },
+    ],
+    orphanCaptions: [],
+    footnotes: [
+      {
+        ref: '#/texts/1',
+        text: '1) Footnote',
+        marker: '1)',
+        bbox: reviewBBox,
+      },
+    ],
+    layout: {
+      readingOrderRefs: ['#/texts/0', '#/tables/0', '#/pictures/0'],
+      visualOrderRefs: ['#/texts/0', '#/tables/0', '#/pictures/0'],
+      bboxWarnings: [],
+    },
+    domainPatterns: [],
+  };
+}
+
+function makeDecision(
+  id: string,
+  command: ReviewAssistanceCommand | undefined,
+  overrides: Partial<ReviewAssistanceDecision> = {},
+): ReviewAssistanceDecision {
+  return {
+    id,
+    pageNo: 1,
+    command,
+    confidence: 0.9,
+    disposition: 'auto_applied',
+    reasons: [id],
+    ...overrides,
+  };
+}
+
+function makeOptions() {
+  return {
+    enabled: true,
+    concurrency: 1,
+    autoApplyThreshold: 0.85,
+    proposalThreshold: 0.5,
+    maxRetries: 3,
+    temperature: 0,
+    outputLanguage: 'en-US',
+  };
+}
+
+function makeLogger() {
+  return {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
   };
 }
 
@@ -896,5 +998,293 @@ describe('ReviewAssistanceRunner', () => {
         'domain_pattern',
       ]),
     );
+  });
+
+  test('covers page-level review fallback paths', async () => {
+    const pagePath = join(outputDir, 'pages', 'page_0.png');
+    const noOutputLogger = makeLogger();
+    const noOutputRunner = new ReviewAssistanceRunner(noOutputLogger) as any;
+    noOutputRunner.reviewPageTask = vi
+      .fn()
+      .mockRejectedValue(new Error('No output generated.'));
+
+    const noOutputResult = (await noOutputRunner.reviewPage(
+      makePageContext(pagePath),
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+      1,
+    )) as ReviewAssistancePageResult;
+
+    expect(noOutputResult.status).toBe('succeeded');
+    expect(noOutputResult.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'empty_model_output' }),
+      ]),
+    );
+    expect(noOutputLogger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: review produced no structured output; recording no-op result',
+      expect.any(Object),
+    );
+
+    const genericLogger = makeLogger();
+    const genericRunner = new ReviewAssistanceRunner(genericLogger) as any;
+    const genericFailure = (await genericRunner.reviewPage(
+      makePageContext(join(outputDir, 'pages', 'missing.png')),
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+      1,
+    )) as ReviewAssistancePageResult;
+
+    expect(genericFailure.status).toBe('failed');
+    expect(genericFailure.error?.message).toContain('ENOENT');
+    expect(genericLogger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: review failed',
+      expect.any(Object),
+    );
+
+    const failedTasksLogger = makeLogger();
+    const failedTasksRunner = new ReviewAssistanceRunner(
+      failedTasksLogger,
+    ) as any;
+    failedTasksRunner.reviewPageTask = vi.fn(async (_context, task) => ({
+      task,
+      status: 'failed',
+      decisions: [],
+    }));
+
+    const failedTasksResult = (await failedTasksRunner.reviewPage(
+      makePageContext(pagePath),
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+      1,
+    )) as ReviewAssistancePageResult;
+
+    expect(failedTasksResult.status).toBe('failed');
+    expect(failedTasksResult.error?.message).toContain(': failed');
+    expect(failedTasksResult.issues.every((issue) => issue.type !== '')).toBe(
+      true,
+    );
+  });
+
+  test('covers task decision merge helpers and touched ref extraction', () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const task = {
+      id: 'text_ocr_hanja',
+      label: 'Text OCR',
+      allowedOps: ['replaceText'],
+    };
+    const noOpDecision = makeDecision('noop', undefined);
+    const invalidDecision = makeDecision('invalid', undefined, {
+      invalidOp: 'addPicture',
+      disposition: 'proposal',
+    });
+
+    expect(runner.enforceTaskAllowedOps(noOpDecision, task)).toBe(noOpDecision);
+    expect(runner.enforceTaskAllowedOps(invalidDecision, task)).toMatchObject({
+      disposition: 'skipped',
+      metadata: {
+        taskOpNotAllowed: {
+          task: 'text_ocr_hanja',
+          op: 'addPicture',
+        },
+      },
+    });
+
+    const mergeCommand: ReviewAssistanceCommand = {
+      op: 'mergeTexts',
+      keepRef: '#/texts/0',
+      textRefs: ['#/texts/0', '#/texts/1'],
+      text: 'Merged',
+    };
+    const merged = runner.mergeTaskDecisions([
+      makeDecision('skipped', undefined, {
+        invalidOp: 'badOp',
+        disposition: 'skipped',
+      }),
+      makeDecision('low', mergeCommand, {
+        confidence: 0.2,
+        metadata: {},
+      }),
+      makeDecision('high', mergeCommand, {
+        confidence: 0.9,
+        metadata: { reviewTask: 'layout_bbox_order' },
+        reasons: ['high'],
+      }),
+    ]) as ReviewAssistanceDecision[];
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0].invalidOp).toBe('badOp');
+    expect(merged[1]).toMatchObject({
+      id: 'high',
+      confidence: 0.9,
+      metadata: {
+        duplicateReviewTasks: ['layout_bbox_order'],
+      },
+    });
+    expect(merged[1].reasons).toContain('duplicate_review_task:unknown');
+
+    const commands: ReviewAssistanceCommand[] = [
+      { op: 'replaceText', textRef: '#/texts/0', text: 'A' },
+      { op: 'updateTextRole', textRef: '#/texts/0', label: 'caption' },
+      { op: 'removeText', textRef: '#/texts/0' },
+      {
+        op: 'splitText',
+        textRef: '#/texts/0',
+        parts: [{ text: 'A' }, { text: 'B' }],
+      },
+      mergeCommand,
+      {
+        op: 'updateTableCell',
+        tableRef: '#/tables/0',
+        row: 0,
+        col: 0,
+        text: 'A',
+      },
+      { op: 'replaceTable', tableRef: '#/tables/0', grid: [[{ text: 'A' }]] },
+      {
+        op: 'linkContinuedTable',
+        sourceTableRef: '#/tables/0',
+        continuedTableRef: '#/tables/1',
+        relation: 'continues_on_next_page',
+      },
+      {
+        op: 'updatePictureCaption',
+        pictureRef: '#/pictures/0',
+        caption: 'Fig',
+      },
+      {
+        op: 'splitPicture',
+        pictureRef: '#/pictures/0',
+        regions: [{ bbox: reviewBBox }],
+      },
+      { op: 'hidePicture', pictureRef: '#/pictures/0', reason: 'duplicate' },
+      { op: 'updateBbox', targetRef: '#/texts/0', bbox: reviewBBox },
+      {
+        op: 'linkFootnote',
+        markerTextRef: '#/texts/0',
+        footnoteTextRef: '#/texts/1',
+      },
+      {
+        op: 'moveNode',
+        sourceRef: '#/texts/0',
+        targetRef: '#/tables/0',
+        position: 'after',
+      },
+      {
+        op: 'addText',
+        pageNo: 1,
+        bbox: reviewBBox,
+        text: 'Missing',
+        label: 'text',
+      },
+      {
+        op: 'addPicture',
+        pageNo: 1,
+        bbox: reviewBBox,
+        imageUri: 'images/new.png',
+      },
+    ];
+
+    expect(commands.map((command) => runner.getTouchedRefs(command))).toEqual([
+      ['#/texts/0'],
+      ['#/texts/0'],
+      ['#/texts/0'],
+      ['#/texts/0'],
+      ['#/texts/0', '#/texts/1'],
+      ['#/tables/0'],
+      ['#/tables/0'],
+      ['#/tables/0'],
+      ['#/pictures/0'],
+      ['#/pictures/0'],
+      ['#/pictures/0'],
+      ['#/texts/0'],
+      ['#/texts/0', '#/texts/1'],
+      ['#/texts/0'],
+      [],
+      [],
+    ]);
+  });
+
+  test('covers runner issue and error helper branches', () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const context = makePageContext('/tmp/page_0.png');
+    const categoryCases: Array<[string, ReviewAssistanceIssueCategory]> = [
+      ['caption_like_body_text', 'caption'],
+      ['footnote_like_body_text', 'footnote'],
+      ['repeated_across_pages', 'text_integrity'],
+      ['picture_internal_text', 'picture'],
+      ['hanja_ocr_candidate', 'domain_pattern'],
+      ['heading_too_long', 'role'],
+      ['empty_text', 'text'],
+    ];
+    const descriptionReasons = [
+      'empty_text',
+      'ocr_noise',
+      'hanja_ocr_candidate',
+      'heading_too_long',
+      'repeated_across_pages',
+      'caption_like_body_text',
+      'picture_internal_text',
+      'footnote_like_body_text',
+      'orphan_caption',
+      'table_missing_caption',
+      'table_many_empty_cells',
+      'multi_page_table_candidate',
+      'image_missing_caption',
+      'large_picture_split_candidate',
+      'hanja_term',
+      'institution_name',
+      'roman_numeral',
+      'layer_code',
+      'unit',
+      'feature_number',
+    ];
+
+    for (const [reason, category] of categoryCases) {
+      expect(runner.issueCategoryForReason(reason)).toBe(category);
+    }
+    for (const reason of descriptionReasons) {
+      expect(runner.issueDescriptionForReason(reason, ' value ')).toContain(
+        'value',
+      );
+    }
+    expect(runner.issueDescriptionForReason('custom_reason')).toBe(
+      'custom_reason',
+    );
+    expect(runner.buildNoOutputIssue(context).reasons).toEqual([
+      'no_output_generated',
+    ]);
+    expect(
+      runner.isNoOutputGeneratedError({
+        name: 'NoOutputGeneratedError',
+      }),
+    ).toBe(true);
+    expect(runner.isNoOutputGeneratedError({ name: undefined })).toBe(false);
+
+    const blankNameError = new Error('plain failure');
+    blankNameError.name = '';
+    expect(runner.errorLogBinding(blankNameError).err.type).toBe('Error');
+    expect(runner.errorLogBinding('plain failure').err).toEqual({
+      type: 'string',
+      message: 'plain failure',
+      stack: undefined,
+    });
+
+    const taskIssue = runner.buildTaskFailureIssue(
+      context,
+      {
+        id: 'text_ocr_hanja',
+        label: 'Text OCR',
+        allowedOps: ['replaceText'],
+      },
+      'plain failure',
+    ) as ReviewAssistanceIssue;
+    expect(taskIssue.reasons).toEqual([
+      'review_task:text_ocr_hanja',
+      'plain failure',
+    ]);
   });
 });
