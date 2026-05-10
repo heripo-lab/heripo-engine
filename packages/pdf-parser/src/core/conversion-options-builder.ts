@@ -11,17 +11,26 @@ import { omit } from 'es-toolkit';
 export function buildConversionOptions(
   options: PDFConvertOptions,
 ): ConversionOptions {
+  const parserOptions = {
+    ...(options as PDFConvertOptions & {
+      reviewAssistanceConcurrency?: unknown;
+    }),
+  };
+  delete parserOptions.reviewAssistanceConcurrency;
+
   return {
-    ...omit(options, [
+    ...omit(parserOptions, [
       'num_threads',
       'document_timeout',
       'forceImagePdf',
       'strategySamplerModel',
       'vlmProcessorModel',
+      'reviewAssistance',
       'skipSampling',
       'forcedMethod',
       'aggregator',
       'onTokenUsage',
+      'onReviewAssistanceProgress',
       'chunkedConversion',
       'chunkSize',
       'chunkMaxRetries',

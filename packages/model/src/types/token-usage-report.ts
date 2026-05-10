@@ -102,6 +102,13 @@ export interface PhaseUsageReport {
    * If only primary or only fallback is present, equals that model's usage.
    */
   total: TokenUsageSummary;
+
+  /**
+   * Metadata for individual LLM calls aggregated into this phase.
+   *
+   * Examples: pageNo, commandCount, autoAppliedCount, proposalCount
+   */
+  metadata?: TokenUsageMetadata[];
 }
 
 /**
@@ -161,3 +168,7 @@ export interface TokenUsageSummary {
    */
   totalTokens: number;
 }
+
+export type TokenUsageMetadataValue = string | number | boolean | null;
+
+export type TokenUsageMetadata = Record<string, TokenUsageMetadataValue>;

@@ -5,16 +5,19 @@
  */
 
 /** Allowed element types matching DoclingDocument text labels */
-export type VlmElementType =
-  | 'text'
-  | 'section_header'
-  | 'caption'
-  | 'footnote'
-  | 'page_header'
-  | 'page_footer'
-  | 'list_item'
-  | 'picture'
-  | 'table';
+export const VLM_ELEMENT_TYPES = [
+  'text',
+  'section_header',
+  'caption',
+  'footnote',
+  'page_header',
+  'page_footer',
+  'list_item',
+  'picture',
+  'table',
+] as const;
+
+export type VlmElementType = (typeof VLM_ELEMENT_TYPES)[number];
 
 /**
  * Normalized bounding box with coordinates in the range 0.0 to 1.0,
@@ -57,11 +60,14 @@ export interface VlmPageElement {
 }
 
 /** Types of quality issues detected in VLM responses */
-export type VlmQualityIssueType =
-  | 'placeholder_text'
-  | 'script_anomaly'
-  | 'meta_description'
-  | 'repetitive_pattern';
+export const VLM_QUALITY_ISSUE_TYPES = [
+  'placeholder_text',
+  'script_anomaly',
+  'meta_description',
+  'repetitive_pattern',
+] as const;
+
+export type VlmQualityIssueType = (typeof VLM_QUALITY_ISSUE_TYPES)[number];
 
 /** Quality metadata for a processed page */
 export interface VlmPageQuality {

@@ -78,6 +78,27 @@ describe('VlmConversionPipeline', () => {
       );
     });
 
+    test('still runs VLM correction when Review Assistance is enabled', async () => {
+      const originalCallback = vi.fn();
+
+      const wrapped = pipeline.wrapCallback(
+        '/tmp/test.pdf',
+        { reviewAssistance: true, vlmProcessorModel: mockModel },
+        originalCallback,
+      );
+
+      await wrapped('/test/output');
+
+      expect(wrapped).not.toBe(originalCallback);
+      expect(VlmTextCorrector).toHaveBeenCalledWith(logger);
+      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+        '/test/output',
+        mockModel,
+        expect.objectContaining({ aggregator: undefined }),
+      );
+      expect(originalCallback).toHaveBeenCalledWith('/test/output');
+    });
+
     test('returns a callback function', () => {
       const wrapped = pipeline.wrapCallback(
         '/tmp/test.pdf',

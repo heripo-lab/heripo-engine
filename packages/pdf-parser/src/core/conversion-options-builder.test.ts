@@ -77,23 +77,29 @@ describe('buildConversionOptions', () => {
       forceImagePdf: true,
       strategySamplerModel: {} as any,
       vlmProcessorModel: {} as any,
+      reviewAssistance: true,
+      reviewAssistanceConcurrency: 4,
       skipSampling: true,
       forcedMethod: 'vlm' as any,
       aggregator: {} as any,
       onTokenUsage: (() => {}) as any,
+      onReviewAssistanceProgress: (() => {}) as any,
       chunkedConversion: true,
       chunkSize: 20,
       chunkMaxRetries: 5,
       documentValidationModel: {} as any,
-    });
+    } as any);
 
     expect(result).not.toHaveProperty('forceImagePdf');
     expect(result).not.toHaveProperty('strategySamplerModel');
     expect(result).not.toHaveProperty('vlmProcessorModel');
+    expect(result).not.toHaveProperty('reviewAssistance');
+    expect(result).not.toHaveProperty('reviewAssistanceConcurrency');
     expect(result).not.toHaveProperty('skipSampling');
     expect(result).not.toHaveProperty('forcedMethod');
     expect(result).not.toHaveProperty('aggregator');
     expect(result).not.toHaveProperty('onTokenUsage');
+    expect(result).not.toHaveProperty('onReviewAssistanceProgress');
     expect(result).not.toHaveProperty('chunkedConversion');
     expect(result).not.toHaveProperty('chunkSize');
     expect(result).not.toHaveProperty('chunkMaxRetries');

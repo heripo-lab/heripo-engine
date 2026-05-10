@@ -1088,6 +1088,57 @@ describe('PDFParser', () => {
       expect(convertMock).not.toHaveBeenCalled();
     });
 
+    test('parse routes to strategy flow when Review Assistance is enabled', async () => {
+      doclingClient.health.mockResolvedValueOnce();
+
+      convertWithStrategyMock.mockResolvedValueOnce({
+        strategy: {
+          method: 'ocrmac',
+          reason: 'Sampling skipped',
+          sampledPages: 0,
+          totalPages: 0,
+        },
+        tokenUsageReport: null,
+      });
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { reviewAssistance: true },
+      );
+
+      expect(convertWithStrategyMock).toHaveBeenCalled();
+      expect(convertMock).not.toHaveBeenCalled();
+      expect(result).toBeNull();
+    });
+
+    test('parse uses legacy flow when Review Assistance object is disabled', async () => {
+      doclingClient.health.mockResolvedValueOnce();
+      convertMock.mockResolvedValueOnce('legacy-result');
+
+      const logger = makeLogger();
+      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
+      await parser.init();
+
+      const result = await parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        { reviewAssistance: {} },
+      );
+
+      expect(convertMock).toHaveBeenCalled();
+      expect(convertWithStrategyMock).not.toHaveBeenCalled();
+      expect(result).toBe('legacy-result');
+    });
+
     test('parse returns null tokenUsageReport from strategy flow', async () => {
       doclingClient.health.mockResolvedValueOnce();
 

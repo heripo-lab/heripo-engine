@@ -214,6 +214,34 @@ describe('LLMTokenUsageAggregator', () => {
       expect(phase.total.outputTokens).toBe(50);
       expect(phase.total.totalTokens).toBe(150);
     });
+
+    test('should track metadata on phases', () => {
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'page-review',
+        model: 'primary',
+        modelName: 'gpt-5',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        metadata: {
+          pageNo: 3,
+          commandCount: 2,
+          autoAppliedCount: 1,
+          proposalCount: 1,
+        },
+      });
+
+      const byComponent = aggregator.getByComponent();
+      expect(byComponent[0].phases['page-review'].metadata).toEqual([
+        {
+          pageNo: 3,
+          commandCount: 2,
+          autoAppliedCount: 1,
+          proposalCount: 1,
+        },
+      ]);
+    });
   });
 
   describe('getTotalUsage', () => {
@@ -622,6 +650,25 @@ describe('LLMTokenUsageAggregator', () => {
       expect(phase.primary).toBeDefined();
       expect(phase.fallback).toBeDefined();
       expect(phase.total.inputTokens).toBe(300);
+    });
+
+    test('should include metadata in phase reports', () => {
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'page-review',
+        model: 'primary',
+        modelName: 'gpt-5',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        metadata: { pageNo: 1, commandCount: 3 },
+      });
+
+      const report = aggregator.getReport();
+
+      expect(report.components[0].phases[0].metadata).toEqual([
+        { pageNo: 1, commandCount: 3 },
+      ]);
     });
   });
 

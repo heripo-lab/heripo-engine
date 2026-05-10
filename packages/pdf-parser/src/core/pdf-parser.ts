@@ -17,6 +17,7 @@ import {
   type PDFConvertOptions,
   PDFConverter,
 } from './pdf-converter';
+import { isReviewAssistanceEnabled } from './review-assistance-options';
 
 type Options = {
   logger: LoggerMethods;
@@ -393,7 +394,8 @@ export class PDFParser {
     // Use strategy-based flow when new options are provided
     const useStrategyFlow =
       options.strategySamplerModel !== undefined ||
-      options.forcedMethod !== undefined;
+      options.forcedMethod !== undefined ||
+      isReviewAssistanceEnabled(options.reviewAssistance);
 
     return this.executeWithRecovery(async () => {
       const effectiveFallbackEnabled =

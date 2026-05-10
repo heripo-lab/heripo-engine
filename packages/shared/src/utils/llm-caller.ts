@@ -64,6 +64,11 @@ export interface LLMCallConfig<TSchema extends z.ZodType> {
    * Phase name for tracking (e.g., 'extraction', 'validation', 'sampling')
    */
   phase: string;
+
+  /**
+   * Structured metadata attached to token usage for this call.
+   */
+  metadata?: TokenUsageMetadata;
 }
 
 /**
@@ -114,7 +119,16 @@ export interface LLMVisionCallConfig<TSchema extends z.ZodType> {
    * Phase name for tracking (e.g., 'extraction', 'validation', 'sampling')
    */
   phase: string;
+
+  /**
+   * Structured metadata attached to token usage for this call.
+   */
+  metadata?: TokenUsageMetadata;
 }
+
+export type TokenUsageMetadataValue = string | number | boolean | null;
+
+export type TokenUsageMetadata = Record<string, TokenUsageMetadataValue>;
 
 /**
  * Token usage information with model tracking
@@ -127,6 +141,7 @@ export interface ExtendedTokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  metadata?: TokenUsageMetadata;
 }
 
 /**
@@ -147,6 +162,7 @@ interface ExecutionConfig {
   abortSignal?: AbortSignal;
   component: string;
   phase: string;
+  metadata?: TokenUsageMetadata;
 }
 
 /**
@@ -217,6 +233,7 @@ export class LLMCaller {
       inputTokens: response.usage?.inputTokens ?? 0,
       outputTokens: response.usage?.outputTokens ?? 0,
       totalTokens: response.usage?.totalTokens ?? 0,
+      metadata: config.metadata,
     };
   }
 

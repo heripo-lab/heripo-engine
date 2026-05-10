@@ -8,10 +8,17 @@ import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { CHUNKED_CONVERSION, PDF_CONVERTER } from '../config/constants';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+import { ReviewAssistanceRunner } from '../processors/review-assistance/review-assistance-runner';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { DoclingConversionExecutor } from './docling-conversion-executor';
 import { ImagePdfConverter } from './image-pdf-converter';
+import {
+  type NormalizedReviewAssistanceOptions,
+  type ReviewAssistanceOptions,
+  type ReviewAssistanceProgressEvent,
+  normalizeReviewAssistanceOptions,
+} from './review-assistance-options';
 import { StrategyResolver } from './strategy-resolver';
 import { VlmConversionPipeline } from './vlm-conversion-pipeline';
 
@@ -53,6 +60,11 @@ export type PDFConvertOptions = Omit<
   vlmProcessorModel?: LanguageModel;
   /** Concurrency for VLM page processing (default: 1) */
   vlmConcurrency?: number;
+  /**
+   * Optional page-level review assistance.
+   * Boolean true enables defaults; object form still requires enabled: true.
+   */
+  reviewAssistance?: boolean | ReviewAssistanceOptions;
   /** Skip sampling and default to ocrmac */
   skipSampling?: boolean;
   /** Force a specific OCR method, bypassing sampling */
@@ -61,6 +73,8 @@ export type PDFConvertOptions = Omit<
   aggregator?: LLMTokenUsageAggregator;
   /** Callback fired after each batch of VLM pages completes, with cumulative token usage */
   onTokenUsage?: (report: TokenUsageReport) => void;
+  /** Callback fired when Review Assistance advances through parser substages */
+  onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void;
   /** Document processing timeout in seconds for the Docling server (default: server default) */
   document_timeout?: number;
   /** Enable chunked conversion for large PDFs (local files only) */
@@ -216,6 +230,9 @@ export class PDFConverter {
     // sampling + VLM processing token usage is always captured.
     const aggregator = options.aggregator ?? new LLMTokenUsageAggregator();
     const trackedOptions: PDFConvertOptions = { ...options, aggregator };
+    const reviewAssistanceOptions = normalizeReviewAssistanceOptions(
+      trackedOptions.reviewAssistance,
+    );
 
     const pdfPath = url.startsWith('file://') ? url.slice(7) : null;
 
@@ -248,11 +265,29 @@ export class PDFConverter {
         throw new Error('VLM conversion requires a local file (file:// URL)');
       }
 
-      const pipeline = new VlmConversionPipeline(this.logger);
-      const wrappedCallback = pipeline.wrapCallback(
+      const postCorrectionCallback = reviewAssistanceOptions.enabled
+        ? this.wrapReviewAssistanceCallback(
+            pdfPath,
+            reportId,
+            trackedOptions,
+            reviewAssistanceOptions,
+            onComplete,
+            abortSignal,
+          )
+        : onComplete;
+
+      if (reviewAssistanceOptions.enabled) {
+        this.logger.info(
+          '[PDFConverter] Review Assistance enabled; running VLM text correction before Review Assistance',
+        );
+      }
+
+      const wrappedCallback = new VlmConversionPipeline(
+        this.logger,
+      ).wrapCallback(
         pdfPath,
         trackedOptions,
-        onComplete,
+        postCorrectionCallback,
         abortSignal,
         strategy.detectedLanguages,
         strategy.koreanHanjaMixPages,
@@ -278,13 +313,28 @@ export class PDFConverter {
     }
 
     // ocrmac path: delegate to existing Docling conversion
+    if (reviewAssistanceOptions.enabled) {
+      this.logger.info(
+        '[PDFConverter] Review Assistance enabled for ocrmac strategy',
+      );
+    }
     const ocrmacOptions: PDFConvertOptions = strategy.detectedLanguages
       ? { ...trackedOptions, ocr_lang: strategy.detectedLanguages }
       : trackedOptions;
+    const ocrmacCallback = reviewAssistanceOptions.enabled
+      ? this.wrapReviewAssistanceCallback(
+          pdfPath,
+          reportId,
+          ocrmacOptions,
+          reviewAssistanceOptions,
+          onComplete,
+          abortSignal,
+        )
+      : onComplete;
     await this.convert(
       url,
       reportId,
-      onComplete,
+      ocrmacCallback,
       cleanupAfterCallback,
       ocrmacOptions,
       abortSignal,
@@ -292,6 +342,39 @@ export class PDFConverter {
     return {
       strategy,
       tokenUsageReport: this.buildTokenReport(aggregator),
+    };
+  }
+
+  private wrapReviewAssistanceCallback(
+    pdfPath: string | null,
+    reportId: string,
+    options: PDFConvertOptions,
+    reviewOptions: NormalizedReviewAssistanceOptions,
+    originalCallback: ConversionCompleteCallback,
+    abortSignal?: AbortSignal,
+  ): ConversionCompleteCallback {
+    if (!pdfPath) {
+      throw new Error('Review Assistance requires a local file (file:// URL)');
+    }
+
+    const model = options.vlmProcessorModel ?? options.strategySamplerModel;
+    if (!model) {
+      throw new Error(
+        'vlmProcessorModel or strategySamplerModel is required when Review Assistance is enabled',
+      );
+    }
+
+    return async (outputDir: string) => {
+      const runner = new ReviewAssistanceRunner(this.logger);
+      await runner.analyzeAndSave(outputDir, reportId, model, {
+        ...reviewOptions,
+        pdfPath,
+        aggregator: options.aggregator,
+        abortSignal,
+        onTokenUsage: options.onTokenUsage,
+        onProgress: options.onReviewAssistanceProgress,
+      });
+      await originalCallback(outputDir);
     };
   }
 
