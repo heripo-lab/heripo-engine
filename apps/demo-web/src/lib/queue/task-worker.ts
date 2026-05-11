@@ -268,7 +268,7 @@ export async function runTaskWorker(
     let artifactDir: string;
     let vlmTokenUsage: TokenUsageReport | null = null;
 
-    // Build PDF convert options with new strategy fields
+    // Build PDF convert options with Korean report detection fields
     const isPublicMode = process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true';
 
     const pdfConvertOptions: PDFConvertOptions = {

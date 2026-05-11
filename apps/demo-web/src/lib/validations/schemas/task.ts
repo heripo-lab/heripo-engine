@@ -34,7 +34,7 @@ export const processingOptionsSchema = z.object({
   // Force image PDF pre-conversion
   forceImagePdf: z.boolean().default(false),
 
-  // OCR Strategy — VLM sampling-based strategy selection
+  // Korean report detection and VLM text correction
   strategySamplerModel: llmModelSchema.optional(),
   vlmProcessorModel: llmModelSchema.optional(),
   forcedMethod: z.enum(['ocrmac', 'vlm']).optional(),
@@ -47,7 +47,7 @@ export const processingOptionsSchema = z.object({
   visionTocExtractorModel: llmModelSchema,
   captionParserModel: llmModelSchema,
 
-  // VLM Processing
+  // VLM text correction
   vlmConcurrency: z.number().int().positive().max(50).default(1),
 
   // Batch & Retry

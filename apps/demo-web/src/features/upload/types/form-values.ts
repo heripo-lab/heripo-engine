@@ -23,7 +23,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   documentValidationModel: 'openai/gpt-5.4',
   // Force image PDF pre-conversion
   forceImagePdf: false,
-  // OCR Strategy
+  // Korean report detection
   strategySamplerModel: 'openai/gpt-5.4',
   vlmProcessorModel: 'google/gemini-3.1-flash-lite-preview',
   forcedMethod: undefined,
@@ -34,7 +34,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   tocExtractorModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
   visionTocExtractorModel: 'google/gemini-3-flash-preview',
   captionParserModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
-  // VLM Processing
+  // VLM text correction
   vlmConcurrency: 10,
   // Batch & Retry
   textCleanerBatchSize: 20,
