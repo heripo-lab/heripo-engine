@@ -53,8 +53,6 @@ export interface VlmTextCorrectorOptions {
   documentLanguages?: string[];
   /** Pre-extracted page texts from pdftotext (1-based pageNo → text) */
   pageTexts?: Map<number, string>;
-  /** Pages containing Hanja detected from text layer (1-based). Only these pages get VLM correction. */
-  koreanHanjaMixPages?: number[];
 }
 
 /** Result of VLM text correction */
@@ -110,19 +108,7 @@ export class VlmTextCorrector {
       };
     }
 
-    let pageNumbers: number[];
-    if (
-      options?.koreanHanjaMixPages &&
-      options.koreanHanjaMixPages.length > 0
-    ) {
-      const hanjaSet = new Set(options.koreanHanjaMixPages);
-      pageNumbers = allPageNumbers.filter((p) => hanjaSet.has(p));
-      this.logger.info(
-        `[VlmTextCorrector] Filtering to ${pageNumbers.length} Korean-Hanja mix pages out of ${allPageNumbers.length} total`,
-      );
-    } else {
-      pageNumbers = allPageNumbers;
-    }
+    const pageNumbers = allPageNumbers;
 
     const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;
     this.logger.info(

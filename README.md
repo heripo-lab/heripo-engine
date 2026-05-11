@@ -16,7 +16,7 @@
 
 > ℹ️ **Notes (v0.1.x)**:
 >
-> - **Mixed Script Detection**: Korean-Hanja mixed documents are automatically detected and corrected via VLM (Vision Language Model)
+> - **Korean Report Correction**: Korean reports are automatically detected and corrected via VLM (Vision Language Model)
 > - **TOC Dependency**: Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention
 > - **Vertical Text**: Old vertical-text documents with Chinese numeral page numbers are a long-term goal, not currently scheduled
 
@@ -120,7 +120,7 @@ For a detailed roadmap, see [docs/roadmap.md](./docs/roadmap.md).
 ### PDF Parsing (`@heripo/pdf-parser`)
 
 - **High-Quality OCR**: Document recognition using Docling SDK (ocrmac / Apple Vision Framework)
-- **Mixed Script Auto-Detection & Correction**: Automatically detects Korean-Hanja mixed pages and corrects them via VLM — ocrmac excels at speed and quality for large-scale processing, but cannot handle mixed character systems, so only affected pages are targeted for VLM correction
+- **Korean Report VLM Correction**: Automatically detects Korean reports and applies VLM text correction to all pages — ocrmac excels at speed and quality for large-scale processing, but Korean archaeological reports often require Hanja restoration and script-aware correction
 - **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs

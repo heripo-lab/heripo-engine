@@ -57,7 +57,7 @@ describe('StrategyResolver', () => {
     mockSamplerInstance = {
       sample: vi.fn().mockResolvedValue({
         method: 'ocrmac',
-        reason: 'No Korean-Hanja mix detected',
+        reason: 'No Korean language detected',
         sampledPages: 3,
         totalPages: 10,
       }),
@@ -157,11 +157,10 @@ describe('StrategyResolver', () => {
     test('returns sampler result directly when no forcedMethod', async () => {
       mockSamplerInstance.sample.mockResolvedValue({
         method: 'vlm',
-        reason: 'Korean-Hanja mix detected',
+        reason: 'Korean document detected',
         sampledPages: 2,
         totalPages: 10,
         detectedLanguages: ['ko-KR'],
-        koreanHanjaMixPages: [1, 3],
       });
 
       const result = await resolver.resolve('/tmp/test.pdf', 'report-1', {
@@ -169,15 +168,14 @@ describe('StrategyResolver', () => {
       });
 
       expect(result.method).toBe('vlm');
-      expect(result.reason).toBe('Korean-Hanja mix detected');
+      expect(result.reason).toBe('Korean document detected');
       expect(result.detectedLanguages).toEqual(['ko-KR']);
-      expect(result.koreanHanjaMixPages).toEqual([1, 3]);
     });
 
     test('overrides method when forcedMethod is specified with sampling', async () => {
       mockSamplerInstance.sample.mockResolvedValue({
         method: 'ocrmac',
-        reason: 'No Korean-Hanja mix detected',
+        reason: 'No Korean language detected',
         sampledPages: 3,
         totalPages: 10,
         detectedLanguages: ['ko-KR'],
@@ -193,7 +191,7 @@ describe('StrategyResolver', () => {
       // Method should be overridden to forced value
       expect(result.method).toBe('vlm');
       // Reason should combine forced label with original sampling reason
-      expect(result.reason).toBe('Forced: vlm (No Korean-Hanja mix detected)');
+      expect(result.reason).toBe('Forced: vlm (No Korean language detected)');
       // Detected languages from sampling should be preserved
       expect(result.detectedLanguages).toEqual(['ko-KR']);
       // Sampling metadata should be preserved

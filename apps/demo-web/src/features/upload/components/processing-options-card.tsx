@@ -141,7 +141,7 @@ function ToggleSwitch({
 }
 
 /**
- * Vision model select dropdown for OCR strategy models
+ * Vision model select dropdown for Korean detection and VLM correction models
  */
 function VisionModelSelect({
   label,
@@ -224,10 +224,12 @@ export function ProcessingOptionsCard({
             </TooltipProvider>
           )}
         </CardTitle>
-        <CardDescription>Configure OCR and processing settings</CardDescription>
+        <CardDescription>
+          Configure Korean detection, OCR, and processing settings
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* OCR Strategy Section */}
+        {/* Korean Report Detection Section */}
 
         {/* Forced Method */}
         <form.Field name="forcedMethod">
@@ -235,8 +237,8 @@ export function ProcessingOptionsCard({
             <div className="space-y-2">
               <label className="text-sm font-medium">OCR Strategy</label>
               <p className="text-muted-foreground text-xs">
-                Auto uses VLM sampling to decide; manual forces a specific
-                method
+                Auto detects Korean reports and applies VLM correction; manual
+                forces a specific method
               </p>
               <DisabledWrapper disabled={disabled}>
                 <Select
@@ -250,7 +252,9 @@ export function ProcessingOptionsCard({
                     <SelectValue placeholder="Select strategy" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto">Auto (VLM Sampling)</SelectItem>
+                    <SelectItem value="auto">
+                      Auto (Korean Detection)
+                    </SelectItem>
                     <SelectItem value="ocrmac">Force ocrmac (OCR)</SelectItem>
                     <SelectItem value="vlm">
                       Force VLM (Vision Language Model)
@@ -262,12 +266,12 @@ export function ProcessingOptionsCard({
           )}
         </form.Field>
 
-        {/* Strategy Sampler Model */}
+        {/* Korean Detection Model */}
         <form.Field name="strategySamplerModel">
           {(field: OptionalStringFieldApi) => (
             <VisionModelSelect
-              label="Strategy Sampler Model"
-              description="Frontier VLM for sampling pages to decide OCR strategy"
+              label="Korean Detection Model"
+              description="Frontier VLM for sampling pages to detect Korean reports"
               value={field.state.value}
               onChange={field.handleChange}
               disabled={disabled}
@@ -280,7 +284,7 @@ export function ProcessingOptionsCard({
           {(field: OptionalStringFieldApi) => (
             <VisionModelSelect
               label="VLM Processor Model"
-              description="VLM for page-by-page text extraction when VLM path is chosen"
+              description="VLM for full-page text correction when the Korean report path is chosen"
               value={field.state.value}
               onChange={field.handleChange}
               disabled={disabled}

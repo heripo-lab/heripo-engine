@@ -3,7 +3,7 @@ import type { Bcp47LanguageTag } from '../language/bcp47-language-tag';
 /**
  * Result of the OCR strategy sampling phase.
  * Determines whether to use ocrmac (standard Docling pipeline)
- * or VLM (direct vision language model processing) for a given document.
+ * or VLM text correction for a given document.
  */
 export interface OcrStrategy {
   /** Selected OCR method */
@@ -23,7 +23,4 @@ export interface OcrStrategy {
 
   /** Total number of pages in the document */
   totalPages: number;
-
-  /** 1-based page numbers where Korean-Hanja mixed script was detected in text layer */
-  koreanHanjaMixPages?: number[];
 }

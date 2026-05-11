@@ -228,7 +228,6 @@ interface OcrStrategy {
   reason: string; // 전략 선택 이유
   sampledPages: number; // 샘플링된 페이지 수
   totalPages: number; // 문서 전체 페이지 수
-  koreanHanjaMixPages?: number[]; // 한국어-한자 혼용 페이지
 }
 ```
 

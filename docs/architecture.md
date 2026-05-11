@@ -93,11 +93,11 @@ flowchart TB
 
 heripo engine utilizes two types of AI technology:
 
-| Type              | Technology                   | Stage                            | Characteristics                                                |
-| ----------------- | ---------------------------- | -------------------------------- | -------------------------------------------------------------- |
-| **Deep Learning** | Apple Vision Framework (OCR) | Preprocessing 1                  | Text recognition from images, local processing, free           |
-| **VLM**           | GPT, Gemini, etc. (Vision)   | Preprocessing 1                  | Mixed script detection and per-page text correction, API calls |
-| **LLM**           | GPT, Claude, Qwen, etc.      | Preprocessing 2, Main Processing | Text understanding/analysis, API calls, cost per token         |
+| Type              | Technology                   | Stage                            | Characteristics                                                      |
+| ----------------- | ---------------------------- | -------------------------------- | -------------------------------------------------------------------- |
+| **Deep Learning** | Apple Vision Framework (OCR) | Preprocessing 1                  | Text recognition from images, local processing, free                 |
+| **VLM**           | GPT, Gemini, etc. (Vision)   | Preprocessing 1                  | Korean report detection and full-document text correction, API calls |
+| **LLM**           | GPT, Claude, Qwen, etc.      | Preprocessing 2, Main Processing | Text understanding/analysis, API calls, cost per token               |
 
 ### LLM Model Selection Strategy
 
@@ -173,7 +173,7 @@ flowchart LR
         B -->|vlm| C
         C --> D[Structure Analysis - Docling]
         D --> E[Image Extraction]
-        E --> F{Mixed Script Detected?}
+        E --> F{Korean Report Detected?}
         F -->|Yes| G[VLM Text Correction]
         F -->|No| H[Save Results]
         G --> H
@@ -187,30 +187,30 @@ flowchart LR
 
 #### Key Features
 
-| Feature                      | Description                                                          | AI Technology                |
-| ---------------------------- | -------------------------------------------------------------------- | ---------------------------- |
-| **OCR Processing**           | Text extraction from scanned images (Korean/English)                 | Deep Learning (Apple Vision) |
-| **Mixed Script Detection**   | Auto-detect Korean-Hanja mix via text layer pre-check + VLM sampling | VLM (Vision LLM)             |
-| **VLM Text Correction**      | Per-page correction of mixed script characters                       | VLM (Vision LLM)             |
-| **Document Type Validation** | Verify document is an archaeological report before processing        | LLM                          |
-| **Structure Analysis**       | Automatic identification of text, table, image regions               | Docling (Rules + ML)         |
-| **Chunked Conversion**       | Split large PDFs into chunks for reliable processing                 | -                            |
-| **Image PDF Fallback**       | Convert PDF to images when direct conversion fails                   | -                            |
-| **Image Extraction**         | Save all images in document as files                                 | -                            |
-| **Page Images**              | Save each page as image (for LLM Vision)                             | -                            |
-| **Server Crash Recovery**    | Automatic restart of docling-serve on connection failure             | -                            |
+| Feature                      | Description                                                                   | AI Technology                |
+| ---------------------------- | ----------------------------------------------------------------------------- | ---------------------------- |
+| **OCR Processing**           | Text extraction from scanned images (Korean/English)                          | Deep Learning (Apple Vision) |
+| **Korean Report Detection**  | Auto-detect Korean documents via text layer pre-check + VLM language sampling | VLM (Vision LLM)             |
+| **VLM Text Correction**      | Full-document OCR text correction for Korean reports                          | VLM (Vision LLM)             |
+| **Document Type Validation** | Verify document is an archaeological report before processing                 | LLM                          |
+| **Structure Analysis**       | Automatic identification of text, table, image regions                        | Docling (Rules + ML)         |
+| **Chunked Conversion**       | Split large PDFs into chunks for reliable processing                          | -                            |
+| **Image PDF Fallback**       | Convert PDF to images when direct conversion fails                            | -                            |
+| **Image Extraction**         | Save all images in document as files                                          | -                            |
+| **Page Images**              | Save each page as image (for LLM Vision)                                      | -                            |
+| **Server Crash Recovery**    | Automatic restart of docling-serve on connection failure                      | -                            |
 
 #### OCR Strategy System
 
-The OCR strategy system addresses a key challenge: **ocrmac (Apple Vision Framework) is excellent for large-scale processing** — it's free, GPU-accelerated, and delivers high-quality results, making it the ideal solution for processing thousands to millions of reports. **However, ocrmac cannot handle mixed character systems** such as Korean-Hanja combinations.
+The OCR strategy system addresses a key challenge: **ocrmac (Apple Vision Framework) is excellent for large-scale processing** — it's free, GPU-accelerated, and delivers high-quality results, making it the ideal solution for processing thousands to millions of reports. **However, Korean archaeological reports often require Hanja restoration and script-aware correction** that standard OCR cannot reliably handle.
 
-To solve this, the system uses a **two-stage detection + targeted correction** approach:
+To solve this, the system uses a **two-stage Korean document detection + full-document correction** approach:
 
-1. **Stage 1: Text Layer Pre-Check** (zero cost) — Uses `pdftotext` to check for Hangul and CJK characters in the document's text layer. If both are present, the document is flagged as mixed-script.
-2. **Stage 2: VLM Sampling** (only when needed) — Samples up to 15 pages and analyzes them with a Vision LLM to confirm mixed-script presence. Uses early exit on first detection to minimize API costs.
-3. **Targeted Correction** — Only pages with mixed-script issues are sent to VLM for correction, keeping cost and time minimal while the rest of the document uses the fast ocrmac pipeline.
+1. **Stage 1: Text Layer Pre-Check** (zero cost) — Uses `pdftotext` to check for Hangul in the document's text layer. If Hangul is present, the document is treated as Korean.
+2. **Stage 2: VLM Sampling** (only when needed) — Samples up to 15 pages and analyzes them with a Vision LLM for language detection. Uses early exit when `ko-KR` is detected.
+3. **Full-Document Correction** — Korean reports run through the standard OCR pipeline first, then every page is sent to VLM text correction.
 
-This approach ensures that the vast majority of documents are processed entirely with the fast, free ocrmac engine, while the small fraction of mixed-script pages receive targeted VLM correction.
+This approach keeps non-Korean documents on the fast, free ocrmac engine while ensuring Korean archaeological reports receive consistent VLM correction across the whole document.
 
 #### Output: DoclingDocument
 

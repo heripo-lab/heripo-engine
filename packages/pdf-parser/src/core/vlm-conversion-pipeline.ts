@@ -32,7 +32,6 @@ export class VlmConversionPipeline {
     originalCallback: ConversionCompleteCallback,
     abortSignal?: AbortSignal,
     detectedLanguages?: string[],
-    koreanHanjaMixPages?: number[],
   ): ConversionCompleteCallback {
     if (!options.vlmProcessorModel) {
       throw new Error('vlmProcessorModel is required when OCR strategy is VLM');
@@ -72,7 +71,6 @@ export class VlmConversionPipeline {
           onTokenUsage: options.onTokenUsage,
           documentLanguages: detectedLanguages,
           pageTexts,
-          koreanHanjaMixPages,
         },
       );
       await originalCallback(outputDir);

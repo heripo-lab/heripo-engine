@@ -228,7 +228,6 @@ interface OcrStrategy {
   reason: string; // Reason for strategy selection
   sampledPages: number; // Number of sampled pages
   totalPages: number; // Total pages in document
-  koreanHanjaMixPages?: number[]; // Pages with Korean-Hanja mixed script
 }
 ```
 
