@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
+import type { Transform } from 'stream';
+import type { ZlibOptions } from 'zlib';
 
-import archiver from 'archiver';
+import * as archiver from 'archiver';
 import { existsSync, statSync } from 'fs';
 import { NextResponse } from 'next/server';
 import { dirname, join } from 'path';
@@ -13,6 +15,22 @@ import {
   parseRouteParams,
   taskRouteParamsSchema,
 } from '~/lib/validations';
+
+interface ZipArchiveOptions {
+  zlib?: ZlibOptions;
+}
+
+interface ZipArchiveStream extends Transform {
+  file(filename: string, data: { name: string }): this;
+  directory(dirpath: string, destpath: string): this;
+  finalize(): Promise<void>;
+}
+
+const ZipArchive = (
+  archiver as unknown as {
+    ZipArchive: new (options?: ZipArchiveOptions) => ZipArchiveStream;
+  }
+).ZipArchive;
 
 export async function GET(
   _request: NextRequest,
@@ -52,7 +70,7 @@ export async function GET(
     const imagesDir = join(taskDir, 'images');
     const pagesDir = join(taskDir, 'pages');
 
-    const archive = archiver('zip', {
+    const archive = new ZipArchive({
       zlib: { level: 6 },
     });
 
