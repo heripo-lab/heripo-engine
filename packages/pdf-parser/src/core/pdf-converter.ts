@@ -290,7 +290,6 @@ export class PDFConverter {
         postCorrectionCallback,
         abortSignal,
         strategy.detectedLanguages,
-        strategy.koreanHanjaMixPages,
       );
 
       const vlmOptions: PDFConvertOptions = strategy.detectedLanguages

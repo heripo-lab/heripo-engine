@@ -35,7 +35,7 @@
 ## Key Features
 
 - **High-Quality OCR**: Document recognition using Docling SDK (ocrmac / Apple Vision Framework)
-- **Mixed Script Auto-Detection & Correction**: Automatically detects Korean-Hanja mixed pages and corrects them via VLM
+- **Korean Report VLM Correction**: Automatically detects Korean reports and applies VLM text correction to all pages
 - **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
@@ -233,16 +233,16 @@ await pdfParser.dispose();
 
 **ocrmac (Apple Vision Framework) is an excellent OCR engine** -- it's free, GPU-accelerated, and delivers high-quality results. For processing thousands to millions of archaeological reports, there's no better solution.
 
-**However, ocrmac cannot handle mixed character systems.** Documents containing Korean-Hanja combinations (and potentially other mixed scripts) produce garbled text for the non-primary script. Rather than switching the entire pipeline to a costly VLM, the system **targets only the affected pages** for VLM correction, minimizing cost and processing time.
+**However, Korean archaeological reports often need script-aware correction.** Hanja restoration, CJK mojibake, phonetic substitutions, and institution names can be unreliable with standard OCR alone. Rather than using VLM as the primary OCR engine, the system runs the fast ocrmac pipeline first and then applies VLM text correction to Korean reports.
 
-### Two-Stage Detection (`OcrStrategySampler`)
+### Two-Stage Korean Detection (`OcrStrategySampler`)
 
-1. **Text Layer Pre-Check** (zero cost): Extracts the document's text layer using `pdftotext` and checks for both Hangul and CJK characters. If both are present, the document is immediately flagged as mixed-script.
-2. **VLM Sampling** (only when needed): Samples up to 15 pages (trimming 10% from front/back to skip covers and appendices) and analyzes them with a Vision LLM. Uses early exit on first Korean-Hanja mix detection to minimize API costs.
+1. **Text Layer Pre-Check** (zero cost): Extracts the document's text layer using `pdftotext` and checks for Hangul. If Hangul is present, the document is immediately treated as Korean.
+2. **VLM Sampling** (only when needed): Samples up to 15 pages (trimming 10% from front/back to skip covers and appendices) and analyzes them with a Vision LLM. Uses early exit when `ko-KR` is detected.
 
-### Per-Page Correction (`VlmTextCorrector`)
+### Full-Document Correction (`VlmTextCorrector`)
 
-When mixed-script pages are detected, only those pages are sent to the VLM for correction:
+When a Korean report is detected, every page is sent to the VLM for correction:
 
 - Extracts OCR text elements and table cells from each page
 - Uses `pdftotext` reference text as a quality anchor
@@ -261,7 +261,7 @@ const tokenUsageReport = await pdfParser.parse(
     // Enable OCR strategy sampling (provide a Vision LLM model)
     strategySamplerModel: openai('gpt-5.1'),
 
-    // VLM model for text correction (required when mixed-script is detected)
+    // VLM model for text correction (required when Korean reports are detected)
     vlmProcessorModel: openai('gpt-5.1'),
 
     // Concurrency for VLM page processing (default: 1)

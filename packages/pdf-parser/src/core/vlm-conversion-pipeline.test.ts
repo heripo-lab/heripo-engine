@@ -254,25 +254,6 @@ describe('VlmConversionPipeline', () => {
       );
     });
 
-    test('passes koreanHanjaMixPages to VlmTextCorrector', async () => {
-      const wrapped = pipeline.wrapCallback(
-        '/tmp/test.pdf',
-        { vlmProcessorModel: mockModel },
-        vi.fn(),
-        undefined,
-        ['ko-KR'],
-        [1, 3, 5],
-      );
-
-      await wrapped('/test/output');
-
-      expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
-        '/test/output',
-        mockModel,
-        expect.objectContaining({ koreanHanjaMixPages: [1, 3, 5] }),
-      );
-    });
-
     test('passes aggregator and abortSignal to VlmTextCorrector', async () => {
       const aggregator = new LLMTokenUsageAggregator();
       const abortController = new AbortController();

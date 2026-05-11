@@ -12,7 +12,7 @@ import { z } from 'zod/v4';
 
 import { PAGE_RENDERING } from '../config/constants.js';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
-import { KOREAN_HANJA_MIX_PROMPT } from '../prompts/korean-hanja-mix-prompt';
+import { KOREAN_DOCUMENT_DETECTION_PROMPT } from '../prompts/korean-document-detection-prompt';
 
 /** Ratio of pages to trim from front and back (covers, TOC, appendices) */
 const EDGE_TRIM_RATIO = 0.1;
@@ -23,19 +23,11 @@ const DEFAULT_MAX_SAMPLE_PAGES = 15;
 /** Default max retries per VLM call */
 const DEFAULT_MAX_RETRIES = 3;
 
-/** Regex to detect CJK Unified Ideographs (Hanja/Kanji/Hanzi) */
-const CJK_REGEX = /[\u4E00-\u9FFF]/;
-
 /** Regex to detect Hangul syllables */
 const HANGUL_REGEX = /[\uAC00-\uD7AF]/;
 
-/** Zod schema for VLM Korean-Hanja mix detection response */
-const koreanHanjaMixSchema = z.object({
-  hasKoreanHanjaMix: z
-    .boolean()
-    .describe(
-      'Whether the page contains any Hanja (漢字/Chinese characters) mixed with Korean text',
-    ),
+/** Zod schema for VLM language detection response */
+const koreanDocumentDetectionSchema = z.object({
   detectedLanguages: z
     .array(z.string())
     .describe(
@@ -62,14 +54,14 @@ export interface OcrStrategySamplerOptions {
 /**
  * Samples pages from a PDF to determine whether to use ocrmac or VLM for processing.
  *
- * First attempts to detect Hangul-Hanja mix directly from the PDF text layer using
- * pdftotext (zero-cost, high accuracy for PDFs with embedded text). Only falls back
- * to VLM-based image analysis for image-only PDFs without a text layer.
+ * First attempts to detect Korean text directly from the PDF text layer using
+ * pdftotext (zero-cost, high accuracy for PDFs with embedded text). Falls back
+ * to VLM-based image analysis when the text layer cannot identify Korean.
  *
  * VLM fallback sampling strategy:
  * - Trim front/back 10% of pages (covers, TOC, appendices)
  * - Select up to 15 pages evenly distributed across the eligible range
- * - Early exit on first Korean-Hanja mix detection
+ * - Early exit on first Korean language detection
  */
 export class OcrStrategySampler {
   private readonly logger: LoggerMethods;
@@ -91,7 +83,7 @@ export class OcrStrategySampler {
    *
    * @param pdfPath - Path to the PDF file
    * @param outputDir - Directory for temporary rendered pages
-   * @param model - Vision language model for Korean-Hanja mix detection
+   * @param model - Vision language model for Korean document detection
    * @param options - Sampling options
    * @returns OcrStrategy with method ('ocrmac' or 'vlm') and metadata
    */
@@ -105,8 +97,8 @@ export class OcrStrategySampler {
 
     this.logger.info('[OcrStrategySampler] Starting OCR strategy sampling...');
 
-    // Step 1: Try text layer pre-check (zero-cost Hangul-Hanja detection)
-    const preCheckResult = await this.preCheckHanjaFromTextLayer(pdfPath);
+    // Step 1: Try text layer pre-check (zero-cost Korean detection)
+    const preCheckResult = await this.preCheckKoreanFromTextLayer(pdfPath);
     if (preCheckResult) {
       return preCheckResult;
     }
@@ -138,7 +130,7 @@ export class OcrStrategySampler {
       `[OcrStrategySampler] Sampling ${sampleIndices.length} of ${renderResult.pageCount} pages: [${sampleIndices.map((i) => i + 1).join(', ')}]`,
     );
 
-    // Step 4: Check each sample page for Korean-Hanja mix (early exit on detection)
+    // Step 4: Check each sample page for Korean text (early exit on detection)
     const sampleResult = await this.samplePages(
       sampleIndices,
       renderResult.pageFiles,
@@ -146,9 +138,9 @@ export class OcrStrategySampler {
       options,
     );
 
-    if (sampleResult.foundMix) {
+    if (sampleResult.foundKorean) {
       this.logger.info(
-        `[OcrStrategySampler] Korean-Hanja mix detected on page ${sampleResult.mixPageNo} → VLM strategy`,
+        `[OcrStrategySampler] Korean document detected on page ${sampleResult.koreanPageNo} → VLM strategy`,
       );
       const detectedLanguages = this.aggregateLanguages(
         sampleResult.languageFrequency,
@@ -156,15 +148,15 @@ export class OcrStrategySampler {
       return {
         method: 'vlm',
         detectedLanguages,
-        reason: `Korean-Hanja mix detected on page ${sampleResult.mixPageNo}`,
+        reason: `Korean document detected on page ${sampleResult.koreanPageNo}`,
         sampledPages: sampleResult.sampledCount,
         totalPages: renderResult.pageCount,
       };
     }
 
-    // Step 5: No Korean-Hanja mix found → ocrmac
+    // Step 5: No Korean language found → ocrmac
     this.logger.info(
-      '[OcrStrategySampler] No Korean-Hanja mix detected → ocrmac strategy',
+      '[OcrStrategySampler] No Korean language detected → ocrmac strategy',
     );
     const detectedLanguages = this.aggregateLanguages(
       sampleResult.languageFrequency,
@@ -172,14 +164,14 @@ export class OcrStrategySampler {
     return {
       method: 'ocrmac',
       detectedLanguages,
-      reason: `No Korean-Hanja mix detected in ${sampleResult.sampledCount} sampled pages`,
+      reason: `No Korean language detected in ${sampleResult.sampledCount} sampled pages`,
       sampledPages: sampleResult.sampledCount,
       totalPages: renderResult.pageCount,
     };
   }
 
   /**
-   * Sample pages for Korean-Hanja mix detection with early exit.
+   * Sample pages for Korean language detection with early exit.
    */
   private async samplePages(
     sampleIndices: number[],
@@ -187,8 +179,8 @@ export class OcrStrategySampler {
     model: LanguageModel,
     options?: OcrStrategySamplerOptions,
   ): Promise<{
-    foundMix: boolean;
-    mixPageNo?: number;
+    foundKorean: boolean;
+    koreanPageNo?: number;
     sampledCount: number;
     languageFrequency: Map<Bcp47LanguageTag, number>;
   }> {
@@ -208,10 +200,10 @@ export class OcrStrategySampler {
         languageFrequency.set(lang, (languageFrequency.get(lang) ?? 0) + 1);
       }
 
-      if (pageAnalysis.hasKoreanHanjaMix) {
+      if (pageAnalysis.detectedLanguages.includes('ko-KR')) {
         return {
-          foundMix: true,
-          mixPageNo: idx + 1,
+          foundKorean: true,
+          koreanPageNo: idx + 1,
           sampledCount: i + 1,
           languageFrequency,
         };
@@ -219,21 +211,19 @@ export class OcrStrategySampler {
     }
 
     return {
-      foundMix: false,
+      foundKorean: false,
       sampledCount: sampleIndices.length,
       languageFrequency,
     };
   }
 
   /**
-   * Pre-check for Hangul-Hanja mix in PDF text layer using pdftotext.
-   * Extracts full document text in a single process and checks at document level.
-   * Only makes a definitive decision for Korean (Hangul) documents:
-   * - Hangul + Hanja (anywhere in document) → VLM (confirmed Korean-Hanja mix)
-   * - Hangul only → ocrmac with ko-KR (confirmed Korean)
+   * Pre-check for Korean text in PDF text layer using pdftotext.
+   * Extracts full document text in a single process and checks at document level:
+   * - Hangul anywhere in document → VLM (confirmed Korean document)
    * - No Hangul (English, Japanese, etc.) → null (delegates to VLM for language detection)
    */
-  private async preCheckHanjaFromTextLayer(
+  private async preCheckKoreanFromTextLayer(
     pdfPath: string,
   ): Promise<OcrStrategy | null> {
     try {
@@ -243,13 +233,12 @@ export class OcrStrategySampler {
       const fullText = await this.textExtractor.extractFullText(pdfPath);
       if (fullText.trim().length === 0) {
         this.logger.debug(
-          '[OcrStrategySampler] No Hangul in text layer, falling back to VLM sampling',
+          '[OcrStrategySampler] No text in text layer, falling back to VLM sampling',
         );
         return null;
       }
 
       const hasHangul = HANGUL_REGEX.test(fullText);
-      const hasHanja = CJK_REGEX.test(fullText);
 
       if (!hasHangul) {
         this.logger.debug(
@@ -258,32 +247,13 @@ export class OcrStrategySampler {
         return null;
       }
 
-      if (hasHanja) {
-        const pageTextArray = fullText.split('\f');
-        const koreanHanjaMixPages = pageTextArray.flatMap((text, i) =>
-          CJK_REGEX.test(text) ? [i + 1] : [],
-        );
-
-        this.logger.info(
-          `[OcrStrategySampler] Hangul-Hanja mix detected in text layer → VLM strategy (${koreanHanjaMixPages.length} pages with Hanja)`,
-        );
-        return {
-          method: 'vlm',
-          detectedLanguages: ['ko-KR'],
-          reason: 'Hangul-Hanja mix found in PDF text layer',
-          koreanHanjaMixPages,
-          sampledPages: totalPages,
-          totalPages,
-        };
-      }
-
       this.logger.info(
-        '[OcrStrategySampler] No Hangul-Hanja mix in text layer → ocrmac strategy',
+        '[OcrStrategySampler] Korean text detected in text layer → VLM strategy',
       );
       return {
-        method: 'ocrmac',
+        method: 'vlm',
         detectedLanguages: ['ko-KR'],
-        reason: `No Hangul-Hanja mix in PDF text layer (${totalPages} pages checked)`,
+        reason: `Korean text found in PDF text layer (${totalPages} pages checked)`,
         sampledPages: totalPages,
         totalPages,
       };
@@ -336,10 +306,10 @@ export class OcrStrategySampler {
   }
 
   /**
-   * Analyze a single sample page for Korean-Hanja mixed script and primary language.
+   * Analyze a single sample page for language.
    * Normalizes raw VLM language responses to valid BCP 47 tags, filtering out invalid ones.
    *
-   * @returns Object with Korean-Hanja detection result and normalized detected languages
+   * @returns Object with normalized detected languages
    */
   private async analyzeSamplePage(
     pageFile: string,
@@ -347,11 +317,10 @@ export class OcrStrategySampler {
     model: LanguageModel,
     options?: OcrStrategySamplerOptions,
   ): Promise<{
-    hasKoreanHanjaMix: boolean;
     detectedLanguages: Bcp47LanguageTag[];
   }> {
     this.logger.debug(
-      `[OcrStrategySampler] Analyzing page ${pageNo} for Korean-Hanja mix and language...`,
+      `[OcrStrategySampler] Analyzing page ${pageNo} for language...`,
     );
 
     const imageData = new Uint8Array(readFileSync(pageFile));
@@ -360,7 +329,10 @@ export class OcrStrategySampler {
       {
         role: 'user' as const,
         content: [
-          { type: 'text' as const, text: KOREAN_HANJA_MIX_PROMPT },
+          {
+            type: 'text' as const,
+            text: KOREAN_DOCUMENT_DETECTION_PROMPT,
+          },
           {
             type: 'image' as const,
             image: imageData,
@@ -371,7 +343,7 @@ export class OcrStrategySampler {
     ];
 
     const result = await LLMCaller.callVision({
-      schema: koreanHanjaMixSchema as any,
+      schema: koreanDocumentDetectionSchema as any,
       messages,
       primaryModel: model,
       fallbackModel: options?.fallbackModel,
@@ -379,7 +351,7 @@ export class OcrStrategySampler {
       temperature: options?.temperature ?? 0,
       abortSignal: options?.abortSignal,
       component: 'OcrStrategySampler',
-      phase: 'korean-hanja-mix-detection',
+      phase: 'korean-document-detection',
     });
 
     if (options?.aggregator) {
@@ -387,7 +359,6 @@ export class OcrStrategySampler {
     }
 
     const output = result.output as {
-      hasKoreanHanjaMix: boolean;
       detectedLanguages: string[];
     };
 
@@ -396,11 +367,10 @@ export class OcrStrategySampler {
       .filter((tag): tag is Bcp47LanguageTag => tag !== null);
 
     this.logger.debug(
-      `[OcrStrategySampler] Page ${pageNo}: hasKoreanHanjaMix=${output.hasKoreanHanjaMix}, detectedLanguages=${normalizedLanguages.join(',')}`,
+      `[OcrStrategySampler] Page ${pageNo}: detectedLanguages=${normalizedLanguages.join(',')}`,
     );
 
     return {
-      hasKoreanHanjaMix: output.hasKoreanHanjaMix,
       detectedLanguages: normalizedLanguages,
     };
   }

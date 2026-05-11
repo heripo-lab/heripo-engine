@@ -199,11 +199,10 @@ describe('PDFConverter.convertWithStrategy', () => {
     test('creates VlmConversionPipeline and calls wrapCallback with correct args', async () => {
       mockResolve.mockResolvedValue({
         method: 'vlm',
-        reason: 'Korean-Hanja mix detected',
+        reason: 'Korean document detected',
         sampledPages: 2,
         totalPages: 10,
         detectedLanguages: ['ko-KR'],
-        koreanHanjaMixPages: [1, 3],
       });
 
       const convertSpy = vi.spyOn(converter, 'convert').mockResolvedValue(null);
@@ -228,7 +227,6 @@ describe('PDFConverter.convertWithStrategy', () => {
         mockOnComplete,
         abortController.signal,
         ['ko-KR'],
-        [1, 3],
       );
 
       convertSpy.mockRestore();
@@ -289,7 +287,6 @@ describe('PDFConverter.convertWithStrategy', () => {
           vlmProcessorModel: mockModel,
         }),
         expect.any(Function),
-        undefined,
         undefined,
         undefined,
       );
@@ -511,7 +508,7 @@ describe('PDFConverter.convertWithStrategy', () => {
         ) => {
           options.aggregator?.track({
             component: 'OcrStrategySampler',
-            phase: 'korean-hanja-mix-detection',
+            phase: 'korean-document-detection',
             model: 'primary',
             modelName: 'sampler-model',
             inputTokens: 800,
@@ -520,7 +517,7 @@ describe('PDFConverter.convertWithStrategy', () => {
           });
           return {
             method: 'ocrmac' as const,
-            reason: 'No Korean-Hanja mix detected',
+            reason: 'No Korean language detected',
             sampledPages: 3,
             totalPages: 10,
           };
@@ -723,7 +720,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     test('VLM path passes detectedLanguages as ocr_lang to convert()', async () => {
       mockResolve.mockResolvedValue({
         method: 'vlm',
-        reason: 'Korean-Hanja mix detected',
+        reason: 'Korean document detected',
         sampledPages: 2,
         totalPages: 10,
         detectedLanguages: ['ko-KR', 'zh-Hans'],
@@ -791,7 +788,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     test('ocrmac path passes detectedLanguages as ocr_lang to convert()', async () => {
       mockResolve.mockResolvedValue({
         method: 'ocrmac',
-        reason: 'No Korean-Hanja mix detected',
+        reason: 'No Korean language detected',
         sampledPages: 3,
         totalPages: 10,
         detectedLanguages: ['ko-KR'],
@@ -845,7 +842,7 @@ describe('PDFConverter.convertWithStrategy', () => {
     test('VLM path passes sampled detectedLanguages as ocr_lang when forcedMethod + strategySamplerModel', async () => {
       mockResolve.mockResolvedValue({
         method: 'vlm',
-        reason: 'Forced: vlm (No Korean-Hanja mix detected)',
+        reason: 'Forced: vlm (No Korean language detected)',
         sampledPages: 3,
         totalPages: 10,
         detectedLanguages: ['ko-KR'],

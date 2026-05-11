@@ -38,18 +38,18 @@ Each stage:
 
 ### ℹ️ Current Notes
 
-| Item                 | Description                                                                                                      | Status         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------- |
-| **Mixed Script OCR** | Korean-Hanja mixed documents are automatically detected and corrected via VLM                                    | ✅ Resolved    |
-| **TOC Dependency**   | Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention | 📋 As designed |
-| **Vertical Text**    | Old documents with vertical text and Chinese numeral page numbers (long-term goal, not currently scheduled)      | 📅 Long-term   |
+| Item                  | Description                                                                                                      | Status         |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------- |
+| **Korean Report OCR** | Korean reports are automatically detected and corrected via VLM                                                  | ✅ Resolved    |
+| **TOC Dependency**    | Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention | 📋 As designed |
+| **Vertical Text**     | Old documents with vertical text and Chinese numeral page numbers (long-term goal, not currently scheduled)      | 📅 Long-term   |
 
 **PDF Parsing and OCR**
 
 - PDF parsing using Docling SDK
 - Apple Silicon GPU-accelerated OCR (ocrmac / Apple Vision Framework)
 - High-quality Korean document recognition
-- Mixed script auto-detection and VLM correction — ocrmac is excellent for large-scale processing (free, GPU-accelerated, high quality), but cannot handle mixed character systems (e.g., Korean-Hanja); affected pages are automatically detected and corrected via VLM
+- Korean report detection and VLM correction — ocrmac is excellent for large-scale processing (free, GPU-accelerated, high quality), while Korean archaeological reports receive full-page VLM text correction for Hanja restoration and script-aware OCR fixes
 - Automatic image extraction
 
 **Document Structure Extraction**

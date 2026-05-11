@@ -1145,7 +1145,7 @@ describe('PDFParser', () => {
       convertWithStrategyMock.mockResolvedValueOnce({
         strategy: {
           method: 'vlm',
-          reason: 'Korean-Hanja mix detected',
+          reason: 'Korean document detected',
           sampledPages: 3,
           totalPages: 50,
         },
