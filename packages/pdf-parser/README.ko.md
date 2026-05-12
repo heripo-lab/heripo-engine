@@ -30,6 +30,7 @@
 - [시스템 의존성 상세](#시스템-의존성-상세)
 - [API 문서](#api-문서)
 - [문제 해결](#문제-해결)
+- [후원](#후원)
 - [라이선스](#라이선스)
 
 ## 주요 기능
@@ -664,6 +665,13 @@ Docling SDK의 로컬 OCR은 macOS에서 Apple Metal GPU 가속을 활용해 성
 
 - [@heripo/document-processor](../document-processor) - 문서 구조 분석 및 LLM 처리
 - [@heripo/model](../model) - 데이터 모델 및 타입 정의
+
+## 후원
+
+heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 수 있습니다:
+
+- [Open Collective](https://opencollective.com/heripo-project): 전반적인 프로젝트 후원
+- [fairy.hada.io/@heripo](https://fairy.hada.io/@heripo): 한국인 개인 후원자를 위한 원화 결제
 
 ## 라이선스
 

@@ -18,6 +18,7 @@
 - [설치](#설치)
 - [사용법](#사용법)
 - [API](#api)
+- [후원](#후원)
 - [라이선스](#라이선스)
 
 ## 개요
@@ -90,6 +91,13 @@ type LogFn = (...args: any[]) => void;
 - [@heripo/model](../model) - 문서 모델 및 타입 정의
 - [@heripo/pdf-parser](../pdf-parser) - PDF 파싱 및 OCR
 - [@heripo/document-processor](../document-processor) - 문서 구조 분석
+
+## 후원
+
+heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 수 있습니다:
+
+- [Open Collective](https://opencollective.com/heripo-project): 전반적인 프로젝트 후원
+- [fairy.hada.io/@heripo](https://fairy.hada.io/@heripo): 한국인 개인 후원자를 위한 원화 결제
 
 ## 라이선스
 

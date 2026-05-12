@@ -20,6 +20,7 @@
 - [Usage](#usage)
 - [Processing Pipeline](#processing-pipeline)
 - [API Documentation](#api-documentation)
+- [Sponsor](#sponsor)
 - [License](#license)
 
 ## Key Features
@@ -393,6 +394,13 @@ console.log('Token usage:', tokenUsage);
 
 - [@heripo/pdf-parser](../pdf-parser) - PDF parsing and OCR
 - [@heripo/model](../model) - Data models and type definitions
+
+## Sponsor
+
+If you'd like to support heripo lab's open-source research, you can sponsor us through:
+
+- [Open Collective](https://opencollective.com/heripo-project) for general project sponsorship.
+- [fairy.hada.io/@heripo](https://fairy.hada.io/@heripo) for Korean individual supporters who prefer KRW payments.
 
 ## License
 

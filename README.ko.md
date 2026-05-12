@@ -38,6 +38,7 @@
 - [로드맵](#로드맵)
 - [기여하기](#기여하기)
 - [인용 및 출처 표기](#인용-및-출처-표기)
+- [후원](#후원)
 - [라이선스](#라이선스)
 
 ## 소개
@@ -463,6 +464,13 @@ Powered by heripo engine
   note = {Apache License 2.0}
 }
 ```
+
+## 후원
+
+heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 수 있습니다:
+
+- [Open Collective](https://opencollective.com/heripo-project): 전반적인 프로젝트 후원
+- [fairy.hada.io/@heripo](https://fairy.hada.io/@heripo): 한국인 개인 후원자를 위한 원화 결제
 
 ## 라이선스
 

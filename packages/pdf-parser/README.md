@@ -30,6 +30,7 @@
 - [System Dependencies Details](#system-dependencies-details)
 - [API Documentation](#api-documentation)
 - [Troubleshooting](#troubleshooting)
+- [Sponsor](#sponsor)
 - [License](#license)
 
 ## Key Features
@@ -664,6 +665,13 @@ If you have ideas for supporting Linux while maintaining both performance and co
 
 - [@heripo/document-processor](../document-processor) - Document structure analysis and LLM processing
 - [@heripo/model](../model) - Data models and type definitions
+
+## Sponsor
+
+If you'd like to support heripo lab's open-source research, you can sponsor us through:
+
+- [Open Collective](https://opencollective.com/heripo-project) for general project sponsorship.
+- [fairy.hada.io/@heripo](https://fairy.hada.io/@heripo) for Korean individual supporters who prefer KRW payments.
 
 ## License
 

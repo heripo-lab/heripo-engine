@@ -18,6 +18,7 @@
 - [Installation](#installation)
 - [Usage](#usage)
 - [API](#api)
+- [Sponsor](#sponsor)
 - [License](#license)
 
 ## Overview
@@ -90,6 +91,13 @@ type LogFn = (...args: any[]) => void;
 - [@heripo/model](../model) - Document models and type definitions
 - [@heripo/pdf-parser](../pdf-parser) - PDF parsing and OCR
 - [@heripo/document-processor](../document-processor) - Document structure analysis
+
+## Sponsor
+
+If you'd like to support heripo lab's open-source research, you can sponsor us through:
+
+- [Open Collective](https://opencollective.com/heripo-project) for general project sponsorship.
+- [fairy.hada.io/@heripo](https://fairy.hada.io/@heripo) for Korean individual supporters who prefer KRW payments.
 
 ## License
 
