@@ -58,6 +58,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     // Google
     'gemini-3-flash-preview': { input: 0.5, output: 3 },
     'gemini-3.1-pro-preview': { input: 2, output: 12 },
+    'gemini-3.1-flash-lite': { input: 0.25, output: 1.5 },
     'gemini-3.1-flash-lite-preview': { input: 0.25, output: 1.5 },
     // Claude
     'anthropic/claude-opus-4-6': { input: 5, output: 25 },
@@ -70,6 +71,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'openai/gpt-5-mini': { input: 0.25, output: 2 },
     'google/gemini-3.1-pro-preview': { input: 2, output: 12 },
     'google/gemini-3-flash-preview': { input: 0.5, output: 3 },
+    'google/gemini-3.1-flash-lite': { input: 0.25, output: 1.5 },
     'google/gemini-3.1-flash-lite-preview': { input: 0.25, output: 1.5 },
   };
 

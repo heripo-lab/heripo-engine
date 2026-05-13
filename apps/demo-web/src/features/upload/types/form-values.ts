@@ -25,7 +25,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   forceImagePdf: false,
   // Korean report detection
   strategySamplerModel: 'openai/gpt-5.4',
-  vlmProcessorModel: 'google/gemini-3.1-flash-lite-preview',
+  vlmProcessorModel: 'google/gemini-3.1-flash-lite',
   forcedMethod: undefined,
   // LLM Models
   fallbackModel: 'openai/gpt-5.4',
