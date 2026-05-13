@@ -33,7 +33,7 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 
 로컬 설치 없이 바로 체험할 수 있습니다:
 
-**🔗 https://engine-demo.heripo.com**
+**🔗 https://engine-demo.heripo.org**
 
 ### 온라인 데모 제한 사항
 

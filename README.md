@@ -20,7 +20,7 @@
 > - **TOC Dependency**: Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention
 > - **Vertical Text**: Old vertical-text documents with Chinese numeral page numbers are a long-term goal, not currently scheduled
 
-> 🌐 **Online Demo**: Try it without local installation → [engine-demo.heripo.com](https://engine-demo.heripo.com)
+> 🌐 **Online Demo**: Try it without local installation → [engine-demo.heripo.org](https://engine-demo.heripo.org)
 
 ## Table of Contents
 
@@ -296,7 +296,7 @@ const processor = new DocumentProcessor({
 
 Try it without local installation:
 
-**🔗 https://engine-demo.heripo.com**
+**🔗 https://engine-demo.heripo.org**
 
 > The online demo has a daily usage limit (3 times). For full functionality, local execution is recommended.
 

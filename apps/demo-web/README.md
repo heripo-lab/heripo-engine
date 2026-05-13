@@ -33,7 +33,7 @@ Demo Web is a full-stack Next.js application that allows you to monitor and visu
 
 Try it without local installation:
 
-**🔗 https://engine-demo.heripo.com**
+**🔗 https://engine-demo.heripo.org**
 
 ### Online Demo Limitations
 

@@ -20,7 +20,7 @@
 > - **목차 의존성**: 목차가 없는 보고서는 처리 실패 (의도된 동작). 드문 추출 실패는 human intervention으로 대응 예정
 > - **세로쓰기 문서**: 페이지 번호가 한자인 오래된 세로쓰기 문서는 장기 목표이나 현재 계획에 없음
 
-> 🌐 **온라인 데모**: 로컬 설치 없이 바로 체험해 보세요 → [engine-demo.heripo.com](https://engine-demo.heripo.com)
+> 🌐 **온라인 데모**: 로컬 설치 없이 바로 체험해 보세요 → [engine-demo.heripo.org](https://engine-demo.heripo.org)
 
 ## 목차
 
@@ -292,7 +292,7 @@ const processor = new DocumentProcessor({
 
 로컬 설치 없이 바로 체험해 보세요:
 
-**🔗 https://engine-demo.heripo.com**
+**🔗 https://engine-demo.heripo.org**
 
 > 온라인 데모는 일일 사용량 제한(3회)이 있습니다. 전체 기능은 로컬 실행을 권장합니다.
 

@@ -174,6 +174,6 @@ jobs:
                     *배포자:* ${{ github.actor }}
                     *커밋:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>
 
-                    ${{ job.status == 'success' && '✅ 데모 사이트: https://engine-demo.heripo.com' || '🚨 로그 확인이 필요합니다.' }}
+                    ${{ job.status == 'success' && '✅ 데모 사이트: https://engine-demo.heripo.org' || '🚨 로그 확인이 필요합니다.' }}
 
                     <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|🔗 워크플로우 로그 보기>

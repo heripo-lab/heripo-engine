@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'engine-demo.heripo.com',
+        hostname: 'engine-demo.heripo.org',
       },
     ],
   },
