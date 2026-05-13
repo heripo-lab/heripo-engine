@@ -65,8 +65,8 @@ export const LLM_MODELS: LLMModel[] = [
     provider: 'Google',
   },
   {
-    id: 'google/gemini-3.1-flash-lite-preview',
-    label: 'Gemini 3.1 Flash Lite Preview',
+    id: 'google/gemini-3.1-flash-lite',
+    label: 'Gemini 3.1 Flash Lite',
     provider: 'Google',
   },
 
