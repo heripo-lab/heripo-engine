@@ -641,6 +641,27 @@ describe('DocumentProcessor', () => {
       );
     });
 
+    test('should throw when validating source refs before RefResolver initialization', () => {
+      const processor = createProcessor();
+
+      expect(() =>
+        (processor as any).validateProcessedDocumentSourceRefs(
+          {
+            reportId: 'report-001',
+            schemaVersion: PROCESSED_DOCUMENT_SCHEMA_VERSION,
+            pageRangeMap: {},
+            chapters: [],
+            images: [],
+            tables: [],
+            footnotes: [],
+          },
+          'error',
+        ),
+      ).toThrow(
+        '[DocumentProcessor] Cannot validate source references before RefResolver initialization',
+      );
+    });
+
     test('should throw when source ref validation is strict and refs are missing', async () => {
       const processor = createProcessor();
       const refResolverMock = {

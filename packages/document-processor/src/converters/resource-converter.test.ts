@@ -572,6 +572,39 @@ describe('ResourceConverter', () => {
       ]);
     });
 
+    test('derives column count from grid colSpans when num_cols is missing', async () => {
+      const logger = createMockLogger();
+      const converter = new ResourceConverter(
+        logger,
+        createMockIdGenerator(),
+        createMockCaptionPipeline(),
+      );
+
+      const mockDoc = {
+        tables: [
+          {
+            self_ref: '#/tables/0',
+            label: 'table',
+            prov: [{ page_no: 2 }],
+            captions: [],
+            data: {
+              num_rows: 1,
+              grid: [
+                [
+                  { text: 'A', col_span: 2 },
+                  { text: 'B', col_span: 1 },
+                ],
+              ],
+            },
+          },
+        ],
+      } as unknown as DoclingDocument;
+
+      const result = await converter.convertTables(mockDoc);
+
+      expect(result[0].numCols).toBe(3);
+    });
+
     test('falls back to table_cells when Docling grid is empty', async () => {
       const logger = createMockLogger();
       const converter = new ResourceConverter(
@@ -621,6 +654,59 @@ describe('ResourceConverter', () => {
       expect(result[0].grid).toEqual([
         [{ text: 'A', rowSpan: 1, colSpan: 3, isHeader: true }],
         [{ text: 'B', rowSpan: 1, colSpan: 1, isHeader: false }],
+      ]);
+    });
+
+    test('uses defensive defaults for table_cells when grid and offsets are missing', async () => {
+      const logger = createMockLogger();
+      const converter = new ResourceConverter(
+        logger,
+        createMockIdGenerator(),
+        createMockCaptionPipeline(),
+      );
+
+      const mockDoc = {
+        tables: [
+          {
+            self_ref: '#/tables/0',
+            label: 'table',
+            prov: [{ page_no: 2 }],
+            captions: [],
+            data: {
+              table_cells: [
+                {
+                  column_header: false,
+                  row_header: false,
+                },
+                {
+                  text: 'Second cell',
+                  start_row_offset_idx: 0,
+                  start_col_offset_idx: 1,
+                  column_header: false,
+                  row_header: false,
+                },
+                {
+                  text: 'Ignored negative row',
+                  start_row_offset_idx: -1,
+                  start_col_offset_idx: 0,
+                  column_header: false,
+                  row_header: false,
+                },
+              ],
+            },
+          },
+        ],
+      } as unknown as DoclingDocument;
+
+      const result = await converter.convertTables(mockDoc);
+
+      expect(result[0].numRows).toBe(1);
+      expect(result[0].numCols).toBe(2);
+      expect(result[0].grid).toEqual([
+        [
+          { text: '', rowSpan: 1, colSpan: 1, isHeader: false },
+          { text: 'Second cell', rowSpan: 1, colSpan: 1, isHeader: false },
+        ],
       ]);
     });
 
