@@ -688,6 +688,49 @@ describe('DocumentProcessor', () => {
       );
     });
 
+    test('should fall back to the text block index when id is missing', async () => {
+      const processor = createProcessor();
+      const refResolverMock = {
+        hasRef: vi.fn(() => false),
+        assertRef: vi.fn(),
+        assertRefs: vi.fn(),
+      };
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        undefined,
+        refResolverMock,
+      );
+      const mockDoc = createMockDoc();
+      mocks.chapterConvertMock.mockReturnValue([
+        {
+          id: 'ch-001',
+          originTitle: 'Chapter 1',
+          title: 'Chapter 1',
+          pageNo: 1,
+          level: 1,
+          sourceRefs: [],
+          textBlocks: [
+            {
+              sourceRef: '#/texts/999',
+              text: 'Body',
+              pdfPageNo: 1,
+            },
+          ],
+          imageIds: [],
+          tableIds: [],
+          footnoteIds: [],
+        },
+      ]);
+
+      await expect(
+        processor.process(mockDoc, 'report-001', '/path', {
+          sourceRefValidationMode: 'error',
+        }),
+      ).rejects.toThrow(
+        '[DocumentProcessor] Source reference validation found 1 missing reference(s): chapter ch-001 textBlock 0 sourceRef (#/texts/999)',
+      );
+    });
+
     test('should warn instead of throwing when sourceRefValidationMode is warn', async () => {
       const processor = createProcessor();
       const refResolverMock = {

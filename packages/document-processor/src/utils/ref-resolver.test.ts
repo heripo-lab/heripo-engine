@@ -452,6 +452,15 @@ describe('RefResolver', () => {
       );
     });
 
+    test('assertRefs should not throw when every ref exists', () => {
+      const doc = createMockDocument();
+      const resolver = new RefResolver(mockLogger, doc);
+
+      expect(() =>
+        resolver.assertRefs(['#/texts/0', '#/pictures/0'], 'batch context'),
+      ).not.toThrow();
+    });
+
     test('assertRefs should throw with every missing ref in context', () => {
       const doc = createMockDocument();
       const resolver = new RefResolver(mockLogger, doc);

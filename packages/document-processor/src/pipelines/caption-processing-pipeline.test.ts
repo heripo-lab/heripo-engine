@@ -497,6 +497,15 @@ describe('CaptionProcessingPipeline', () => {
       });
     });
 
+    test('should skip blank string captions', () => {
+      const pipeline = createPipeline();
+
+      expect(pipeline.extractCaptionSource(['   ', 'Figure 1'])).toStrictEqual({
+        text: 'Figure 1',
+        sourceRefs: [],
+      });
+    });
+
     test('should preserve unresolved refs without text', () => {
       const mockResolver = {
         resolveText: vi.fn().mockReturnValue(null),

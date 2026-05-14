@@ -429,6 +429,11 @@ export class DocumentProcessor {
       footnotes,
       source: processOptions.source,
     });
+    const assembleTime = Date.now() - startTimeAssemble;
+    this.logger.info(
+      `[DocumentProcessor] Document assembly took ${assembleTime}ms`,
+    );
+
     const sourceRefValidationMode =
       this.resolveSourceRefValidationMode(processOptions);
     if (sourceRefValidationMode !== 'off') {
@@ -437,10 +442,6 @@ export class DocumentProcessor {
         sourceRefValidationMode,
       );
     }
-    const assembleTime = Date.now() - startTimeAssemble;
-    this.logger.info(
-      `[DocumentProcessor] Document assembly took ${assembleTime}ms`,
-    );
 
     this.logger.info('[DocumentProcessor] Document processing completed');
 
@@ -624,15 +625,9 @@ export class DocumentProcessor {
     processedDoc: ProcessedDocument,
     mode: Exclude<SourceRefValidationMode, 'off'>,
   ): void {
-    if (!this.refResolver) {
-      throw new Error(
-        '[DocumentProcessor] Cannot validate source references before RefResolver initialization',
-      );
-    }
-
     const issues = this.collectMissingSourceRefs(
       processedDoc,
-      this.refResolver,
+      this.refResolver!,
     );
 
     if (issues.length === 0) {
