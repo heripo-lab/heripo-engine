@@ -50,6 +50,7 @@
     "test": "turbo test",
     "test:watch": "turbo test:watch",
     "test:coverage": "turbo test:coverage",
+    "test:coverage:force": "turbo test:coverage --force",
     "shared:test:coverage": "pnpm --filter shared test:coverage",
     "model:test:coverage": "pnpm --filter model test:coverage",
     "pdf-parser:test:coverage": "pnpm --filter pdf-parser test:coverage",
