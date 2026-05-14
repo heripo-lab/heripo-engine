@@ -146,7 +146,12 @@ export interface DocumentProcessorProcessOptions {
   /**
    * Validate generated source references against the input Docling document.
    *
-   * This option is reserved for the source reference validation phase.
+   * NOTE: not yet honored — wiring lands with the source-ref validation
+   * phase (RefResolver `assertRef`/`assertRefs`). Setting this today has no
+   * effect; the option is published in advance so consumer code can opt in
+   * once the validator is in place.
+   *
+   * @experimental
    */
   validateSourceRefs?: boolean;
 }
@@ -398,15 +403,15 @@ export class DocumentProcessor {
     );
 
     const startTimeAssemble = Date.now();
-    const processedDoc = this.assembleProcessedDocument(
+    const processedDoc = this.assembleProcessedDocument({
       reportId,
       pageRangeMap,
       chapters,
       images,
       tables,
       footnotes,
-      processOptions.source,
-    );
+      source: processOptions.source,
+    });
     const assembleTime = Date.now() - startTimeAssemble;
     this.logger.info(
       `[DocumentProcessor] Document assembly took ${assembleTime}ms`,
@@ -585,17 +590,29 @@ export class DocumentProcessor {
    *
    * Creates the ProcessedDocument structure with all converted components
    */
-  private assembleProcessedDocument(
-    reportId: string,
-    pageRangeMap: Record<number, PageRange>,
-    chapters: Chapter[],
-    images: ProcessedImage[],
-    tables: ProcessedTable[],
-    footnotes: ProcessedFootnote[],
-    source?: ProcessedDocumentSource,
-  ): ProcessedDocument {
+  private assembleProcessedDocument(input: {
+    reportId: string;
+    pageRangeMap: Record<number, PageRange>;
+    chapters: Chapter[];
+    images: ProcessedImage[];
+    tables: ProcessedTable[];
+    footnotes: ProcessedFootnote[];
+    source?: ProcessedDocumentSource;
+  }): ProcessedDocument {
     this.logger.info('[DocumentProcessor] Assembling ProcessedDocument...');
 
+    const {
+      reportId,
+      pageRangeMap,
+      chapters,
+      images,
+      tables,
+      footnotes,
+      source,
+    } = input;
+
+    // Omit `source` key entirely when caller did not supply metadata so that
+    // snapshot equality and JSON output stay free of an explicit `undefined`.
     const processedDoc: ProcessedDocument = {
       reportId,
       schemaVersion: PROCESSED_DOCUMENT_SCHEMA_VERSION,

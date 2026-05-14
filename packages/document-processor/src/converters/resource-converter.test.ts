@@ -32,7 +32,6 @@ function createMockCaptionPipeline(
   overrides?: Partial<CaptionProcessingPipeline>,
 ): CaptionProcessingPipeline {
   return {
-    extractCaptionText: vi.fn().mockReturnValue(undefined),
     extractCaptionSource: vi
       .fn()
       .mockReturnValue({ text: undefined, sourceRefs: [] }),

@@ -376,6 +376,9 @@ describe('CaptionProcessingPipeline', () => {
     });
   });
 
+  // Exercises the deprecated `extractCaptionText` wrapper. Kept until
+  // legacy callers migrate to `extractCaptionSource`.
+  /* eslint-disable @typescript-eslint/no-deprecated */
   describe('extractCaptionText', () => {
     test('should return undefined for undefined captions', () => {
       const pipeline = createPipeline();
@@ -450,6 +453,7 @@ describe('CaptionProcessingPipeline', () => {
       ).toBe('Figure 1 Site overview');
     });
   });
+  /* eslint-enable @typescript-eslint/no-deprecated */
 
   describe('extractCaptionSource', () => {
     test('should return empty source refs for undefined captions', () => {

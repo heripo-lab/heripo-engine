@@ -27,9 +27,13 @@ export interface CaptionProcessingPipelineDeps {
 
 /**
  * Caption text and source references extracted from Docling caption links.
+ *
+ * `text` is `undefined` when none of the captions resolved to non-empty text;
+ * `sourceRefs` is always present and contains every `$ref` caption in order
+ * (string captions contribute to `text` only).
  */
 export interface CaptionSourceExtraction {
-  text?: string;
+  text: string | undefined;
   sourceRefs: string[];
 }
 
@@ -43,6 +47,8 @@ export interface CaptionSourceExtraction {
  * 4. Reparse failed captions with fallback model
  */
 export class CaptionProcessingPipeline {
+  private static readonly CAPTION_JOIN_SEPARATOR = ' ';
+
   private readonly logger: LoggerMethods;
   private readonly captionParser: CaptionParser;
   private readonly captionValidator: CaptionValidator;
@@ -251,9 +257,14 @@ export class CaptionProcessingPipeline {
   }
 
   /**
-   * Extract caption text from resource
+   * Extract combined caption text from resource captions.
    *
-   * Handles both string references and $ref resolution
+   * Returns every caption joined with a single space; empty/whitespace-only
+   * entries are skipped. Returns `undefined` when nothing resolves to text.
+   *
+   * @deprecated Use {@link extractCaptionSource} to also receive the
+   * caption `$ref` list. This helper is retained as a thin wrapper for
+   * legacy callers.
    */
   extractCaptionText(
     captions: Array<string | DoclingReference> | undefined,
@@ -263,6 +274,11 @@ export class CaptionProcessingPipeline {
 
   /**
    * Extract caption text and source references from resource captions.
+   *
+   * Iterates captions in order. String captions contribute to text only;
+   * `$ref` captions also push the ref onto `sourceRefs` regardless of whether
+   * the resolver finds text. Resolved/raw text is trimmed, and empty parts
+   * are skipped before joining.
    */
   extractCaptionSource(
     captions: Array<string | DoclingReference> | undefined,
@@ -287,12 +303,11 @@ export class CaptionProcessingPipeline {
       }
     });
 
-    if (textParts.length === 0) {
-      return { sourceRefs };
-    }
-
     return {
-      text: textParts.join(' '),
+      text:
+        textParts.length === 0
+          ? undefined
+          : textParts.join(CaptionProcessingPipeline.CAPTION_JOIN_SEPARATOR),
       sourceRefs,
     };
   }
