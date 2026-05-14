@@ -60,9 +60,11 @@ import type { DoclingDocument } from '@heripo/model';
 
 **주요 필드:**
 
-- `type`: 문서 타입 (예: "pdf")
-- `item_index`: 아이템 인덱스
-- `json_content`: 문서 내용 (JSON 객체)
+- `schema_name`, `version`, `name`: Docling 문서 식별 필드
+- `origin`: 원천 파일 metadata
+- `body`, `furniture`, `groups`: 문서 트리 및 그룹 구조
+- `texts`, `pictures`, `tables`: 추출된 content node
+- `pages`: 페이지 metadata와 렌더링된 페이지 이미지 참조
 
 ### ProcessedDocument
 
@@ -73,11 +75,28 @@ import type { ProcessedDocument } from '@heripo/model';
 
 interface ProcessedDocument {
   reportId: string; // 리포트 ID
+  schemaVersion?: string; // 처리된 문서 schema version
+  source?: ProcessedDocumentSource; // 원천 Docling artifact metadata
   pageRangeMap: Record<number, PageRange>; // PDF 페이지 → 문서 페이지 매핑
   chapters: Chapter[]; // 계층적 챕터 구조
   images: ProcessedImage[]; // 추출된 이미지 메타데이터
   tables: ProcessedTable[]; // 추출된 테이블 데이터
   footnotes: ProcessedFootnote[]; // 추출된 각주
+}
+```
+
+### ProcessedDocumentSource
+
+처리된 문서를 만들 때 사용한 Docling JSON의 원천 artifact metadata입니다.
+
+```typescript
+import type { ProcessedDocumentSource } from '@heripo/model';
+
+interface ProcessedDocumentSource {
+  pipelineRunId?: string; // 처리 pipeline run ID
+  doclingObjectKey?: string; // result.json 또는 병합된 Docling JSON object key
+  doclingSha256?: string; // Docling JSON artifact의 SHA-256 hash
+  handoffManifestObjectKey?: string; // handoff manifest object key
 }
 ```
 
@@ -94,6 +113,7 @@ interface Chapter {
   originTitle: string; // 원본 제목
   level: number; // 계층 레벨 (1, 2, 3, ...)
   pageNo: number; // 시작 페이지 번호
+  sourceRefs?: string[]; // 제목 추출에 사용된 원천 Docling ref
   textBlocks: TextBlock[]; // 텍스트 블록
   imageIds: string[]; // 이미지 ID 참조
   tableIds: string[]; // 테이블 ID 참조
@@ -110,6 +130,8 @@ interface Chapter {
 import type { TextBlock } from '@heripo/model';
 
 interface TextBlock {
+  id?: string; // 안정적인 텍스트 블록 ID
+  sourceRef?: string; // 원천 Docling text ref
   text: string; // 텍스트 내용
   pdfPageNo: number; // PDF 페이지 번호
 }
@@ -124,6 +146,8 @@ import type { ProcessedImage } from '@heripo/model';
 
 interface ProcessedImage {
   id: string; // 이미지 ID
+  sourceRef?: string; // 원천 Docling picture ref
+  captionSourceRefs?: string[]; // 캡션 텍스트 item의 원천 Docling ref
   caption?: Caption; // 캡션 (선택)
   pdfPageNo: number; // PDF 페이지 번호
   path: string; // 이미지 파일 경로
@@ -139,6 +163,8 @@ import type { ProcessedTable } from '@heripo/model';
 
 interface ProcessedTable {
   id: string; // 테이블 ID
+  sourceRef?: string; // 원천 Docling table ref
+  captionSourceRefs?: string[]; // 캡션 텍스트 item의 원천 Docling ref
   caption?: Caption; // 캡션 (선택)
   pdfPageNo: number; // PDF 페이지 번호
   grid: ProcessedTableCell[][]; // 2D 그리드 데이터
@@ -146,6 +172,12 @@ interface ProcessedTable {
   numCols: number; // 열 개수
 }
 ```
+
+`grid`는 화면에 보이는 셀만 담은 compact list입니다. 병합 셀은
+`rowSpan`, `colSpan`으로 표현하고, span으로 덮인 shadow cell은 포함하지
+않습니다. 테이블 셀에는 의도적으로 cell-level `sourceRef`가 없습니다. 셀을
+원천 테이블로 추적할 때는 `table.sourceRef`와 `grid[row][col]` 위치를 함께
+사용합니다.
 
 ### ProcessedTableCell
 
@@ -197,6 +229,7 @@ import type { ProcessedFootnote } from '@heripo/model';
 
 interface ProcessedFootnote {
   id: string; // 각주 ID
+  sourceRef?: string; // 원천 Docling text ref
   text: string; // 각주 텍스트
   pdfPageNo: number; // PDF 페이지 번호
 }
@@ -277,6 +310,58 @@ interface TokenUsageSummary {
 }
 ```
 
+### Review Assistance 타입
+
+`@heripo/pdf-parser`에서 `reviewAssistance`를 활성화했을 때 생성되는 선택적
+page-level review assistance 결과 타입입니다.
+
+```typescript
+import type {
+  ReviewAssistanceDecision,
+  ReviewAssistanceIssue,
+  ReviewAssistanceProgressEvent,
+  ReviewAssistanceReport,
+} from '@heripo/model';
+
+interface ReviewAssistanceReport {
+  schemaName: 'HeripoReviewAssistanceReport';
+  version: '1.0';
+  reportId: string;
+  source: {
+    doclingResult: 'result.json';
+    ocrOriginSnapshot?: 'result_ocr_origin.json';
+    originSnapshot?: 'result_review_origin.json';
+  };
+  summary: {
+    pageCount: number;
+    pagesSucceeded: number;
+    pagesFailed: number;
+    autoAppliedCount: number;
+    proposalCount: number;
+    skippedCount: number;
+    issueCount: number;
+  };
+  pages: Array<{
+    pageNo: number;
+    status: 'succeeded' | 'failed';
+    decisions: ReviewAssistanceDecision[];
+    issues: ReviewAssistanceIssue[];
+  }>;
+}
+
+interface ReviewAssistanceProgressEvent {
+  substage:
+    | 'review-assistance:prepare'
+    | 'review-assistance:page'
+    | 'review-assistance:patch'
+    | 'review-assistance:write-report';
+  status: 'started' | 'progress' | 'completed' | 'failed';
+  reportId: string;
+  pageNo?: number;
+  pageCount?: number;
+}
+```
+
 ### BCP-47 언어 태그 유틸리티
 
 BCP-47 언어 태그를 다루기 위한 유틸리티입니다.
@@ -290,10 +375,10 @@ import {
   normalizeToBcp47,
 } from '@heripo/model';
 
-// Bcp47LanguageTag - 지원되는 BCP-47 언어 태그의 유니온 타입
-type Bcp47LanguageTag = 'ko' | 'en' | 'ja' | 'zh' | /* ... */ string;
+// Bcp47LanguageTag - 지원되는 전체 BCP-47 언어 태그의 유니온 타입
+type Bcp47LanguageTag = (typeof BCP47_LANGUAGE_TAGS)[number];
 
-// BCP47_LANGUAGE_TAGS - 30개 지원 태그의 상수 배열
+// BCP47_LANGUAGE_TAGS - ocrmac에서 지원하는 언어 태그 상수 배열
 const BCP47_LANGUAGE_TAGS: readonly Bcp47LanguageTag[];
 
 // BCP47_LANGUAGE_TAG_SET - O(1) 조회를 위한 ReadonlySet
@@ -303,7 +388,7 @@ const BCP47_LANGUAGE_TAG_SET: ReadonlySet<string>;
 function isValidBcp47Tag(tag: string): tag is Bcp47LanguageTag;
 
 // normalizeToBcp47 - 언어 문자열을 BCP-47 형식으로 정규화
-function normalizeToBcp47(tag: string): Bcp47LanguageTag | undefined;
+function normalizeToBcp47(tag: string): Bcp47LanguageTag | null;
 ```
 
 ## 사용법

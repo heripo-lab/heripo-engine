@@ -21,6 +21,7 @@
 - [설치](#설치)
 - [사용법](#사용법)
 - [OCR 전략 시스템](#ocr-전략-시스템)
+- [Review Assistance](#review-assistance)
 - [문서 유형 검증](#문서-유형-검증)
 - [대용량 PDF 청크 변환](#대용량-pdf-청크-변환)
 - [이미지 PDF 폴백](#이미지-pdf-폴백)
@@ -43,6 +44,7 @@
 - **문서 유형 검증**: LLM 기반 고고학 보고서 여부 검증 (선택)
 - **청크 변환**: 대용량 PDF를 청크로 분할하여 안정적으로 처리
 - **이미지 PDF 폴백**: 변환 실패 시 이미지 기반 PDF로 자동 재시도
+- **Review Assistance**: 선택적 page-level VLM review로 audit proposal을 기록하고 고신뢰도 수정만 자동 적용
 - **AbortSignal 지원**: 진행 중인 파싱 작업 취소
 - **서버 크래시 복구**: ECONNREFUSED 발생 시 docling-serve 자동 재시작
 
@@ -50,7 +52,7 @@
 
 ### 시스템 요구사항
 
-- **macOS** with Apple Silicon (M1/M2/M3) - 최적 성능을 위해 권장
+- **macOS** with Apple Silicon (M1/M2/M3/M4/M5) - 최적 성능을 위해 권장
 - **macOS** with Intel - 지원되지만 속도가 느림
 - **Linux/Windows** - 현재 지원하지 않음
 
@@ -62,7 +64,7 @@
 brew install node
 ```
 
-#### 2. pnpm >= 9.0.0
+#### 2. pnpm >= 10.0.0
 
 ```bash
 npm install -g pnpm
@@ -124,13 +126,13 @@ brew install imagemagick ghostscript
 
 ```bash
 # npm으로 설치
-npm install @heripo/pdf-parser
+npm install @heripo/pdf-parser @heripo/logger
 
 # pnpm으로 설치
-pnpm add @heripo/pdf-parser
+pnpm add @heripo/pdf-parser @heripo/logger
 
 # yarn으로 설치
-yarn add @heripo/pdf-parser
+yarn add @heripo/pdf-parser @heripo/logger
 ```
 
 ## 사용법
@@ -141,7 +143,12 @@ yarn add @heripo/pdf-parser
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
 
-const logger = Logger(...);
+const logger = new Logger({
+  debug: (...args) => console.debug('[heripo]', ...args),
+  info: (...args) => console.info('[heripo]', ...args),
+  warn: (...args) => console.warn('[heripo]', ...args),
+  error: (...args) => console.error('[heripo]', ...args),
+});
 
 // PDFParser 인스턴스 생성 (logger는 필수)
 const pdfParser = new PDFParser({
@@ -155,13 +162,13 @@ await pdfParser.init();
 // PDF 파싱
 const tokenUsageReport = await pdfParser.parse(
   'file:///path/to/report.pdf', // PDF URL (file:// 또는 http://)
-  'report-001',                 // 리포트 ID
+  'report-001', // 리포트 ID
   async (outputPath) => {
     // 변환 완료 콜백
     console.log('PDF 변환 완료:', outputPath);
   },
-  false,                        // cleanupAfterCallback
-  {},                           // PDFConvertOptions
+  false, // cleanupAfterCallback
+  {}, // PDFConvertOptions
 );
 
 // 토큰 사용량 리포트 (LLM 사용이 없으면 null)
@@ -201,6 +208,15 @@ const tokenUsageReport = await pdfParser.parse(
 
     // 문서 유형 검증
     documentValidationModel: openai('gpt-5.1'),
+
+    // 선택적 page-level review assistance
+    reviewAssistance: {
+      enabled: true,
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      outputLanguage: 'ko-KR',
+    },
+    onReviewAssistanceProgress: (event) => console.log(event),
 
     // 대용량 PDF 청크 변환
     chunkedConversion: true,
@@ -273,6 +289,42 @@ const tokenUsageReport = await pdfParser.parse(
   },
 );
 ```
+
+## Review Assistance
+
+`reviewAssistance`는 Docling 변환 후 선택적으로 실행되는 page-level VLM
+review입니다. 렌더링된 페이지 이미지, 텍스트, 테이블, 캡션, 그림, reading
+order, role, bounding box, 도메인 패턴을 점검하고, 고신뢰도 수정만
+`result.json`에 적용하면서 audit report를 남깁니다.
+
+```typescript
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    strategySamplerModel: openai('gpt-5.1'),
+    vlmProcessorModel: openai('gpt-5.1'),
+    reviewAssistance: {
+      enabled: true,
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      maxRetries: 3,
+      temperature: 0,
+      outputLanguage: 'ko-KR',
+    },
+    onReviewAssistanceProgress: (event) => {
+      console.log(event.substage, event.status, event.pageNo);
+    },
+  },
+);
+```
+
+Review Assistance는 로컬 `file://` PDF와 `vlmProcessorModel` 또는
+`strategySamplerModel`이 필요합니다. 고신뢰도 수정은 `result.json`에 적용하고,
+원본 snapshot은 `result_review_origin.json`, `result_ocr_origin.json`에 보존하며,
+페이지별 결정, 이슈, proposal, 요약 count는 `review_assistance.json`에 기록합니다.
 
 ## 문서 유형 검증
 
@@ -405,7 +457,7 @@ try {
 ### 핵심 장점
 
 - **비용**: 클라우드 OCR 대비 100배 이상 저렴 (무료)
-- **성능**: Apple Silicon M1/M2/M3에서 GPU 가속으로 빠른 처리
+- **성능**: Apple Silicon M1/M2/M3/M4/M5에서 GPU 가속으로 빠른 처리
 - **품질**: 복잡한 레이아웃의 문서도 정확히 인식
 - **프라이버시**: 문서가 외부 서버로 전송되지 않음
 
@@ -526,6 +578,10 @@ type PDFConvertOptions = {
   document_timeout?: number; // 문서 처리 타임아웃 (초)
   documentValidationModel?: LanguageModel; // 문서 유형 검증용 LLM
 
+  // Review Assistance
+  reviewAssistance?: boolean | ReviewAssistanceOptions; // 선택적 page-level review
+  onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void; // 진행 상황 callback
+
   // 청크 변환 (대용량 PDF)
   chunkedConversion?: boolean; // 청크 변환 활성화
   chunkSize?: number; // 청크당 페이지 수
@@ -536,6 +592,19 @@ type PDFConvertOptions = {
   ocr_lang?: string[]; // OCR 언어
   // ... 기타 Docling ConversionOptions 필드
 };
+```
+
+### ReviewAssistanceOptions
+
+```typescript
+interface ReviewAssistanceOptions {
+  enabled?: boolean; // page-level review assistance 활성화
+  autoApplyThreshold?: number; // 자동 적용 최소 confidence (기본값: 0.85)
+  proposalThreshold?: number; // sidecar proposal 최소 confidence (기본값: 0.5)
+  maxRetries?: number; // page-level VLM 호출별 최대 재시도 횟수 (기본값: 3)
+  temperature?: number; // VLM 생성 temperature (기본값: 0)
+  outputLanguage?: string; // 사람이 읽는 review reason 언어 (기본값: en-US)
+}
 ```
 
 ### ConvertWithStrategyResult

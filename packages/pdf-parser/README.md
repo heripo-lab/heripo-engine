@@ -21,6 +21,7 @@
 - [Installation](#installation)
 - [Usage](#usage)
 - [OCR Strategy System](#ocr-strategy-system)
+- [Review Assistance](#review-assistance)
 - [Document Type Validation](#document-type-validation)
 - [Large PDF Chunked Conversion](#large-pdf-chunked-conversion)
 - [Image PDF Fallback](#image-pdf-fallback)
@@ -43,6 +44,7 @@
 - **Document Type Validation**: Optional LLM-based validation that a PDF is an archaeological report
 - **Chunked Conversion**: Split large PDFs into chunks for reliable processing
 - **Image PDF Fallback**: Automatic fallback to image-based PDF when conversion fails
+- **Review Assistance**: Optional page-level VLM review that writes audit proposals and can auto-apply high-confidence fixes
 - **AbortSignal Support**: Cancel ongoing parsing operations
 - **Server Crash Recovery**: Automatic restart of docling-serve on ECONNREFUSED
 
@@ -50,7 +52,7 @@
 
 ### System Requirements
 
-- **macOS** with Apple Silicon (M1/M2/M3) - Recommended for optimal performance
+- **macOS** with Apple Silicon (M1/M2/M3/M4/M5) - Recommended for optimal performance
 - **macOS** with Intel - Supported but slower
 - **Linux/Windows** - Currently not supported
 
@@ -62,7 +64,7 @@
 brew install node
 ```
 
-#### 2. pnpm >= 9.0.0
+#### 2. pnpm >= 10.0.0
 
 ```bash
 npm install -g pnpm
@@ -124,13 +126,13 @@ This setup runs only once and may take 5-10 minutes depending on internet connec
 
 ```bash
 # Install with npm
-npm install @heripo/pdf-parser
+npm install @heripo/pdf-parser @heripo/logger
 
 # Install with pnpm
-pnpm add @heripo/pdf-parser
+pnpm add @heripo/pdf-parser @heripo/logger
 
 # Install with yarn
-yarn add @heripo/pdf-parser
+yarn add @heripo/pdf-parser @heripo/logger
 ```
 
 ## Usage
@@ -141,7 +143,12 @@ yarn add @heripo/pdf-parser
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
 
-const logger = Logger(...);
+const logger = new Logger({
+  debug: (...args) => console.debug('[heripo]', ...args),
+  info: (...args) => console.info('[heripo]', ...args),
+  warn: (...args) => console.warn('[heripo]', ...args),
+  error: (...args) => console.error('[heripo]', ...args),
+});
 
 // Create PDFParser instance (logger is required)
 const pdfParser = new PDFParser({
@@ -155,13 +162,13 @@ await pdfParser.init();
 // Parse PDF
 const tokenUsageReport = await pdfParser.parse(
   'file:///path/to/report.pdf', // PDF URL (file:// or http://)
-  'report-001',                 // Report ID
+  'report-001', // Report ID
   async (outputPath) => {
     // Conversion complete callback
     console.log('PDF conversion complete:', outputPath);
   },
-  false,                        // cleanupAfterCallback
-  {},                           // PDFConvertOptions
+  false, // cleanupAfterCallback
+  {}, // PDFConvertOptions
 );
 
 // Token usage report (null when no LLM usage)
@@ -201,6 +208,15 @@ const tokenUsageReport = await pdfParser.parse(
 
     // Document validation
     documentValidationModel: openai('gpt-5.1'),
+
+    // Optional page-level review assistance
+    reviewAssistance: {
+      enabled: true,
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      outputLanguage: 'en-US',
+    },
+    onReviewAssistanceProgress: (event) => console.log(event),
 
     // Chunked conversion for large PDFs
     chunkedConversion: true,
@@ -273,6 +289,43 @@ const tokenUsageReport = await pdfParser.parse(
   },
 );
 ```
+
+## Review Assistance
+
+`reviewAssistance` enables an optional page-level VLM review after Docling
+conversion. It inspects rendered page images, text, tables, captions, pictures,
+reading order, roles, bounding boxes, and domain patterns, then writes an audit
+report while applying only high-confidence fixes.
+
+```typescript
+const tokenUsageReport = await pdfParser.parse(
+  'file:///path/to/input.pdf',
+  'report-001',
+  async (outputPath) => console.log(outputPath),
+  false,
+  {
+    strategySamplerModel: openai('gpt-5.1'),
+    vlmProcessorModel: openai('gpt-5.1'),
+    reviewAssistance: {
+      enabled: true,
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      maxRetries: 3,
+      temperature: 0,
+      outputLanguage: 'en-US',
+    },
+    onReviewAssistanceProgress: (event) => {
+      console.log(event.substage, event.status, event.pageNo);
+    },
+  },
+);
+```
+
+Review Assistance requires a local `file://` PDF and either
+`vlmProcessorModel` or `strategySamplerModel`. It updates `result.json` with
+auto-applied fixes, keeps snapshots in `result_review_origin.json` and
+`result_ocr_origin.json`, and writes `review_assistance.json` containing
+per-page decisions, issues, proposals, and summary counts.
 
 ## Document Type Validation
 
@@ -405,7 +458,7 @@ Archaeological excavation report PDFs have the following characteristics:
 ### Key Advantages
 
 - **Cost**: 100x+ cheaper than cloud OCR (free)
-- **Performance**: Fast processing with GPU acceleration on Apple Silicon M1/M2/M3
+- **Performance**: Fast processing with GPU acceleration on Apple Silicon M1/M2/M3/M4/M5
 - **Quality**: Accurate recognition even for complex documents
 - **Privacy**: Documents are not sent to external servers
 
@@ -526,6 +579,10 @@ type PDFConvertOptions = {
   document_timeout?: number; // Document processing timeout in seconds
   documentValidationModel?: LanguageModel; // LLM for document type validation
 
+  // Review Assistance
+  reviewAssistance?: boolean | ReviewAssistanceOptions; // Optional page-level review
+  onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void; // Progress callback
+
   // Chunked conversion (large PDFs)
   chunkedConversion?: boolean; // Enable chunked conversion
   chunkSize?: number; // Pages per chunk
@@ -536,6 +593,19 @@ type PDFConvertOptions = {
   ocr_lang?: string[]; // OCR languages
   // ... other Docling ConversionOptions fields
 };
+```
+
+### ReviewAssistanceOptions
+
+```typescript
+interface ReviewAssistanceOptions {
+  enabled?: boolean; // Enable page-level review assistance
+  autoApplyThreshold?: number; // Minimum confidence for direct mutation (default: 0.85)
+  proposalThreshold?: number; // Minimum confidence for sidecar proposal (default: 0.5)
+  maxRetries?: number; // Max retries per page-level VLM call (default: 3)
+  temperature?: number; // VLM generation temperature (default: 0)
+  outputLanguage?: string; // Human-readable review reason language (default: en-US)
+}
 ```
 
 ### ConvertWithStrategyResult

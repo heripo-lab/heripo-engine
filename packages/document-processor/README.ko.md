@@ -29,6 +29,8 @@
 - **계층 구조**: 장/절/소절 계층 구조 자동 생성
 - **페이지 매핑**: Vision LLM을 활용한 실제 페이지 번호 매핑
 - **캡션 파싱**: 이미지 및 테이블 캡션 자동 파싱
+- **원천 추적성**: Docling 원천 metadata와 node-level reference 보존
+- **테이블 그리드 정규화**: row/column span을 보존하고 병합 셀 shadow entry 제거
 - **LLM 유연성**: OpenAI, Anthropic, Google 등 다양한 LLM 지원
 - **Fallback 재시도**: 실패 시 자동으로 fallback 모델로 재시도
 
@@ -36,13 +38,13 @@
 
 ```bash
 # npm으로 설치
-npm install @heripo/document-processor @heripo/model
+npm install @heripo/document-processor @heripo/model @heripo/logger
 
 # pnpm으로 설치
-pnpm add @heripo/document-processor @heripo/model
+pnpm add @heripo/document-processor @heripo/model @heripo/logger
 
 # yarn으로 설치
-yarn add @heripo/document-processor @heripo/model
+yarn add @heripo/document-processor @heripo/model @heripo/logger
 ```
 
 추가로 LLM 프로파이더의 SDK가 필요합니다:
@@ -61,7 +63,12 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { Logger } from '@heripo/logger';
 
-const logger = Logger(...);
+const logger = new Logger({
+  debug: (...args) => console.debug('[heripo]', ...args),
+  info: (...args) => console.info('[heripo]', ...args),
+  warn: (...args) => console.warn('[heripo]', ...args),
+  error: (...args) => console.error('[heripo]', ...args),
+});
 
 // 기본 사용 - fallback 모델만 지정
 const processor = new DocumentProcessor({
@@ -223,6 +230,17 @@ console.log(document.images[0].captionSourceRefs);
 
 테이블 셀에는 cell-level `sourceRef`를 만들지 않습니다. 특정 셀의 원천 위치는 `table.sourceRef`와 `grid[row][col]`의 row/column index를 함께 사용해 추적합니다.
 
+### 테이블 그리드 처리
+
+처리된 테이블은 화면에 보이는 셀만 담은 compact `grid`를 제공합니다. processor는 다음을 수행합니다:
+
+- Docling의 row/column span을 `rowSpan`, `colSpan`으로 보존
+- 행/열 헤더를 `isHeader`로 표시
+- Docling이 병합 셀의 덮인 영역을 반복 제공하는 경우 shadow entry 제거
+- Docling의 `data.grid`가 비어 있으면 `table_cells`에서 그리드 구성
+
+`numRows`와 `numCols`는 논리적 테이블 크기를 유지합니다. 개별 셀에는 `sourceRef`를 저장하지 않으므로, 셀의 원천 위치를 추적할 때는 `table.sourceRef`와 `grid[row][col]` 위치를 함께 사용합니다.
+
 ## 처리 파이프라인
 
 DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니다:
@@ -271,7 +289,7 @@ DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니
 ### 4. 리소스 변환
 
 - **이미지**: CaptionParser로 캡션 추출 및 파싱
-- **테이블**: 그리드 데이터 변환 및 캡션 파싱
+- **테이블**: 그리드 데이터 변환, 병합 셀 shadow filtering, span 보존 및 캡션 파싱
 - **캡션 검증**: CaptionValidator로 파싱 결과 검증
 
 ### 5. 챕터 변환 (ChapterConverter)
@@ -281,7 +299,7 @@ DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니
 - 페이지 범위별로 텍스트 블록을 챕터에 연결
 - 이미지/테이블 ID를 적절한 챕터에 연결
 - 각주 ID를 적절한 챕터에 연결
-- Fallback: TOC가 비어있을 때 단일 "Document" 챕터 생성
+- TOC 항목이 비어 있으면 TOC 기반 챕터 변환을 진행할 수 없으므로 `TocNotFoundError` 발생
 
 ## API 문서
 
@@ -291,7 +309,7 @@ DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니
 
 ```typescript
 interface DocumentProcessorOptions {
-  logger: Logger; // 로거 인스턴스 (필수)
+  logger: LoggerMethods; // 로거 인스턴스 (필수)
 
   // LLM 모델 설정
   fallbackModel: LanguageModel; // Fallback 모델 (필수)
@@ -386,7 +404,7 @@ try {
   const { document, usage } = await processor.process(doc, 'id', 'path');
 } catch (error) {
   if (error instanceof TocNotFoundError) {
-    console.log('TOC를 찾을 수 없습니다. 단일 챕터로 처리됩니다.');
+    console.error('TOC를 찾을 수 없습니다. 수동 TOC 검수가 필요합니다.');
   } else if (error instanceof TocParseError) {
     console.error('TOC 파싱 실패:', error.message);
   }

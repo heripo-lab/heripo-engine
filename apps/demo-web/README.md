@@ -17,7 +17,8 @@ Demo Web is a full-stack Next.js application that allows you to monitor and visu
 
 - PDF upload and processing option configuration
 - Real-time processing status monitoring (SSE)
-- Processing result visualization (TOC, images, tables)
+- Processing result visualization (TOC, images, tables, merged cells, source pages)
+- Downloadable result ZIP with processed JSON, raw Docling JSON, source handoff manifest, images, and rendered pages
 - Job queue management
 
 ### Technology Stack
@@ -65,13 +66,14 @@ This application depends on `@heripo/pdf-parser`, which has specific system requ
 
 - macOS system requirements (Apple Silicon or Intel)
 - Python version requirements (3.9-3.12)
-- Required system dependencies (jq, lsof)
+- Required system dependencies (poppler, jq, lsof)
+- Optional image PDF fallback dependencies (ImageMagick, Ghostscript)
 - First-run setup instructions
 
 ### Node.js and Package Manager
 
 - **Node.js** >= 24.0.0
-- **pnpm** >= 9.0.0
+- **pnpm** >= 10.0.0
 
 ### LLM API Keys
 
@@ -99,11 +101,18 @@ cp .env.example .env
 # At least one API key is required
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_GENERATIVE_AI_API_KEY=...
+TOGETHER_AI_API_KEY=...
 
 # Optional
 PDF_PARSER_PORT=5001
 PDF_PARSER_TIMEOUT=10000000
+NEXT_PUBLIC_PUBLIC_MODE=false
+UPLOAD_SESSION_SECRET=...
 ```
+
+See [`.env.example`](./.env.example) for the complete set of public mode,
+webhook, cleanup, Turnstile, and upload-session variables.
 
 #### Webhook Setup (Optional)
 
@@ -117,17 +126,21 @@ WEBHOOK_SECRET=your-hmac-secret-key
 
 **Supported Events:**
 
-| Event                 | Description                 |
-| --------------------- | --------------------------- |
-| `task.started`        | Processing started          |
-| `task.completed`      | Processing completed        |
-| `task.failed`         | Processing failed           |
-| `task.cancelled`      | Processing cancelled        |
-| `otp.failed`          | OTP authentication failed   |
-| `otp.locked`          | Locked after 3 OTP failures |
-| `rate_limit.exceeded` | Daily limit reached         |
+| Event                        | Description                                  |
+| ---------------------------- | -------------------------------------------- |
+| `task.started`               | Processing started                           |
+| `task.completed`             | Processing completed                         |
+| `task.failed`                | Processing failed                            |
+| `task.cancelled`             | Processing cancelled                         |
+| `otp.failed`                 | OTP authentication failed                    |
+| `otp.locked`                 | Locked after 3 OTP failures                  |
+| `rate_limit.exceeded`        | Daily limit reached                          |
+| `session.weekly_locked`      | Weekly session lock reached                  |
+| `document.validation_failed` | Uploaded PDF failed document type validation |
+| `cleanup.completed`          | Scheduled cleanup completed                  |
+| `cleanup.failed`             | Scheduled cleanup failed                     |
 
-All webhooks include `event`, `timestamp`, `ip`, `userAgent`, and `filename` fields. Payloads are signed with HMAC-SHA256 using `WEBHOOK_SECRET`, included in the `X-Webhook-Signature` header.
+Task and user-triggered webhooks include `event`, `timestamp`, `ip`, `userAgent`, and usually `filename` fields. Cleanup webhooks are system events with cleanup-specific counts and errors. Payloads are signed with HMAC-SHA256 using `WEBHOOK_SECRET`, included in the `X-Webhook-Signature` header.
 
 ### 2. Install Dependencies
 
@@ -141,7 +154,7 @@ pnpm install
 
 ```bash
 # From root
-pnpm --filter demo-web dev
+pnpm --filter @heripo/demo-web dev
 
 # Or from demo-web directory
 cd apps/demo-web
@@ -171,7 +184,10 @@ After processing completes:
 
 - TOC structure visualization
 - View extracted images
-- Check table data
+- Check table data with merged cell spans
+- Open rendered PDF pages and source images
+- Download all artifacts as a ZIP (`result-processed.json`, `result.json`, `source-handoff-manifest.json`, `images/`, `pages/`)
+- Export the processed result JSON
 
 ### 4. Job Management
 
@@ -187,7 +203,11 @@ After processing completes:
 src/
 ├── app/                      # Next.js App Router
 │   ├── api/                  # API routes
-│   │   └── tasks/            # Task management API
+│   │   ├── tasks/            # Task CRUD, SSE stream, result, images/pages, download
+│   │   ├── upload/           # Chunked upload session/chunk/complete APIs
+│   │   ├── rate-limit/       # Public-mode rate limit check
+│   │   └── system/           # System status API
+│   ├── legal/                # Terms and privacy pages
 │   ├── tasks/                # Task list page
 │   ├── process/[taskId]/     # Real-time processing page
 │   └── result/[taskId]/      # Result page
@@ -202,8 +222,16 @@ src/
 │   └── tasks/                # Task management
 └── lib/
     ├── api/                  # API client
+    ├── auth/                 # TOTP, Turnstile, upload sessions
+    ├── cleanup/              # Scheduled task/upload cleanup
+    ├── config/               # Public mode, webhook, cleanup config
+    ├── cost/                 # Token pricing and cost calculation
     ├── db/                   # JSON file DB
+    ├── processing/           # LLM model factory
     ├── queue/                # Job queue
+    ├── session/              # Browser session management
+    ├── validations/          # Zod validation schemas
+    ├── webhook/              # Webhook client and payloads
     └── query-client.ts       # React Query config
 ```
 
@@ -228,6 +256,8 @@ const response = await fetch('/api/tasks');
 - `useDeleteTask()` - Delete task (mutation)
 - `useCreateTask()` - Create task (mutation)
 - `useTaskStream(taskId)` - SSE real-time stream
+- `useDownloadAll({ taskId, filename })` - Download all task artifacts as ZIP
+- `useExportJson({ data, filename })` - Export processed result JSON
 
 ## About Testing
 
@@ -246,7 +276,7 @@ Core business logic and tests are concentrated in the following packages:
 Generate TOTP secret for bypassing public mode:
 
 ```bash
-pnpm --filter demo-web generate:otp-secret
+pnpm --filter @heripo/demo-web generate:otp-secret
 ```
 
 Set the output value in `OTP_SECRET` in your `.env` file.
