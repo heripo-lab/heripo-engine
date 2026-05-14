@@ -380,6 +380,250 @@ describe('ResourceConverter', () => {
       expect(result[0].grid[1][1].colSpan).toBe(1);
     });
 
+    test('filters merged-cell shadow entries using Docling offsets', async () => {
+      const logger = createMockLogger();
+      const converter = new ResourceConverter(
+        logger,
+        createMockIdGenerator(),
+        createMockCaptionPipeline(),
+      );
+
+      const mockDoc = {
+        tables: [
+          {
+            self_ref: '#/tables/0',
+            label: 'table',
+            prov: [{ page_no: 2 }],
+            captions: [],
+            data: {
+              num_rows: 2,
+              num_cols: 3,
+              table_cells: [],
+              grid: [
+                [
+                  {
+                    text: 'Row',
+                    column_header: false,
+                    row_header: true,
+                    start_row_offset_idx: 0,
+                    end_row_offset_idx: 2,
+                    start_col_offset_idx: 0,
+                    end_col_offset_idx: 1,
+                    row_span: 2,
+                    col_span: 1,
+                  },
+                  {
+                    text: 'Group',
+                    column_header: true,
+                    row_header: false,
+                    start_row_offset_idx: 0,
+                    end_row_offset_idx: 1,
+                    start_col_offset_idx: 1,
+                    end_col_offset_idx: 3,
+                    row_span: 1,
+                    col_span: 2,
+                  },
+                  {
+                    text: 'shadow',
+                    column_header: true,
+                    row_header: false,
+                    start_row_offset_idx: 0,
+                    end_row_offset_idx: 1,
+                    start_col_offset_idx: 1,
+                    end_col_offset_idx: 3,
+                    row_span: 1,
+                    col_span: 2,
+                  },
+                ],
+                [
+                  {
+                    text: 'covered',
+                    column_header: false,
+                    row_header: true,
+                    start_row_offset_idx: 0,
+                    end_row_offset_idx: 2,
+                    start_col_offset_idx: 0,
+                    end_col_offset_idx: 1,
+                    row_span: 2,
+                    col_span: 1,
+                  },
+                  {
+                    text: 'B',
+                    column_header: false,
+                    row_header: false,
+                    start_row_offset_idx: 1,
+                    end_row_offset_idx: 2,
+                    start_col_offset_idx: 1,
+                    end_col_offset_idx: 2,
+                    row_span: 1,
+                    col_span: 1,
+                  },
+                  {
+                    text: 'C',
+                    column_header: false,
+                    row_header: false,
+                    start_row_offset_idx: 1,
+                    end_row_offset_idx: 2,
+                    start_col_offset_idx: 2,
+                    end_col_offset_idx: 3,
+                    row_span: 1,
+                    col_span: 1,
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      } as unknown as DoclingDocument;
+
+      const result = await converter.convertTables(mockDoc);
+
+      expect(result[0].numRows).toBe(2);
+      expect(result[0].numCols).toBe(3);
+      expect(result[0].grid).toEqual([
+        [
+          {
+            text: 'Row',
+            rowSpan: 2,
+            colSpan: 1,
+            isHeader: true,
+          },
+          {
+            text: 'Group',
+            rowSpan: 1,
+            colSpan: 2,
+            isHeader: true,
+          },
+        ],
+        [
+          {
+            text: 'B',
+            rowSpan: 1,
+            colSpan: 1,
+            isHeader: false,
+          },
+          {
+            text: 'C',
+            rowSpan: 1,
+            colSpan: 1,
+            isHeader: false,
+          },
+        ],
+      ]);
+    });
+
+    test('keeps compact grid cells even when start offsets skip columns', async () => {
+      const logger = createMockLogger();
+      const converter = new ResourceConverter(
+        logger,
+        createMockIdGenerator(),
+        createMockCaptionPipeline(),
+      );
+
+      const mockDoc = {
+        tables: [
+          {
+            self_ref: '#/tables/0',
+            label: 'table',
+            prov: [{ page_no: 2 }],
+            captions: [],
+            data: {
+              num_rows: 1,
+              num_cols: 3,
+              table_cells: [],
+              grid: [
+                [
+                  {
+                    text: 'A',
+                    column_header: false,
+                    row_header: false,
+                    start_row_offset_idx: 0,
+                    end_row_offset_idx: 1,
+                    start_col_offset_idx: 0,
+                    end_col_offset_idx: 2,
+                    row_span: 1,
+                    col_span: 2,
+                  },
+                  {
+                    text: 'B',
+                    column_header: false,
+                    row_header: false,
+                    start_row_offset_idx: 0,
+                    end_row_offset_idx: 1,
+                    start_col_offset_idx: 2,
+                    end_col_offset_idx: 3,
+                    row_span: 1,
+                    col_span: 1,
+                  },
+                ],
+              ],
+            },
+          },
+        ],
+      } as unknown as DoclingDocument;
+
+      const result = await converter.convertTables(mockDoc);
+
+      expect(result[0].grid).toEqual([
+        [
+          { text: 'A', rowSpan: 1, colSpan: 2, isHeader: false },
+          { text: 'B', rowSpan: 1, colSpan: 1, isHeader: false },
+        ],
+      ]);
+    });
+
+    test('falls back to table_cells when Docling grid is empty', async () => {
+      const logger = createMockLogger();
+      const converter = new ResourceConverter(
+        logger,
+        createMockIdGenerator(),
+        createMockCaptionPipeline(),
+      );
+
+      const mockDoc = {
+        tables: [
+          {
+            self_ref: '#/tables/0',
+            label: 'table',
+            prov: [{ page_no: 2 }],
+            captions: [],
+            data: {
+              num_rows: 2,
+              num_cols: 3,
+              grid: [],
+              table_cells: [
+                {
+                  text: 'B',
+                  column_header: false,
+                  row_header: false,
+                  start_row_offset_idx: 1,
+                  end_row_offset_idx: 2,
+                  start_col_offset_idx: 1,
+                  end_col_offset_idx: 2,
+                },
+                {
+                  text: 'A',
+                  column_header: true,
+                  row_header: false,
+                  start_row_offset_idx: 0,
+                  end_row_offset_idx: 1,
+                  start_col_offset_idx: 0,
+                  end_col_offset_idx: 3,
+                },
+              ],
+            },
+          },
+        ],
+      } as unknown as DoclingDocument;
+
+      const result = await converter.convertTables(mockDoc);
+
+      expect(result[0].grid).toEqual([
+        [{ text: 'A', rowSpan: 1, colSpan: 3, isHeader: true }],
+        [{ text: 'B', rowSpan: 1, colSpan: 1, isHeader: false }],
+      ]);
+    });
+
     test('processes tables with captions', async () => {
       const logger = createMockLogger();
       const captionPipeline = createMockCaptionPipeline({
