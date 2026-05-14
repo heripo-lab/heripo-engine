@@ -57,7 +57,7 @@ heripo lab is an open-source R&D group that combines archaeological domain knowl
   - A Study on Archaeological Informatization Using Large Language Models (LLMs): Proof of Concept for an Automated Metadata Extraction Pipeline from Archaeological Excavation Reports (2025, _Heritage: History and Science_ Vol. 58 No. 3, KCI Listed)
     - DOI: [10.22755/kjchs.2025.58.3.34](https://doi.org/10.22755/KJCHS.2025.58.3.34)
     - [Korean Original](https://koreascience.kr/article/JAKO202570361249829.page)
-    - [Official English Version (PDF)](<https://files.heripo.com/archaelogical-informatization-poc/(Eng._Version)_KIM_Hongyeon_2025_A_Study_on_Archaeological_Informatization_Using_Large_Language_Models.pdf>)
+    - [Official English Version (PDF)](<https://files.heripo.org/archaelogical-informatization-poc/(Eng._Version)_KIM_Hongyeon_2025_A_Study_on_Archaeological_Informatization_Using_Large_Language_Models.pdf>)
 
 #### Cho, Hayoung (Domain Researcher)
 
