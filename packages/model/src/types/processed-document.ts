@@ -52,6 +52,41 @@ export interface PageRange {
 }
 
 /**
+ * Source artifact metadata for a processed document
+ *
+ * Stores caller-supplied identifiers for the raw or merged Docling artifact used
+ * to create this processed document. Storage providers and URL formats are kept
+ * outside this model.
+ *
+ * @interface ProcessedDocumentSource
+ */
+export interface ProcessedDocumentSource {
+  /**
+   * Identifier of the processing pipeline run that produced the source artifact
+   * @type {string}
+   */
+  pipelineRunId?: string;
+
+  /**
+   * Object key for the canonical or merged Docling JSON artifact
+   * @type {string}
+   */
+  doclingObjectKey?: string;
+
+  /**
+   * SHA-256 hash of the Docling JSON artifact
+   * @type {string}
+   */
+  doclingSha256?: string;
+
+  /**
+   * Object key for a handoff manifest that describes related processing outputs
+   * @type {string}
+   */
+  handoffManifestObjectKey?: string;
+}
+
+/**
  * Text block (paragraph, sentence, etc.)
  *
  * Represents actual text content inside a chapter.
@@ -59,6 +94,18 @@ export interface PageRange {
  * @interface TextBlock
  */
 export interface TextBlock {
+  /**
+   * Stable identifier of the text block
+   * @type {string}
+   */
+  id?: string;
+
+  /**
+   * Docling self reference for the source text item
+   * @type {string}
+   */
+  sourceRef?: string;
+
   /**
    * Content of the text block
    * @type {string}
@@ -114,6 +161,12 @@ export interface Chapter {
    * @type {number}
    */
   level: number;
+
+  /**
+   * Docling references for the source nodes used to derive the chapter title
+   * @type {string[]}
+   */
+  sourceRefs?: string[];
 
   /**
    * Text blocks inside the chapter
@@ -175,6 +228,18 @@ export interface ProcessedImage {
    * @type {string}
    */
   id: string;
+
+  /**
+   * Docling self reference for the source picture item
+   * @type {string}
+   */
+  sourceRef?: string;
+
+  /**
+   * Docling references for caption text items associated with this image
+   * @type {string[]}
+   */
+  captionSourceRefs?: string[];
 
   /**
    * Caption information for the image (if available)
@@ -248,6 +313,18 @@ export interface ProcessedTable {
   id: string;
 
   /**
+   * Docling self reference for the source table item
+   * @type {string}
+   */
+  sourceRef?: string;
+
+  /**
+   * Docling references for caption text items associated with this table
+   * @type {string[]}
+   */
+  captionSourceRefs?: string[];
+
+  /**
    * Caption information for the table (if available)
    * @type {Caption}
    */
@@ -300,6 +377,12 @@ export interface ProcessedFootnote {
   id: string;
 
   /**
+   * Docling self reference for the source footnote text item
+   * @type {string}
+   */
+  sourceRef?: string;
+
+  /**
    * Text content of the footnote
    *
    * @type {string}
@@ -327,6 +410,18 @@ export interface ProcessedDocument {
    * @type {string}
    */
   reportId: string;
+
+  /**
+   * Processed document schema version
+   * @type {string}
+   */
+  schemaVersion?: string;
+
+  /**
+   * Source artifact metadata for the Docling artifact used to produce this document
+   * @type {ProcessedDocumentSource}
+   */
+  source?: ProcessedDocumentSource;
 
   /**
    * Mapping of page ranges for actual document pages per PDF page
