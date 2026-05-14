@@ -146,7 +146,7 @@ export interface DocumentProcessorProcessOptions {
   /**
    * Validate generated source references against the input Docling document.
    *
-   * NOTE: not yet honored — wiring lands with the source-ref validation
+   * NOTE: not yet honored - wiring lands with the source-ref validation
    * phase (RefResolver `assertRef`/`assertRefs`). Setting this today has no
    * effect; the option is published in advance so consumer code can opt in
    * once the validator is in place.

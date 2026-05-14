@@ -459,7 +459,7 @@ describe('CaptionProcessingPipeline', () => {
     test('should return empty source refs for undefined captions', () => {
       const pipeline = createPipeline();
 
-      expect(pipeline.extractCaptionSource(undefined)).toEqual({
+      expect(pipeline.extractCaptionSource(undefined)).toStrictEqual({
         sourceRefs: [],
       });
     });
@@ -506,7 +506,9 @@ describe('CaptionProcessingPipeline', () => {
         refResolver: mockResolver as any,
       });
 
-      expect(pipeline.extractCaptionSource([{ $ref: '#/texts/99' }])).toEqual({
+      expect(
+        pipeline.extractCaptionSource([{ $ref: '#/texts/99' }]),
+      ).toStrictEqual({
         sourceRefs: ['#/texts/99'],
       });
     });

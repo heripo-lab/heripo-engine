@@ -28,12 +28,12 @@ export interface CaptionProcessingPipelineDeps {
 /**
  * Caption text and source references extracted from Docling caption links.
  *
- * `text` is `undefined` when none of the captions resolved to non-empty text;
+ * `text` is omitted when none of the captions resolved to non-empty text;
  * `sourceRefs` is always present and contains every `$ref` caption in order
  * (string captions contribute to `text` only).
  */
 export interface CaptionSourceExtraction {
-  text: string | undefined;
+  text?: string;
   sourceRefs: string[];
 }
 
@@ -303,11 +303,12 @@ export class CaptionProcessingPipeline {
       }
     });
 
+    if (textParts.length === 0) {
+      return { sourceRefs };
+    }
+
     return {
-      text:
-        textParts.length === 0
-          ? undefined
-          : textParts.join(CaptionProcessingPipeline.CAPTION_JOIN_SEPARATOR),
+      text: textParts.join(CaptionProcessingPipeline.CAPTION_JOIN_SEPARATOR),
       sourceRefs,
     };
   }
