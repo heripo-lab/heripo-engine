@@ -2,7 +2,7 @@
   "name": "@heripo/logger",
   "private": false,
   "type": "module",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "description": "Logger interface for heripo engine",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
