@@ -190,6 +190,45 @@ const { document, usage } = await processor.process(
 );
 ```
 
+### Preserving Source Docling References
+
+If the caller knows where the source Docling JSON is stored or has its hash,
+pass that metadata through `source`. The value is preserved as
+`ProcessedDocument.source`. Use `validateSourceRefs` or
+`sourceRefValidationMode` to verify that generated `sourceRef` and
+`captionSourceRefs` values exist in the input `DoclingDocument`.
+
+```typescript
+const { document } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  {
+    pageRangeMap,
+    tocEntries,
+    source: {
+      pipelineRunId: 'run-001',
+      doclingObjectKey: 'docling/report-001.json',
+      doclingSha256: '...',
+      handoffManifestObjectKey: 'manifests/run-001.json',
+    },
+    sourceRefValidationMode: 'warn', // 'off' | 'warn' | 'error'
+  },
+);
+
+console.log(document.source);
+console.log(document.chapters[0].textBlocks[0].sourceRef);
+console.log(document.images[0].captionSourceRefs);
+```
+
+`sourceRefValidationMode: 'error'` fails processing when references are missing.
+`validateSourceRefs: true` is a compatibility shortcut and behaves like
+`'error'` unless a mode is explicitly provided.
+
+Table cells do not receive cell-level `sourceRef` values. To locate a specific
+cell in the source artifact, combine `table.sourceRef` with the
+`grid[row][col]` row/column indexes.
+
 ## Processing Pipeline
 
 DocumentProcessor processes documents through a 5-stage pipeline:
@@ -294,6 +333,9 @@ Transforms DoclingDocument into ProcessedDocument.
 interface DocumentProcessorProcessOptions {
   pageRangeMap?: Record<number, PageRange>;
   tocEntries?: TocEntry[];
+  source?: ProcessedDocumentSource;
+  validateSourceRefs?: boolean;
+  sourceRefValidationMode?: 'off' | 'warn' | 'error';
 }
 ```
 
@@ -302,7 +344,7 @@ interface DocumentProcessorProcessOptions {
 - `doclingDoc` (DoclingDocument): PDF parser output
 - `reportId` (string): Report ID
 - `artifactDir` (string): Artifact directory containing parser outputs such as `images/`, `pages/`, and `result.json`
-- `processOptions` (DocumentProcessorProcessOptions, optional): Per-document processing inputs. When `pageRangeMap` is provided, automatic page range parsing is skipped. When `tocEntries` is provided, automatic TOC extraction is skipped.
+- `processOptions` (DocumentProcessorProcessOptions, optional): Per-document processing inputs. When `pageRangeMap` is provided, automatic page range parsing is skipped. When `tocEntries` is provided, automatic TOC extraction is skipped. `source` preserves source Docling artifact metadata, and `sourceRefValidationMode` controls generated source reference validation.
 
 **Returns:**
 

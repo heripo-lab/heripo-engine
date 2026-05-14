@@ -28,6 +28,7 @@ export type {
 export type {
   DocumentProcessorOptions,
   DocumentProcessorProcessOptions,
+  SourceRefValidationMode,
 } from './document-processor';
 export type { TocEntry, TocAreaResult, PageSizeGroup } from './types';
 export {

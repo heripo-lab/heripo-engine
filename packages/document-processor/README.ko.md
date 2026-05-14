@@ -190,6 +190,37 @@ const { document, usage } = await processor.process(
 );
 ```
 
+### 원천 Docling 참조 보존
+
+호출자가 원천 Docling JSON의 저장 위치나 해시를 알고 있다면 `source`로 전달할 수 있습니다. 이 값은 `ProcessedDocument.source`에 그대로 보존됩니다. `validateSourceRefs` 또는 `sourceRefValidationMode`를 사용하면 processor가 생성한 `sourceRef`, `captionSourceRefs`가 입력 `DoclingDocument`에 실제로 존재하는지 검증합니다.
+
+```typescript
+const { document } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  {
+    pageRangeMap,
+    tocEntries,
+    source: {
+      pipelineRunId: 'run-001',
+      doclingObjectKey: 'docling/report-001.json',
+      doclingSha256: '...',
+      handoffManifestObjectKey: 'manifests/run-001.json',
+    },
+    sourceRefValidationMode: 'warn', // 'off' | 'warn' | 'error'
+  },
+);
+
+console.log(document.source);
+console.log(document.chapters[0].textBlocks[0].sourceRef);
+console.log(document.images[0].captionSourceRefs);
+```
+
+`sourceRefValidationMode: 'error'`는 누락된 참조가 있으면 처리를 실패시킵니다. `validateSourceRefs: true`는 호환용 단축 옵션이며, 별도 mode를 지정하지 않으면 `'error'`와 같습니다.
+
+테이블 셀에는 cell-level `sourceRef`를 만들지 않습니다. 특정 셀의 원천 위치는 `table.sourceRef`와 `grid[row][col]`의 row/column index를 함께 사용해 추적합니다.
+
 ## 처리 파이프라인
 
 DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니다:
@@ -294,6 +325,9 @@ DoclingDocument를 ProcessedDocument로 변환합니다.
 interface DocumentProcessorProcessOptions {
   pageRangeMap?: Record<number, PageRange>;
   tocEntries?: TocEntry[];
+  source?: ProcessedDocumentSource;
+  validateSourceRefs?: boolean;
+  sourceRefValidationMode?: 'off' | 'warn' | 'error';
 }
 ```
 
@@ -302,7 +336,7 @@ interface DocumentProcessorProcessOptions {
 - `doclingDoc` (DoclingDocument): PDF 파서의 출력
 - `reportId` (string): 리포트 ID
 - `artifactDir` (string): `images/`, `pages/`, `result.json` 같은 parser 산출물이 들어 있는 디렉토리
-- `processOptions` (DocumentProcessorProcessOptions, 선택): 문서별 처리 입력값. `pageRangeMap`이 제공되면 자동 페이지 범위 파싱을 건너뜁니다. `tocEntries`가 제공되면 자동 TOC 추출을 건너뜁니다.
+- `processOptions` (DocumentProcessorProcessOptions, 선택): 문서별 처리 입력값. `pageRangeMap`이 제공되면 자동 페이지 범위 파싱을 건너뜁니다. `tocEntries`가 제공되면 자동 TOC 추출을 건너뜁니다. `source`는 원천 Docling artifact metadata를 결과에 보존하고, `sourceRefValidationMode`는 생성된 원천 참조의 검증 방식을 제어합니다.
 
 **반환값:**
 

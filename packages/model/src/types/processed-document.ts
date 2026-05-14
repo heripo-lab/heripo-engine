@@ -266,6 +266,10 @@ export interface ProcessedImage {
 /**
  * Cell information of a table
  *
+ * Table cells intentionally do not carry cell-level Docling source references.
+ * Use the parent table's `sourceRef` with the row/column index in `grid` as
+ * the locator for cell provenance.
+ *
  * @interface ProcessedTableCell
  */
 export interface ProcessedTableCell {
@@ -351,7 +355,9 @@ export interface ProcessedTable {
   /**
    * Table data (2D array)
    *
-   * Access using grid[row][col].
+   * Access using grid[row][col]. For source lookup, combine `sourceRef` with
+   * the row and column indexes because processed cells do not store cell-level
+   * source references.
    *
    * @type {ProcessedTableCell[][]}
    */

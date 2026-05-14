@@ -31,6 +31,13 @@ import { CaptionValidator, TocContentValidator } from './validators';
 
 export const PROCESSED_DOCUMENT_SCHEMA_VERSION = 'processed-document.v2';
 
+export type SourceRefValidationMode = 'off' | 'warn' | 'error';
+
+interface SourceRefValidationIssue {
+  context: string;
+  ref: string;
+}
+
 /**
  * DocumentProcessor Options
  */
@@ -146,14 +153,24 @@ export interface DocumentProcessorProcessOptions {
   /**
    * Validate generated source references against the input Docling document.
    *
-   * NOTE: not yet honored - wiring lands with the source-ref validation
-   * phase (RefResolver `assertRef`/`assertRefs`). Setting this today has no
-   * effect; the option is published in advance so consumer code can opt in
-   * once the validator is in place.
+   * When true, missing references are treated as errors unless
+   * `sourceRefValidationMode` is provided.
    *
    * @experimental
    */
   validateSourceRefs?: boolean;
+
+  /**
+   * Controls how missing generated source references are handled.
+   *
+   * Explicit mode takes precedence over `validateSourceRefs`. Use `warn` for
+   * rollout visibility without failing processing, and `error` for strict
+   * provenance checks.
+   *
+   * @default 'off'
+   * @experimental
+   */
+  sourceRefValidationMode?: SourceRefValidationMode;
 }
 
 /**
@@ -412,6 +429,14 @@ export class DocumentProcessor {
       footnotes,
       source: processOptions.source,
     });
+    const sourceRefValidationMode =
+      this.resolveSourceRefValidationMode(processOptions);
+    if (sourceRefValidationMode !== 'off') {
+      this.validateProcessedDocumentSourceRefs(
+        processedDoc,
+        sourceRefValidationMode,
+      );
+    }
     const assembleTime = Date.now() - startTimeAssemble;
     this.logger.info(
       `[DocumentProcessor] Document assembly took ${assembleTime}ms`,
@@ -583,6 +608,102 @@ export class DocumentProcessor {
     );
 
     return pageRangeMap;
+  }
+
+  private resolveSourceRefValidationMode(
+    processOptions: DocumentProcessorProcessOptions,
+  ): SourceRefValidationMode {
+    if (processOptions.sourceRefValidationMode !== undefined) {
+      return processOptions.sourceRefValidationMode;
+    }
+
+    return processOptions.validateSourceRefs === true ? 'error' : 'off';
+  }
+
+  private validateProcessedDocumentSourceRefs(
+    processedDoc: ProcessedDocument,
+    mode: Exclude<SourceRefValidationMode, 'off'>,
+  ): void {
+    if (!this.refResolver) {
+      throw new Error(
+        '[DocumentProcessor] Cannot validate source references before RefResolver initialization',
+      );
+    }
+
+    const issues = this.collectMissingSourceRefs(
+      processedDoc,
+      this.refResolver,
+    );
+
+    if (issues.length === 0) {
+      this.logger.info(
+        '[DocumentProcessor] Source reference validation passed',
+      );
+      return;
+    }
+
+    const details = issues
+      .map((issue) => `${issue.context} (${issue.ref})`)
+      .join('; ');
+    const message = `[DocumentProcessor] Source reference validation found ${issues.length} missing reference(s): ${details}`;
+
+    if (mode === 'warn') {
+      this.logger.warn(message);
+      return;
+    }
+
+    this.logger.error(message);
+    throw new Error(message);
+  }
+
+  private collectMissingSourceRefs(
+    processedDoc: ProcessedDocument,
+    refResolver: RefResolver,
+  ): SourceRefValidationIssue[] {
+    const issues: SourceRefValidationIssue[] = [];
+
+    const addRef = (ref: string | undefined, context: string): void => {
+      if (ref !== undefined && !refResolver.hasRef(ref)) {
+        issues.push({ context, ref });
+      }
+    };
+
+    const addRefs = (refs: string[] | undefined, context: string): void => {
+      refs?.forEach((ref, index) => {
+        addRef(ref, `${context}[${index}]`);
+      });
+    };
+
+    const visitChapter = (chapter: Chapter): void => {
+      addRefs(chapter.sourceRefs, `chapter ${chapter.id} sourceRefs`);
+
+      chapter.textBlocks.forEach((textBlock, index) => {
+        addRef(
+          textBlock.sourceRef,
+          `chapter ${chapter.id} textBlock ${textBlock.id ?? index} sourceRef`,
+        );
+      });
+
+      chapter.children?.forEach(visitChapter);
+    };
+
+    processedDoc.chapters.forEach(visitChapter);
+
+    processedDoc.images.forEach((image) => {
+      addRef(image.sourceRef, `image ${image.id} sourceRef`);
+      addRefs(image.captionSourceRefs, `image ${image.id} captionSourceRefs`);
+    });
+
+    processedDoc.tables.forEach((table) => {
+      addRef(table.sourceRef, `table ${table.id} sourceRef`);
+      addRefs(table.captionSourceRefs, `table ${table.id} captionSourceRefs`);
+    });
+
+    processedDoc.footnotes.forEach((footnote) => {
+      addRef(footnote.sourceRef, `footnote ${footnote.id} sourceRef`);
+    });
+
+    return issues;
   }
 
   /**
