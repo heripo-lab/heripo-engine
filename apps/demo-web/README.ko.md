@@ -17,7 +17,8 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 
 - PDF 업로드 및 처리 옵션 설정
 - 실시간 처리 상태 모니터링 (SSE)
-- 처리 결과 시각화 (목차, 이미지, 표)
+- 처리 결과 시각화 (목차, 이미지, 표, 병합 셀, 원천 페이지)
+- 처리 결과 ZIP 다운로드 (`result-processed.json`, 원천 Docling JSON, source handoff manifest, 이미지, 렌더링 페이지 포함)
 - 작업 큐 관리
 
 ### 기술 스택
@@ -65,13 +66,14 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 
 - macOS 시스템 요구사항 (Apple Silicon 또는 Intel)
 - Python 버전 요구사항 (3.9-3.12)
-- 필수 시스템 의존성 (jq, lsof)
+- 필수 시스템 의존성 (poppler, jq, lsof)
+- 선택적 이미지 PDF 폴백 의존성 (ImageMagick, Ghostscript)
 - 최초 실행 설정 안내
 
 ### Node.js 및 패키지 관리자
 
 - **Node.js** >= 24.0.0
-- **pnpm** >= 9.0.0
+- **pnpm** >= 10.0.0
 
 ### LLM API 키
 
@@ -99,11 +101,18 @@ cp .env.example .env
 # 최소 하나의 API 키는 필수입니다
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_GENERATIVE_AI_API_KEY=...
+TOGETHER_AI_API_KEY=...
 
 # 선택사항
 PDF_PARSER_PORT=5001
 PDF_PARSER_TIMEOUT=10000000
+NEXT_PUBLIC_PUBLIC_MODE=false
+UPLOAD_SESSION_SECRET=...
 ```
+
+public mode, webhook, cleanup, Turnstile, upload-session 변수 전체 목록은
+[`.env.example`](./.env.example)을 참고하세요.
 
 #### 웹훅 설정 (선택사항)
 
@@ -117,17 +126,21 @@ WEBHOOK_SECRET=your-hmac-secret-key
 
 **지원 이벤트:**
 
-| 이벤트                | 설명                |
-| --------------------- | ------------------- |
-| `task.started`        | 처리 시작           |
-| `task.completed`      | 처리 완료           |
-| `task.failed`         | 처리 실패           |
-| `task.cancelled`      | 처리 취소           |
-| `otp.failed`          | OTP 인증 실패       |
-| `otp.locked`          | OTP 3회 실패로 잠금 |
-| `rate_limit.exceeded` | 일일 제한 도달      |
+| 이벤트                       | 설명                             |
+| ---------------------------- | -------------------------------- |
+| `task.started`               | 처리 시작                        |
+| `task.completed`             | 처리 완료                        |
+| `task.failed`                | 처리 실패                        |
+| `task.cancelled`             | 처리 취소                        |
+| `otp.failed`                 | OTP 인증 실패                    |
+| `otp.locked`                 | OTP 3회 실패로 잠금              |
+| `rate_limit.exceeded`        | 일일 제한 도달                   |
+| `session.weekly_locked`      | 주간 session lock 도달           |
+| `document.validation_failed` | 업로드 PDF의 문서 유형 검증 실패 |
+| `cleanup.completed`          | 예약 cleanup 완료                |
+| `cleanup.failed`             | 예약 cleanup 실패                |
 
-모든 웹훅에는 `event`, `timestamp`, `ip`, `userAgent`, `filename` 필드가 포함됩니다. 페이로드는 `WEBHOOK_SECRET`을 사용한 HMAC-SHA256 서명이 `X-Webhook-Signature` 헤더에 포함됩니다.
+작업 및 사용자 동작 웹훅에는 `event`, `timestamp`, `ip`, `userAgent`, 대개 `filename` 필드가 포함됩니다. cleanup 웹훅은 system event로 cleanup count와 error 정보를 포함합니다. 페이로드는 `WEBHOOK_SECRET`을 사용한 HMAC-SHA256 서명이 `X-Webhook-Signature` 헤더에 포함됩니다.
 
 ### 2. 의존성 설치
 
@@ -141,7 +154,7 @@ pnpm install
 
 ```bash
 # 루트에서
-pnpm --filter demo-web dev
+pnpm --filter @heripo/demo-web dev
 
 # 또는 demo-web 디렉토리에서
 cd apps/demo-web
@@ -171,7 +184,10 @@ pnpm dev
 
 - 목차 구조 시각화
 - 추출된 이미지 보기
-- 테이블 데이터 확인
+- 병합 셀 span이 반영된 테이블 데이터 확인
+- 렌더링된 PDF 페이지와 원천 이미지 열람
+- 전체 artifact ZIP 다운로드 (`result-processed.json`, `result.json`, `source-handoff-manifest.json`, `images/`, `pages/`)
+- 처리된 결과 JSON export
 
 ### 4. 작업 관리
 
@@ -187,7 +203,11 @@ pnpm dev
 src/
 ├── app/                      # Next.js App Router
 │   ├── api/                  # API 라우트
-│   │   └── tasks/            # 작업 관리 API
+│   │   ├── tasks/            # 작업 CRUD, SSE stream, result, images/pages, download
+│   │   ├── upload/           # 청크 업로드 session/chunk/complete API
+│   │   ├── rate-limit/       # public mode rate limit 확인
+│   │   └── system/           # system status API
+│   ├── legal/                # 약관 및 개인정보 처리방침 페이지
 │   ├── tasks/                # 작업 목록 페이지
 │   ├── process/[taskId]/     # 실시간 처리 페이지
 │   └── result/[taskId]/      # 결과 페이지
@@ -202,8 +222,16 @@ src/
 │   └── tasks/                # 작업 관리
 └── lib/
     ├── api/                  # API 클라이언트
+    ├── auth/                 # TOTP, Turnstile, upload session
+    ├── cleanup/              # 예약 task/upload cleanup
+    ├── config/               # public mode, webhook, cleanup config
+    ├── cost/                 # token 가격 및 비용 계산
     ├── db/                   # JSON 파일 DB
+    ├── processing/           # LLM model factory
     ├── queue/                # 작업 큐
+    ├── session/              # browser session 관리
+    ├── validations/          # Zod validation schema
+    ├── webhook/              # webhook client 및 payload
     └── query-client.ts       # React Query 설정
 ```
 
@@ -228,6 +256,8 @@ const response = await fetch('/api/tasks');
 - `useDeleteTask()` - 작업 삭제 (mutation)
 - `useCreateTask()` - 작업 생성 (mutation)
 - `useTaskStream(taskId)` - SSE 실시간 스트림
+- `useDownloadAll({ taskId, filename })` - 전체 작업 artifact ZIP 다운로드
+- `useExportJson({ data, filename })` - 처리 결과 JSON export
 
 ## 테스트에 대해
 
@@ -246,7 +276,7 @@ const response = await fetch('/api/tasks');
 퍼블릭 모드 우회를 위한 TOTP 시크릿을 생성합니다:
 
 ```bash
-pnpm --filter demo-web generate:otp-secret
+pnpm --filter @heripo/demo-web generate:otp-secret
 ```
 
 출력된 값을 `.env` 파일의 `OTP_SECRET`에 설정하세요.

@@ -45,6 +45,60 @@ export class RefResolver {
   }
 
   /**
+   * Check whether a Docling self reference exists in the indexed document.
+   */
+  hasRef(ref: string): boolean {
+    const match = ref.match(/^#\/(\w+)\//);
+    if (!match) {
+      return false;
+    }
+
+    const collection = match[1];
+
+    if (collection === 'texts') {
+      return this.textMap.has(ref);
+    }
+    if (collection === 'pictures') {
+      return this.pictureMap.has(ref);
+    }
+    if (collection === 'tables') {
+      return this.tableMap.has(ref);
+    }
+    if (collection === 'groups') {
+      return this.groupMap.has(ref);
+    }
+
+    return false;
+  }
+
+  /**
+   * Assert that a Docling self reference exists in the indexed document.
+   */
+  assertRef(ref: string, context: string): void {
+    if (this.hasRef(ref)) {
+      return;
+    }
+
+    const message = `[RefResolver] Missing source reference in ${context}: ${ref}`;
+    this.logger.warn(message);
+    throw new Error(message);
+  }
+
+  /**
+   * Assert that every Docling self reference exists in the indexed document.
+   */
+  assertRefs(refs: string[], context: string): void {
+    const missingRefs = refs.filter((ref) => !this.hasRef(ref));
+    if (missingRefs.length === 0) {
+      return;
+    }
+
+    const message = `[RefResolver] Missing source references in ${context}: ${missingRefs.join(', ')}`;
+    this.logger.warn(message);
+    throw new Error(message);
+  }
+
+  /**
    * Resolve a $ref string to the actual item
    * @param ref - Reference string (e.g., "#/texts/0")
    * @returns The resolved item, or null if not found

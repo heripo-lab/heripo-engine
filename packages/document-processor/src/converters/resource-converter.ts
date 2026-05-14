@@ -1,6 +1,8 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type {
   DoclingDocument,
+  DoclingTableCell,
+  DoclingTableItem,
   ProcessedFootnote,
   ProcessedImage,
   ProcessedTable,
@@ -11,6 +13,133 @@ import type { CaptionProcessingPipeline } from '../pipelines';
 import type { IdGenerator } from '../utils';
 
 import { TextCleaner } from '../utils';
+
+function getFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function getRowSpan(cell: DoclingTableCell): number {
+  const startRow = getFiniteNumber(cell.start_row_offset_idx);
+  const endRow = getFiniteNumber(cell.end_row_offset_idx);
+  const offsetSpan =
+    startRow !== undefined && endRow !== undefined ? endRow - startRow : 0;
+
+  return Math.max(1, offsetSpan || getFiniteNumber(cell.row_span) || 1);
+}
+
+function getColSpan(cell: DoclingTableCell): number {
+  const startCol = getFiniteNumber(cell.start_col_offset_idx);
+  const endCol = getFiniteNumber(cell.end_col_offset_idx);
+  const offsetSpan =
+    startCol !== undefined && endCol !== undefined ? endCol - startCol : 0;
+
+  return Math.max(1, offsetSpan || getFiniteNumber(cell.col_span) || 1);
+}
+
+function convertTableCell(cell: DoclingTableCell): ProcessedTableCell {
+  return {
+    text: cell.text ?? '',
+    rowSpan: getRowSpan(cell),
+    colSpan: getColSpan(cell),
+    isHeader: cell.column_header || cell.row_header || false,
+  };
+}
+
+function getAnchorColumn(
+  cell: DoclingTableCell,
+  rowIndex: number,
+  colIndex: number,
+): number | undefined {
+  const startRow = getFiniteNumber(cell.start_row_offset_idx) ?? rowIndex;
+  const startCol = getFiniteNumber(cell.start_col_offset_idx) ?? colIndex;
+
+  return startRow === rowIndex ? startCol : undefined;
+}
+
+function buildGridFromRawGrid(
+  rawGrid: DoclingTableCell[][],
+): ProcessedTableCell[][] {
+  return rawGrid.map((row, rowIndex) => {
+    const cellsByColumn = new Map<number, ProcessedTableCell>();
+
+    row.forEach((cell, colIndex) => {
+      const anchorColumn = getAnchorColumn(cell, rowIndex, colIndex);
+      if (anchorColumn === undefined || cellsByColumn.has(anchorColumn)) {
+        return;
+      }
+
+      cellsByColumn.set(anchorColumn, convertTableCell(cell));
+    });
+
+    return Array.from(cellsByColumn.entries())
+      .sort(([left], [right]) => left - right)
+      .map(([, cell]) => cell);
+  });
+}
+
+function buildGridFromTableCells(
+  tableCells: DoclingTableCell[] | undefined,
+  rowCount: number,
+): ProcessedTableCell[][] {
+  if (!tableCells || tableCells.length === 0) return [];
+
+  const maxRow =
+    tableCells.reduce(
+      (max, cell) =>
+        Math.max(max, getFiniteNumber(cell.start_row_offset_idx) ?? 0),
+      rowCount - 1,
+    ) + 1;
+  const rows: Array<Array<{ col: number; cell: ProcessedTableCell }>> =
+    Array.from({ length: Math.max(0, maxRow) }, () => []);
+
+  for (const cell of tableCells) {
+    const row = getFiniteNumber(cell.start_row_offset_idx) ?? 0;
+    const col = getFiniteNumber(cell.start_col_offset_idx) ?? 0;
+    if (row < 0 || row >= rows.length) continue;
+    rows[row].push({ col, cell: convertTableCell(cell) });
+  }
+
+  return rows.map((row) =>
+    row.sort((a, b) => a.col - b.col).map(({ cell }) => cell),
+  );
+}
+
+function getGridColumnCount(grid: ProcessedTableCell[][]): number {
+  return grid.reduce(
+    (max, row) =>
+      Math.max(
+        max,
+        row.reduce((sum, cell) => sum + Math.max(1, cell.colSpan), 0),
+      ),
+    0,
+  );
+}
+
+function buildProcessedTableGrid(table: DoclingTableItem): {
+  grid: ProcessedTableCell[][];
+  numRows: number;
+  numCols: number;
+} {
+  const rawGrid = table.data.grid ?? [];
+  const rawNumRows = getFiniteNumber(table.data.num_rows);
+  const rawNumCols = getFiniteNumber(table.data.num_cols);
+  const grid =
+    rawGrid.length > 0
+      ? buildGridFromRawGrid(rawGrid)
+      : buildGridFromTableCells(table.data.table_cells, rawNumRows ?? 0);
+
+  return {
+    grid,
+    numRows:
+      rawNumRows !== undefined && rawNumRows > 0 ? rawNumRows : grid.length,
+    numCols:
+      rawNumCols !== undefined && rawNumCols > 0
+        ? rawNumCols
+        : getGridColumnCount(grid),
+  };
+}
 
 /**
  * ResourceConverter
@@ -75,14 +204,18 @@ export class ResourceConverter {
       `[ResourceConverter] Converting ${doclingDoc.pictures.length} images...`,
     );
 
-    const captionTexts: Array<string | undefined> = doclingDoc.pictures.map(
-      (picture) =>
-        this.captionProcessingPipeline.extractCaptionText(picture.captions),
+    const captionSources = doclingDoc.pictures.map((picture) =>
+      this.captionProcessingPipeline.extractCaptionSource(picture.captions),
+    );
+    const captionTexts = captionSources.map(
+      (captionSource) => captionSource.text,
     );
 
     const images: ProcessedImage[] = doclingDoc.pictures.map(
       (picture, index) => ({
         id: this.idGenerator.generateImageId(),
+        sourceRef: picture.self_ref,
+        captionSourceRefs: captionSources[index].sourceRefs,
         path: `${artifactDir}/images/image_${index}.png`,
         pdfPageNo: picture.prov?.[0]?.page_no ?? 0,
       }),
@@ -111,26 +244,23 @@ export class ResourceConverter {
       `[ResourceConverter] Converting ${doclingDoc.tables.length} tables...`,
     );
 
-    const captionTexts: Array<string | undefined> = doclingDoc.tables.map(
-      (table) =>
-        this.captionProcessingPipeline.extractCaptionText(table.captions),
+    const captionSources = doclingDoc.tables.map((table) =>
+      this.captionProcessingPipeline.extractCaptionSource(table.captions),
+    );
+    const captionTexts = captionSources.map(
+      (captionSource) => captionSource.text,
     );
 
-    const tables: ProcessedTable[] = doclingDoc.tables.map((table) => {
-      const grid: ProcessedTableCell[][] = table.data.grid.map((row) =>
-        row.map((cell) => ({
-          text: cell.text,
-          rowSpan: cell.row_span ?? 1,
-          colSpan: cell.col_span ?? 1,
-          isHeader: cell.column_header || cell.row_header || false,
-        })),
-      );
+    const tables: ProcessedTable[] = doclingDoc.tables.map((table, index) => {
+      const { grid, numRows, numCols } = buildProcessedTableGrid(table);
 
       return {
         id: this.idGenerator.generateTableId(),
+        sourceRef: table.self_ref,
+        captionSourceRefs: captionSources[index].sourceRefs,
         pdfPageNo: table.prov?.[0]?.page_no ?? 0,
-        numRows: grid.length,
-        numCols: grid[0]?.length ?? 0,
+        numRows,
+        numCols,
         grid,
       };
     });
@@ -165,6 +295,7 @@ export class ResourceConverter {
       .filter((item) => TextCleaner.isValidText(item.text))
       .map((item) => ({
         id: this.idGenerator.generateFootnoteId(),
+        sourceRef: item.self_ref,
         text: TextCleaner.normalize(item.text),
         pdfPageNo: item.prov?.[0]?.page_no ?? 1,
       }));

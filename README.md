@@ -125,6 +125,7 @@ For a detailed roadmap, see [docs/roadmap.md](./docs/roadmap.md).
 - **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
+- **Review Assistance**: Optional page-level VLM review with audit proposals and high-confidence auto-fixes
 
 ### Document Processing (`@heripo/document-processor`)
 
@@ -132,12 +133,15 @@ For a detailed roadmap, see [docs/roadmap.md](./docs/roadmap.md).
 - **Hierarchical Structure**: Automatic generation of chapter/section/subsection hierarchy
 - **Page Mapping**: Actual page number mapping using Vision LLM
 - **Caption Parsing**: Automatic parsing of image and table captions
+- **Source Provenance**: Optional Docling source metadata and node-level source references
+- **Table Grid Normalization**: Preserves row/column spans and removes merged-cell shadow entries
 - **LLM Flexibility**: Support for various LLMs including OpenAI, Anthropic, Google
 
 ### Data Models (`@heripo/model`)
 
 - **ProcessedDocument**: Intermediate data model optimized for LLM analysis
 - **DoclingDocument**: Raw output format from Docling SDK
+- **ReviewAssistanceReport**: Optional page-level review assistance report model
 - **Type Safety**: Complete TypeScript type definitions
 
 ## Architecture
@@ -150,11 +154,11 @@ heripo-engine/
 │   ├── pdf-parser/        # PDF → DoclingDocument
 │   ├── document-processor/ # DoclingDocument → ProcessedDocument
 │   ├── model/             # Data models and type definitions
+│   ├── logger/            # Logging adapter package
 │   └── shared/            # Internal utilities (not published)
 ├── apps/                  # Applications
 │   └── demo-web/          # Next.js web demo
 └── tools/                 # Build tool configurations
-    ├── logger/            # Logging utility (not published)
     ├── tsconfig/          # Shared TypeScript config
     ├── tsup-config/       # Build config
     └── vitest-config/     # Test config
@@ -197,9 +201,10 @@ For detailed installation guide, see [@heripo/pdf-parser README](./packages/pdf-
 pnpm add @heripo/pdf-parser
 pnpm add @heripo/document-processor
 pnpm add @heripo/model
+pnpm add @heripo/logger
 
 # Or install all at once
-pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model
+pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/logger
 ```
 
 ## Packages
@@ -209,19 +214,28 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model
 | [@heripo/pdf-parser](./packages/pdf-parser)                 | 0.1.x   | PDF parsing and OCR                            |
 | [@heripo/document-processor](./packages/document-processor) | 0.1.x   | Document structure analysis and LLM processing |
 | [@heripo/model](./packages/model)                           | 0.1.x   | Data models and type definitions               |
+| [@heripo/logger](./packages/logger)                         | 0.1.x   | Logger interface and adapter                   |
 
 ## Usage Examples
 
 ### Basic Usage
 
 ```typescript
+import type { DoclingDocument } from '@heripo/model';
+
 import { anthropic } from '@ai-sdk/anthropic';
 import { openai } from '@ai-sdk/openai';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
+import { readFile } from 'node:fs/promises';
 
-const logger = Logger(...);
+const logger = new Logger({
+  debug: (...args) => console.debug('[heripo]', ...args),
+  info: (...args) => console.info('[heripo]', ...args),
+  warn: (...args) => console.warn('[heripo]', ...args),
+  error: (...args) => console.error('[heripo]', ...args),
+});
 
 // 1. PDF Parsing
 const pdfParser = new PDFParser({
@@ -232,9 +246,13 @@ const pdfParser = new PDFParser({
 await pdfParser.init();
 
 const tokenUsageReport = await pdfParser.parse(
-  'path/to/report.pdf',
+  'file:///path/to/report.pdf',
   'report-001',
-  async (outputPath) => {
+  async (artifactDir) => {
+    const doclingDocument = JSON.parse(
+      await readFile(`${artifactDir}/result.json`, 'utf8'),
+    ) as DoclingDocument;
+
     // 2. Document Processing (inside callback)
     const processor = new DocumentProcessor({
       logger,
@@ -250,7 +268,7 @@ const tokenUsageReport = await pdfParser.parse(
     const { document, usage } = await processor.process(
       doclingDocument,
       'report-001',
-      outputPath,
+      artifactDir,
     );
 
     // 3. Use Results
@@ -337,6 +355,7 @@ For detailed usage, see [apps/demo-web/README.md](./apps/demo-web/README.md).
 - [@heripo/pdf-parser](./packages/pdf-parser/README.md)
 - [@heripo/document-processor](./packages/document-processor/README.md)
 - [@heripo/model](./packages/model/README.md)
+- [@heripo/logger](./packages/logger/README.md)
 
 ## Roadmap
 

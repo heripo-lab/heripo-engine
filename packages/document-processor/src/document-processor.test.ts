@@ -7,7 +7,10 @@ import type { TocEntry } from './types';
 import { BatchProcessor } from '@heripo/shared';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { DocumentProcessor } from './document-processor';
+import {
+  DocumentProcessor,
+  PROCESSED_DOCUMENT_SCHEMA_VERSION,
+} from './document-processor';
 import { TocNotFoundError } from './extractors/toc-extract-error';
 
 // Mock CaptionParser for fallback reparse tests
@@ -18,7 +21,11 @@ vi.mock('./parsers/caption-parser.js', () => ({
 // Mock utilities
 vi.mock('./utils/ref-resolver.js', () => ({
   RefResolver: vi.fn(function () {
-    return {};
+    return {
+      hasRef: vi.fn((_ref: string) => true),
+      assertRef: vi.fn(),
+      assertRefs: vi.fn(),
+    };
   }),
 }));
 
@@ -29,6 +36,7 @@ vi.mock('./utils/id-generator.js', () => ({
       generateImageId: vi.fn(() => 'img-001'),
       generateTableId: vi.fn(() => 'tbl-001'),
       generateFootnoteId: vi.fn(() => 'ftn-001'),
+      generateTextBlockId: vi.fn(() => 'txt-001'),
     };
   }),
 }));
@@ -248,6 +256,11 @@ describe('DocumentProcessor', () => {
         pageRangeMap: { 1: { startPageNo: 1, endPageNo: 1 } },
         usage: [],
       }),
+      refResolverMock = {
+        hasRef: vi.fn((_ref: string) => true),
+        assertRef: vi.fn(),
+        assertRefs: vi.fn(),
+      },
     ) => {
       const tocExtractMock = vi
         .fn()
@@ -279,6 +292,7 @@ describe('DocumentProcessor', () => {
         (...args: any[]) => {
           originalInit(...args);
 
+          (processor as any).refResolver = refResolverMock;
           (processor as any).pageRangeParser = {
             parse: pageRangeParseMock,
           };
@@ -299,6 +313,7 @@ describe('DocumentProcessor', () => {
         tocExtractMock,
         convertAllMock,
         chapterConvertMock,
+        refResolverMock,
       };
     };
 
@@ -507,6 +522,9 @@ describe('DocumentProcessor', () => {
 
       expect(result).toBeDefined();
       expect(result.document.reportId).toBe('report-001');
+      expect(result.document.schemaVersion).toBe(
+        PROCESSED_DOCUMENT_SCHEMA_VERSION,
+      );
       expect(result.document.chapters).toHaveLength(1);
       expect(result.document.chapters[0].title).toBe('Chapter 1');
       expect(result.document.images).toEqual([]);
@@ -514,6 +532,297 @@ describe('DocumentProcessor', () => {
       expect(result.document.footnotes).toEqual([]);
       expect(result.document.pageRangeMap).toBeDefined();
       expect(result.usage).toBeDefined();
+    });
+
+    test('should include caller supplied source metadata', async () => {
+      const processor = createProcessor();
+      const source = {
+        pipelineRunId: 'run-001',
+        doclingObjectKey: 'docling/report-001.json',
+        doclingSha256: 'abc123',
+        handoffManifestObjectKey: 'manifests/run-001.json',
+      };
+      stubSuccessfulProcessing(processor);
+      const mockDoc = createMockDoc();
+
+      const result = await processor.process(mockDoc, 'report-001', '/path', {
+        source,
+      });
+
+      expect(result.document.schemaVersion).toBe(
+        PROCESSED_DOCUMENT_SCHEMA_VERSION,
+      );
+      expect(result.document.source).toBe(source);
+    });
+
+    test('should validate generated source refs when validateSourceRefs is true', async () => {
+      const processor = createProcessor();
+      const mocks = stubSuccessfulProcessing(processor);
+      const mockDoc = createMockDoc();
+
+      mocks.convertAllMock.mockResolvedValue({
+        images: [
+          {
+            id: 'img-001',
+            sourceRef: '#/pictures/0',
+            captionSourceRefs: ['#/texts/1'],
+            pdfPageNo: 1,
+            path: '/path/images/image_0.png',
+          },
+        ],
+        tables: [
+          {
+            id: 'tbl-001',
+            sourceRef: '#/tables/0',
+            captionSourceRefs: ['#/texts/2'],
+            pdfPageNo: 1,
+            numRows: 0,
+            numCols: 0,
+            grid: [],
+          },
+        ],
+        footnotes: [
+          {
+            id: 'ftn-001',
+            sourceRef: '#/texts/3',
+            text: 'Footnote',
+            pdfPageNo: 1,
+          },
+        ],
+      });
+      mocks.chapterConvertMock.mockReturnValue([
+        {
+          id: 'ch-001',
+          originTitle: 'Chapter 1',
+          title: 'Chapter 1',
+          pageNo: 1,
+          level: 1,
+          sourceRefs: ['#/texts/0'],
+          textBlocks: [
+            {
+              id: 'txt-001',
+              sourceRef: '#/texts/4',
+              text: 'Body',
+              pdfPageNo: 1,
+            },
+          ],
+          imageIds: ['img-001'],
+          tableIds: ['tbl-001'],
+          footnoteIds: ['ftn-001'],
+          children: [
+            {
+              id: 'ch-002',
+              originTitle: 'Child',
+              title: 'Child',
+              pageNo: 1,
+              level: 2,
+              sourceRefs: ['#/texts/5'],
+              textBlocks: [],
+              imageIds: [],
+              tableIds: [],
+              footnoteIds: [],
+            },
+          ],
+        },
+      ]);
+
+      await processor.process(mockDoc, 'report-001', '/path', {
+        validateSourceRefs: true,
+      });
+
+      expect(mocks.refResolverMock.hasRef).toHaveBeenCalledWith('#/texts/0');
+      expect(mocks.refResolverMock.hasRef).toHaveBeenCalledWith('#/texts/4');
+      expect(mocks.refResolverMock.hasRef).toHaveBeenCalledWith('#/texts/5');
+      expect(mocks.refResolverMock.hasRef).toHaveBeenCalledWith('#/pictures/0');
+      expect(mocks.refResolverMock.hasRef).toHaveBeenCalledWith('#/tables/0');
+      expect(mocks.refResolverMock.hasRef).toHaveBeenCalledWith('#/texts/3');
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[DocumentProcessor] Source reference validation passed',
+      );
+    });
+
+    test('should throw when validating source refs before RefResolver initialization', () => {
+      const processor = createProcessor();
+
+      expect(() =>
+        (processor as any).validateProcessedDocumentSourceRefs(
+          {
+            reportId: 'report-001',
+            schemaVersion: PROCESSED_DOCUMENT_SCHEMA_VERSION,
+            pageRangeMap: {},
+            chapters: [],
+            images: [],
+            tables: [],
+            footnotes: [],
+          },
+          'error',
+        ),
+      ).toThrow(
+        '[DocumentProcessor] Cannot validate source references before RefResolver initialization',
+      );
+    });
+
+    test('should throw when source ref validation is strict and refs are missing', async () => {
+      const processor = createProcessor();
+      const refResolverMock = {
+        hasRef: vi.fn((ref: string) => ref !== '#/texts/999'),
+        assertRef: vi.fn(),
+        assertRefs: vi.fn(),
+      };
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        undefined,
+        refResolverMock,
+      );
+      const mockDoc = createMockDoc();
+      mocks.chapterConvertMock.mockReturnValue([
+        {
+          id: 'ch-001',
+          originTitle: 'Chapter 1',
+          title: 'Chapter 1',
+          pageNo: 1,
+          level: 1,
+          sourceRefs: [],
+          textBlocks: [
+            {
+              id: 'txt-001',
+              sourceRef: '#/texts/999',
+              text: 'Body',
+              pdfPageNo: 1,
+            },
+          ],
+          imageIds: [],
+          tableIds: [],
+          footnoteIds: [],
+        },
+      ]);
+
+      await expect(
+        processor.process(mockDoc, 'report-001', '/path', {
+          validateSourceRefs: true,
+        }),
+      ).rejects.toThrow(
+        '[DocumentProcessor] Source reference validation found 1 missing reference(s): chapter ch-001 textBlock txt-001 sourceRef (#/texts/999)',
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        '[DocumentProcessor] Source reference validation found 1 missing reference(s): chapter ch-001 textBlock txt-001 sourceRef (#/texts/999)',
+      );
+    });
+
+    test('should fall back to the text block index when id is missing', async () => {
+      const processor = createProcessor();
+      const refResolverMock = {
+        hasRef: vi.fn(() => false),
+        assertRef: vi.fn(),
+        assertRefs: vi.fn(),
+      };
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        undefined,
+        refResolverMock,
+      );
+      const mockDoc = createMockDoc();
+      mocks.chapterConvertMock.mockReturnValue([
+        {
+          id: 'ch-001',
+          originTitle: 'Chapter 1',
+          title: 'Chapter 1',
+          pageNo: 1,
+          level: 1,
+          sourceRefs: [],
+          textBlocks: [
+            {
+              sourceRef: '#/texts/999',
+              text: 'Body',
+              pdfPageNo: 1,
+            },
+          ],
+          imageIds: [],
+          tableIds: [],
+          footnoteIds: [],
+        },
+      ]);
+
+      await expect(
+        processor.process(mockDoc, 'report-001', '/path', {
+          sourceRefValidationMode: 'error',
+        }),
+      ).rejects.toThrow(
+        '[DocumentProcessor] Source reference validation found 1 missing reference(s): chapter ch-001 textBlock 0 sourceRef (#/texts/999)',
+      );
+    });
+
+    test('should warn instead of throwing when sourceRefValidationMode is warn', async () => {
+      const processor = createProcessor();
+      const refResolverMock = {
+        hasRef: vi.fn(() => false),
+        assertRef: vi.fn(),
+        assertRefs: vi.fn(),
+      };
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        undefined,
+        refResolverMock,
+      );
+      const mockDoc = createMockDoc();
+      mocks.convertAllMock.mockResolvedValue({
+        images: [
+          {
+            id: 'img-001',
+            sourceRef: '#/pictures/999',
+            captionSourceRefs: ['#/texts/998'],
+            pdfPageNo: 1,
+            path: '/path/images/image_0.png',
+          },
+        ],
+        tables: [],
+        footnotes: [],
+      });
+
+      const result = await processor.process(mockDoc, 'report-001', '/path', {
+        sourceRefValidationMode: 'warn',
+      });
+
+      expect(result.document.reportId).toBe('report-001');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[DocumentProcessor] Source reference validation found 2 missing reference(s): image img-001 sourceRef (#/pictures/999); image img-001 captionSourceRefs[0] (#/texts/998)',
+      );
+    });
+
+    test('should let sourceRefValidationMode off override validateSourceRefs', async () => {
+      const processor = createProcessor();
+      const refResolverMock = {
+        hasRef: vi.fn(() => false),
+        assertRef: vi.fn(),
+        assertRefs: vi.fn(),
+      };
+      const mocks = stubSuccessfulProcessing(
+        processor,
+        undefined,
+        refResolverMock,
+      );
+      const mockDoc = createMockDoc();
+      mocks.chapterConvertMock.mockReturnValue([
+        {
+          id: 'ch-001',
+          originTitle: 'Chapter 1',
+          title: 'Chapter 1',
+          pageNo: 1,
+          level: 1,
+          sourceRefs: ['#/texts/999'],
+          textBlocks: [],
+          imageIds: [],
+          tableIds: [],
+          footnoteIds: [],
+        },
+      ]);
+
+      await processor.process(mockDoc, 'report-001', '/path', {
+        validateSourceRefs: true,
+        sourceRefValidationMode: 'off',
+      });
+
+      expect(mocks.refResolverMock.hasRef).not.toHaveBeenCalled();
     });
 
     test('should use injected pageRangeMap without parsing page ranges', async () => {

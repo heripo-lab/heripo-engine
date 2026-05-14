@@ -376,6 +376,9 @@ describe('CaptionProcessingPipeline', () => {
     });
   });
 
+  // Exercises the deprecated `extractCaptionText` wrapper. Kept until
+  // legacy callers migrate to `extractCaptionSource`.
+  /* eslint-disable @typescript-eslint/no-deprecated */
   describe('extractCaptionText', () => {
     test('should return undefined for undefined captions', () => {
       const pipeline = createPipeline();
@@ -428,6 +431,120 @@ describe('CaptionProcessingPipeline', () => {
       expect(
         pipeline.extractCaptionText([{ $ref: '#/texts/0' }]),
       ).toBeUndefined();
+    });
+
+    test('should combine multiple caption refs', () => {
+      const mockResolver = {
+        resolveText: vi
+          .fn()
+          .mockReturnValueOnce({ text: 'Figure 1' })
+          .mockReturnValueOnce({ text: 'Site overview' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(
+        pipeline.extractCaptionText([
+          { $ref: '#/texts/0' },
+          { $ref: '#/texts/1' },
+        ]),
+      ).toBe('Figure 1 Site overview');
+    });
+  });
+  /* eslint-enable @typescript-eslint/no-deprecated */
+
+  describe('extractCaptionSource', () => {
+    test('should return empty source refs for undefined captions', () => {
+      const pipeline = createPipeline();
+
+      expect(pipeline.extractCaptionSource(undefined)).toStrictEqual({
+        sourceRefs: [],
+      });
+    });
+
+    test('should preserve refs and resolve text for ref captions', () => {
+      const mockResolver = {
+        resolveText: vi.fn().mockReturnValue({ text: 'Resolved Caption' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(pipeline.extractCaptionSource([{ $ref: '#/texts/0' }])).toEqual({
+        text: 'Resolved Caption',
+        sourceRefs: ['#/texts/0'],
+      });
+      expect(mockResolver.resolveText).toHaveBeenCalledWith('#/texts/0');
+    });
+
+    test('should combine string captions and ref captions', () => {
+      const mockResolver = {
+        resolveText: vi.fn().mockReturnValue({ text: 'Site overview' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(
+        pipeline.extractCaptionSource(['Figure 1', { $ref: '#/texts/1' }]),
+      ).toEqual({
+        text: 'Figure 1 Site overview',
+        sourceRefs: ['#/texts/1'],
+      });
+    });
+
+    test('should preserve multiple caption refs in order', () => {
+      const mockResolver = {
+        resolveText: vi
+          .fn()
+          .mockReturnValueOnce({ text: 'Figure 1' })
+          .mockReturnValueOnce({ text: 'Site overview' })
+          .mockReturnValueOnce({ text: 'North trench' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(
+        pipeline.extractCaptionSource([
+          { $ref: '#/texts/1' },
+          { $ref: '#/texts/2' },
+          { $ref: '#/texts/3' },
+        ]),
+      ).toEqual({
+        text: 'Figure 1 Site overview North trench',
+        sourceRefs: ['#/texts/1', '#/texts/2', '#/texts/3'],
+      });
+    });
+
+    test('should skip blank string captions', () => {
+      const pipeline = createPipeline();
+
+      expect(pipeline.extractCaptionSource(['   ', 'Figure 1'])).toStrictEqual({
+        text: 'Figure 1',
+        sourceRefs: [],
+      });
+    });
+
+    test('should preserve unresolved refs without text', () => {
+      const mockResolver = {
+        resolveText: vi.fn().mockReturnValue(null),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(
+        pipeline.extractCaptionSource([{ $ref: '#/texts/99' }]),
+      ).toStrictEqual({
+        sourceRefs: ['#/texts/99'],
+      });
     });
   });
 });

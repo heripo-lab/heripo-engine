@@ -15,7 +15,10 @@
  * @packageDocumentation
  */
 
-export { DocumentProcessor } from './document-processor';
+export {
+  DocumentProcessor,
+  PROCESSED_DOCUMENT_SCHEMA_VERSION,
+} from './document-processor';
 export { BaseLLMComponent, TextLLMComponent, VisionLLMComponent } from './core';
 export type {
   BaseLLMComponentOptions,
@@ -25,6 +28,7 @@ export type {
 export type {
   DocumentProcessorOptions,
   DocumentProcessorProcessOptions,
+  SourceRefValidationMode,
 } from './document-processor';
 export type { TocEntry, TocAreaResult, PageSizeGroup } from './types';
 export {
@@ -73,6 +77,7 @@ export { ChapterConverter, ResourceConverter } from './converters';
 export { CaptionProcessingPipeline, TocExtractionPipeline } from './pipelines';
 export type {
   CaptionProcessingPipelineDeps,
+  CaptionSourceExtraction,
   TocExtractionPipelineDeps,
 } from './pipelines';
 export { extractMaxPageNumber } from './utils';

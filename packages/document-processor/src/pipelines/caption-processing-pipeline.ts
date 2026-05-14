@@ -1,5 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { Caption } from '@heripo/model';
+import type { Caption, DoclingReference } from '@heripo/model';
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
@@ -26,6 +26,18 @@ export interface CaptionProcessingPipelineDeps {
 }
 
 /**
+ * Caption text and source references extracted from Docling caption links.
+ *
+ * `text` is omitted when none of the captions resolved to non-empty text;
+ * `sourceRefs` is always present and contains every `$ref` caption in order
+ * (string captions contribute to `text` only).
+ */
+export interface CaptionSourceExtraction {
+  text?: string;
+  sourceRefs: string[];
+}
+
+/**
  * CaptionProcessingPipeline
  *
  * Processes resource captions through a multi-step pipeline:
@@ -35,6 +47,8 @@ export interface CaptionProcessingPipelineDeps {
  * 4. Reparse failed captions with fallback model
  */
 export class CaptionProcessingPipeline {
+  private static readonly CAPTION_JOIN_SEPARATOR = ' ';
+
   private readonly logger: LoggerMethods;
   private readonly captionParser: CaptionParser;
   private readonly captionValidator: CaptionValidator;
@@ -243,27 +257,59 @@ export class CaptionProcessingPipeline {
   }
 
   /**
-   * Extract caption text from resource
+   * Extract combined caption text from resource captions.
    *
-   * Handles both string references and $ref resolution
+   * Returns every caption joined with a single space; empty/whitespace-only
+   * entries are skipped. Returns `undefined` when nothing resolves to text.
+   *
+   * @deprecated Use {@link extractCaptionSource} to also receive the
+   * caption `$ref` list. This helper is retained as a thin wrapper for
+   * legacy callers.
    */
   extractCaptionText(
-    captions: Array<string | { $ref: string }> | undefined,
+    captions: Array<string | DoclingReference> | undefined,
   ): string | undefined {
-    if (!captions?.[0]) {
-      return undefined;
+    return this.extractCaptionSource(captions).text;
+  }
+
+  /**
+   * Extract caption text and source references from resource captions.
+   *
+   * Iterates captions in order. String captions contribute to text only;
+   * `$ref` captions also push the ref onto `sourceRefs` regardless of whether
+   * the resolver finds text. Resolved/raw text is trimmed, and empty parts
+   * are skipped before joining.
+   */
+  extractCaptionSource(
+    captions: Array<string | DoclingReference> | undefined,
+  ): CaptionSourceExtraction {
+    const sourceRefs: string[] = [];
+    const textParts: string[] = [];
+
+    captions?.forEach((caption) => {
+      if (typeof caption === 'string') {
+        const text = caption.trim();
+        if (text.length > 0) {
+          textParts.push(text);
+        }
+        return;
+      }
+
+      sourceRefs.push(caption.$ref);
+      const resolved = this.refResolver?.resolveText(caption.$ref);
+      const text = resolved?.text.trim();
+      if (text && text.length > 0) {
+        textParts.push(text);
+      }
+    });
+
+    if (textParts.length === 0) {
+      return { sourceRefs };
     }
 
-    const captionRef = captions[0];
-    if (typeof captionRef === 'string') {
-      return captionRef;
-    }
-
-    if (this.refResolver && '$ref' in captionRef) {
-      const resolved = this.refResolver.resolveText(captionRef.$ref);
-      return resolved?.text;
-    }
-
-    return undefined;
+    return {
+      text: textParts.join(CaptionProcessingPipeline.CAPTION_JOIN_SEPARATOR),
+      sourceRefs,
+    };
   }
 }

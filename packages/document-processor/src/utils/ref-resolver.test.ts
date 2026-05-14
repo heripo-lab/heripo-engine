@@ -417,6 +417,68 @@ describe('RefResolver', () => {
     });
   });
 
+  describe('source reference validation helpers', () => {
+    test('hasRef should return true for indexed refs and false for missing refs', () => {
+      const doc = createMockDocument();
+      const resolver = new RefResolver(mockLogger, doc);
+
+      expect(resolver.hasRef('#/texts/0')).toBe(true);
+      expect(resolver.hasRef('#/pictures/0')).toBe(true);
+      expect(resolver.hasRef('#/tables/1')).toBe(true);
+      expect(resolver.hasRef('#/groups/0')).toBe(true);
+      expect(resolver.hasRef('#/texts/999')).toBe(false);
+      expect(resolver.hasRef('#/unknown/0')).toBe(false);
+      expect(resolver.hasRef('invalid')).toBe(false);
+    });
+
+    test('assertRef should not throw for an existing ref', () => {
+      const doc = createMockDocument();
+      const resolver = new RefResolver(mockLogger, doc);
+
+      expect(() =>
+        resolver.assertRef('#/texts/0', 'test context'),
+      ).not.toThrow();
+    });
+
+    test('assertRef should throw and warn for a missing ref', () => {
+      const doc = createMockDocument();
+      const resolver = new RefResolver(mockLogger, doc);
+
+      expect(() => resolver.assertRef('#/texts/999', 'test context')).toThrow(
+        '[RefResolver] Missing source reference in test context: #/texts/999',
+      );
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[RefResolver] Missing source reference in test context: #/texts/999',
+      );
+    });
+
+    test('assertRefs should not throw when every ref exists', () => {
+      const doc = createMockDocument();
+      const resolver = new RefResolver(mockLogger, doc);
+
+      expect(() =>
+        resolver.assertRefs(['#/texts/0', '#/pictures/0'], 'batch context'),
+      ).not.toThrow();
+    });
+
+    test('assertRefs should throw with every missing ref in context', () => {
+      const doc = createMockDocument();
+      const resolver = new RefResolver(mockLogger, doc);
+
+      expect(() =>
+        resolver.assertRefs(
+          ['#/texts/0', '#/tables/999', '#/unknown/0'],
+          'batch context',
+        ),
+      ).toThrow(
+        '[RefResolver] Missing source references in batch context: #/tables/999, #/unknown/0',
+      );
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[RefResolver] Missing source references in batch context: #/tables/999, #/unknown/0',
+      );
+    });
+  });
+
   describe('edge cases', () => {
     test('should handle documents with large number of items', () => {
       const largeDoc: DoclingDocument = {

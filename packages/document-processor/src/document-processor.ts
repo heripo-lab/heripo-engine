@@ -5,6 +5,7 @@ import type {
   DocumentProcessResult,
   PageRange,
   ProcessedDocument,
+  ProcessedDocumentSource,
   ProcessedFootnote,
   ProcessedImage,
   ProcessedTable,
@@ -27,6 +28,15 @@ import { CaptionParser, PageRangeParser } from './parsers';
 import { CaptionProcessingPipeline, TocExtractionPipeline } from './pipelines';
 import { IdGenerator, RefResolver, TextCleaner } from './utils';
 import { CaptionValidator, TocContentValidator } from './validators';
+
+export const PROCESSED_DOCUMENT_SCHEMA_VERSION = 'processed-document.v2';
+
+export type SourceRefValidationMode = 'off' | 'warn' | 'error';
+
+interface SourceRefValidationIssue {
+  context: string;
+  ref: string;
+}
 
 /**
  * DocumentProcessor Options
@@ -134,6 +144,33 @@ export interface DocumentProcessorProcessOptions {
    * When provided, automatic TOC extraction pipeline execution is skipped.
    */
   tocEntries?: TocEntry[];
+
+  /**
+   * Caller-supplied source artifact metadata for the Docling input.
+   */
+  source?: ProcessedDocumentSource;
+
+  /**
+   * Validate generated source references against the input Docling document.
+   *
+   * When true, missing references are treated as errors unless
+   * `sourceRefValidationMode` is provided.
+   *
+   * @experimental
+   */
+  validateSourceRefs?: boolean;
+
+  /**
+   * Controls how missing generated source references are handled.
+   *
+   * Explicit mode takes precedence over `validateSourceRefs`. Use `warn` for
+   * rollout visibility without failing processing, and `error` for strict
+   * provenance checks.
+   *
+   * @default 'off'
+   * @experimental
+   */
+  sourceRefValidationMode?: SourceRefValidationMode;
 }
 
 /**
@@ -383,18 +420,28 @@ export class DocumentProcessor {
     );
 
     const startTimeAssemble = Date.now();
-    const processedDoc = this.assembleProcessedDocument(
+    const processedDoc = this.assembleProcessedDocument({
       reportId,
       pageRangeMap,
       chapters,
       images,
       tables,
       footnotes,
-    );
+      source: processOptions.source,
+    });
     const assembleTime = Date.now() - startTimeAssemble;
     this.logger.info(
       `[DocumentProcessor] Document assembly took ${assembleTime}ms`,
     );
+
+    const sourceRefValidationMode =
+      this.resolveSourceRefValidationMode(processOptions);
+    if (sourceRefValidationMode !== 'off') {
+      this.validateProcessedDocumentSourceRefs(
+        processedDoc,
+        sourceRefValidationMode,
+      );
+    }
 
     this.logger.info('[DocumentProcessor] Document processing completed');
 
@@ -564,23 +611,134 @@ export class DocumentProcessor {
     return pageRangeMap;
   }
 
+  private resolveSourceRefValidationMode(
+    processOptions: DocumentProcessorProcessOptions,
+  ): SourceRefValidationMode {
+    if (processOptions.sourceRefValidationMode !== undefined) {
+      return processOptions.sourceRefValidationMode;
+    }
+
+    return processOptions.validateSourceRefs === true ? 'error' : 'off';
+  }
+
+  private validateProcessedDocumentSourceRefs(
+    processedDoc: ProcessedDocument,
+    mode: Exclude<SourceRefValidationMode, 'off'>,
+  ): void {
+    if (!this.refResolver) {
+      throw new Error(
+        '[DocumentProcessor] Cannot validate source references before RefResolver initialization',
+      );
+    }
+
+    const issues = this.collectMissingSourceRefs(
+      processedDoc,
+      this.refResolver,
+    );
+
+    if (issues.length === 0) {
+      this.logger.info(
+        '[DocumentProcessor] Source reference validation passed',
+      );
+      return;
+    }
+
+    const details = issues
+      .map((issue) => `${issue.context} (${issue.ref})`)
+      .join('; ');
+    const message = `[DocumentProcessor] Source reference validation found ${issues.length} missing reference(s): ${details}`;
+
+    if (mode === 'warn') {
+      this.logger.warn(message);
+      return;
+    }
+
+    this.logger.error(message);
+    throw new Error(message);
+  }
+
+  private collectMissingSourceRefs(
+    processedDoc: ProcessedDocument,
+    refResolver: RefResolver,
+  ): SourceRefValidationIssue[] {
+    const issues: SourceRefValidationIssue[] = [];
+
+    const addRef = (ref: string | undefined, context: string): void => {
+      if (ref !== undefined && !refResolver.hasRef(ref)) {
+        issues.push({ context, ref });
+      }
+    };
+
+    const addRefs = (refs: string[] | undefined, context: string): void => {
+      refs?.forEach((ref, index) => {
+        addRef(ref, `${context}[${index}]`);
+      });
+    };
+
+    const visitChapter = (chapter: Chapter): void => {
+      addRefs(chapter.sourceRefs, `chapter ${chapter.id} sourceRefs`);
+
+      chapter.textBlocks.forEach((textBlock, index) => {
+        addRef(
+          textBlock.sourceRef,
+          `chapter ${chapter.id} textBlock ${textBlock.id ?? index} sourceRef`,
+        );
+      });
+
+      chapter.children?.forEach(visitChapter);
+    };
+
+    processedDoc.chapters.forEach(visitChapter);
+
+    processedDoc.images.forEach((image) => {
+      addRef(image.sourceRef, `image ${image.id} sourceRef`);
+      addRefs(image.captionSourceRefs, `image ${image.id} captionSourceRefs`);
+    });
+
+    processedDoc.tables.forEach((table) => {
+      addRef(table.sourceRef, `table ${table.id} sourceRef`);
+      addRefs(table.captionSourceRefs, `table ${table.id} captionSourceRefs`);
+    });
+
+    processedDoc.footnotes.forEach((footnote) => {
+      addRef(footnote.sourceRef, `footnote ${footnote.id} sourceRef`);
+    });
+
+    return issues;
+  }
+
   /**
    * Assemble the final ProcessedDocument
    *
    * Creates the ProcessedDocument structure with all converted components
    */
-  private assembleProcessedDocument(
-    reportId: string,
-    pageRangeMap: Record<number, PageRange>,
-    chapters: Chapter[],
-    images: ProcessedImage[],
-    tables: ProcessedTable[],
-    footnotes: ProcessedFootnote[],
-  ): ProcessedDocument {
+  private assembleProcessedDocument(input: {
+    reportId: string;
+    pageRangeMap: Record<number, PageRange>;
+    chapters: Chapter[];
+    images: ProcessedImage[];
+    tables: ProcessedTable[];
+    footnotes: ProcessedFootnote[];
+    source?: ProcessedDocumentSource;
+  }): ProcessedDocument {
     this.logger.info('[DocumentProcessor] Assembling ProcessedDocument...');
 
+    const {
+      reportId,
+      pageRangeMap,
+      chapters,
+      images,
+      tables,
+      footnotes,
+      source,
+    } = input;
+
+    // Omit `source` key entirely when caller did not supply metadata so that
+    // snapshot equality and JSON output stay free of an explicit `undefined`.
     const processedDoc: ProcessedDocument = {
       reportId,
+      schemaVersion: PROCESSED_DOCUMENT_SCHEMA_VERSION,
+      ...(source !== undefined ? { source } : {}),
       pageRangeMap,
       chapters,
       images,

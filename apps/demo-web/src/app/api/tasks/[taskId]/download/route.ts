@@ -67,6 +67,11 @@ export async function GET(
     }
 
     const taskDir = dirname(task.processedResultPath);
+    const doclingResultPath = join(taskDir, 'result.json');
+    const sourceHandoffManifestPath = join(
+      taskDir,
+      'source-handoff-manifest.json',
+    );
     const imagesDir = join(taskDir, 'images');
     const pagesDir = join(taskDir, 'pages');
 
@@ -75,6 +80,16 @@ export async function GET(
     });
 
     archive.file(task.processedResultPath, { name: 'result-processed.json' });
+
+    if (existsSync(doclingResultPath)) {
+      archive.file(doclingResultPath, { name: 'result.json' });
+    }
+
+    if (existsSync(sourceHandoffManifestPath)) {
+      archive.file(sourceHandoffManifestPath, {
+        name: 'source-handoff-manifest.json',
+      });
+    }
 
     if (existsSync(imagesDir) && statSync(imagesDir).isDirectory()) {
       archive.directory(imagesDir, 'images');

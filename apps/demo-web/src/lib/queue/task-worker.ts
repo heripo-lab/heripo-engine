@@ -1,4 +1,8 @@
-import type { DoclingDocument, TokenUsageReport } from '@heripo/model';
+import type {
+  DoclingDocument,
+  ProcessedDocumentSource,
+  TokenUsageReport,
+} from '@heripo/model';
 import type { PDFConvertOptions, PDFParser } from '@heripo/pdf-parser';
 import type { EventEmitter } from 'events';
 
@@ -6,7 +10,9 @@ import type { QueuedTask, SSEEvent } from './task-queue-manager';
 
 import { DocumentProcessor } from '@heripo/document-processor';
 import { InvalidDocumentTypeError } from '@heripo/pdf-parser';
+import { createHash } from 'crypto';
 import { readFileSync, writeFileSync } from 'fs';
+import { relative, sep } from 'path';
 
 import { calculateCost } from '../cost/model-pricing';
 import { createLog } from '../db/repositories/log-repository';
@@ -27,6 +33,69 @@ import {
   sendWebhookAsync,
 } from '../webhook';
 import { PDFParserManager } from './pdf-parser-manager';
+
+const SOURCE_HANDOFF_MANIFEST_FILENAME = 'source-handoff-manifest.json';
+
+interface SourceArtifactContext {
+  doclingResultPath: string;
+  manifestPath: string;
+  processedResultPath: string;
+  source: ProcessedDocumentSource;
+}
+
+function toObjectKey(filePath: string): string {
+  return relative(process.cwd(), filePath).split(sep).join('/');
+}
+
+function calculateFileSha256(filePath: string): string {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+function createSourceArtifactContext(
+  taskId: string,
+  artifactDir: string,
+): SourceArtifactContext {
+  const doclingResultPath = `${artifactDir}/result.json`;
+  const manifestPath = `${artifactDir}/${SOURCE_HANDOFF_MANIFEST_FILENAME}`;
+  const processedResultPath = `${artifactDir}/result-processed.json`;
+
+  const doclingObjectKey = toObjectKey(doclingResultPath);
+  const handoffManifestObjectKey = toObjectKey(manifestPath);
+
+  return {
+    doclingResultPath,
+    manifestPath,
+    processedResultPath,
+    source: {
+      pipelineRunId: taskId,
+      doclingObjectKey,
+      doclingSha256: calculateFileSha256(doclingResultPath),
+      handoffManifestObjectKey,
+    },
+  };
+}
+
+function writeSourceHandoffManifest(context: SourceArtifactContext): void {
+  const manifest = {
+    schemaVersion: 'source-handoff-manifest.v1',
+    pipelineRunId: context.source.pipelineRunId,
+    createdAt: new Date().toISOString(),
+    artifacts: {
+      docling: {
+        objectKey: context.source.doclingObjectKey,
+        sha256: context.source.doclingSha256,
+        mediaType: 'application/json',
+      },
+      processedDocument: {
+        objectKey: toObjectKey(context.processedResultPath),
+        sha256: calculateFileSha256(context.processedResultPath),
+        mediaType: 'application/json',
+      },
+    },
+  };
+
+  writeFileSync(context.manifestPath, JSON.stringify(manifest, null, 2));
+}
 
 /**
  * Parse a PDF using the given parser and return the DoclingDocument with artifact directory.
@@ -342,10 +411,19 @@ export async function runTaskWorker(
     // Step 2-5: Document Processing
     logger.info('Starting document processing...');
 
+    const sourceArtifactContext = createSourceArtifactContext(
+      taskId,
+      artifactDir,
+    );
+
     const result = await processor.process(
       doclingDocument,
       taskId,
       artifactDir,
+      {
+        source: sourceArtifactContext.source,
+        validateSourceRefs: true,
+      },
     );
 
     // Merge VLM token usage into document-processor report
@@ -356,17 +434,17 @@ export async function runTaskWorker(
     logger.info('Document processing completed');
 
     // Save processed result
-    const processedResultPath = `${artifactDir}/result-processed.json`;
     writeFileSync(
-      processedResultPath,
+      sourceArtifactContext.processedResultPath,
       JSON.stringify(result.document, null, 2),
     );
+    writeSourceHandoffManifest(sourceArtifactContext);
 
     // Update task with results
     updateTaskResult(taskId, {
       artifactDir,
       resultPath: `${artifactDir}/result.json`,
-      processedResultPath,
+      processedResultPath: sourceArtifactContext.processedResultPath,
       totalPages: Object.keys(result.document.pageRangeMap).length,
       chaptersCount: result.document.chapters.length,
       imagesCount: result.document.images.length,

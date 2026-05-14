@@ -29,6 +29,8 @@
 - **Hierarchical Structure**: Automatic generation of chapter/section/subsection hierarchy
 - **Page Mapping**: Actual page number mapping using Vision LLM
 - **Caption Parsing**: Automatic parsing of image and table captions
+- **Source Provenance**: Preserves Docling source metadata and node-level references
+- **Table Grid Normalization**: Preserves row/column spans and removes merged-cell shadow entries
 - **LLM Flexibility**: Support for various LLMs including OpenAI, Anthropic, Google
 - **Fallback Retry**: Automatic retry with fallback model on failure
 
@@ -36,13 +38,13 @@
 
 ```bash
 # Install with npm
-npm install @heripo/document-processor @heripo/model
+npm install @heripo/document-processor @heripo/model @heripo/logger
 
 # Install with pnpm
-pnpm add @heripo/document-processor @heripo/model
+pnpm add @heripo/document-processor @heripo/model @heripo/logger
 
 # Install with yarn
-yarn add @heripo/document-processor @heripo/model
+yarn add @heripo/document-processor @heripo/model @heripo/logger
 ```
 
 Additionally, LLM provider SDKs are required:
@@ -61,7 +63,12 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { Logger } from '@heripo/logger';
 
-const logger = Logger(...);
+const logger = new Logger({
+  debug: (...args) => console.debug('[heripo]', ...args),
+  info: (...args) => console.info('[heripo]', ...args),
+  warn: (...args) => console.warn('[heripo]', ...args),
+  error: (...args) => console.error('[heripo]', ...args),
+});
 
 // Basic usage - specify fallback model only
 const processor = new DocumentProcessor({
@@ -190,6 +197,66 @@ const { document, usage } = await processor.process(
 );
 ```
 
+### Preserving Source Docling References
+
+If the caller knows where the source Docling JSON is stored or has its hash,
+pass that metadata through `source`. The value is preserved as
+`ProcessedDocument.source`. Use `validateSourceRefs` or
+`sourceRefValidationMode` to verify that generated `sourceRef` and
+`captionSourceRefs` values exist in the input `DoclingDocument`.
+
+```typescript
+const { document } = await processor.process(
+  doclingDocument,
+  'report-001',
+  artifactDir,
+  {
+    pageRangeMap,
+    tocEntries,
+    source: {
+      pipelineRunId: 'run-001',
+      doclingObjectKey: 'docling/report-001.json',
+      doclingSha256: '...',
+      handoffManifestObjectKey: 'manifests/run-001.json',
+    },
+    sourceRefValidationMode: 'warn', // 'off' | 'warn' | 'error'
+  },
+);
+
+console.log(document.source);
+console.log(document.chapters[0].textBlocks[0].sourceRef);
+console.log(document.images[0].captionSourceRefs);
+```
+
+`ProcessedDocument.source` is document-level metadata that identifies the
+Docling artifact used for processing. `TextBlock.sourceRef`,
+`Chapter.sourceRefs`, `ProcessedImage.sourceRef`, `ProcessedTable.sourceRef`,
+and `ProcessedFootnote.sourceRef` are node-level references that point back to
+the Docling nodes each processed node came from. For images and tables,
+`captionSourceRefs` contains only caption text node references, not the resource
+node reference.
+
+`sourceRefValidationMode: 'error'` fails processing when references are missing.
+`validateSourceRefs: true` is a compatibility shortcut and behaves like
+`'error'` unless a mode is explicitly provided.
+
+Table cells do not receive cell-level `sourceRef` values. To locate a specific
+cell in the source artifact, combine `table.sourceRef` with the
+`grid[row][col]` row/column indexes.
+
+### Table Grid Handling
+
+Processed tables expose a compact `grid` of visible cells. The processor:
+
+- Preserves Docling row/column spans as `rowSpan` and `colSpan`
+- Marks row and column headers through `isHeader`
+- Removes merged-cell shadow entries when Docling repeats covered cells
+- Falls back to `table_cells` when Docling's `data.grid` is empty
+
+`numRows` and `numCols` keep the logical table size. Individual cells do not
+store `sourceRef`; use `table.sourceRef` together with the `grid[row][col]`
+position when tracing a cell back to the source table.
+
 ## Processing Pipeline
 
 DocumentProcessor processes documents through a 5-stage pipeline:
@@ -238,7 +305,7 @@ DocumentProcessor processes documents through a 5-stage pipeline:
 ### 4. Resource Transformation
 
 - **Images**: Caption extraction and parsing with CaptionParser
-- **Tables**: Grid data transformation and caption parsing
+- **Tables**: Grid data transformation, merged-cell shadow filtering, span preservation, and caption parsing
 - **Caption Validation**: Parsing result validation with CaptionValidator
 
 ### 5. Chapter Conversion (ChapterConverter)
@@ -248,7 +315,7 @@ DocumentProcessor processes documents through a 5-stage pipeline:
 - Link text blocks to chapters by page range
 - Connect image/table IDs to appropriate chapters
 - Link footnote IDs to appropriate chapters
-- Fallback: Create single "Document" chapter when TOC is empty
+- Throws `TocNotFoundError` when TOC entries are empty because TOC-based chapter conversion is required
 
 ## API Documentation
 
@@ -258,7 +325,7 @@ DocumentProcessor processes documents through a 5-stage pipeline:
 
 ```typescript
 interface DocumentProcessorOptions {
-  logger: Logger; // Logger instance (required)
+  logger: LoggerMethods; // Logger instance (required)
 
   // LLM model settings
   fallbackModel: LanguageModel; // Fallback model (required)
@@ -294,6 +361,9 @@ Transforms DoclingDocument into ProcessedDocument.
 interface DocumentProcessorProcessOptions {
   pageRangeMap?: Record<number, PageRange>;
   tocEntries?: TocEntry[];
+  source?: ProcessedDocumentSource;
+  validateSourceRefs?: boolean;
+  sourceRefValidationMode?: 'off' | 'warn' | 'error';
 }
 ```
 
@@ -302,7 +372,7 @@ interface DocumentProcessorProcessOptions {
 - `doclingDoc` (DoclingDocument): PDF parser output
 - `reportId` (string): Report ID
 - `artifactDir` (string): Artifact directory containing parser outputs such as `images/`, `pages/`, and `result.json`
-- `processOptions` (DocumentProcessorProcessOptions, optional): Per-document processing inputs. When `pageRangeMap` is provided, automatic page range parsing is skipped. When `tocEntries` is provided, automatic TOC extraction is skipped.
+- `processOptions` (DocumentProcessorProcessOptions, optional): Per-document processing inputs. When `pageRangeMap` is provided, automatic page range parsing is skipped. When `tocEntries` is provided, automatic TOC extraction is skipped. `source` preserves source Docling artifact metadata, and `sourceRefValidationMode` controls generated source reference validation.
 
 **Returns:**
 
@@ -350,7 +420,7 @@ try {
   const { document, usage } = await processor.process(doc, 'id', 'path');
 } catch (error) {
   if (error instanceof TocNotFoundError) {
-    console.log('TOC not found. Processing as single chapter.');
+    console.error('TOC not found. Manual TOC review is required.');
   } else if (error instanceof TocParseError) {
     console.error('TOC parsing failed:', error.message);
   }
