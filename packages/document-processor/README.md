@@ -221,6 +221,14 @@ console.log(document.chapters[0].textBlocks[0].sourceRef);
 console.log(document.images[0].captionSourceRefs);
 ```
 
+`ProcessedDocument.source` is document-level metadata that identifies the
+Docling artifact used for processing. `TextBlock.sourceRef`,
+`Chapter.sourceRefs`, `ProcessedImage.sourceRef`, `ProcessedTable.sourceRef`,
+and `ProcessedFootnote.sourceRef` are node-level references that point back to
+the Docling nodes each processed node came from. For images and tables,
+`captionSourceRefs` contains only caption text node references, not the resource
+node reference.
+
 `sourceRefValidationMode: 'error'` fails processing when references are missing.
 `validateSourceRefs: true` is a compatibility shortcut and behaves like
 `'error'` unless a mode is explicitly provided.

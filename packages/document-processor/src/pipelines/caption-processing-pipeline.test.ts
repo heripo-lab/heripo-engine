@@ -497,6 +497,31 @@ describe('CaptionProcessingPipeline', () => {
       });
     });
 
+    test('should preserve multiple caption refs in order', () => {
+      const mockResolver = {
+        resolveText: vi
+          .fn()
+          .mockReturnValueOnce({ text: 'Figure 1' })
+          .mockReturnValueOnce({ text: 'Site overview' })
+          .mockReturnValueOnce({ text: 'North trench' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(
+        pipeline.extractCaptionSource([
+          { $ref: '#/texts/1' },
+          { $ref: '#/texts/2' },
+          { $ref: '#/texts/3' },
+        ]),
+      ).toEqual({
+        text: 'Figure 1 Site overview North trench',
+        sourceRefs: ['#/texts/1', '#/texts/2', '#/texts/3'],
+      });
+    });
+
     test('should skip blank string captions', () => {
       const pipeline = createPipeline();
 

@@ -217,6 +217,8 @@ console.log(document.chapters[0].textBlocks[0].sourceRef);
 console.log(document.images[0].captionSourceRefs);
 ```
 
+`ProcessedDocument.source`는 처리에 사용된 Docling artifact 자체를 가리키는 문서 단위 metadata입니다. `TextBlock.sourceRef`, `Chapter.sourceRefs`, `ProcessedImage.sourceRef`, `ProcessedTable.sourceRef`, `ProcessedFootnote.sourceRef`는 해당 processed node가 어떤 Docling node에서 왔는지 가리키는 node-level 참조입니다. 이미지와 테이블의 `captionSourceRefs`는 resource node가 아니라 caption text node의 참조만 담습니다.
+
 `sourceRefValidationMode: 'error'`는 누락된 참조가 있으면 처리를 실패시킵니다. `validateSourceRefs: true`는 호환용 단축 옵션이며, 별도 mode를 지정하지 않으면 `'error'`와 같습니다.
 
 테이블 셀에는 cell-level `sourceRef`를 만들지 않습니다. 특정 셀의 원천 위치는 `table.sourceRef`와 `grid[row][col]`의 row/column index를 함께 사용해 추적합니다.
