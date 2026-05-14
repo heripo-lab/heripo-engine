@@ -181,12 +181,31 @@ describe('IdGenerator', () => {
     });
   });
 
+  describe('generateTextBlockId', () => {
+    test('should generate text block IDs with correct format', () => {
+      expect(generator.generateTextBlockId()).toBe('txt-001');
+      expect(generator.generateTextBlockId()).toBe('txt-002');
+      expect(generator.generateTextBlockId()).toBe('txt-003');
+    });
+
+    test('should increment independently from other types', () => {
+      generator.generateChapterId();
+      generator.generateImageId();
+      generator.generateTableId();
+      generator.generateFootnoteId();
+
+      expect(generator.generateTextBlockId()).toBe('txt-001');
+      expect(generator.generateTextBlockId()).toBe('txt-002');
+    });
+  });
+
   describe('reset', () => {
     test('should reset all counters to zero', () => {
       generator.generateChapterId();
       generator.generateImageId();
       generator.generateTableId();
       generator.generateFootnoteId();
+      generator.generateTextBlockId();
 
       generator.reset();
 
@@ -194,6 +213,7 @@ describe('IdGenerator', () => {
       expect(generator.generateImageId()).toBe('img-001');
       expect(generator.generateTableId()).toBe('tbl-001');
       expect(generator.generateFootnoteId()).toBe('ftn-001');
+      expect(generator.generateTextBlockId()).toBe('txt-001');
     });
 
     test('should reset counters after multiple generations', () => {
@@ -202,6 +222,7 @@ describe('IdGenerator', () => {
         generator.generateImageId();
         generator.generateTableId();
         generator.generateFootnoteId();
+        generator.generateTextBlockId();
       }
 
       generator.reset();
@@ -210,6 +231,7 @@ describe('IdGenerator', () => {
       expect(generator.generateImageId()).toBe('img-001');
       expect(generator.generateTableId()).toBe('tbl-001');
       expect(generator.generateFootnoteId()).toBe('ftn-001');
+      expect(generator.generateTextBlockId()).toBe('txt-001');
     });
 
     test('should allow generating IDs after reset', () => {
@@ -224,7 +246,13 @@ describe('IdGenerator', () => {
   describe('getCounters', () => {
     test('should return initial counter values', () => {
       const counters = generator.getCounters();
-      expect(counters).toEqual({ chapter: 0, image: 0, table: 0, footnote: 0 });
+      expect(counters).toEqual({
+        chapter: 0,
+        image: 0,
+        table: 0,
+        footnote: 0,
+        textBlock: 0,
+      });
     });
 
     test('should return current counter values after generation', () => {
@@ -236,9 +264,16 @@ describe('IdGenerator', () => {
       generator.generateTableId();
       generator.generateFootnoteId();
       generator.generateFootnoteId();
+      generator.generateTextBlockId();
 
       const counters = generator.getCounters();
-      expect(counters).toEqual({ chapter: 2, image: 1, table: 3, footnote: 2 });
+      expect(counters).toEqual({
+        chapter: 2,
+        image: 1,
+        table: 3,
+        footnote: 2,
+        textBlock: 1,
+      });
     });
 
     test('should return zero counters after reset', () => {
@@ -246,10 +281,17 @@ describe('IdGenerator', () => {
       generator.generateImageId();
       generator.generateTableId();
       generator.generateFootnoteId();
+      generator.generateTextBlockId();
       generator.reset();
 
       const counters = generator.getCounters();
-      expect(counters).toEqual({ chapter: 0, image: 0, table: 0, footnote: 0 });
+      expect(counters).toEqual({
+        chapter: 0,
+        image: 0,
+        table: 0,
+        footnote: 0,
+        textBlock: 0,
+      });
     });
 
     test('should not modify counters when getting values', () => {
@@ -263,6 +305,7 @@ describe('IdGenerator', () => {
         image: 0,
         table: 0,
         footnote: 0,
+        textBlock: 0,
       });
     });
   });
@@ -276,6 +319,7 @@ describe('IdGenerator', () => {
       generator.generateTableId();
       generator.generateTableId();
       generator.generateFootnoteId();
+      generator.generateTextBlockId();
       generator.generateChapterId();
 
       expect(generator.getCounters()).toEqual({
@@ -283,6 +327,7 @@ describe('IdGenerator', () => {
         image: 2,
         table: 3,
         footnote: 1,
+        textBlock: 1,
       });
     });
 
@@ -293,6 +338,7 @@ describe('IdGenerator', () => {
       ids.push(generator.generateImageId()); // img-001
       ids.push(generator.generateTableId()); // tbl-001
       ids.push(generator.generateFootnoteId()); // ftn-001
+      ids.push(generator.generateTextBlockId()); // txt-001
       ids.push(generator.generateChapterId()); // ch-002
       ids.push(generator.generateImageId()); // img-002
       ids.push(generator.generateChapterId()); // ch-003
@@ -302,6 +348,7 @@ describe('IdGenerator', () => {
         'img-001',
         'tbl-001',
         'ftn-001',
+        'txt-001',
         'ch-002',
         'img-002',
         'ch-003',
@@ -341,12 +388,14 @@ describe('IdGenerator', () => {
       generator.generateImageId();
       generator.generateTableId();
       generator.generateFootnoteId();
+      generator.generateTextBlockId();
 
       const newGenerator = new IdGenerator();
       expect(newGenerator.generateChapterId()).toBe('ch-001');
       expect(newGenerator.generateImageId()).toBe('img-001');
       expect(newGenerator.generateTableId()).toBe('tbl-001');
       expect(newGenerator.generateFootnoteId()).toBe('ftn-001');
+      expect(newGenerator.generateTextBlockId()).toBe('txt-001');
     });
   });
 });

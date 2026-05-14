@@ -429,5 +429,82 @@ describe('CaptionProcessingPipeline', () => {
         pipeline.extractCaptionText([{ $ref: '#/texts/0' }]),
       ).toBeUndefined();
     });
+
+    test('should combine multiple caption refs', () => {
+      const mockResolver = {
+        resolveText: vi
+          .fn()
+          .mockReturnValueOnce({ text: 'Figure 1' })
+          .mockReturnValueOnce({ text: 'Site overview' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(
+        pipeline.extractCaptionText([
+          { $ref: '#/texts/0' },
+          { $ref: '#/texts/1' },
+        ]),
+      ).toBe('Figure 1 Site overview');
+    });
+  });
+
+  describe('extractCaptionSource', () => {
+    test('should return empty source refs for undefined captions', () => {
+      const pipeline = createPipeline();
+
+      expect(pipeline.extractCaptionSource(undefined)).toEqual({
+        sourceRefs: [],
+      });
+    });
+
+    test('should preserve refs and resolve text for ref captions', () => {
+      const mockResolver = {
+        resolveText: vi.fn().mockReturnValue({ text: 'Resolved Caption' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(pipeline.extractCaptionSource([{ $ref: '#/texts/0' }])).toEqual({
+        text: 'Resolved Caption',
+        sourceRefs: ['#/texts/0'],
+      });
+      expect(mockResolver.resolveText).toHaveBeenCalledWith('#/texts/0');
+    });
+
+    test('should combine string captions and ref captions', () => {
+      const mockResolver = {
+        resolveText: vi.fn().mockReturnValue({ text: 'Site overview' }),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(
+        pipeline.extractCaptionSource(['Figure 1', { $ref: '#/texts/1' }]),
+      ).toEqual({
+        text: 'Figure 1 Site overview',
+        sourceRefs: ['#/texts/1'],
+      });
+    });
+
+    test('should preserve unresolved refs without text', () => {
+      const mockResolver = {
+        resolveText: vi.fn().mockReturnValue(null),
+      };
+
+      const pipeline = createPipeline({
+        refResolver: mockResolver as any,
+      });
+
+      expect(pipeline.extractCaptionSource([{ $ref: '#/texts/99' }])).toEqual({
+        sourceRefs: ['#/texts/99'],
+      });
+    });
   });
 });

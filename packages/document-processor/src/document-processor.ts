@@ -5,6 +5,7 @@ import type {
   DocumentProcessResult,
   PageRange,
   ProcessedDocument,
+  ProcessedDocumentSource,
   ProcessedFootnote,
   ProcessedImage,
   ProcessedTable,
@@ -27,6 +28,8 @@ import { CaptionParser, PageRangeParser } from './parsers';
 import { CaptionProcessingPipeline, TocExtractionPipeline } from './pipelines';
 import { IdGenerator, RefResolver, TextCleaner } from './utils';
 import { CaptionValidator, TocContentValidator } from './validators';
+
+export const PROCESSED_DOCUMENT_SCHEMA_VERSION = 'processed-document.v2';
 
 /**
  * DocumentProcessor Options
@@ -134,6 +137,18 @@ export interface DocumentProcessorProcessOptions {
    * When provided, automatic TOC extraction pipeline execution is skipped.
    */
   tocEntries?: TocEntry[];
+
+  /**
+   * Caller-supplied source artifact metadata for the Docling input.
+   */
+  source?: ProcessedDocumentSource;
+
+  /**
+   * Validate generated source references against the input Docling document.
+   *
+   * This option is reserved for the source reference validation phase.
+   */
+  validateSourceRefs?: boolean;
 }
 
 /**
@@ -390,6 +405,7 @@ export class DocumentProcessor {
       images,
       tables,
       footnotes,
+      processOptions.source,
     );
     const assembleTime = Date.now() - startTimeAssemble;
     this.logger.info(
@@ -576,11 +592,14 @@ export class DocumentProcessor {
     images: ProcessedImage[],
     tables: ProcessedTable[],
     footnotes: ProcessedFootnote[],
+    source?: ProcessedDocumentSource,
   ): ProcessedDocument {
     this.logger.info('[DocumentProcessor] Assembling ProcessedDocument...');
 
     const processedDoc: ProcessedDocument = {
       reportId,
+      schemaVersion: PROCESSED_DOCUMENT_SCHEMA_VERSION,
+      ...(source !== undefined ? { source } : {}),
       pageRangeMap,
       chapters,
       images,

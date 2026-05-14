@@ -153,6 +153,71 @@ describe('ChapterConverter', () => {
       expect(chapters[2].textBlocks).toHaveLength(2); // Pages 10, 15 (10+)
     });
 
+    test('should preserve text block IDs and source refs', () => {
+      const tocEntries: TocEntry[] = [
+        { title: 'Chapter 1', level: 1, pageNo: 1 },
+      ];
+      const textItems: DoclingTextItem[] = [
+        createTextItem('First text', 1),
+        createTextItem('Second text', 2),
+      ];
+      const pageRangeMap: Record<number, PageRange> = {
+        1: { startPageNo: 1, endPageNo: 1 },
+        2: { startPageNo: 2, endPageNo: 2 },
+      };
+
+      const chapters = converter.convert(
+        tocEntries,
+        textItems,
+        pageRangeMap,
+        [],
+        [],
+        [],
+      );
+
+      expect(chapters[1].textBlocks).toEqual([
+        {
+          id: 'txt-001',
+          sourceRef: '#/texts/1',
+          text: 'First text',
+          pdfPageNo: 1,
+        },
+        {
+          id: 'txt-002',
+          sourceRef: '#/texts/2',
+          text: 'Second text',
+          pdfPageNo: 2,
+        },
+      ]);
+    });
+
+    test('should propagate TOC entry source refs to chapters', () => {
+      const tocEntries: TocEntry[] = [
+        {
+          title: 'Chapter 1',
+          level: 1,
+          pageNo: 1,
+          sourceRefs: ['#/texts/10'],
+          children: [
+            {
+              title: 'Section 1.1',
+              level: 2,
+              pageNo: 2,
+              sourceRefs: ['#/texts/11'],
+            },
+          ],
+        },
+        { title: 'Chapter 2', level: 1, pageNo: 3 },
+      ];
+
+      const chapters = converter.convert(tocEntries, [], {}, [], [], []);
+
+      expect(chapters[0].sourceRefs).toEqual([]);
+      expect(chapters[1].sourceRefs).toEqual(['#/texts/10']);
+      expect(chapters[1].children![0].sourceRefs).toEqual(['#/texts/11']);
+      expect(chapters[2].sourceRefs).toEqual([]);
+    });
+
     test('should link images to chapters by page range', () => {
       const tocEntries: TocEntry[] = [
         { title: 'Chapter 1', level: 1, pageNo: 1 },

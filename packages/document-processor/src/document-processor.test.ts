@@ -7,7 +7,10 @@ import type { TocEntry } from './types';
 import { BatchProcessor } from '@heripo/shared';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { DocumentProcessor } from './document-processor';
+import {
+  DocumentProcessor,
+  PROCESSED_DOCUMENT_SCHEMA_VERSION,
+} from './document-processor';
 import { TocNotFoundError } from './extractors/toc-extract-error';
 
 // Mock CaptionParser for fallback reparse tests
@@ -29,6 +32,7 @@ vi.mock('./utils/id-generator.js', () => ({
       generateImageId: vi.fn(() => 'img-001'),
       generateTableId: vi.fn(() => 'tbl-001'),
       generateFootnoteId: vi.fn(() => 'ftn-001'),
+      generateTextBlockId: vi.fn(() => 'txt-001'),
     };
   }),
 }));
@@ -507,6 +511,9 @@ describe('DocumentProcessor', () => {
 
       expect(result).toBeDefined();
       expect(result.document.reportId).toBe('report-001');
+      expect(result.document.schemaVersion).toBe(
+        PROCESSED_DOCUMENT_SCHEMA_VERSION,
+      );
       expect(result.document.chapters).toHaveLength(1);
       expect(result.document.chapters[0].title).toBe('Chapter 1');
       expect(result.document.images).toEqual([]);
@@ -514,6 +521,27 @@ describe('DocumentProcessor', () => {
       expect(result.document.footnotes).toEqual([]);
       expect(result.document.pageRangeMap).toBeDefined();
       expect(result.usage).toBeDefined();
+    });
+
+    test('should include caller supplied source metadata', async () => {
+      const processor = createProcessor();
+      const source = {
+        pipelineRunId: 'run-001',
+        doclingObjectKey: 'docling/report-001.json',
+        doclingSha256: 'abc123',
+        handoffManifestObjectKey: 'manifests/run-001.json',
+      };
+      stubSuccessfulProcessing(processor);
+      const mockDoc = createMockDoc();
+
+      const result = await processor.process(mockDoc, 'report-001', '/path', {
+        source,
+      });
+
+      expect(result.document.schemaVersion).toBe(
+        PROCESSED_DOCUMENT_SCHEMA_VERSION,
+      );
+      expect(result.document.source).toBe(source);
     });
 
     test('should use injected pageRangeMap without parsing page ranges', async () => {

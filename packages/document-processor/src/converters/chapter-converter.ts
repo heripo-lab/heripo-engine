@@ -138,6 +138,7 @@ export class ChapterConverter {
       title: ChapterConverter.FRONT_MATTER_TITLE,
       pageNo: 1,
       level: 1,
+      sourceRefs: [],
       textBlocks: [],
       imageIds: [],
       tableIds: [],
@@ -159,6 +160,7 @@ export class ChapterConverter {
         title: TextCleaner.normalize(entry.title),
         pageNo: entry.pageNo,
         level: entry.level,
+        sourceRefs: entry.sourceRefs ?? [],
         textBlocks: [],
         imageIds: [],
         tableIds: [],
@@ -286,6 +288,8 @@ export class ChapterConverter {
       .map((item) => {
         const pdfPageNo = item.prov?.[0]?.page_no ?? 1;
         return {
+          id: this.idGenerator.generateTextBlockId(),
+          sourceRef: item.self_ref,
           text: TextCleaner.normalize(item.text),
           pdfPageNo,
         };

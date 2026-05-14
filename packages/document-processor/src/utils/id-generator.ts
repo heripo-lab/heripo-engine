@@ -5,6 +5,7 @@
  * - Chapters: ch-001, ch-002, ...
  * - Images: img-001, img-002, ...
  * - Tables: tbl-001, tbl-002, ...
+ * - Text blocks: txt-001, txt-002, ...
  *
  * Each type maintains its own independent counter.
  */
@@ -13,6 +14,7 @@ export class IdGenerator {
   private imageCounter = 0;
   private tableCounter = 0;
   private footnoteCounter = 0;
+  private textBlockCounter = 0;
 
   /**
    * Generate a chapter ID
@@ -51,6 +53,15 @@ export class IdGenerator {
   }
 
   /**
+   * Generate a text block ID
+   * @returns A text block ID in the format "txt-001"
+   */
+  generateTextBlockId(): string {
+    this.textBlockCounter++;
+    return `txt-${this.padNumber(this.textBlockCounter)}`;
+  }
+
+  /**
    * Reset all counters to zero
    */
   reset(): void {
@@ -58,6 +69,7 @@ export class IdGenerator {
     this.imageCounter = 0;
     this.tableCounter = 0;
     this.footnoteCounter = 0;
+    this.textBlockCounter = 0;
   }
 
   /**
@@ -68,12 +80,14 @@ export class IdGenerator {
     image: number;
     table: number;
     footnote: number;
+    textBlock: number;
   } {
     return {
       chapter: this.chapterCounter,
       image: this.imageCounter,
       table: this.tableCounter,
       footnote: this.footnoteCounter,
+      textBlock: this.textBlockCounter,
     };
   }
 

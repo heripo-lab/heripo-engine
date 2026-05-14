@@ -75,14 +75,18 @@ export class ResourceConverter {
       `[ResourceConverter] Converting ${doclingDoc.pictures.length} images...`,
     );
 
-    const captionTexts: Array<string | undefined> = doclingDoc.pictures.map(
-      (picture) =>
-        this.captionProcessingPipeline.extractCaptionText(picture.captions),
+    const captionSources = doclingDoc.pictures.map((picture) =>
+      this.captionProcessingPipeline.extractCaptionSource(picture.captions),
+    );
+    const captionTexts = captionSources.map(
+      (captionSource) => captionSource.text,
     );
 
     const images: ProcessedImage[] = doclingDoc.pictures.map(
       (picture, index) => ({
         id: this.idGenerator.generateImageId(),
+        sourceRef: picture.self_ref,
+        captionSourceRefs: captionSources[index].sourceRefs,
         path: `${artifactDir}/images/image_${index}.png`,
         pdfPageNo: picture.prov?.[0]?.page_no ?? 0,
       }),
@@ -111,12 +115,14 @@ export class ResourceConverter {
       `[ResourceConverter] Converting ${doclingDoc.tables.length} tables...`,
     );
 
-    const captionTexts: Array<string | undefined> = doclingDoc.tables.map(
-      (table) =>
-        this.captionProcessingPipeline.extractCaptionText(table.captions),
+    const captionSources = doclingDoc.tables.map((table) =>
+      this.captionProcessingPipeline.extractCaptionSource(table.captions),
+    );
+    const captionTexts = captionSources.map(
+      (captionSource) => captionSource.text,
     );
 
-    const tables: ProcessedTable[] = doclingDoc.tables.map((table) => {
+    const tables: ProcessedTable[] = doclingDoc.tables.map((table, index) => {
       const grid: ProcessedTableCell[][] = table.data.grid.map((row) =>
         row.map((cell) => ({
           text: cell.text,
@@ -128,6 +134,8 @@ export class ResourceConverter {
 
       return {
         id: this.idGenerator.generateTableId(),
+        sourceRef: table.self_ref,
+        captionSourceRefs: captionSources[index].sourceRefs,
         pdfPageNo: table.prov?.[0]?.page_no ?? 0,
         numRows: grid.length,
         numCols: grid[0]?.length ?? 0,
@@ -165,6 +173,7 @@ export class ResourceConverter {
       .filter((item) => TextCleaner.isValidText(item.text))
       .map((item) => ({
         id: this.idGenerator.generateFootnoteId(),
+        sourceRef: item.self_ref,
         text: TextCleaner.normalize(item.text),
         pdfPageNo: item.prov?.[0]?.page_no ?? 1,
       }));

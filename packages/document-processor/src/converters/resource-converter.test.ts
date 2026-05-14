@@ -23,7 +23,7 @@ function createMockIdGenerator(overrides?: Partial<IdGenerator>): IdGenerator {
     generateTableId: vi.fn(() => 'tbl-001'),
     generateFootnoteId: vi.fn(() => 'ftn-001'),
     generateChapterId: vi.fn(() => 'ch-001'),
-    generateTextBlockId: vi.fn(() => 'tb-001'),
+    generateTextBlockId: vi.fn(() => 'txt-001'),
     ...overrides,
   } as unknown as IdGenerator;
 }
@@ -33,6 +33,9 @@ function createMockCaptionPipeline(
 ): CaptionProcessingPipeline {
   return {
     extractCaptionText: vi.fn().mockReturnValue(undefined),
+    extractCaptionSource: vi
+      .fn()
+      .mockReturnValue({ text: undefined, sourceRefs: [] }),
     processResourceCaptions: vi.fn().mockResolvedValue(new Map<number, any>()),
     ...overrides,
   } as unknown as CaptionProcessingPipeline;
@@ -94,7 +97,10 @@ describe('ResourceConverter', () => {
     test('processes images with captions', async () => {
       const logger = createMockLogger();
       const captionPipeline = createMockCaptionPipeline({
-        extractCaptionText: vi.fn().mockReturnValue('Figure 1: Test image'),
+        extractCaptionSource: vi.fn().mockReturnValue({
+          text: 'Figure 1: Test image',
+          sourceRefs: [],
+        }),
         processResourceCaptions: vi
           .fn()
           .mockResolvedValue(
@@ -126,7 +132,46 @@ describe('ResourceConverter', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('img-001');
+      expect(result[0].sourceRef).toBe('#/pictures/0');
+      expect(result[0].captionSourceRefs).toEqual([]);
       expect(result[0].caption?.fullText).toBe('Figure 1: Test image');
+    });
+
+    test('preserves image caption source refs', async () => {
+      const logger = createMockLogger();
+      const captionPipeline = createMockCaptionPipeline({
+        extractCaptionSource: vi.fn().mockReturnValue({
+          text: 'Figure 1: Test image',
+          sourceRefs: ['#/texts/7', '#/texts/8'],
+        }),
+      });
+
+      const converter = new ResourceConverter(
+        logger,
+        createMockIdGenerator(),
+        captionPipeline,
+      );
+
+      const mockDoc = {
+        pictures: [
+          {
+            self_ref: '#/pictures/0',
+            label: 'picture',
+            prov: [{ page_no: 1 }],
+            children: [],
+            captions: [{ $ref: '#/texts/7' }, { $ref: '#/texts/8' }],
+          },
+        ],
+      } as unknown as DoclingDocument;
+
+      const result = await converter.convertImages(mockDoc, '/path');
+
+      expect(result[0].sourceRef).toBe('#/pictures/0');
+      expect(result[0].captionSourceRefs).toEqual(['#/texts/7', '#/texts/8']);
+      expect(captionPipeline.processResourceCaptions).toHaveBeenCalledWith(
+        ['Figure 1: Test image'],
+        'image',
+      );
     });
 
     test('processes images without captions', async () => {
@@ -153,6 +198,8 @@ describe('ResourceConverter', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('img-001');
+      expect(result[0].sourceRef).toBe('#/pictures/0');
+      expect(result[0].captionSourceRefs).toEqual([]);
       expect(result[0].pdfPageNo).toBe(2);
       expect(result[0].caption).toBeUndefined();
     });
@@ -337,7 +384,10 @@ describe('ResourceConverter', () => {
     test('processes tables with captions', async () => {
       const logger = createMockLogger();
       const captionPipeline = createMockCaptionPipeline({
-        extractCaptionText: vi.fn().mockReturnValue('Table 1: Data summary'),
+        extractCaptionSource: vi.fn().mockReturnValue({
+          text: 'Table 1: Data summary',
+          sourceRefs: [],
+        }),
         processResourceCaptions: vi
           .fn()
           .mockResolvedValue(
@@ -379,9 +429,52 @@ describe('ResourceConverter', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('tbl-001');
+      expect(result[0].sourceRef).toBe('#/tables/0');
+      expect(result[0].captionSourceRefs).toEqual([]);
       expect(result[0].numRows).toBe(2);
       expect(result[0].numCols).toBe(2);
       expect(result[0].caption?.fullText).toBe('Table 1: Data summary');
+    });
+
+    test('preserves table caption source refs', async () => {
+      const logger = createMockLogger();
+      const captionPipeline = createMockCaptionPipeline({
+        extractCaptionSource: vi.fn().mockReturnValue({
+          text: 'Table 1: Data summary',
+          sourceRefs: ['#/texts/10'],
+        }),
+      });
+
+      const converter = new ResourceConverter(
+        logger,
+        createMockIdGenerator(),
+        captionPipeline,
+      );
+
+      const mockDoc = {
+        tables: [
+          {
+            self_ref: '#/tables/0',
+            label: 'table',
+            prov: [{ page_no: 2 }],
+            captions: [{ $ref: '#/texts/10' }],
+            data: {
+              num_rows: 1,
+              num_cols: 1,
+              grid: [[{ text: 'Cell' }]],
+            },
+          },
+        ],
+      } as unknown as DoclingDocument;
+
+      const result = await converter.convertTables(mockDoc);
+
+      expect(result[0].sourceRef).toBe('#/tables/0');
+      expect(result[0].captionSourceRefs).toEqual(['#/texts/10']);
+      expect(captionPipeline.processResourceCaptions).toHaveBeenCalledWith(
+        ['Table 1: Data summary'],
+        'table',
+      );
     });
   });
 
@@ -404,11 +497,13 @@ describe('ResourceConverter', () => {
       const mockDoc = {
         texts: [
           {
+            self_ref: '#/texts/1',
             text: 'This is a footnote',
             label: 'footnote',
             prov: [{ page_no: 3 }],
           },
           {
+            self_ref: '#/texts/2',
             text: 'Another footnote',
             label: 'footnote',
             prov: [{ page_no: 5 }],
@@ -425,8 +520,10 @@ describe('ResourceConverter', () => {
 
       expect(result).toHaveLength(2);
       expect(result[0].id).toBe('ftn-001');
+      expect(result[0].sourceRef).toBe('#/texts/1');
       expect(result[0].text).toBe('This is a footnote');
       expect(result[0].pdfPageNo).toBe(3);
+      expect(result[1].sourceRef).toBe('#/texts/2');
       expect(result[1].pdfPageNo).toBe(5);
     });
 

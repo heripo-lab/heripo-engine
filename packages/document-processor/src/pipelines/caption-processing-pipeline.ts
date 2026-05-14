@@ -1,5 +1,5 @@
 import type { LoggerMethods } from '@heripo/logger';
-import type { Caption } from '@heripo/model';
+import type { Caption, DoclingReference } from '@heripo/model';
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
@@ -23,6 +23,14 @@ export interface CaptionProcessingPipelineDeps {
   captionValidatorBatchSize: number;
   usageAggregator: LLMTokenUsageAggregator;
   abortSignal?: AbortSignal;
+}
+
+/**
+ * Caption text and source references extracted from Docling caption links.
+ */
+export interface CaptionSourceExtraction {
+  text?: string;
+  sourceRefs: string[];
 }
 
 /**
@@ -248,22 +256,44 @@ export class CaptionProcessingPipeline {
    * Handles both string references and $ref resolution
    */
   extractCaptionText(
-    captions: Array<string | { $ref: string }> | undefined,
+    captions: Array<string | DoclingReference> | undefined,
   ): string | undefined {
-    if (!captions?.[0]) {
-      return undefined;
+    return this.extractCaptionSource(captions).text;
+  }
+
+  /**
+   * Extract caption text and source references from resource captions.
+   */
+  extractCaptionSource(
+    captions: Array<string | DoclingReference> | undefined,
+  ): CaptionSourceExtraction {
+    const sourceRefs: string[] = [];
+    const textParts: string[] = [];
+
+    captions?.forEach((caption) => {
+      if (typeof caption === 'string') {
+        const text = caption.trim();
+        if (text.length > 0) {
+          textParts.push(text);
+        }
+        return;
+      }
+
+      sourceRefs.push(caption.$ref);
+      const resolved = this.refResolver?.resolveText(caption.$ref);
+      const text = resolved?.text.trim();
+      if (text && text.length > 0) {
+        textParts.push(text);
+      }
+    });
+
+    if (textParts.length === 0) {
+      return { sourceRefs };
     }
 
-    const captionRef = captions[0];
-    if (typeof captionRef === 'string') {
-      return captionRef;
-    }
-
-    if (this.refResolver && '$ref' in captionRef) {
-      const resolved = this.refResolver.resolveText(captionRef.$ref);
-      return resolved?.text;
-    }
-
-    return undefined;
+    return {
+      text: textParts.join(' '),
+      sourceRefs,
+    };
   }
 }

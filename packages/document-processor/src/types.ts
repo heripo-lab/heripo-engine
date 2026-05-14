@@ -20,6 +20,11 @@ export interface TocEntry {
   pageNo: number;
 
   /**
+   * Docling references for source nodes used to derive this TOC entry
+   */
+  sourceRefs?: string[];
+
+  /**
    * Child TOC entries
    */
   children?: TocEntry[];
