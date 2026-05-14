@@ -625,9 +625,15 @@ export class DocumentProcessor {
     processedDoc: ProcessedDocument,
     mode: Exclude<SourceRefValidationMode, 'off'>,
   ): void {
+    if (!this.refResolver) {
+      throw new Error(
+        '[DocumentProcessor] Cannot validate source references before RefResolver initialization',
+      );
+    }
+
     const issues = this.collectMissingSourceRefs(
       processedDoc,
-      this.refResolver!,
+      this.refResolver,
     );
 
     if (issues.length === 0) {
