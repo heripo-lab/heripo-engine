@@ -24,6 +24,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PdfTextExtractor } from '../pdf-text-extractor';
+import { createReviewAssistancePageGatePendingEligibility } from './review-assistance-page-gate';
 import { ReviewAssistanceRunner } from './review-assistance-runner';
 
 const { mockExtractText } = vi.hoisted(() => ({
@@ -640,6 +641,62 @@ describe('ReviewAssistanceRunner', () => {
     );
   });
 
+  test('propagates page gate image read errors when aborted', async () => {
+    const logger = makeLogger();
+    const abortController = new AbortController();
+    abortController.abort();
+    rmSync(join(outputDir, 'pages', 'page_0.png'), { force: true });
+
+    await expect(
+      new ReviewAssistanceRunner(logger).analyzeAndSave(
+        outputDir,
+        'report-1',
+        { modelId: 'mock-model' } as any,
+        {
+          ...makeOptions(),
+          abortSignal: abortController.signal,
+        },
+      ),
+    ).rejects.toThrow('ENOENT');
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1: page image unavailable for page gate',
+      expect.any(Object),
+    );
+  });
+
+  test('keeps non-pending contexts unchanged while evaluating pending page gates', async () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const pageOneContext = makePageContext(
+      join(outputDir, 'pages', 'page_0.png'),
+    );
+    const pageTwoContext = {
+      ...makePageContext(join(outputDir, 'pages', 'page_1.png')),
+      pageNo: 2,
+      reviewAssistanceEligibility:
+        createReviewAssistancePageGatePendingEligibility(2),
+    };
+    writeFileSync(
+      join(outputDir, 'pages', 'page_1.png'),
+      Buffer.from([4, 5, 6]),
+    );
+    vi.mocked(LLMCaller.callVision).mockResolvedValue(makeGateResult());
+
+    const updated = (await runner.ensurePageEligibility(
+      [pageOneContext, pageTwoContext],
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+      outputDir,
+    )) as PageReviewContext[];
+
+    expect(updated[0]).toBe(pageOneContext);
+    expect(updated[1].reviewAssistanceEligibility).toMatchObject({
+      pageNo: 2,
+      eligible: true,
+      reasons: ['VLM sees data-bearing content'],
+    });
+    expect(LLMCaller.callVision).toHaveBeenCalledTimes(1);
+  });
+
   test('reuses an existing page gate sidecar without re-evaluating eligibility', async () => {
     writeFileSync(
       join(outputDir, 'review_assistance_page_gate.json'),
@@ -914,6 +971,31 @@ describe('ReviewAssistanceRunner', () => {
     expect(report.summary.pagesSucceeded).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
       '[ReviewAssistanceRunner] pdftotext extraction failed, proceeding without text reference',
+      expect.any(Error),
+    );
+  });
+
+  test('re-evaluates page gates when the existing gate sidecar is malformed', async () => {
+    const logger = makeLogger();
+    writeFileSync(
+      join(outputDir, 'review_assistance_page_gate.json'),
+      '{not-json',
+    );
+
+    const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+    );
+
+    const components = vi
+      .mocked(LLMCaller.callVision)
+      .mock.calls.map(([input]) => input.component);
+    expect(components).toContain('ReviewAssistancePageGate');
+    expect(report.pages[0].status).toBe('succeeded');
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Failed to read page gate report, re-evaluating pages',
       expect.any(Error),
     );
   });
@@ -1413,6 +1495,24 @@ describe('ReviewAssistanceRunner', () => {
       expect.any(Object),
     );
 
+    const abortLogger = makeLogger();
+    const abortRunner = new ReviewAssistanceRunner(abortLogger) as any;
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(
+      abortRunner.reviewPage(
+        makePageContext(join(outputDir, 'pages', 'missing.png')),
+        'report-1',
+        { modelId: 'mock-model' } as any,
+        {
+          ...makeOptions(),
+          abortSignal: abortController.signal,
+        },
+        1,
+      ),
+    ).rejects.toThrow('ENOENT');
+
     const failedTasksLogger = makeLogger();
     const failedTasksRunner = new ReviewAssistanceRunner(
       failedTasksLogger,
@@ -1436,6 +1536,32 @@ describe('ReviewAssistanceRunner', () => {
     expect(failedTasksResult.issues.every((issue) => issue.type !== '')).toBe(
       true,
     );
+
+    const abortTaskRunner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const abortTaskController = new AbortController();
+    abortTaskController.abort();
+    vi.mocked(LLMCaller.callVision).mockRejectedValue(
+      new Error('task aborted'),
+    );
+
+    await expect(
+      abortTaskRunner.reviewPageTask(
+        makePageContext(pagePath),
+        {
+          id: 'text_ocr_hanja',
+          label: 'Text OCR and Hanja correction',
+          allowedOps: ['replaceText'],
+          focus: 'Abort branch coverage',
+        },
+        new Uint8Array([1]),
+        1,
+        { modelId: 'mock-model' } as any,
+        {
+          ...makeOptions(),
+          abortSignal: abortTaskController.signal,
+        },
+      ),
+    ).rejects.toThrow('task aborted');
   });
 
   test('covers task decision merge helpers and touched ref extraction', () => {

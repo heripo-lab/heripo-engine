@@ -578,6 +578,190 @@ describe('VlmTextCorrector', () => {
       });
     });
 
+    test('propagates review-assistance gate errors when aborted', async () => {
+      const doc = createTestDoc([]);
+      const abortController = new AbortController();
+      abortController.abort();
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockRejectedValue(
+        new Error('gate aborted'),
+      );
+
+      await expect(
+        corrector.correctAndSave('/output/report-1', mockModel, {
+          abortSignal: abortController.signal,
+          reviewAssistanceGate: {
+            enabled: true,
+          },
+        }),
+      ).rejects.toThrow('gate aborted');
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        '[VlmTextCorrector] Page 1: review-assistance gate failed open',
+        expect.any(Error),
+      );
+    });
+
+    test('passes page table and picture caption context to the review-assistance gate', async () => {
+      const bodyText = createTextItem('본문', 'text', 1);
+      bodyText.self_ref = '#/texts/0';
+      const captionText = createTextItem('Lámina 1', 'caption', 1);
+      captionText.self_ref = '#/texts/1';
+      const table = createTableItem([createTableCell('유구', 0, 0)], 1);
+      const doc = createTestDoc([bodyText, captionText], [table]);
+      doc.pictures = [
+        {
+          self_ref: '#/pictures/0',
+          label: 'picture',
+          prov: [
+            {
+              page_no: 1,
+              bbox: { l: 0, t: 0, r: 100, b: 100, coord_origin: 'BOTTOMLEFT' },
+              charspan: [0, 0],
+            },
+          ],
+          captions: [{ $ref: '#/texts/1' }],
+          references: [],
+          footnotes: [],
+          annotations: [],
+        } as any,
+        {
+          self_ref: '#/pictures/1',
+          label: 'picture',
+          prov: [
+            {
+              page_no: 1,
+              bbox: {
+                l: 100,
+                t: 100,
+                r: 180,
+                b: 180,
+                coord_origin: 'BOTTOMLEFT',
+              },
+              charspan: [0, 0],
+            },
+          ],
+          captions: [],
+          references: [],
+          footnotes: [],
+          annotations: [],
+        } as any,
+      ];
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+        if (input.component === 'ReviewAssistancePageGate') {
+          return {
+            output: {
+              eligible: true,
+              kind: 'archaeological_data',
+              score: 90,
+              reasons: ['captioned picture and table'],
+              exclusionReasons: [],
+            },
+            usage: {
+              component: 'ReviewAssistancePageGate',
+              phase: 'page-eligibility',
+              model: 'primary',
+              modelName: 'test-vlm',
+              inputTokens: 10,
+              outputTokens: 5,
+              totalTokens: 15,
+            },
+            usedFallback: false,
+          };
+        }
+        return mockVlmResponse({ tc: [], cc: [] });
+      });
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        reviewAssistanceGate: {
+          enabled: true,
+        },
+      });
+
+      const pageGateCall = vi
+        .mocked(LLMCaller.callVision)
+        .mock.calls.find(
+          ([input]) => input.component === 'ReviewAssistancePageGate',
+        );
+      const prompt = (pageGateCall?.[0].messages[0].content as any[]).find(
+        (entry: any) => entry.type === 'text',
+      ).text as string;
+      expect(prompt).toContain('"tableCount":1');
+      expect(prompt).toContain('"caption":"Lámina 1"');
+      expect(prompt).toContain('"suspectReasons":[]');
+      expect(prompt).toContain('"suspectReasons":["image_missing_caption"]');
+    });
+
+    test('uses stringified non-Error review-assistance gate failures for fail-open reasons', async () => {
+      const doc = createTestDoc([]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockRejectedValue('gate string failure');
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        reviewAssistanceGate: {
+          enabled: true,
+        },
+      });
+
+      const sidecarCall = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(([path]) =>
+          String(path).endsWith('review_assistance_page_gate.json'),
+        );
+      const sidecar = JSON.parse(String(sidecarCall?.[1]));
+      expect(sidecar.pages[0]).toMatchObject({
+        reasons: ['page_gate_failed_open', 'gate string failure'],
+      });
+    });
+
     test('tracks token usage via aggregator', async () => {
       const doc = createTestDoc([createTextItem('text', 'text', 1)]);
 

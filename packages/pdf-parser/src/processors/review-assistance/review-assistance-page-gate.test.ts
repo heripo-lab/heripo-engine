@@ -144,6 +144,31 @@ describe('ReviewAssistancePageGate', () => {
     });
   });
 
+  test('truncates long text blocks in the page gate prompt', async () => {
+    const longText = `${'A'.repeat(1_900)}TAIL`;
+
+    await new ReviewAssistancePageGate().evaluate(
+      makeContext({
+        textBlocks: [
+          {
+            label: 'text',
+            text: longText,
+            suspectReasons: [],
+          },
+        ],
+      }),
+      new Uint8Array([1]),
+      { modelId: 'mock-model' } as any,
+    );
+
+    const prompt = (
+      vi.mocked(LLMCaller.callVision).mock.calls[0][0].messages[0]
+        .content as any[]
+    ).find((entry: any) => entry.type === 'text').text as string;
+    expect(prompt).toContain('A'.repeat(1_800));
+    expect(prompt).not.toContain('TAIL');
+  });
+
   test('keeps VLM skip reasons for non-meaningful pages', async () => {
     vi.mocked(LLMCaller.callVision).mockResolvedValue({
       output: {
