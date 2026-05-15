@@ -32,6 +32,7 @@ import {
 } from '../../types/review-assistance-schema';
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
+import { PictureSplitCandidateDetector } from './picture-split-candidate-detector';
 import {
   REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
   ReviewAssistancePageGate,
@@ -110,6 +111,7 @@ export class ReviewAssistanceRunner {
       options,
       outputDir,
     );
+    contexts = await this.addPictureSplitCandidates(contexts);
     const pagesSkippedByGate = contexts.filter(
       (context) => !context.reviewAssistanceEligibility.eligible,
     ).length;
@@ -368,6 +370,51 @@ export class ReviewAssistanceRunner {
       updatedContexts.map((context) => context.reviewAssistanceEligibility),
     );
     return updatedContexts;
+  }
+
+  private async addPictureSplitCandidates(
+    contexts: PageReviewContext[],
+  ): Promise<PageReviewContext[]> {
+    const detector = new PictureSplitCandidateDetector(this.logger);
+    return Promise.all(
+      contexts.map(async (context) => {
+        if (
+          !context.reviewAssistanceEligibility.eligible ||
+          this.hasUnavailablePageImageGateReason(context) ||
+          context.pictures.length === 0
+        ) {
+          return context;
+        }
+
+        const pictures: PageReviewContext['pictures'] = [];
+        for (const picture of context.pictures) {
+          if (!picture.bbox) {
+            pictures.push(picture);
+            continue;
+          }
+          const splitCandidate = await detector.detect({
+            pageImagePath: context.pageImagePath,
+            pageSize: context.pageSize,
+            pictureBbox: picture.bbox,
+          });
+          if (!splitCandidate) {
+            pictures.push(picture);
+            continue;
+          }
+          pictures.push({
+            ...picture,
+            splitCandidate,
+            suspectReasons: [
+              ...new Set([
+                ...picture.suspectReasons,
+                'picture_split_boundary_candidate',
+              ]),
+            ],
+          });
+        }
+        return { ...context, pictures };
+      }),
+    );
   }
 
   private async reviewPage(
@@ -1188,8 +1235,8 @@ export class ReviewAssistanceRunner {
         return `앞뒤 페이지 표와 이어질 가능성이 있습니다${preview}`;
       case 'image_missing_caption':
         return `캡션이 없는 이미지입니다${preview}`;
-      case 'large_picture_split_candidate':
-        return `큰 이미지 bbox라 복합 이미지 분할 후보입니다${preview}`;
+      case 'picture_split_boundary_candidate':
+        return `이미지 내부에 분할 경계 후보가 있습니다${preview}`;
       case 'hanja_term':
         return `한자 용어가 포함되어 이미지 대조가 필요합니다${preview}`;
       case 'institution_name':

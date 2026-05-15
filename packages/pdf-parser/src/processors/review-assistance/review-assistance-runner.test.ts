@@ -24,6 +24,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PdfTextExtractor } from '../pdf-text-extractor';
+import { PictureSplitCandidateDetector } from './picture-split-candidate-detector';
 import { createReviewAssistancePageGatePendingEligibility } from './review-assistance-page-gate';
 import { ReviewAssistanceRunner } from './review-assistance-runner';
 
@@ -1703,6 +1704,59 @@ describe('ReviewAssistanceRunner', () => {
     ]);
   });
 
+  test('adds split candidates only for pictures with supported detector evidence', async () => {
+    const detectorSpy = vi
+      .spyOn(PictureSplitCandidateDetector.prototype, 'detect')
+      .mockResolvedValueOnce({
+        score: 0.9,
+        orientation: 'vertical',
+        reasons: ['vertical_gutter_with_content_on_both_sides'],
+      });
+    const runner = new ReviewAssistanceRunner(makeLogger()) as unknown as {
+      addPictureSplitCandidates: (
+        contexts: PageReviewContext[],
+      ) => Promise<PageReviewContext[]>;
+    };
+
+    const [context] = await runner.addPictureSplitCandidates([
+      makePageContext('/tmp/page_0.png'),
+    ]);
+
+    expect(detectorSpy).toHaveBeenCalledWith({
+      pageImagePath: '/tmp/page_0.png',
+      pageSize: { width: 100, height: 100 },
+      pictureBbox: reviewBBox,
+    });
+    expect(context.pictures[0].splitCandidate).toMatchObject({
+      orientation: 'vertical',
+      score: 0.9,
+    });
+    expect(context.pictures[0].suspectReasons).toContain(
+      'picture_split_boundary_candidate',
+    );
+    detectorSpy.mockRestore();
+  });
+
+  test('keeps pictures without bbox out of split candidate detection', async () => {
+    const detectorSpy = vi.spyOn(
+      PictureSplitCandidateDetector.prototype,
+      'detect',
+    );
+    const runner = new ReviewAssistanceRunner(makeLogger()) as unknown as {
+      addPictureSplitCandidates: (
+        contexts: PageReviewContext[],
+      ) => Promise<PageReviewContext[]>;
+    };
+    const context = makePageContext('/tmp/page_0.png');
+    context.pictures[0].bbox = undefined;
+
+    const [result] = await runner.addPictureSplitCandidates([context]);
+
+    expect(detectorSpy).not.toHaveBeenCalled();
+    expect(result.pictures[0].splitCandidate).toBeUndefined();
+    detectorSpy.mockRestore();
+  });
+
   test('covers runner issue and error helper branches', () => {
     const runner = new ReviewAssistanceRunner(makeLogger()) as any;
     const context = makePageContext('/tmp/page_0.png');
@@ -1729,7 +1783,7 @@ describe('ReviewAssistanceRunner', () => {
       'table_many_empty_cells',
       'multi_page_table_candidate',
       'image_missing_caption',
-      'large_picture_split_candidate',
+      'picture_split_boundary_candidate',
       'hanja_term',
       'institution_name',
       'roman_numeral',

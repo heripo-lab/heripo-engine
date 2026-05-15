@@ -502,9 +502,10 @@ describe('PageReviewContextBuilder', () => {
     expect(first.tables[0].nextPageTableRefs).toEqual(['#/tables/1']);
     expect(second.tables[0].previousPageTableRefs).toEqual(['#/tables/0']);
     expect(first.pictures[0].caption).toBe('Table 1');
-    expect(first.pictures[0].suspectReasons).toContain(
+    expect(first.pictures[0].suspectReasons).not.toContain(
       'large_picture_split_candidate',
     );
+    expect(first.pictures[0].splitCandidate).toBeUndefined();
     expect(first.layout.bboxWarnings.map((warning) => warning.reason)).toEqual(
       expect.arrayContaining([
         'bbox_outside_page',

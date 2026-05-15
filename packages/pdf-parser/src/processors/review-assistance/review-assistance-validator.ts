@@ -408,6 +408,12 @@ export class ReviewAssistanceValidator {
           this.validateBbox(context, region.bbox, reasons),
         );
         this.validateSplitRegions(command.regions, reasons);
+        this.validateSplitPicture(
+          context,
+          command.pictureRef,
+          command.regions,
+          reasons,
+        );
         break;
       case 'updateBbox':
         if (!this.refExists(command.targetRef, refs)) {
@@ -893,6 +899,161 @@ export class ReviewAssistanceValidator {
     }
   }
 
+  private validateSplitPicture(
+    context: PageReviewContext,
+    pictureRef: string,
+    regions: ReviewAssistanceImageRegion[],
+    reasons: string[],
+  ): void {
+    const picture = context.pictures.find((entry) => entry.ref === pictureRef);
+    if (!picture) return;
+    if (!picture.splitCandidate) {
+      reasons.push('split_picture_without_boundary_candidate');
+      return;
+    }
+    if (!picture.bbox) {
+      reasons.push('split_picture_source_bbox_missing');
+      return;
+    }
+
+    for (const region of regions) {
+      if (
+        this.bboxContainmentRatio(region.bbox, picture.bbox, context.pageSize) <
+        0.9
+      ) {
+        reasons.push('split_picture_region_outside_source');
+        break;
+      }
+    }
+
+    const expectedRegionCount = picture.splitCandidate.suggestedRegions?.length;
+    if (expectedRegionCount && regions.length !== expectedRegionCount) {
+      reasons.push('split_picture_region_count_mismatch');
+    }
+
+    if (
+      picture.splitCandidate.orientation &&
+      !this.splitRegionsMatchOrientation(
+        regions,
+        picture.splitCandidate.orientation,
+        context.pageSize,
+      )
+    ) {
+      reasons.push('split_picture_boundary_not_supported');
+    }
+  }
+
+  private splitRegionsMatchOrientation(
+    regions: ReviewAssistanceImageRegion[],
+    orientation: 'horizontal' | 'vertical' | 'grid',
+    pageSize: PageReviewContext['pageSize'],
+  ): boolean {
+    if (orientation === 'grid') {
+      return (
+        regions.length >= 4 &&
+        this.hasSeparatedRegionPair(regions, 'vertical', pageSize) &&
+        this.hasSeparatedRegionPair(regions, 'horizontal', pageSize)
+      );
+    }
+    return this.hasSeparatedRegionPair(regions, orientation, pageSize);
+  }
+
+  private hasSeparatedRegionPair(
+    regions: ReviewAssistanceImageRegion[],
+    orientation: 'horizontal' | 'vertical',
+    pageSize: PageReviewContext['pageSize'],
+  ): boolean {
+    for (let i = 0; i < regions.length; i++) {
+      for (let j = i + 1; j < regions.length; j++) {
+        const a = this.toTopLeftRect(regions[i].bbox, pageSize);
+        const b = this.toTopLeftRect(regions[j].bbox, pageSize);
+        if (orientation === 'vertical') {
+          const separated = a.right <= b.left || b.right <= a.left;
+          const overlap = this.axisOverlapRatio(
+            a.top,
+            a.bottom,
+            b.top,
+            b.bottom,
+          );
+          if (separated && overlap >= 0.5) return true;
+        } else {
+          const separated = a.bottom <= b.top || b.bottom <= a.top;
+          const overlap = this.axisOverlapRatio(
+            a.left,
+            a.right,
+            b.left,
+            b.right,
+          );
+          if (separated && overlap >= 0.5) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private bboxContainmentRatio(
+    inner: DoclingBBox,
+    outer: DoclingBBox,
+    pageSize: PageReviewContext['pageSize'],
+  ): number {
+    const innerRect = this.toTopLeftRect(inner, pageSize);
+    const outerRect = this.toTopLeftRect(outer, pageSize);
+    const intersection = this.rectIntersectionArea(innerRect, outerRect);
+    const innerArea = this.rectArea(innerRect);
+    return innerArea === 0 ? 0 : intersection / innerArea;
+  }
+
+  private rectIntersectionArea(a: TopLeftRect, b: TopLeftRect): number {
+    const left = Math.max(a.left, b.left);
+    const right = Math.min(a.right, b.right);
+    const top = Math.max(a.top, b.top);
+    const bottom = Math.min(a.bottom, b.bottom);
+    return Math.max(0, right - left) * Math.max(0, bottom - top);
+  }
+
+  private rectArea(rect: TopLeftRect): number {
+    return (
+      Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top)
+    );
+  }
+
+  private axisOverlapRatio(
+    aStart: number,
+    aEnd: number,
+    bStart: number,
+    bEnd: number,
+  ): number {
+    const overlap = Math.max(
+      0,
+      Math.min(aEnd, bEnd) - Math.max(aStart, bStart),
+    );
+    const minLength = Math.min(aEnd - aStart, bEnd - bStart);
+    return minLength <= 0 ? 0 : overlap / minLength;
+  }
+
+  private toTopLeftRect(
+    bbox: DoclingBBox,
+    pageSize: PageReviewContext['pageSize'],
+  ): TopLeftRect {
+    const left = Math.min(bbox.l, bbox.r);
+    const right = Math.max(bbox.l, bbox.r);
+    if (bbox.coord_origin === 'BOTTOMLEFT') {
+      const pageHeight = pageSize?.height ?? Math.max(bbox.t, bbox.b);
+      return {
+        left,
+        right,
+        top: pageHeight - Math.max(bbox.t, bbox.b),
+        bottom: pageHeight - Math.min(bbox.t, bbox.b),
+      };
+    }
+    return {
+      left,
+      right,
+      top: Math.min(bbox.t, bbox.b),
+      bottom: Math.max(bbox.t, bbox.b),
+    };
+  }
+
   private missingTextMatches(
     context: PageReviewContext,
     text: string,
@@ -1183,4 +1344,11 @@ interface RefSet {
   tables: Set<string>;
   adjacentTables: Set<string>;
   pictures: Set<string>;
+}
+
+interface TopLeftRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }

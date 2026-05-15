@@ -41,11 +41,19 @@ export interface PageReviewTable {
   suspectReasons: string[];
 }
 
+export interface PageReviewPictureSplitCandidate {
+  score: number;
+  orientation?: 'horizontal' | 'vertical' | 'grid';
+  reasons: string[];
+  suggestedRegions?: Array<{ bbox: DoclingBBox; confidence: number }>;
+}
+
 export interface PageReviewPicture {
   ref: string;
   caption?: string;
   imageUri?: string;
   bbox?: DoclingBBox;
+  splitCandidate?: PageReviewPictureSplitCandidate;
   suspectReasons: string[];
 }
 
@@ -563,9 +571,6 @@ export class PageReviewContextBuilder {
     const image = (item as unknown as { image?: { uri?: string } }).image;
     const suspectReasons = caption ? [] : ['image_missing_caption'];
     const bbox = this.getProvForPage(item.prov, pageNo)?.bbox;
-    if (bbox && this.isLargePictureBbox(bbox)) {
-      suspectReasons.push('large_picture_split_candidate');
-    }
     return {
       ref: `#/pictures/${index}`,
       caption,
@@ -904,10 +909,6 @@ export class PageReviewContextBuilder {
 
   private extractFootnoteMarker(text: string): string | undefined {
     return /^(?<marker>\d+[\).]|[*†‡])/.exec(text.trim())?.groups?.marker;
-  }
-
-  private isLargePictureBbox(bbox: DoclingBBox): boolean {
-    return Math.abs(bbox.r - bbox.l) * Math.abs(bbox.t - bbox.b) > 100_000;
   }
 
   private getBboxWarningReason(

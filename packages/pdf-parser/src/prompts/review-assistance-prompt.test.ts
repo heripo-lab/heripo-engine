@@ -36,6 +36,12 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       'Do not leave them as generic review notes',
     );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'Suggest splitPicture only when the picture context includes splitCandidate',
+    );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'Do not split a single large photo',
+    );
   });
 
   test('serializes all page review context sections into prompt JSON', () => {
@@ -87,6 +93,11 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
           ref: '#/pictures/0',
           caption: 'Figure 1',
           imageUri: 'images/pic_0.png',
+          splitCandidate: {
+            score: 0.82,
+            orientation: 'vertical',
+            reasons: ['vertical_gutter_with_content_on_both_sides'],
+          },
           suspectReasons: [],
         },
       ],
@@ -120,6 +131,7 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('"nextPageTableRefs"');
     expect(prompt).toContain('"domainPatterns"');
     expect(prompt).toContain('"pictures"');
+    expect(prompt).toContain('"splitCandidate"');
   });
 
   test('task prompt narrows allowed ops and focused context', () => {
@@ -179,6 +191,54 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('Allowed ops for this task: replaceText');
     expect(prompt).toContain('"domainPatterns"');
     expect(prompt).not.toContain('"gridPreview"');
+    expect(prompt).not.toContain('"splitCandidate"');
+  });
+
+  test('picture task exposes split candidates only for candidate-backed pictures', () => {
+    const context: PageReviewContext = {
+      pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['picture_present'],
+        exclusionReasons: [],
+      },
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [],
+      missingTextCandidates: [],
+      tables: [],
+      pictures: [
+        {
+          ref: '#/pictures/0',
+          bbox: { l: 0, t: 0, r: 100, b: 100, coord_origin: 'TOPLEFT' },
+          splitCandidate: {
+            score: 0.88,
+            orientation: 'vertical',
+            reasons: ['vertical_gutter_with_content_on_both_sides'],
+          },
+          suspectReasons: ['picture_split_boundary_candidate'],
+        },
+      ],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: ['#/pictures/0'],
+        visualOrderRefs: ['#/pictures/0'],
+        bboxWarnings: [],
+      },
+      domainPatterns: [],
+    };
+    const task = REVIEW_ASSISTANCE_TASKS.find(
+      (entry) => entry.id === 'pictures_captions',
+    )!;
+    const prompt = buildReviewAssistancePrompt(context, task);
+
+    expect(prompt).toContain('Allowed ops for this task');
+    expect(prompt).toContain('"splitCandidate"');
+    expect(prompt).toContain('picture_split_boundary_candidate');
   });
 
   test('출력 언어 지시를 포함한다', () => {

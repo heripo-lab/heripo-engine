@@ -47,7 +47,9 @@ Rules:
 - Suggest updateTextRole for repeated page headers, page footers, footnotes, and captions misclassified as body text.
 - Suggest addText only when visible document text outside picture regions is missing from Docling and the bbox is clear.
 - Suggest removeText only for clear duplicate, empty, OCR-noise, or picture-internal non-caption text.
-- Suggest addPicture or splitPicture with page-coordinate bboxes when the page image clearly shows missing or combined pictures.
+- Suggest addPicture with page-coordinate bboxes when the page image clearly shows a missing external picture region.
+- Suggest splitPicture only when the picture context includes splitCandidate and the page image confirms clearly separated sub-images with visible gutters, borders, or component boundaries.
+- Do not split a single large photo, map, cover artwork, barcode, or decorative image.
 - Suggest updateBbox only when the existing bbox is clearly outside the visual element.
 - Suggest linkContinuedTable only for adjacent-page tables with compatible columns, headers, or captions.
 - Keep confidence conservative for delete, hide, merge, split, replaceTable, updateBbox, and continued-table commands.
@@ -113,7 +115,7 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
         'removeText',
       ],
       focus:
-        'Inspect picture regions and external captions only. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures with high confidence when they are not external captions.',
+        'Inspect picture regions and external captions only. Split a picture only when its context includes splitCandidate and the page image confirms clear internal boundaries. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures with high confidence when they are not external captions.',
     },
     {
       id: 'layout_bbox_order',
@@ -301,6 +303,7 @@ function toPromptPicture(picture: PageReviewContext['pictures'][number]) {
     caption: picture.caption,
     imageUri: picture.imageUri,
     bbox: picture.bbox,
+    splitCandidate: picture.splitCandidate,
     suspectReasons: picture.suspectReasons,
   };
 }

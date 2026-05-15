@@ -70,7 +70,25 @@ function makeContext(
       {
         ref: '#/pictures/0',
         bbox,
-        suspectReasons: ['image_missing_caption'],
+        splitCandidate: {
+          score: 0.88,
+          orientation: 'vertical',
+          reasons: ['vertical_gutter_with_content_on_both_sides'],
+          suggestedRegions: [
+            {
+              bbox: { ...bbox, r: 35 },
+              confidence: 0.86,
+            },
+            {
+              bbox: { ...bbox, l: 45 },
+              confidence: 0.86,
+            },
+          ],
+        },
+        suspectReasons: [
+          'image_missing_caption',
+          'picture_split_boundary_candidate',
+        ],
       },
     ],
     orphanCaptions: [],
@@ -616,6 +634,183 @@ describe('ReviewAssistanceValidator', () => {
 
     expect(decision.disposition).toBe('proposal');
     expect(decision.reasons).not.toContain('table_ref_not_found');
+  });
+
+  test('allows splitPicture only when a boundary candidate supports the regions', () => {
+    const context = makeContext();
+
+    const decision = validateWithContext(context, {
+      op: 'splitPicture',
+      targetRef: '#/pictures/0',
+      payload: {
+        regions: [
+          { bbox: { ...bbox, r: 35 }, caption: 'A' },
+          { bbox: { ...bbox, l: 45 }, caption: 'B' },
+        ],
+      },
+      confidence: 0.95,
+      rationale: 'Visible gutter separates two panels',
+      evidence: null,
+    });
+
+    expect(decision.disposition).toBe('proposal');
+    expect(decision.reasons).not.toContain(
+      'split_picture_without_boundary_candidate',
+    );
+    expect(decision.reasons).not.toContain(
+      'split_picture_boundary_not_supported',
+    );
+  });
+
+  test('skips splitPicture when the target picture has no boundary candidate', () => {
+    const context = makeContext();
+    context.pictures[0].splitCandidate = undefined;
+    context.pictures[0].suspectReasons = ['image_missing_caption'];
+
+    const decision = validateWithContext(context, {
+      op: 'splitPicture',
+      targetRef: '#/pictures/0',
+      payload: {
+        regions: [
+          { bbox: { ...bbox, r: 35 }, caption: 'A' },
+          { bbox: { ...bbox, l: 45 }, caption: 'B' },
+        ],
+      },
+      confidence: 0.95,
+      rationale: 'Model wants to split a large image',
+      evidence: null,
+    });
+
+    expect(decision.disposition).toBe('skipped');
+    expect(decision.reasons).toContain(
+      'split_picture_without_boundary_candidate',
+    );
+  });
+
+  test('skips splitPicture regions that conflict with candidate geometry', () => {
+    const context = makeContext();
+
+    const decision = validateWithContext(context, {
+      op: 'splitPicture',
+      targetRef: '#/pictures/0',
+      payload: {
+        regions: [
+          { bbox: { ...bbox, b: 20 }, caption: 'Top' },
+          { bbox: { ...bbox, t: 25 }, caption: 'Bottom' },
+          {
+            bbox: { ...bbox, t: 41, b: 55 },
+            caption: 'Outside source',
+          },
+        ],
+      },
+      confidence: 0.95,
+      rationale: 'Unsupported split geometry',
+      evidence: null,
+    });
+
+    expect(decision.disposition).toBe('skipped');
+    expect(decision.reasons).toContain('split_picture_region_outside_source');
+    expect(decision.reasons).toContain('split_picture_region_count_mismatch');
+    expect(decision.reasons).toContain('split_picture_boundary_not_supported');
+  });
+
+  test('skips splitPicture when the source picture is missing or lacks geometry', () => {
+    const missingPicture = validateWithContext(makeContext(), {
+      op: 'splitPicture',
+      targetRef: '#/pictures/404',
+      payload: {
+        regions: [
+          { bbox: { ...bbox, r: 35 }, caption: 'A' },
+          { bbox: { ...bbox, l: 45 }, caption: 'B' },
+        ],
+      },
+      confidence: 0.95,
+      rationale: 'Unknown source picture',
+      evidence: null,
+    });
+    const missingBboxContext = makeContext();
+    missingBboxContext.pictures[0].bbox = undefined;
+    const missingBbox = validateWithContext(missingBboxContext, {
+      op: 'splitPicture',
+      targetRef: '#/pictures/0',
+      payload: {
+        regions: [
+          { bbox: { ...bbox, r: 35 }, caption: 'A' },
+          { bbox: { ...bbox, l: 45 }, caption: 'B' },
+        ],
+      },
+      confidence: 0.95,
+      rationale: 'Source picture has candidate but no bbox',
+      evidence: null,
+    });
+
+    expect(missingPicture.reasons).toContain('target_ref_not_found');
+    expect(missingPicture.reasons).not.toContain(
+      'split_picture_without_boundary_candidate',
+    );
+    expect(missingBbox.disposition).toBe('skipped');
+    expect(missingBbox.reasons).toContain('split_picture_source_bbox_missing');
+  });
+
+  test('supports horizontal and grid split candidates', () => {
+    const horizontalContext = makeContext();
+    horizontalContext.pictures[0].splitCandidate = {
+      score: 0.88,
+      orientation: 'horizontal',
+      reasons: ['horizontal_gutter_with_content_on_both_sides'],
+      suggestedRegions: [
+        { bbox: { ...bbox, b: 20 }, confidence: 0.86 },
+        { bbox: { ...bbox, t: 25 }, confidence: 0.86 },
+      ],
+    };
+    const horizontal = validateWithContext(horizontalContext, {
+      op: 'splitPicture',
+      targetRef: '#/pictures/0',
+      payload: {
+        regions: [
+          { bbox: { ...bbox, b: 20 }, caption: 'Top' },
+          { bbox: { ...bbox, t: 25 }, caption: 'Bottom' },
+        ],
+      },
+      confidence: 0.95,
+      rationale: 'Horizontal gutter separates panels',
+      evidence: null,
+    });
+
+    const gridContext = makeContext();
+    gridContext.pictures[0].splitCandidate = {
+      score: 0.88,
+      orientation: 'grid',
+      reasons: ['grid_gutters_with_content_in_each_region'],
+      suggestedRegions: [
+        { bbox: { ...bbox, r: 35, b: 20 }, confidence: 0.86 },
+        { bbox: { ...bbox, l: 45, b: 20 }, confidence: 0.86 },
+        { bbox: { ...bbox, r: 35, t: 25 }, confidence: 0.86 },
+        { bbox: { ...bbox, l: 45, t: 25 }, confidence: 0.86 },
+      ],
+    };
+    const grid = validateWithContext(gridContext, {
+      op: 'splitPicture',
+      targetRef: '#/pictures/0',
+      payload: {
+        regions: [
+          { bbox: { ...bbox, r: 35, b: 20 }, caption: 'Top left' },
+          { bbox: { ...bbox, l: 45, b: 20 }, caption: 'Top right' },
+          { bbox: { ...bbox, r: 35, t: 25 }, caption: 'Bottom left' },
+          { bbox: { ...bbox, l: 45, t: 25 }, caption: 'Bottom right' },
+        ],
+      },
+      confidence: 0.95,
+      rationale: 'Grid gutters separate panels',
+      evidence: null,
+    });
+
+    expect(horizontal.disposition).toBe('proposal');
+    expect(horizontal.reasons).not.toContain(
+      'split_picture_boundary_not_supported',
+    );
+    expect(grid.disposition).toBe('proposal');
+    expect(grid.reasons).not.toContain('split_picture_boundary_not_supported');
   });
 
   test('requires continued-table source ref to belong to the current page', () => {
@@ -1361,6 +1556,20 @@ describe('ReviewAssistanceValidator', () => {
       ) => boolean;
       getRiskPenalty: (context: PageReviewContext, command: any) => number;
       iou: (a: DoclingBBox, b: DoclingBBox) => number;
+      splitRegionsMatchOrientation: (
+        regions: Array<{ bbox: DoclingBBox }>,
+        orientation: 'horizontal' | 'vertical' | 'grid',
+        pageSize: PageReviewContext['pageSize'],
+      ) => boolean;
+      hasSeparatedRegionPair: (
+        regions: Array<{ bbox: DoclingBBox }>,
+        orientation: 'horizontal' | 'vertical',
+        pageSize: PageReviewContext['pageSize'],
+      ) => boolean;
+      toTopLeftRect: (
+        bbox: DoclingBBox,
+        pageSize: PageReviewContext['pageSize'],
+      ) => { top: number; bottom: number };
     };
     const reasons: string[] = [];
 
@@ -1417,6 +1626,76 @@ describe('ReviewAssistanceValidator', () => {
         { text: 'B', label: 'body' },
       ]),
     ).toEqual([{ text: 'A' }, { text: 'B', label: 'body' }]);
+    const gridRegions = [
+      { bbox: { ...bbox, r: 35, b: 20 } },
+      { bbox: { ...bbox, l: 45, b: 20 } },
+      { bbox: { ...bbox, r: 35, t: 25 } },
+      { bbox: { ...bbox, l: 45, t: 25 } },
+    ];
+    expect(
+      validator.splitRegionsMatchOrientation(
+        gridRegions,
+        'grid',
+        makeContext().pageSize,
+      ),
+    ).toBe(true);
+    expect(
+      validator.splitRegionsMatchOrientation(
+        gridRegions.slice(0, 2),
+        'grid',
+        makeContext().pageSize,
+      ),
+    ).toBe(false);
+    expect(
+      validator.splitRegionsMatchOrientation(
+        [
+          { bbox: { ...bbox, b: 18 } },
+          { bbox: { ...bbox, t: 20, b: 25 } },
+          { bbox: { ...bbox, t: 27, b: 32 } },
+          { bbox: { ...bbox, t: 34 } },
+        ],
+        'grid',
+        makeContext().pageSize,
+      ),
+    ).toBe(false);
+    expect(
+      validator.splitRegionsMatchOrientation(
+        [
+          { bbox: { ...bbox, r: 35 } },
+          { bbox: { ...bbox, l: 45 } },
+          { bbox: { ...bbox, l: 46, r: 79 } },
+          { bbox: { ...bbox, l: 47, r: 78 } },
+        ],
+        'grid',
+        makeContext().pageSize,
+      ),
+    ).toBe(false);
+    expect(
+      validator.hasSeparatedRegionPair(
+        [{ bbox: { ...bbox, b: 20 } }, { bbox: { ...bbox, t: 25 } }],
+        'horizontal',
+        makeContext().pageSize,
+      ),
+    ).toBe(true);
+    expect(
+      validator.hasSeparatedRegionPair(
+        [{ bbox: { ...bbox, b: 20 } }, { bbox: { ...bbox, b: 20 } }],
+        'horizontal',
+        makeContext().pageSize,
+      ),
+    ).toBe(false);
+    expect(
+      validator.toTopLeftRect(
+        { l: 0, t: 90, r: 20, b: 10, coord_origin: 'BOTTOMLEFT' },
+        { width: 100, height: 100 },
+      ),
+    ).toMatchObject({ top: 10, bottom: 90 });
+    expect(
+      validator.toTopLeftRect(
+        { l: 0, t: 90, r: 20, b: 10, coord_origin: 'BOTTOMLEFT' },
+        null,
+      ),
+    ).toMatchObject({ top: 0, bottom: 80 });
     expect(
       validator.getRiskPenalty(makeContext(), {
         op: 'removeText',
@@ -1442,6 +1721,7 @@ describe('ReviewAssistanceValidator', () => {
     ).toBe(0);
     expect(validator.getSuspectReasons(makeContext(), '#/pictures/0')).toEqual([
       'image_missing_caption',
+      'picture_split_boundary_candidate',
     ]);
     expect(validator.getSuspectReasons(makeContext(), '#/unknown/0')).toEqual(
       [],
