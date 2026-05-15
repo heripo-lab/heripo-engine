@@ -14,6 +14,7 @@ import type { ReviewAssistancePageEligibility } from './review-assistance-page-g
 import { isAbsolute, join } from 'node:path';
 
 import { matchTextToReferenceWithUnused } from '../../utils/text-reference-matcher';
+import { bboxContainmentRatio, bboxToTopLeftRect } from './bbox-geometry';
 import { createReviewAssistancePageGatePendingEligibility } from './review-assistance-page-gate';
 
 export interface PageReviewTextBlock {
@@ -512,7 +513,7 @@ export class PageReviewContextBuilder {
     const insidePicture = pictures.some(
       (picture) =>
         picture.bbox &&
-        this.containmentRatio(block.bbox!, picture.bbox, pageSize) >= 0.8,
+        bboxContainmentRatio(block.bbox!, picture.bbox, pageSize) >= 0.8,
     );
     if (!insidePicture) return block;
     if (block.suspectReasons.includes('picture_internal_text')) return block;
@@ -613,8 +614,8 @@ export class PageReviewContextBuilder {
     return geometries
       .filter((entry) => entry.bbox)
       .sort((a, b) => {
-        const boxA = this.toTopLeftRect(a.bbox!, pageSize);
-        const boxB = this.toTopLeftRect(b.bbox!, pageSize);
+        const boxA = bboxToTopLeftRect(a.bbox!, pageSize);
+        const boxB = bboxToTopLeftRect(b.bbox!, pageSize);
         return boxA.top - boxB.top || boxA.left - boxB.left;
       })
       .map((entry) => entry.ref);
@@ -916,7 +917,7 @@ export class PageReviewContextBuilder {
     pageSize: { width: number; height: number } | null,
   ): string | null {
     if (!bbox) return null;
-    const rect = this.toTopLeftRect(bbox, pageSize);
+    const rect = bboxToTopLeftRect(bbox, pageSize);
     if (rect.right <= rect.left || rect.bottom <= rect.top) {
       return 'invalid_bbox_order';
     }
@@ -943,8 +944,8 @@ export class PageReviewContextBuilder {
     pageSize: { width: number; height: number } | null,
   ): number {
     if (!a || !b) return Number.POSITIVE_INFINITY;
-    const rectA = this.toTopLeftRect(a, pageSize);
-    const rectB = this.toTopLeftRect(b, pageSize);
+    const rectA = bboxToTopLeftRect(a, pageSize);
+    const rectB = bboxToTopLeftRect(b, pageSize);
     const centerA = {
       x: (rectA.left + rectA.right) / 2,
       y: (rectA.top + rectA.bottom) / 2,
@@ -954,48 +955,5 @@ export class PageReviewContextBuilder {
       y: (rectB.top + rectB.bottom) / 2,
     };
     return Math.hypot(centerA.x - centerB.x, centerA.y - centerB.y);
-  }
-
-  private containmentRatio(
-    inner: DoclingBBox,
-    outer: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
-  ): number {
-    const innerRect = this.toTopLeftRect(inner, pageSize);
-    const outerRect = this.toTopLeftRect(outer, pageSize);
-    const intersectionWidth = Math.max(
-      0,
-      Math.min(innerRect.right, outerRect.right) -
-        Math.max(innerRect.left, outerRect.left),
-    );
-    const intersectionHeight = Math.max(
-      0,
-      Math.min(innerRect.bottom, outerRect.bottom) -
-        Math.max(innerRect.top, outerRect.top),
-    );
-    const innerArea =
-      (innerRect.right - innerRect.left) * (innerRect.bottom - innerRect.top);
-    if (innerArea <= 0) return 0;
-    return (intersectionWidth * intersectionHeight) / innerArea;
-  }
-
-  private toTopLeftRect(
-    bbox: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
-  ): { left: number; top: number; right: number; bottom: number } {
-    if (bbox.coord_origin === 'BOTTOMLEFT' && pageSize) {
-      return {
-        left: Math.min(bbox.l, bbox.r),
-        top: pageSize.height - Math.max(bbox.t, bbox.b),
-        right: Math.max(bbox.l, bbox.r),
-        bottom: pageSize.height - Math.min(bbox.t, bbox.b),
-      };
-    }
-    return {
-      left: Math.min(bbox.l, bbox.r),
-      top: Math.min(bbox.t, bbox.b),
-      right: Math.max(bbox.l, bbox.r),
-      bottom: Math.max(bbox.t, bbox.b),
-    };
   }
 }

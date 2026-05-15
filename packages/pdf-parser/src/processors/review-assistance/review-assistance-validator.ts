@@ -16,6 +16,8 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { createHash } from 'node:crypto';
 
+import { bboxContainmentRatio, bboxToTopLeftRect } from './bbox-geometry';
+
 const TRUSTED_VLM_AUTO_APPLY_THRESHOLD = 0.7;
 
 export interface ReviewAssistanceValidatorOptions {
@@ -918,8 +920,7 @@ export class ReviewAssistanceValidator {
 
     for (const region of regions) {
       if (
-        this.bboxContainmentRatio(region.bbox, picture.bbox, context.pageSize) <
-        0.9
+        bboxContainmentRatio(region.bbox, picture.bbox, context.pageSize) < 0.9
       ) {
         reasons.push('split_picture_region_outside_source');
         break;
@@ -965,8 +966,8 @@ export class ReviewAssistanceValidator {
   ): boolean {
     for (let i = 0; i < regions.length; i++) {
       for (let j = i + 1; j < regions.length; j++) {
-        const a = this.toTopLeftRect(regions[i].bbox, pageSize);
-        const b = this.toTopLeftRect(regions[j].bbox, pageSize);
+        const a = bboxToTopLeftRect(regions[i].bbox, pageSize);
+        const b = bboxToTopLeftRect(regions[j].bbox, pageSize);
         if (orientation === 'vertical') {
           const separated = a.right <= b.left || b.right <= a.left;
           const overlap = this.axisOverlapRatio(
@@ -991,32 +992,6 @@ export class ReviewAssistanceValidator {
     return false;
   }
 
-  private bboxContainmentRatio(
-    inner: DoclingBBox,
-    outer: DoclingBBox,
-    pageSize: PageReviewContext['pageSize'],
-  ): number {
-    const innerRect = this.toTopLeftRect(inner, pageSize);
-    const outerRect = this.toTopLeftRect(outer, pageSize);
-    const intersection = this.rectIntersectionArea(innerRect, outerRect);
-    const innerArea = this.rectArea(innerRect);
-    return innerArea === 0 ? 0 : intersection / innerArea;
-  }
-
-  private rectIntersectionArea(a: TopLeftRect, b: TopLeftRect): number {
-    const left = Math.max(a.left, b.left);
-    const right = Math.min(a.right, b.right);
-    const top = Math.max(a.top, b.top);
-    const bottom = Math.min(a.bottom, b.bottom);
-    return Math.max(0, right - left) * Math.max(0, bottom - top);
-  }
-
-  private rectArea(rect: TopLeftRect): number {
-    return (
-      Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top)
-    );
-  }
-
   private axisOverlapRatio(
     aStart: number,
     aEnd: number,
@@ -1029,29 +1004,6 @@ export class ReviewAssistanceValidator {
     );
     const minLength = Math.min(aEnd - aStart, bEnd - bStart);
     return minLength <= 0 ? 0 : overlap / minLength;
-  }
-
-  private toTopLeftRect(
-    bbox: DoclingBBox,
-    pageSize: PageReviewContext['pageSize'],
-  ): TopLeftRect {
-    const left = Math.min(bbox.l, bbox.r);
-    const right = Math.max(bbox.l, bbox.r);
-    if (bbox.coord_origin === 'BOTTOMLEFT') {
-      const pageHeight = pageSize?.height ?? Math.max(bbox.t, bbox.b);
-      return {
-        left,
-        right,
-        top: pageHeight - Math.max(bbox.t, bbox.b),
-        bottom: pageHeight - Math.min(bbox.t, bbox.b),
-      };
-    }
-    return {
-      left,
-      right,
-      top: Math.min(bbox.t, bbox.b),
-      bottom: Math.max(bbox.t, bbox.b),
-    };
   }
 
   private missingTextMatches(
@@ -1344,11 +1296,4 @@ interface RefSet {
   tables: Set<string>;
   adjacentTables: Set<string>;
   pictures: Set<string>;
-}
-
-interface TopLeftRect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
 }

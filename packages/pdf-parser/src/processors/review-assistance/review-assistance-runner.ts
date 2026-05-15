@@ -376,45 +376,56 @@ export class ReviewAssistanceRunner {
     contexts: PageReviewContext[],
   ): Promise<PageReviewContext[]> {
     const detector = new PictureSplitCandidateDetector(this.logger);
-    return Promise.all(
-      contexts.map(async (context) => {
-        if (
-          !context.reviewAssistanceEligibility.eligible ||
-          this.hasUnavailablePageImageGateReason(context) ||
-          context.pictures.length === 0
-        ) {
-          return context;
-        }
-
-        const pictures: PageReviewContext['pictures'] = [];
-        for (const picture of context.pictures) {
-          if (!picture.bbox) {
-            pictures.push(picture);
-            continue;
-          }
-          const splitCandidate = await detector.detect({
-            pageImagePath: context.pageImagePath,
-            pageSize: context.pageSize,
-            pictureBbox: picture.bbox,
-          });
-          if (!splitCandidate) {
-            pictures.push(picture);
-            continue;
-          }
-          pictures.push({
-            ...picture,
-            splitCandidate,
-            suspectReasons: [
-              ...new Set([
-                ...picture.suspectReasons,
-                'picture_split_boundary_candidate',
-              ]),
-            ],
-          });
-        }
-        return { ...context, pictures };
-      }),
+    // Bounded concurrency: detector.detect() spawns ImageMagick subprocesses
+    // and the rest of the runner uses REVIEW_ASSISTANCE_PAGE_CONCURRENCY for
+    // page-level work. Use the same limit so a 300-page report does not fan
+    // out into hundreds of concurrent magick processes.
+    return ConcurrentPool.run(
+      contexts,
+      REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
+      (context) => this.attachSplitCandidatesToPage(context, detector),
     );
+  }
+
+  private async attachSplitCandidatesToPage(
+    context: PageReviewContext,
+    detector: PictureSplitCandidateDetector,
+  ): Promise<PageReviewContext> {
+    if (
+      !context.reviewAssistanceEligibility.eligible ||
+      this.hasUnavailablePageImageGateReason(context) ||
+      context.pictures.length === 0
+    ) {
+      return context;
+    }
+
+    const pictures: PageReviewContext['pictures'] = [];
+    for (const picture of context.pictures) {
+      if (!picture.bbox) {
+        pictures.push(picture);
+        continue;
+      }
+      const splitCandidate = await detector.detect({
+        pageImagePath: context.pageImagePath,
+        pageSize: context.pageSize,
+        pictureBbox: picture.bbox,
+      });
+      if (!splitCandidate) {
+        pictures.push(picture);
+        continue;
+      }
+      pictures.push({
+        ...picture,
+        splitCandidate,
+        suspectReasons: [
+          ...new Set([
+            ...picture.suspectReasons,
+            'picture_split_boundary_candidate',
+          ]),
+        ],
+      });
+    }
+    return { ...context, pictures };
   }
 
   private async reviewPage(

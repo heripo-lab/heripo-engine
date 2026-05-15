@@ -1,15 +1,21 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type { DoclingBBox } from '@heripo/model';
 
+import type { PageSize } from './bbox-geometry';
 import type { PageReviewPictureSplitCandidate } from './page-review-context-builder';
 
 import { spawnAsync } from '@heripo/shared';
 
+import {
+  bboxToTopLeftRect,
+  rectArea,
+  topLeftRectToBbox,
+} from './bbox-geometry';
 import { ImageRegionSnapper } from './image-region-snapper';
 
 export interface PictureSplitCandidateDetectorInput {
   pageImagePath: string;
-  pageSize: { width: number; height: number } | null;
+  pageSize: PageSize;
   pictureBbox: DoclingBBox;
 }
 
@@ -49,20 +55,31 @@ interface GutterCandidate {
   reasons: string[];
 }
 
-interface TopLeftRect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
+// Picture bboxes smaller than this area in document units are unlikely to
+// be composite figures worth splitting. Matches the previous large-picture
+// gate so detection is only attempted on pictures that used to qualify.
 const DEFAULT_MIN_DOCUMENT_AREA = 100_000;
+// Downscale the picture crop to a 96x96 gray sample before density analysis.
+// Small enough to keep ImageMagick cheap, large enough to preserve column
+// and row gutters in typical archaeological-report figures.
 const DEFAULT_SAMPLE_SIZE = 96;
+// Pixels brighter than this threshold (0-255) count as blank. 245 tolerates
+// JPEG/scanner background noise while still rejecting faint content.
 const DEFAULT_BLANK_THRESHOLD = 245;
+// A gutter column/row must have less than 6% content pixels on average to
+// qualify as a low-content band.
 const DEFAULT_MAX_GUTTER_CONTENT_RATIO = 0.06;
+// Each side of the gutter must have at least 18% content density to count
+// as a real sub-image rather than a marginal annotation.
 const DEFAULT_MIN_SIDE_CONTENT_RATIO = 0.18;
+// The gutter must span at least 2.5% of the cross-axis length, filtering out
+// hairline gaps caused by text leading or scan noise.
 const DEFAULT_MIN_GUTTER_WIDTH_RATIO = 0.025;
+// Each suggested split region must cover at least 8% of the source bbox area
+// so we do not propose splits that carve off slivers.
 const DEFAULT_MIN_REGION_AREA_RATIO = 0.08;
+// Weighted gutter score must clear 0.65 to be reported. Below this, evidence
+// is too weak to motivate a structural splitPicture proposal.
 const MIN_SCORE = 0.65;
 
 export class PictureSplitCandidateDetector {
@@ -352,7 +369,7 @@ export class PictureSplitCandidateDetector {
 
   private buildCandidate(
     bbox: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
+    pageSize: PageSize,
     input: {
       orientation: 'horizontal' | 'vertical' | 'grid';
       score: number;
@@ -381,11 +398,11 @@ export class PictureSplitCandidateDetector {
 
   private buildSuggestedRegions(
     bbox: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
+    pageSize: PageSize,
     vertical?: GutterCandidate,
     horizontal?: GutterCandidate,
   ): Array<{ bbox: DoclingBBox; confidence: number }> {
-    const source = this.toTopLeftRect(bbox, pageSize);
+    const source = bboxToTopLeftRect(bbox, pageSize);
     const xRanges = vertical
       ? [
           [
@@ -414,11 +431,7 @@ export class PictureSplitCandidateDetector {
 
     return yRanges.flatMap(([top, bottom]) =>
       xRanges.map(([left, right]) => ({
-        bbox: this.fromTopLeftRect(
-          { left, top, right, bottom },
-          bbox,
-          pageSize,
-        ),
+        bbox: topLeftRectToBbox({ left, top, right, bottom }, bbox, pageSize),
         confidence: Number(confidence.toFixed(2)),
       })),
     );
@@ -426,17 +439,17 @@ export class PictureSplitCandidateDetector {
 
   private regionsPassMinimumArea(
     sourceBbox: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
+    pageSize: PageSize,
     regions: Array<{ bbox: DoclingBBox }>,
   ): boolean {
-    const source = this.toTopLeftRect(sourceBbox, pageSize);
-    const sourceArea = this.rectArea(source);
+    const sourceArea = rectArea(bboxToTopLeftRect(sourceBbox, pageSize));
     const minRatio =
       this.options.minRegionAreaRatio ?? DEFAULT_MIN_REGION_AREA_RATIO;
-    return regions.every((region) => {
-      const rect = this.toTopLeftRect(region.bbox, pageSize);
-      return this.rectArea(rect) >= sourceArea * minRatio;
-    });
+    return regions.every(
+      (region) =>
+        rectArea(bboxToTopLeftRect(region.bbox, pageSize)) >=
+        sourceArea * minRatio,
+    );
   }
 
   private isLargeEnoughForInspection(bbox: DoclingBBox): boolean {
@@ -465,60 +478,6 @@ export class PictureSplitCandidateDetector {
       width: Math.round(right - x),
       height: Math.round(bottom - y),
     };
-  }
-
-  private toTopLeftRect(
-    bbox: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
-  ): TopLeftRect {
-    const left = Math.min(bbox.l, bbox.r);
-    const right = Math.max(bbox.l, bbox.r);
-    if (bbox.coord_origin === 'BOTTOMLEFT') {
-      const pageHeight = pageSize?.height ?? Math.max(bbox.t, bbox.b);
-      return {
-        left,
-        right,
-        top: pageHeight - Math.max(bbox.t, bbox.b),
-        bottom: pageHeight - Math.min(bbox.t, bbox.b),
-      };
-    }
-    return {
-      left,
-      right,
-      top: Math.min(bbox.t, bbox.b),
-      bottom: Math.max(bbox.t, bbox.b),
-    };
-  }
-
-  private fromTopLeftRect(
-    rect: TopLeftRect,
-    originalBbox: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
-  ): DoclingBBox {
-    if (originalBbox.coord_origin === 'BOTTOMLEFT') {
-      const pageHeight =
-        pageSize?.height ?? Math.max(originalBbox.t, originalBbox.b);
-      return {
-        l: rect.left,
-        r: rect.right,
-        t: pageHeight - rect.top,
-        b: pageHeight - rect.bottom,
-        coord_origin: 'BOTTOMLEFT',
-      };
-    }
-    return {
-      l: rect.left,
-      t: rect.top,
-      r: rect.right,
-      b: rect.bottom,
-      coord_origin: originalBbox.coord_origin || 'TOPLEFT',
-    };
-  }
-
-  private rectArea(rect: TopLeftRect): number {
-    return (
-      Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top)
-    );
   }
 
   private interpolate(start: number, end: number, ratio: number): number {

@@ -1566,10 +1566,6 @@ describe('ReviewAssistanceValidator', () => {
         orientation: 'horizontal' | 'vertical',
         pageSize: PageReviewContext['pageSize'],
       ) => boolean;
-      toTopLeftRect: (
-        bbox: DoclingBBox,
-        pageSize: PageReviewContext['pageSize'],
-      ) => { top: number; bottom: number };
     };
     const reasons: string[] = [];
 
@@ -1684,18 +1680,6 @@ describe('ReviewAssistanceValidator', () => {
         makeContext().pageSize,
       ),
     ).toBe(false);
-    expect(
-      validator.toTopLeftRect(
-        { l: 0, t: 90, r: 20, b: 10, coord_origin: 'BOTTOMLEFT' },
-        { width: 100, height: 100 },
-      ),
-    ).toMatchObject({ top: 10, bottom: 90 });
-    expect(
-      validator.toTopLeftRect(
-        { l: 0, t: 90, r: 20, b: 10, coord_origin: 'BOTTOMLEFT' },
-        null,
-      ),
-    ).toMatchObject({ top: 0, bottom: 80 });
     expect(
       validator.getRiskPenalty(makeContext(), {
         op: 'removeText',

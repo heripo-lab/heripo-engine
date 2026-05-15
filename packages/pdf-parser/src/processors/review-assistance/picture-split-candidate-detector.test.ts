@@ -279,15 +279,6 @@ describe('PictureSplitCandidateDetector', () => {
           reasons: string[];
         },
       ) => unknown;
-      toTopLeftRect: (
-        bbox: DoclingBBox,
-        pageSize: { width: number; height: number } | null,
-      ) => { top: number; bottom: number };
-      fromTopLeftRect: (
-        rect: { left: number; top: number; right: number; bottom: number },
-        bbox: DoclingBBox,
-        pageSize: { width: number; height: number } | null,
-      ) => DoclingBBox;
     };
 
     expect(
@@ -330,42 +321,6 @@ describe('PictureSplitCandidateDetector', () => {
         },
       ),
     ).toBeUndefined();
-
-    const bottomLeftBbox: DoclingBBox = {
-      l: 0,
-      t: 400,
-      r: 500,
-      b: 0,
-      coord_origin: 'BOTTOMLEFT',
-    };
-    expect(
-      detector.toTopLeftRect(bottomLeftBbox, { width: 500, height: 400 }),
-    ).toMatchObject({ top: 0, bottom: 400 });
-    expect(detector.toTopLeftRect(bottomLeftBbox, null)).toMatchObject({
-      top: 0,
-      bottom: 400,
-    });
-    expect(
-      detector.fromTopLeftRect(
-        { left: 0, top: 0, right: 250, bottom: 200 },
-        bottomLeftBbox,
-        { width: 500, height: 400 },
-      ),
-    ).toMatchObject({ t: 400, b: 200, coord_origin: 'BOTTOMLEFT' });
-    expect(
-      detector.fromTopLeftRect(
-        { left: 0, top: 0, right: 250, bottom: 200 },
-        bottomLeftBbox,
-        null,
-      ),
-    ).toMatchObject({ t: 400, b: 200, coord_origin: 'BOTTOMLEFT' });
-    expect(
-      detector.fromTopLeftRect(
-        { left: 0, top: 0, right: 250, bottom: 200 },
-        { l: 0, t: 0, r: 500, b: 400 } as DoclingBBox,
-        { width: 500, height: 400 },
-      ),
-    ).toMatchObject({ coord_origin: 'TOPLEFT' });
   });
 
   test('rejects candidate regions that are too small', async () => {
