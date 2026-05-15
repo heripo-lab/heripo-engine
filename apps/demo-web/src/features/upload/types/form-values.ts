@@ -23,7 +23,11 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   documentValidationModel: 'openai/gpt-5.4',
   // Force image PDF pre-conversion
   forceImagePdf: false,
-  // Mandatory post-Docling correction
+  // Mandatory post-Docling correction.
+  // NOTE: demo-web defaults assume cloud VLMs (Gemini, OpenAI) where higher
+  // page concurrency is safe. For local models prefer a smaller value
+  // (the pdf-parser library default is 1) to keep GPU/memory usage bounded —
+  // see Phase D in docs/plans/pdf-parser-correction-gating.md.
   correction: {
     models: {
       textCorrection: 'google/gemini-3.1-flash-lite',
@@ -37,6 +41,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
       reviewTasks: 6,
       tables: 1,
     },
+    outputLanguage: 'ko-KR',
+    maxRetries: undefined,
   },
   // LLM Models
   fallbackModel: 'openai/gpt-5.4',

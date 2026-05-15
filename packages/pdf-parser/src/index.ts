@@ -3,6 +3,7 @@ export type {
   ConversionCompleteCallback,
   PDFConvertOptions,
 } from './core/pdf-converter';
+export { PDF_CORRECTION_DEFAULTS } from './core/correction-options';
 export type {
   NormalizedPDFCorrectionOptions,
   PDFCorrectionConcurrencyOptions,

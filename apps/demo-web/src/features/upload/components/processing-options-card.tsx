@@ -348,6 +348,35 @@ export function ProcessingOptionsCard({
           )}
         </form.Field>
 
+        <form.Field name="correction.outputLanguage">
+          {(field: StringFieldApi) => (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Correction Output Language
+              </label>
+              <p className="text-muted-foreground text-xs">
+                Language of AI-written reasons, descriptions, and issues in the
+                correction report (BCP 47 tag)
+              </p>
+              <DisabledWrapper disabled={disabled}>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(v) => field.handleChange(v)}
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ko-KR">한국어 (ko-KR)</SelectItem>
+                    <SelectItem value="en-US">English (en-US)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </DisabledWrapper>
+            </div>
+          )}
+        </form.Field>
+
         {/* Force Image PDF */}
         <form.Field name="forceImagePdf">
           {(field: BooleanFieldApi) => (

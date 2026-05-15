@@ -104,6 +104,20 @@ function normalizeThreshold(
   return clamp(normalizeNumber(value, fallback), 0, 1);
 }
 
+/**
+ * Normalize a generation temperature value to the API-supported range [0, 2].
+ *
+ * Kept separate from threshold normalization because temperatures and 0-1
+ * thresholds (auto-apply, proposal, structural-noise) intentionally use
+ * different ranges.
+ */
+function normalizeTemperature(
+  value: number | undefined,
+  fallback: number,
+): number {
+  return clamp(normalizeNumber(value, fallback), 0, 2);
+}
+
 function normalizeOutputLanguage(value: string | undefined): string {
   const normalized = value?.trim();
   return normalized || PDF_CORRECTION_DEFAULTS.outputLanguage;
@@ -184,7 +198,7 @@ export function normalizePDFCorrectionOptions(
     },
     autoApplyThreshold,
     proposalThreshold,
-    temperature: normalizeThreshold(
+    temperature: normalizeTemperature(
       value.temperature,
       PDF_CORRECTION_DEFAULTS.temperature,
     ),

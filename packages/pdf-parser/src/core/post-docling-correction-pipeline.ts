@@ -10,11 +10,11 @@ import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+import { PostDoclingPageProcessor } from '../processors/post-docling-page-processor';
 import {
   type ReviewAssistanceModelResolver,
   ReviewAssistanceRunner,
 } from '../processors/review-assistance/review-assistance-runner';
-import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { runJqFileJson } from '../utils/jq';
 import {
   type NormalizedPDFCorrectionOptions,
@@ -39,8 +39,8 @@ export class PostDoclingCorrectionPipeline {
       const ocrOriginPath = join(outputDir, 'result_ocr_origin.json');
       copyFileSync(resultPath, ocrOriginPath);
 
-      const corrector = new VlmTextCorrector(this.logger);
-      await corrector.correctAndSave(
+      const pageProcessor = new PostDoclingPageProcessor(this.logger);
+      await pageProcessor.correctAndSave(
         outputDir,
         correction.models.textCorrection,
         {
@@ -53,7 +53,6 @@ export class PostDoclingCorrectionPipeline {
           documentLanguages: options.ocr_lang,
           pageTexts,
           reviewAssistanceGate: {
-            enabled: true,
             model: correction.models.pageGate,
             maxRetries: correction.maxRetries.pageGate,
             temperature: correction.temperature,
@@ -116,19 +115,18 @@ export class PostDoclingCorrectionPipeline {
   ): Promise<Map<number, string> | undefined> {
     if (!pdfPath) return undefined;
 
+    let totalPages: number;
     try {
       const resultPath = join(outputDir, 'result.json');
-      const totalPages = await runJqFileJson<number>(
-        '.pages | length',
-        resultPath,
-      );
-      const textExtractor = new PdfTextExtractor(this.logger);
-      return await textExtractor.extractText(pdfPath, totalPages);
-    } catch {
+      totalPages = await runJqFileJson<number>('.pages | length', resultPath);
+    } catch (error) {
       this.logger.warn(
-        '[PDFConverter] pdftotext extraction failed, proceeding without text reference',
+        '[PostDoclingCorrectionPipeline] Failed to read page count from result.json, skipping text reference extraction',
+        error,
       );
       return undefined;
     }
+
+    return PdfTextExtractor.tryExtract(this.logger, pdfPath, totalPages);
   }
 }

@@ -104,7 +104,8 @@ export class ReviewAssistanceRunner {
     );
     const pageTexts =
       options.pageTexts ??
-      (await this.extractPageTexts(
+      (await PdfTextExtractor.tryExtract(
+        this.logger,
         options.pdfPath,
         Object.keys(doc.pages).length,
       ));
@@ -255,23 +256,6 @@ export class ReviewAssistanceRunner {
     );
 
     return report;
-  }
-
-  private async extractPageTexts(
-    pdfPath: string | undefined,
-    totalPages: number,
-  ): Promise<Map<number, string> | undefined> {
-    if (!pdfPath) return undefined;
-    try {
-      const extractor = new PdfTextExtractor(this.logger);
-      return await extractor.extractText(pdfPath, totalPages);
-    } catch (error) {
-      this.logger.warn(
-        '[ReviewAssistanceRunner] pdftotext extraction failed, proceeding without text reference',
-        error,
-      );
-      return undefined;
-    }
   }
 
   private readPageGateEligibility(

@@ -24,6 +24,57 @@ describe('PdfTextExtractor', () => {
     extractor = new PdfTextExtractor(mockLogger);
   });
 
+  describe('tryExtract (static)', () => {
+    test('returns undefined when pdfPath is missing (no extraction attempted)', async () => {
+      const result = await PdfTextExtractor.tryExtract(
+        mockLogger,
+        undefined,
+        5,
+      );
+
+      expect(result).toBeUndefined();
+      expect(mockSpawnAsync).not.toHaveBeenCalled();
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    test('returns the extracted page-text map on success', async () => {
+      mockSpawnAsync.mockResolvedValue({
+        code: 0,
+        stdout: 'sample',
+        stderr: '',
+      });
+
+      const result = await PdfTextExtractor.tryExtract(
+        mockLogger,
+        '/tmp/test.pdf',
+        2,
+      );
+
+      expect(result).toBeInstanceOf(Map);
+      expect(result?.size).toBe(2);
+      expect(result?.get(1)).toBe('sample');
+      expect(result?.get(2)).toBe('sample');
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    test('returns undefined and logs a warning when extraction throws', async () => {
+      const error = new Error('spawn ENOENT');
+      mockSpawnAsync.mockRejectedValue(error);
+
+      const result = await PdfTextExtractor.tryExtract(
+        mockLogger,
+        '/tmp/test.pdf',
+        1,
+      );
+
+      expect(result).toBeUndefined();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        '[PdfTextExtractor] pdftotext extraction failed, proceeding without text reference',
+        error,
+      );
+    });
+  });
+
   describe('extractText', () => {
     test('extracts text from all pages and returns Map', async () => {
       mockSpawnAsync

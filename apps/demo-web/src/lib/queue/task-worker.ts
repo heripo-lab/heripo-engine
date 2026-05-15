@@ -230,6 +230,7 @@ function buildPDFCorrectionOptions(
     );
   }
 
+  const stageRetries = options.correction.maxRetries;
   return {
     models: {
       textCorrection: createModel(options.correction.models.textCorrection),
@@ -248,12 +249,12 @@ function buildPDFCorrectionOptions(
     },
     concurrency: options.correction.concurrency,
     maxRetries: {
-      textCorrection: options.maxRetries,
-      pageGate: options.maxRetries,
-      reviewAssistance: options.maxRetries,
-      tableCorrection: options.maxRetries,
+      textCorrection: stageRetries?.textCorrection ?? options.maxRetries,
+      pageGate: stageRetries?.pageGate ?? options.maxRetries,
+      reviewAssistance: stageRetries?.reviewAssistance ?? options.maxRetries,
+      tableCorrection: stageRetries?.tableCorrection ?? options.maxRetries,
     },
-    outputLanguage: 'ko-KR',
+    outputLanguage: options.correction.outputLanguage,
   };
 }
 

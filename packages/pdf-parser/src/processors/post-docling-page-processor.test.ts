@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { applyCorrections } from './correction-applier';
-import { VlmTextCorrector } from './vlm-text-corrector';
+import { PostDoclingPageProcessor } from './post-docling-page-processor';
 
 vi.mock('@heripo/shared', () => ({
   ConcurrentPool: { run: vi.fn() },
@@ -176,7 +176,7 @@ function mockVlmResponse(
   return {
     output,
     usage: {
-      component: 'VlmTextCorrector',
+      component: 'PostDoclingPageProcessor',
       phase: 'text-correction',
       model: 'primary',
       modelName: 'test-vlm',
@@ -188,14 +188,14 @@ function mockVlmResponse(
   };
 }
 
-describe('VlmTextCorrector', () => {
+describe('PostDoclingPageProcessor', () => {
   let logger: LoggerMethods;
-  let corrector: VlmTextCorrector;
+  let corrector: PostDoclingPageProcessor;
 
   beforeEach(() => {
     vi.clearAllMocks();
     logger = createMockLogger();
-    corrector = new VlmTextCorrector(logger);
+    corrector = new PostDoclingPageProcessor(logger);
 
     // Default: readFileSync returns image data for page images
     vi.mocked(readFileSync).mockImplementation((path: any) => {
@@ -280,7 +280,7 @@ describe('VlmTextCorrector', () => {
       expect(result.pagesProcessed).toBe(0);
       expect(result.textCorrections).toBe(0);
       expect(logger.info).toHaveBeenCalledWith(
-        '[VlmTextCorrector] No pages to process',
+        '[PostDoclingPageProcessor] No pages to process',
       );
     });
 
@@ -344,7 +344,7 @@ describe('VlmTextCorrector', () => {
       const mockAggregator = {
         track: vi.fn(),
         getReport: vi.fn().mockReturnValue({
-          components: [{ component: 'VlmTextCorrector' }],
+          components: [{ component: 'PostDoclingPageProcessor' }],
           total: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
         }),
       };
@@ -488,7 +488,7 @@ describe('VlmTextCorrector', () => {
           primaryModel: mockModel,
           maxRetries: 5,
           temperature: 0.2,
-          component: 'VlmTextCorrector',
+          component: 'PostDoclingPageProcessor',
           phase: 'text-correction',
         }),
       );
@@ -525,7 +525,7 @@ describe('VlmTextCorrector', () => {
       expect(result.textCorrections).toBe(0);
       expect(LLMCaller.callVision).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(
-        '[VlmTextCorrector] Page 1: failed to read page image',
+        '[PostDoclingPageProcessor] Page 1: failed to read page image',
         expect.any(Error),
       );
     });
@@ -555,7 +555,7 @@ describe('VlmTextCorrector', () => {
         mockModel,
         {
           reviewAssistanceGate: {
-            enabled: true,
+            model: mockModel,
           },
         },
       );
@@ -607,12 +607,12 @@ describe('VlmTextCorrector', () => {
         corrector.correctAndSave('/output/report-1', mockModel, {
           abortSignal: abortController.signal,
           reviewAssistanceGate: {
-            enabled: true,
+            model: mockModel,
           },
         }),
       ).rejects.toThrow('gate aborted');
       expect(logger.warn).not.toHaveBeenCalledWith(
-        '[VlmTextCorrector] Page 1: review-assistance gate failed open',
+        '[PostDoclingPageProcessor] Page 1: review-assistance gate failed open',
         expect.any(Error),
       );
     });
@@ -706,7 +706,7 @@ describe('VlmTextCorrector', () => {
 
       await corrector.correctAndSave('/output/report-1', mockModel, {
         reviewAssistanceGate: {
-          enabled: true,
+          model: mockModel,
         },
       });
 
@@ -747,7 +747,7 @@ describe('VlmTextCorrector', () => {
 
       await corrector.correctAndSave('/output/report-1', mockModel, {
         reviewAssistanceGate: {
-          enabled: true,
+          model: mockModel,
         },
       });
 
@@ -825,7 +825,7 @@ describe('VlmTextCorrector', () => {
 
       expect(result.pagesFailed).toBe(1);
       expect(logger.warn).toHaveBeenCalledWith(
-        '[VlmTextCorrector] Page 1: VLM correction failed, keeping OCR text',
+        '[PostDoclingPageProcessor] Page 1: VLM correction failed, keeping OCR text',
         expect.any(Error),
       );
     });
@@ -1045,7 +1045,7 @@ describe('VlmTextCorrector', () => {
 
       await corrector.correctAndSave('/output/report-1', mockModel, {
         reviewAssistanceGate: {
-          enabled: true,
+          model: mockModel,
           outputLanguage: 'en-US',
         },
       });
@@ -1053,7 +1053,7 @@ describe('VlmTextCorrector', () => {
       expect(LLMCaller.callVision).toHaveBeenCalledTimes(2);
       expect(LLMCaller.callVision).toHaveBeenCalledWith(
         expect.objectContaining({
-          component: 'VlmTextCorrector',
+          component: 'PostDoclingPageProcessor',
           phase: 'text-correction',
         }),
       );
@@ -1103,7 +1103,7 @@ describe('VlmTextCorrector', () => {
         mockModel,
         {
           reviewAssistanceGate: {
-            enabled: true,
+            model: mockModel,
           },
         },
       );
@@ -1127,7 +1127,7 @@ describe('VlmTextCorrector', () => {
         exclusionReasons: [],
       });
       expect(logger.warn).toHaveBeenCalledWith(
-        '[VlmTextCorrector] Page 1: review-assistance gate failed open',
+        '[PostDoclingPageProcessor] Page 1: review-assistance gate failed open',
         expect.any(Error),
       );
     });
@@ -1176,7 +1176,7 @@ describe('VlmTextCorrector', () => {
         mockModel,
         {
           reviewAssistanceGate: {
-            enabled: true,
+            model: mockModel,
           },
         },
       );
@@ -1373,7 +1373,7 @@ describe('VlmTextCorrector', () => {
       await corrector.correctAndSave('/output/report-1', mockModel);
 
       expect(logger.debug).toHaveBeenCalledWith(
-        '[VlmTextCorrector] Page 1: 1 text, 0 cell corrections',
+        '[PostDoclingPageProcessor] Page 1: 1 text, 0 cell corrections',
       );
     });
   });

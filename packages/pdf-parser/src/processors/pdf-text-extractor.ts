@@ -16,6 +16,32 @@ export class PdfTextExtractor {
   constructor(private readonly logger: LoggerMethods) {}
 
   /**
+   * Safely extract page texts: returns the map on success, `undefined` on
+   * failure. Failures are logged as a single warning and do not throw, so
+   * callers can continue without a pdftotext reference layer.
+   *
+   * Returns `undefined` immediately when `pdfPath` is missing (e.g. a remote
+   * URL where local extraction is not possible).
+   */
+  static async tryExtract(
+    logger: LoggerMethods,
+    pdfPath: string | undefined,
+    totalPages: number,
+  ): Promise<Map<number, string> | undefined> {
+    if (!pdfPath) return undefined;
+    try {
+      const extractor = new PdfTextExtractor(logger);
+      return await extractor.extractText(pdfPath, totalPages);
+    } catch (error) {
+      logger.warn(
+        '[PdfTextExtractor] pdftotext extraction failed, proceeding without text reference',
+        error,
+      );
+      return undefined;
+    }
+  }
+
+  /**
    * Extract text from all pages of a PDF.
    *
    * @param pdfPath - Absolute path to the source PDF file

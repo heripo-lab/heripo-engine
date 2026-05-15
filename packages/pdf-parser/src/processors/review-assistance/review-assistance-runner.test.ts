@@ -43,13 +43,32 @@ vi.mock('@heripo/shared', async () => {
   };
 });
 
-vi.mock('../pdf-text-extractor', () => ({
-  PdfTextExtractor: vi.fn().mockImplementation(function () {
+vi.mock('../pdf-text-extractor', () => {
+  const PdfTextExtractor: any = vi.fn().mockImplementation(function () {
     return {
       extractText: mockExtractText,
     };
-  }),
-}));
+  });
+  PdfTextExtractor.tryExtract = vi.fn(
+    async (
+      logger: { warn: (...args: unknown[]) => void },
+      pdfPath: string | undefined,
+      totalPages: number,
+    ): Promise<Map<number, string> | undefined> => {
+      if (!pdfPath) return undefined;
+      try {
+        return await mockExtractText(pdfPath, totalPages);
+      } catch (error) {
+        logger.warn(
+          '[PdfTextExtractor] pdftotext extraction failed, proceeding without text reference',
+          error,
+        );
+        return undefined;
+      }
+    },
+  );
+  return { PdfTextExtractor };
+});
 
 const usage = {
   component: 'ReviewAssistance',
@@ -933,7 +952,7 @@ describe('ReviewAssistanceRunner', () => {
 
     expect(report.summary.pagesSucceeded).toBe(1);
     expect(logger.warn).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] pdftotext extraction failed, proceeding without text reference',
+      '[PdfTextExtractor] pdftotext extraction failed, proceeding without text reference',
       expect.any(Error),
     );
   });

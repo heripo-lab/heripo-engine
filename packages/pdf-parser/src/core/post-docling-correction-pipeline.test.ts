@@ -5,8 +5,8 @@ import { copyFileSync } from 'node:fs';
 import { type Mock, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
+import { PostDoclingPageProcessor } from '../processors/post-docling-page-processor';
 import { ReviewAssistanceRunner } from '../processors/review-assistance/review-assistance-runner';
-import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { runJqFileJson } from '../utils/jq';
 import { PostDoclingCorrectionPipeline } from './post-docling-correction-pipeline';
 
@@ -22,12 +22,14 @@ vi.mock('../utils/jq', () => ({
   runJqFileJson: vi.fn(),
 }));
 
-vi.mock('../processors/pdf-text-extractor', () => ({
-  PdfTextExtractor: vi.fn(),
-}));
+vi.mock('../processors/pdf-text-extractor', () => {
+  const PdfTextExtractor: any = vi.fn();
+  PdfTextExtractor.tryExtract = vi.fn();
+  return { PdfTextExtractor };
+});
 
-vi.mock('../processors/vlm-text-corrector', () => ({
-  VlmTextCorrector: vi.fn(),
+vi.mock('../processors/post-docling-page-processor', () => ({
+  PostDoclingPageProcessor: vi.fn(),
 }));
 
 vi.mock('../processors/review-assistance/review-assistance-runner', () => ({
@@ -43,7 +45,7 @@ const taskModel = { modelId: 'task-model' } as any;
 describe('PostDoclingCorrectionPipeline', () => {
   let logger: LoggerMethods;
   let pipeline: PostDoclingCorrectionPipeline;
-  let mockCorrectorInstance: { correctAndSave: Mock };
+  let mockPageProcessorInstance: { correctAndSave: Mock };
   let mockRunnerInstance: { analyzeAndSave: Mock };
   let mockTextExtractorInstance: { extractText: Mock };
 
@@ -59,7 +61,7 @@ describe('PostDoclingCorrectionPipeline', () => {
 
     pipeline = new PostDoclingCorrectionPipeline(logger);
 
-    mockCorrectorInstance = {
+    mockPageProcessorInstance = {
       correctAndSave: vi.fn().mockResolvedValue({
         textCorrections: 0,
         cellCorrections: 0,
@@ -67,8 +69,8 @@ describe('PostDoclingCorrectionPipeline', () => {
         pagesFailed: 0,
       }),
     };
-    vi.mocked(VlmTextCorrector).mockImplementation(function () {
-      return mockCorrectorInstance as any;
+    vi.mocked(PostDoclingPageProcessor).mockImplementation(function () {
+      return mockPageProcessorInstance as any;
     });
 
     mockRunnerInstance = {
@@ -92,6 +94,23 @@ describe('PostDoclingCorrectionPipeline', () => {
     vi.mocked(PdfTextExtractor).mockImplementation(function () {
       return mockTextExtractorInstance as any;
     });
+    vi.mocked((PdfTextExtractor as any).tryExtract).mockImplementation(
+      async (logger: any, pdfPath: any, totalPages: any) => {
+        if (!pdfPath) return undefined;
+        try {
+          return await mockTextExtractorInstance.extractText(
+            pdfPath,
+            totalPages,
+          );
+        } catch (error) {
+          logger.warn(
+            '[PdfTextExtractor] pdftotext extraction failed, proceeding without text reference',
+            error,
+          );
+          return undefined;
+        }
+      },
+    );
 
     vi.mocked(runJqFileJson).mockResolvedValue(1);
   });
@@ -129,14 +148,13 @@ describe('PostDoclingCorrectionPipeline', () => {
 
     await wrapped('/test/output');
 
-    expect(VlmTextCorrector).toHaveBeenCalledWith(logger);
+    expect(PostDoclingPageProcessor).toHaveBeenCalledWith(logger);
     expect(ReviewAssistanceRunner).toHaveBeenCalledWith(logger);
-    expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+    expect(mockPageProcessorInstance.correctAndSave).toHaveBeenCalledWith(
       '/test/output',
       textCorrectionModel,
       expect.objectContaining({
         reviewAssistanceGate: expect.objectContaining({
-          enabled: true,
           model: pageGateModel,
         }),
       }),
@@ -168,12 +186,16 @@ describe('PostDoclingCorrectionPipeline', () => {
 
     await wrapped('/test/output');
 
-    expect(PdfTextExtractor).toHaveBeenCalledWith(logger);
+    expect((PdfTextExtractor as any).tryExtract).toHaveBeenCalledWith(
+      logger,
+      '/tmp/test.pdf',
+      2,
+    );
     expect(mockTextExtractorInstance.extractText).toHaveBeenCalledWith(
       '/tmp/test.pdf',
       2,
     );
-    expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+    expect(mockPageProcessorInstance.correctAndSave).toHaveBeenCalledWith(
       '/test/output',
       textCorrectionModel,
       expect.objectContaining({ pageTexts }),
@@ -197,8 +219,8 @@ describe('PostDoclingCorrectionPipeline', () => {
     await wrapped('/test/output');
 
     expect(runJqFileJson).not.toHaveBeenCalled();
-    expect(PdfTextExtractor).not.toHaveBeenCalled();
-    expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+    expect((PdfTextExtractor as any).tryExtract).not.toHaveBeenCalled();
+    expect(mockPageProcessorInstance.correctAndSave).toHaveBeenCalledWith(
       '/test/output',
       textCorrectionModel,
       expect.objectContaining({ pageTexts: undefined }),
@@ -226,11 +248,42 @@ describe('PostDoclingCorrectionPipeline', () => {
     await wrapped('/test/output');
 
     expect(logger.warn).toHaveBeenCalledWith(
-      '[PDFConverter] pdftotext extraction failed, proceeding without text reference',
+      '[PdfTextExtractor] pdftotext extraction failed, proceeding without text reference',
+      expect.any(Error),
     );
-    expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+    expect(mockPageProcessorInstance.correctAndSave).toHaveBeenCalledWith(
       '/test/output',
       textCorrectionModel,
+      expect.objectContaining({ pageTexts: undefined }),
+    );
+  });
+
+  test('continues without page text references when page count read fails', async () => {
+    vi.mocked(runJqFileJson).mockRejectedValue(new Error('jq missing'));
+
+    const wrapped = pipeline.wrapCallback(
+      '/tmp/test.pdf',
+      'report-1',
+      correctionOptions(),
+      vi.fn(),
+    );
+
+    await wrapped('/test/output');
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[PostDoclingCorrectionPipeline] Failed to read page count from result.json, skipping text reference extraction',
+      expect.any(Error),
+    );
+    expect((PdfTextExtractor as any).tryExtract).not.toHaveBeenCalled();
+    expect(mockPageProcessorInstance.correctAndSave).toHaveBeenCalledWith(
+      '/test/output',
+      textCorrectionModel,
+      expect.objectContaining({ pageTexts: undefined }),
+    );
+    expect(mockRunnerInstance.analyzeAndSave).toHaveBeenCalledWith(
+      '/test/output',
+      'report-1',
+      expect.any(Function),
       expect.objectContaining({ pageTexts: undefined }),
     );
   });
@@ -251,9 +304,9 @@ describe('PostDoclingCorrectionPipeline', () => {
     );
 
     const copyOrder = vi.mocked(copyFileSync).mock.invocationCallOrder[0];
-    const correctorOrder =
-      mockCorrectorInstance.correctAndSave.mock.invocationCallOrder[0];
-    expect(copyOrder).toBeLessThan(correctorOrder);
+    const pageProcessorOrder =
+      mockPageProcessorInstance.correctAndSave.mock.invocationCallOrder[0];
+    expect(copyOrder).toBeLessThan(pageProcessorOrder);
   });
 
   test('forwards stage-specific options and token tracking hooks', async () => {
@@ -288,7 +341,7 @@ describe('PostDoclingCorrectionPipeline', () => {
 
     await wrapped('/test/output');
 
-    expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
+    expect(mockPageProcessorInstance.correctAndSave).toHaveBeenCalledWith(
       '/test/output',
       textCorrectionModel,
       expect.objectContaining({
@@ -369,7 +422,7 @@ describe('PostDoclingCorrectionPipeline', () => {
     expect(taskModelResolver({ id: 'tables' })).toBe(taskModel);
 
     vi.clearAllMocks();
-    mockCorrectorInstance.correctAndSave.mockResolvedValue({
+    mockPageProcessorInstance.correctAndSave.mockResolvedValue({
       textCorrections: 0,
       cellCorrections: 0,
       pagesProcessed: 5,

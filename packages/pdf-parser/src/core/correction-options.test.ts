@@ -25,11 +25,25 @@ describe('normalizePDFCorrectionOptions', () => {
     expect(() => normalizePDFCorrectionOptions(undefined)).toThrow(
       'PDF correction.models is required',
     );
-    expect(() =>
-      normalizePDFCorrectionOptions({
-        models: { pageGate: model, reviewAssistance: model },
-      } as any),
-    ).toThrow('PDF correction.models.textCorrection is required');
+  });
+
+  test.each([
+    {
+      field: 'textCorrection',
+      models: { pageGate: model, reviewAssistance: model },
+    },
+    {
+      field: 'pageGate',
+      models: { textCorrection: model, reviewAssistance: model },
+    },
+    {
+      field: 'reviewAssistance',
+      models: { textCorrection: model, pageGate: model },
+    },
+  ])('requires correction.models.$field to be present', ({ field, models }) => {
+    expect(() => normalizePDFCorrectionOptions({ models } as any)).toThrow(
+      `PDF correction.models.${field} is required`,
+    );
   });
 
   test('fills defaults for correction execution settings', () => {
@@ -57,7 +71,7 @@ describe('normalizePDFCorrectionOptions', () => {
         pageGate: { structuralNoiseThreshold: 2 },
         proposalThreshold: 0.7,
         autoApplyThreshold: 0.2,
-        temperature: 2,
+        temperature: 1.5,
       }),
     );
 
@@ -73,7 +87,17 @@ describe('normalizePDFCorrectionOptions', () => {
       pageGate: { structuralNoiseThreshold: 1 },
       proposalThreshold: 0.7,
       autoApplyThreshold: 0.7,
-      temperature: 1,
+      temperature: 1.5,
     });
+  });
+
+  test('clamps temperature to the API-supported [0, 2] range', () => {
+    const above = normalizePDFCorrectionOptions(correction({ temperature: 3 }));
+    const below = normalizePDFCorrectionOptions(
+      correction({ temperature: -1 }),
+    );
+
+    expect(above.temperature).toBe(2);
+    expect(below.temperature).toBe(0);
   });
 });

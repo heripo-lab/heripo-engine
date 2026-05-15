@@ -45,6 +45,40 @@ interface OptionalStringFieldApi {
   handleChange: (value: string | undefined) => void;
 }
 
+interface OptionalNumberFieldApi {
+  state: { value: number | undefined };
+  handleChange: (value: number | undefined) => void;
+}
+
+const CORRECTION_RETRY_FIELDS = [
+  {
+    name: 'correction.maxRetries.textCorrection',
+    label: 'Text Correction',
+  },
+  {
+    name: 'correction.maxRetries.pageGate',
+    label: 'Page Gate',
+  },
+  {
+    name: 'correction.maxRetries.reviewAssistance',
+    label: 'Review Assistance',
+  },
+  {
+    name: 'correction.maxRetries.tableCorrection',
+    label: 'Table Correction',
+  },
+] as const;
+
+const RETRY_OVERRIDE_NONE = '__inherit__';
+const RETRY_OVERRIDE_OPTIONS = [
+  { value: RETRY_OVERRIDE_NONE, label: 'inherit' },
+  { value: '0', label: '0' },
+  { value: '1', label: '1' },
+  { value: '2', label: '2' },
+  { value: '3', label: '3' },
+  { value: '5', label: '5' },
+] as const;
+
 interface AdvancedOptionsCardProps {
   disabled?: boolean;
 }
@@ -469,6 +503,47 @@ export function AdvancedOptionsCard({
                 </div>
               )}
             </form.Field>
+          </div>
+        </div>
+
+        <div className="bg-border h-px" />
+
+        {/* Per-stage Correction Retry Overrides */}
+        <div className="space-y-3">
+          <label className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+            Correction Retry Overrides
+          </label>
+          <p className="text-muted-foreground text-xs">
+            Override Max Retries for individual correction stages. Leave on
+            inherit to use the global value above.
+          </p>
+          <div className="grid gap-3">
+            {CORRECTION_RETRY_FIELDS.map((config) => (
+              <form.Field key={config.name} name={config.name}>
+                {(field: OptionalNumberFieldApi) => (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">{config.label}</span>
+                    <SelectWithTooltip
+                      value={
+                        field.state.value === undefined
+                          ? RETRY_OVERRIDE_NONE
+                          : String(field.state.value)
+                      }
+                      onValueChange={(v) =>
+                        field.handleChange(
+                          v === RETRY_OVERRIDE_NONE
+                            ? undefined
+                            : parseInt(v, 10),
+                        )
+                      }
+                      disabled={disabled}
+                      className="w-28"
+                      options={[...RETRY_OVERRIDE_OPTIONS]}
+                    />
+                  </div>
+                )}
+              </form.Field>
+            ))}
           </div>
         </div>
       </CardContent>

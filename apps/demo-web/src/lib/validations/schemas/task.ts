@@ -31,6 +31,15 @@ const correctionTaskModelSchema = z
   })
   .optional();
 
+const correctionMaxRetriesSchema = z
+  .object({
+    textCorrection: z.number().int().nonnegative().max(10).optional(),
+    pageGate: z.number().int().nonnegative().max(10).optional(),
+    reviewAssistance: z.number().int().nonnegative().max(10).optional(),
+    tableCorrection: z.number().int().nonnegative().max(10).optional(),
+  })
+  .optional();
+
 const correctionOptionsSchema = z.object({
   models: z.object({
     textCorrection: llmModelSchema,
@@ -46,6 +55,12 @@ const correctionOptionsSchema = z.object({
       tables: z.number().int().positive().max(10).default(1),
     })
     .optional(),
+  // BCP 47 language tag for AI prompt output (descriptions, reasons).
+  // Defaults to ko-KR; the library accepts any string.
+  outputLanguage: z.string().default('ko-KR'),
+  // Optional per-stage retry overrides. When unset, each stage uses the
+  // top-level `maxRetries` value.
+  maxRetries: correctionMaxRetriesSchema,
 });
 
 /**

@@ -257,7 +257,7 @@ await pdfParser.dispose();
 1. **Text Layer Pre-Check** (zero cost): Extracts the document's text layer using `pdftotext` and checks for Hangul. If Hangul is present, the document is immediately treated as Korean.
 2. **VLM Sampling** (only when needed): Samples up to 15 pages (trimming 10% from front/back to skip covers and appendices) and analyzes them with a Vision LLM. Uses early exit when `ko-KR` is detected.
 
-### Full-Document Correction (`VlmTextCorrector`)
+### Full-Document Correction (`PostDoclingPageProcessor`)
 
 When a Korean report is detected, every page is sent to the VLM for correction:
 

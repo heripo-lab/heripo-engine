@@ -434,7 +434,7 @@ describe('PDFConverter', () => {
     test('should return aggregated token report when token usage was tracked', async () => {
       const aggregator = new LLMTokenUsageAggregator();
       aggregator.track({
-        component: 'VlmTextCorrector',
+        component: 'PostDoclingPageProcessor',
         phase: 'text-correction',
         model: 'primary',
         modelName: 'test-model',
