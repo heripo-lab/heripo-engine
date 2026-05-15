@@ -51,6 +51,7 @@ import {
   type ReviewAssistanceWorkItem,
   ReviewAssistanceWorkScheduler,
 } from './review-assistance-work-scheduler';
+import { TableCorrectionRunner } from './table-correction-runner';
 
 export type ReviewAssistanceModelResolver = (
   task: ReviewAssistanceTaskDefinition,
@@ -708,21 +709,29 @@ export class ReviewAssistanceRunner {
         `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item started`,
       );
 
+      const tableCorrection =
+        workItem.kind === 'table'
+          ? this.createTableCorrectionWorkContext(context, workItem)
+          : undefined;
       const packer = new ReviewAssistanceContextPacker();
-      const packedContext = packer.pack(context, workItem);
+      const packedContext =
+        tableCorrection?.context.scopedPageContext ??
+        packer.pack(context, workItem);
       const maxAttempts = this.getWorkItemMaxAttempts(workItem, options);
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         attempts = attempt;
-        const prompt = buildReviewAssistancePrompt(
-          packedContext,
-          workItem.task,
-          {
-            outputLanguage: options.outputLanguage,
-            validationFeedback,
-            attempt,
-          },
-        );
+        const prompt = tableCorrection
+          ? tableCorrection.runner.buildPrompt(tableCorrection.context, {
+              outputLanguage: options.outputLanguage,
+              validationFeedback,
+              attempt,
+            })
+          : buildReviewAssistancePrompt(packedContext, workItem.task, {
+              outputLanguage: options.outputLanguage,
+              validationFeedback,
+              attempt,
+            });
         const result = await this.withWorkItemTimeout(
           LLMCaller.callVision({
             schema: reviewAssistancePageSchema as any,
@@ -762,12 +771,25 @@ export class ReviewAssistanceRunner {
         options.aggregator?.track(result.usage);
 
         const output = result.output as ReviewAssistancePageOutput;
-        const decisions = this.validateWorkItemOutput(
-          packedContext,
-          output,
-          workItem,
-          options,
-        );
+        const decisions = tableCorrection
+          ? this.decorateWorkItemDecisions(
+              tableCorrection.runner.validateOutput(
+                tableCorrection.context,
+                output,
+                {
+                  autoApplyThreshold: options.autoApplyThreshold,
+                  proposalThreshold: options.proposalThreshold,
+                  allowAutoApply: true,
+                },
+              ),
+              workItem,
+            )
+          : this.validateWorkItemOutput(
+              packedContext,
+              output,
+              workItem,
+              options,
+            );
         const failureReasons = this.getValidationFailureReasons(decisions);
         if (failureReasons.length === 0) {
           const validation: ReviewAssistanceCallTraceValidation =
@@ -871,6 +893,20 @@ export class ReviewAssistanceRunner {
     }
   }
 
+  private createTableCorrectionWorkContext(
+    context: PageReviewContext,
+    workItem: ReviewAssistanceWorkItem,
+  ): {
+    runner: TableCorrectionRunner;
+    context: ReturnType<TableCorrectionRunner['buildContext']>;
+  } {
+    const runner = new TableCorrectionRunner();
+    return {
+      runner,
+      context: runner.buildContext(context, workItem),
+    };
+  }
+
   private validateWorkItemOutput(
     context: PageReviewContext,
     output: ReviewAssistancePageOutput,
@@ -878,12 +914,21 @@ export class ReviewAssistanceRunner {
     options: ReviewAssistanceRunnerOptions,
   ): ReviewAssistanceDecision[] {
     const validator = new ReviewAssistanceValidator();
-    return validator
-      .validatePageOutput(context, output, {
+    return this.decorateWorkItemDecisions(
+      validator.validatePageOutput(context, output, {
         autoApplyThreshold: options.autoApplyThreshold,
         proposalThreshold: options.proposalThreshold,
         allowAutoApply: true,
-      })
+      }),
+      workItem,
+    );
+  }
+
+  private decorateWorkItemDecisions(
+    decisions: ReviewAssistanceDecision[],
+    workItem: ReviewAssistanceWorkItem,
+  ): ReviewAssistanceDecision[] {
+    return decisions
       .map((decision) => this.withTaskMetadata(decision, workItem.task))
       .map((decision) => this.withWorkItemMetadata(decision, workItem))
       .map((decision) => this.enforceTaskAllowedOps(decision, workItem.task));
@@ -940,6 +985,7 @@ export class ReviewAssistanceRunner {
       reason.includes('outside_source') ||
       reason.includes('region_count_mismatch') ||
       reason.includes('boundary_not_supported') ||
+      reason.startsWith('table_correction_') ||
       reason.startsWith('task_op_not_allowed:')
     );
   }

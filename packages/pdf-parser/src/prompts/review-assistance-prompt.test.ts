@@ -134,6 +134,56 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('"splitCandidate"');
   });
 
+  test('table task serializes table-specific context and orphan table captions', () => {
+    const task = REVIEW_ASSISTANCE_TASKS.find((entry) => entry.id === 'tables');
+    const context: PageReviewContext = {
+      pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['table_present'],
+        exclusionReasons: [],
+      },
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [],
+      missingTextCandidates: [],
+      tables: [
+        {
+          ref: '#/tables/0',
+          caption: 'Table 1',
+          gridPreview: [['A']],
+          rowCount: 1,
+          colCount: 1,
+          emptyCellRatio: 0,
+          suspectReasons: [],
+        },
+      ],
+      pictures: [],
+      orphanCaptions: [
+        {
+          ref: '#/texts/1',
+          text: 'Table 1',
+          currentLabel: 'text',
+          captionLikeBodyText: true,
+          nearestMediaRefs: [{ ref: '#/tables/0', kind: 'table', distance: 2 }],
+        },
+      ],
+      footnotes: [],
+      layout: { readingOrderRefs: [], visualOrderRefs: [], bboxWarnings: [] },
+      domainPatterns: [],
+    };
+
+    const prompt = buildReviewAssistancePrompt(context, task);
+
+    expect(prompt).toContain('TASK: Tables and continued tables');
+    expect(prompt).toContain('"tables"');
+    expect(prompt).toContain('"orphanCaptions"');
+    expect(prompt).toContain('"rowCount":1');
+  });
+
   test('task prompt narrows allowed ops and focused context', () => {
     const context: PageReviewContext = {
       pageNo: 1,

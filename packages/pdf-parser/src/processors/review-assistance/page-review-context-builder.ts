@@ -38,6 +38,14 @@ export interface PageReviewTable {
   caption?: string;
   bbox?: DoclingBBox;
   gridPreview: string[][];
+  rowCount?: number;
+  colCount?: number;
+  hasSpans?: boolean;
+  headerRows?: number[];
+  headerColumns?: number[];
+  unitHints?: string[];
+  footnoteRefs?: string[];
+  footnoteMarkers?: string[];
   emptyCellRatio: number;
   previousPageTableRefs?: string[];
   previousPageTableSummary?: string;
@@ -536,6 +544,15 @@ export class PageReviewContextBuilder {
     const ref = `#/tables/${index}`;
     const gridPreview = this.buildGridPreview(item.data.grid);
     const emptyCellRatio = this.getEmptyCellRatio(item.data.grid);
+    const tableCells = this.getTableCells(item);
+    const headerRows = this.getHeaderRows(tableCells);
+    const headerColumns = this.getHeaderColumns(tableCells);
+    const unitHints = this.detectUnitHints(
+      tableCells.map((cell) => cell.text).join('\n'),
+    );
+    const footnoteMarkers = this.detectFootnoteMarkers(
+      tableCells.map((cell) => cell.text).join('\n'),
+    );
     const suspectReasons: string[] = [];
 
     if (!this.getCaptionText(item.captions, facts)) {
@@ -553,6 +570,16 @@ export class PageReviewContextBuilder {
       caption: this.getCaptionText(item.captions, facts),
       bbox: this.getProvForPage(item.prov, pageNo)?.bbox,
       gridPreview,
+      rowCount: item.data.num_rows,
+      colCount: item.data.num_cols,
+      hasSpans: tableCells.some(
+        (cell) => cell.row_span > 1 || cell.col_span > 1,
+      ),
+      headerRows,
+      headerColumns,
+      unitHints,
+      footnoteRefs: item.footnotes.map((ref) => ref.$ref),
+      footnoteMarkers,
       emptyCellRatio,
       previousPageTableRefs: facts.tableRefsByPage.get(pageNo - 1),
       previousPageTableSummary: facts.tableSummariesByPage
@@ -764,6 +791,28 @@ export class PageReviewContextBuilder {
       );
   }
 
+  private getTableCells(item: DoclingTableItem): DoclingTableCell[] {
+    return item.data.table_cells.length > 0
+      ? item.data.table_cells
+      : item.data.grid.flat();
+  }
+
+  private getHeaderRows(cells: DoclingTableCell[]): number[] {
+    return this.uniqueNumbers(
+      cells
+        .filter((cell) => cell.column_header)
+        .map((cell) => cell.start_row_offset_idx),
+    );
+  }
+
+  private getHeaderColumns(cells: DoclingTableCell[]): number[] {
+    return this.uniqueNumbers(
+      cells
+        .filter((cell) => cell.row_header)
+        .map((cell) => cell.start_col_offset_idx),
+    );
+  }
+
   private getEmptyCellRatio(grid: DoclingTableCell[][]): number {
     let total = 0;
     let empty = 0;
@@ -776,6 +825,28 @@ export class PageReviewContextBuilder {
       }
     }
     return total === 0 ? 0 : empty / total;
+  }
+
+  private detectUnitHints(text: string): string[] {
+    // Alternation order matters: regex matches the leftmost branch first,
+    // so longer units (mm, m²) must precede their shorter prefixes (m).
+    return this.uniqueStrings(
+      text.match(/\d+(?:\.\d+)?\s?(?:mm|cm|m²|m|㎝|㎜|㎡|kg|g|점|개)/giu) ?? [],
+    ).slice(0, 20);
+  }
+
+  private detectFootnoteMarkers(text: string): string[] {
+    return this.uniqueStrings(
+      text.match(/(?:※|\*|[¹²³⁴⁵⁶⁷⁸⁹]|\[[0-9]+\]|\([0-9]+\))/gu) ?? [],
+    ).slice(0, 20);
+  }
+
+  private uniqueNumbers(values: number[]): number[] {
+    return [...new Set(values.filter(Number.isFinite))].sort((a, b) => a - b);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
   }
 
   private hasAdjacentCompatibleTable(

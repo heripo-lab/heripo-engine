@@ -552,6 +552,88 @@ describe('ReviewAssistanceRunner', () => {
     expect(textCall).toEqual(expect.objectContaining({ maxRetries: 4 }));
   });
 
+  test('routes table work items through TableCorrectionRunner with re-ask feedback', async () => {
+    let tableAttempts = 0;
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      if (input.metadata?.task !== 'tables') {
+        return makeReviewResult();
+      }
+      tableAttempts += 1;
+      // First attempt targets a non-existent table so the table-specific
+      // validator rejects it and forces a re-ask with validation feedback.
+      if (tableAttempts === 1) {
+        return makeReviewResult([
+          {
+            op: 'updateTableCell',
+            targetRef: '#/tables/9',
+            payload: { tableRef: '#/tables/9', row: 0, col: 0, text: 'X' },
+            confidence: 0.95,
+            rationale: 'Wrong target table',
+            evidence: 'X',
+          },
+        ]);
+      }
+      return makeReviewResult([
+        {
+          op: 'updateTableCell',
+          targetRef: '#/tables/0',
+          payload: { tableRef: '#/tables/0', row: 0, col: 0, text: '유물' },
+          confidence: 0.95,
+          rationale: 'Cell OCR correction',
+          evidence: '유물',
+        },
+      ]);
+    });
+
+    const report = await new ReviewAssistanceRunner(
+      makeLogger(),
+    ).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
+      tableMaxRetries: 3,
+    });
+
+    const tableCalls = vi
+      .mocked(LLMCaller.callVision)
+      .mock.calls.map(([input]) => input as any)
+      .filter(
+        (input) =>
+          input.component === 'ReviewAssistance' &&
+          input.metadata?.task === 'tables',
+      );
+
+    expect(tableCalls).toHaveLength(2);
+    const firstPrompt = tableCalls[0].messages[0].content[0].text as string;
+    const secondPrompt = tableCalls[1].messages[0].content[0].text as string;
+    expect(firstPrompt).toContain('TABLE CORRECTION CONTEXT JSON');
+    expect(firstPrompt).toContain('"targetTable"');
+    expect(secondPrompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
+    expect(secondPrompt).toContain('table_correction_target_ref_mismatch');
+
+    const tableDecisions = report.pages[0].decisions.filter(
+      (decision) => decision.metadata?.tableCorrection,
+    );
+    expect(tableDecisions).toHaveLength(1);
+    expect(tableDecisions[0].command?.op).toBe('updateTableCell');
+    expect(tableDecisions[0].metadata?.tableCorrection).toMatchObject({
+      targetRef: '#/tables/0',
+    });
+
+    const sidecar = JSON.parse(
+      readFileSync(join(outputDir, 'review_assistance.json'), 'utf-8'),
+    );
+    const tableTrace = sidecar.callTraces.find(
+      (trace: { kind: string }) => trace.kind === 'table',
+    );
+    expect(tableTrace).toMatchObject({
+      kind: 'table',
+      attempts: 2,
+      validation: 'reasked',
+    });
+  });
+
   test('skips non-eligible pages without structural model calls', async () => {
     vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
       if (input.component === 'ReviewAssistancePageGate') {

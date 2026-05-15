@@ -855,10 +855,12 @@ export class ReviewAssistanceValidator {
       reasons.push('table_cell_negative_index');
       return;
     }
-    if (
-      row >= table.gridPreview.length ||
-      col >= table.gridPreview[row].length
-    ) {
+    const rowLimit = table.rowCount ?? table.gridPreview.length;
+    const colLimit =
+      table.colCount === undefined
+        ? (table.gridPreview[row]?.length ?? table.gridPreview[0]?.length ?? 0)
+        : table.colCount;
+    if (row >= rowLimit || col >= colLimit) {
       reasons.push('table_cell_out_of_preview_range');
     }
   }
@@ -1212,17 +1214,30 @@ export class ReviewAssistanceValidator {
     /* v8 ignore next -- structured schema should provide arrays; kept for untrusted LLM payload defense */
     if (!Array.isArray(value)) return [];
     return value.map((row) =>
-      Array.isArray(row)
-        ? row.map((cell) => ({
-            text:
-              typeof cell === 'object' &&
-              cell !== null &&
-              typeof (cell as { text?: unknown }).text === 'string'
-                ? (cell as { text: string }).text
-                : '',
-          }))
-        : [],
+      Array.isArray(row) ? row.map((cell) => this.tableCellValue(cell)) : [],
     );
+  }
+
+  private tableCellValue(value: unknown): ReviewAssistanceTableCell {
+    if (!value || typeof value !== 'object') {
+      return { text: '' };
+    }
+    const record = value as Record<string, unknown>;
+    const cell: ReviewAssistanceTableCell = {
+      text: typeof record.text === 'string' ? record.text : '',
+    };
+    if (typeof record.rowSpan === 'number') cell.rowSpan = record.rowSpan;
+    if (typeof record.colSpan === 'number') cell.colSpan = record.colSpan;
+    if (typeof record.columnHeader === 'boolean') {
+      cell.columnHeader = record.columnHeader;
+    }
+    if (typeof record.rowHeader === 'boolean')
+      cell.rowHeader = record.rowHeader;
+    // Preserve bbox so ReviewAssistancePatcher.buildTableData can place each
+    // cell precisely instead of falling back to the table-level prov bbox.
+    const bbox = this.bboxValue(record.bbox);
+    if (bbox) cell.bbox = bbox;
+    return cell;
   }
 
   private imageRegionsValue(value: unknown): ReviewAssistanceImageRegion[] {

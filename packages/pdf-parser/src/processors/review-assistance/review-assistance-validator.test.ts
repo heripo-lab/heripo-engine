@@ -599,6 +599,50 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.reasons).toContain('table_grid_not_rectangular');
   });
 
+  test('preserves cell bbox and span metadata in replaceTable commands', () => {
+    const cellBbox: DoclingBBox = {
+      l: 5,
+      t: 6,
+      r: 25,
+      b: 16,
+      coord_origin: 'TOPLEFT',
+    };
+    const decision = validate({
+      op: 'replaceTable',
+      targetRef: '#/tables/0',
+      payload: {
+        grid: [
+          [
+            {
+              text: 'A',
+              bbox: cellBbox,
+              rowSpan: 1,
+              colSpan: 2,
+              columnHeader: true,
+            },
+            { text: 'B' },
+          ],
+          [{ text: 'C' }, { text: 'D' }],
+        ],
+      },
+      confidence: 0.9,
+      rationale: 'Replace grid with cell-level metadata',
+      evidence: null,
+    });
+
+    expect(decision.command?.op).toBe('replaceTable');
+    const grid =
+      decision.command?.op === 'replaceTable' ? decision.command.grid : [];
+    expect(grid[0][0]).toMatchObject({
+      text: 'A',
+      bbox: cellBbox,
+      rowSpan: 1,
+      colSpan: 2,
+      columnHeader: true,
+    });
+    expect(grid[0][1]).toEqual({ text: 'B' });
+  });
+
   test('allows updating existing empty table cells', () => {
     const context = makeContext();
     context.tables[0].gridPreview[0][0] = '';
