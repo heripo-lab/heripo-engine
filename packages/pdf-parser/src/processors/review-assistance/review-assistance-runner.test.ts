@@ -318,15 +318,24 @@ function makeDecision(
 }
 
 function makeOptions() {
+  const pageGateModel = { modelId: 'page-gate-model' } as any;
   return {
-    enabled: true,
-    concurrency: 1,
+    pageGateModel,
+    pageGateMaxRetries: 3,
+    pageGateTemperature: 0,
+    pageConcurrency: 1,
+    taskConcurrency: 6,
     autoApplyThreshold: 0.85,
     proposalThreshold: 0.5,
     maxRetries: 3,
     temperature: 0,
     outputLanguage: 'en-US',
   };
+}
+
+function makeModelResolver() {
+  const model = { modelId: 'mock-model' } as any;
+  return vi.fn(() => model);
 }
 
 function makeLogger() {
@@ -375,15 +384,9 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       {
-        enabled: true,
-        concurrency: 1,
-        autoApplyThreshold: 0.85,
-        proposalThreshold: 0.5,
-        maxRetries: 3,
-        temperature: 0,
-        outputLanguage: 'en-US',
+        ...makeOptions(),
         aggregator,
         onTokenUsage,
         onProgress,
@@ -504,14 +507,8 @@ describe('ReviewAssistanceRunner', () => {
 
     const report = await new ReviewAssistanceRunner(
       makeLogger(),
-    ).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-      outputLanguage: 'en-US',
+    ).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
     });
 
     expect(LLMCaller.callVision).toHaveBeenCalledTimes(1);
@@ -552,7 +549,7 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       makeOptions(),
     );
 
@@ -597,7 +594,7 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       makeOptions(),
     );
 
@@ -652,7 +649,7 @@ describe('ReviewAssistanceRunner', () => {
       new ReviewAssistanceRunner(logger).analyzeAndSave(
         outputDir,
         'report-1',
-        { modelId: 'mock-model' } as any,
+        makeModelResolver(),
         {
           ...makeOptions(),
           abortSignal: abortController.signal,
@@ -684,7 +681,6 @@ describe('ReviewAssistanceRunner', () => {
 
     const updated = (await runner.ensurePageEligibility(
       [pageOneContext, pageTwoContext],
-      { modelId: 'mock-model' } as any,
       makeOptions(),
       outputDir,
     )) as PageReviewContext[];
@@ -719,12 +715,7 @@ describe('ReviewAssistanceRunner', () => {
 
     const report = await new ReviewAssistanceRunner(
       makeLogger(),
-    ).analyzeAndSave(
-      outputDir,
-      'report-1',
-      { modelId: 'mock-model' } as any,
-      makeOptions(),
-    );
+    ).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), makeOptions());
 
     const components = vi
       .mocked(LLMCaller.callVision)
@@ -757,12 +748,7 @@ describe('ReviewAssistanceRunner', () => {
 
     const report = await new ReviewAssistanceRunner(
       makeLogger(),
-    ).analyzeAndSave(
-      outputDir,
-      'report-1',
-      { modelId: 'mock-model' } as any,
-      makeOptions(),
-    );
+    ).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), makeOptions());
 
     expect(LLMCaller.callVision).not.toHaveBeenCalled();
     expect(report.summary.pagesSucceeded).toBe(1);
@@ -787,14 +773,8 @@ describe('ReviewAssistanceRunner', () => {
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
-    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-      outputLanguage: 'en-US',
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
       pdfPath: '/tmp/input.pdf',
     });
 
@@ -867,14 +847,8 @@ describe('ReviewAssistanceRunner', () => {
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
-    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-      outputLanguage: 'en-US',
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
     });
 
     expect(report.summary.autoAppliedCount).toBe(0);
@@ -922,14 +896,8 @@ describe('ReviewAssistanceRunner', () => {
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
-    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-      outputLanguage: 'en-US',
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
     });
 
     expect(
@@ -956,15 +924,9 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       {
-        enabled: true,
-        concurrency: 1,
-        autoApplyThreshold: 0.85,
-        proposalThreshold: 0.5,
-        maxRetries: 3,
-        temperature: 0,
-        outputLanguage: 'en-US',
+        ...makeOptions(),
         pdfPath: '/tmp/input.pdf',
       },
     );
@@ -986,7 +948,7 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       makeOptions(),
     );
 
@@ -1013,15 +975,9 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       {
-        enabled: true,
-        concurrency: 1,
-        autoApplyThreshold: 0.85,
-        proposalThreshold: 0.5,
-        maxRetries: 3,
-        temperature: 0,
-        outputLanguage: 'en-US',
+        ...makeOptions(),
       },
     );
 
@@ -1050,14 +1006,8 @@ describe('ReviewAssistanceRunner', () => {
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
-    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-      outputLanguage: 'en-US',
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
     });
 
     expect(report.pages[0].error?.message).toContain(
@@ -1080,15 +1030,9 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       {
-        enabled: true,
-        concurrency: 1,
-        autoApplyThreshold: 0.85,
-        proposalThreshold: 0.5,
-        maxRetries: 3,
-        temperature: 0,
-        outputLanguage: 'en-US',
+        ...makeOptions(),
       },
     );
 
@@ -1120,15 +1064,9 @@ describe('ReviewAssistanceRunner', () => {
     const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
       outputDir,
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       {
-        enabled: true,
-        concurrency: 1,
-        autoApplyThreshold: 0.85,
-        proposalThreshold: 0.5,
-        maxRetries: 3,
-        temperature: 0,
-        outputLanguage: 'en-US',
+        ...makeOptions(),
       },
     );
 
@@ -1235,21 +1173,10 @@ describe('ReviewAssistanceRunner', () => {
         warn: vi.fn(),
         error: vi.fn(),
         debug: vi.fn(),
-      }).analyzeAndSave(
-        outputDir,
-        'report-1',
-        { modelId: 'mock-model' } as any,
-        {
-          enabled: true,
-          concurrency: 1,
-          autoApplyThreshold: 0.85,
-          proposalThreshold: 0.5,
-          maxRetries: 3,
-          temperature: 0,
-          outputLanguage: 'en-US',
-          abortSignal: abortController.signal,
-        },
-      ),
+      }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+        ...makeOptions(),
+        abortSignal: abortController.signal,
+      }),
     ).rejects.toThrow('aborted');
   });
 
@@ -1427,14 +1354,8 @@ describe('ReviewAssistanceRunner', () => {
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
-    }).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
-      enabled: true,
-      concurrency: 1,
-      autoApplyThreshold: 0.85,
-      proposalThreshold: 0.5,
-      maxRetries: 3,
-      temperature: 0,
-      outputLanguage: 'en-US',
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
     });
     const categories = report.pages.flatMap((page) =>
       page.issues.map((issue) => issue.category),
@@ -1463,7 +1384,7 @@ describe('ReviewAssistanceRunner', () => {
     const noOutputResult = (await noOutputRunner.reviewPage(
       makePageContext(pagePath),
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       makeOptions(),
       1,
     )) as ReviewAssistancePageResult;
@@ -1484,7 +1405,7 @@ describe('ReviewAssistanceRunner', () => {
     const genericFailure = (await genericRunner.reviewPage(
       makePageContext(join(outputDir, 'pages', 'missing.png')),
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       makeOptions(),
       1,
     )) as ReviewAssistancePageResult;
@@ -1505,7 +1426,7 @@ describe('ReviewAssistanceRunner', () => {
       abortRunner.reviewPage(
         makePageContext(join(outputDir, 'pages', 'missing.png')),
         'report-1',
-        { modelId: 'mock-model' } as any,
+        makeModelResolver(),
         {
           ...makeOptions(),
           abortSignal: abortController.signal,
@@ -1527,7 +1448,7 @@ describe('ReviewAssistanceRunner', () => {
     const failedTasksResult = (await failedTasksRunner.reviewPage(
       makePageContext(pagePath),
       'report-1',
-      { modelId: 'mock-model' } as any,
+      makeModelResolver(),
       makeOptions(),
       1,
     )) as ReviewAssistancePageResult;
@@ -1556,7 +1477,7 @@ describe('ReviewAssistanceRunner', () => {
         },
         new Uint8Array([1]),
         1,
-        { modelId: 'mock-model' } as any,
+        makeModelResolver(),
         {
           ...makeOptions(),
           abortSignal: abortTaskController.signal,
@@ -1715,12 +1636,14 @@ describe('ReviewAssistanceRunner', () => {
     const runner = new ReviewAssistanceRunner(makeLogger()) as unknown as {
       addPictureSplitCandidates: (
         contexts: PageReviewContext[],
+        concurrency: number,
       ) => Promise<PageReviewContext[]>;
     };
 
-    const [context] = await runner.addPictureSplitCandidates([
-      makePageContext('/tmp/page_0.png'),
-    ]);
+    const [context] = await runner.addPictureSplitCandidates(
+      [makePageContext('/tmp/page_0.png')],
+      1,
+    );
 
     expect(detectorSpy).toHaveBeenCalledWith({
       pageImagePath: '/tmp/page_0.png',
@@ -1745,12 +1668,13 @@ describe('ReviewAssistanceRunner', () => {
     const runner = new ReviewAssistanceRunner(makeLogger()) as unknown as {
       addPictureSplitCandidates: (
         contexts: PageReviewContext[],
+        concurrency: number,
       ) => Promise<PageReviewContext[]>;
     };
     const context = makePageContext('/tmp/page_0.png');
     context.pictures[0].bbox = undefined;
 
-    const [result] = await runner.addPictureSplitCandidates([context]);
+    const [result] = await runner.addPictureSplitCandidates([context], 1);
 
     expect(detectorSpy).not.toHaveBeenCalled();
     expect(result.pictures[0].splitCandidate).toBeUndefined();

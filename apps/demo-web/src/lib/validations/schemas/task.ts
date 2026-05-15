@@ -20,6 +20,34 @@ const llmModelSchema = z.string().refine((val) => llmModelIds.includes(val), {
   message: 'Invalid LLM model ID',
 });
 
+const correctionTaskModelSchema = z
+  .object({
+    textOcrHanja: llmModelSchema.optional(),
+    textIntegrity: llmModelSchema.optional(),
+    textRoleFootnote: llmModelSchema.optional(),
+    tables: llmModelSchema.optional(),
+    picturesCaptions: llmModelSchema.optional(),
+    layoutBboxOrder: llmModelSchema.optional(),
+  })
+  .optional();
+
+const correctionOptionsSchema = z.object({
+  models: z.object({
+    textCorrection: llmModelSchema,
+    pageGate: llmModelSchema,
+    reviewAssistance: llmModelSchema,
+    tableCorrection: llmModelSchema.optional(),
+    reviewAssistanceTasks: correctionTaskModelSchema,
+  }),
+  concurrency: z
+    .object({
+      pages: z.number().int().positive().max(50).default(1),
+      reviewTasks: z.number().int().positive().max(6).default(6),
+      tables: z.number().int().positive().max(10).default(1),
+    })
+    .optional(),
+});
+
 /**
  * Processing options schema for PDF processing.
  * Used for POST /api/tasks request body validation.
@@ -34,10 +62,8 @@ export const processingOptionsSchema = z.object({
   // Force image PDF pre-conversion
   forceImagePdf: z.boolean().default(false),
 
-  // Korean report detection and VLM text correction
-  strategySamplerModel: llmModelSchema.optional(),
-  vlmProcessorModel: llmModelSchema.optional(),
-  forcedMethod: z.enum(['ocrmac', 'vlm']).optional(),
+  // Mandatory post-Docling correction
+  correction: correctionOptionsSchema,
 
   // LLM Models
   fallbackModel: llmModelSchema,
@@ -46,9 +72,6 @@ export const processingOptionsSchema = z.object({
   validatorModel: llmModelSchema,
   visionTocExtractorModel: llmModelSchema,
   captionParserModel: llmModelSchema,
-
-  // VLM text correction
-  vlmConcurrency: z.number().int().positive().max(50).default(1),
 
   // Batch & Retry
   textCleanerBatchSize: z.number().int().nonnegative().default(20),

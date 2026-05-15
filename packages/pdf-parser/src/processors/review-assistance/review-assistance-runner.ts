@@ -13,7 +13,6 @@ import type {
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
-import type { NormalizedReviewAssistanceOptions } from '../../core/review-assistance-options';
 import type { PageReviewContext } from './page-review-context-builder';
 
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
@@ -44,7 +43,21 @@ import {
 import { ReviewAssistancePatcher } from './review-assistance-patcher';
 import { ReviewAssistanceValidator } from './review-assistance-validator';
 
-export interface ReviewAssistanceRunnerOptions extends NormalizedReviewAssistanceOptions {
+export type ReviewAssistanceModelResolver = (
+  task: ReviewAssistanceTaskDefinition,
+) => LanguageModel;
+
+export interface ReviewAssistanceRunnerOptions {
+  pageGateModel: LanguageModel;
+  pageGateMaxRetries: number;
+  pageGateTemperature: number;
+  pageConcurrency: number;
+  taskConcurrency: number;
+  autoApplyThreshold: number;
+  proposalThreshold: number;
+  maxRetries: number;
+  temperature: number;
+  outputLanguage: string;
   pdfPath?: string;
   abortSignal?: AbortSignal;
   aggregator?: LLMTokenUsageAggregator;
@@ -52,9 +65,6 @@ export interface ReviewAssistanceRunnerOptions extends NormalizedReviewAssistanc
   onProgress?: (event: ReviewAssistanceProgressEvent) => void;
   pageTexts?: Map<number, string>;
 }
-
-const REVIEW_ASSISTANCE_PAGE_CONCURRENCY = 1;
-const REVIEW_ASSISTANCE_TASK_CONCURRENCY = REVIEW_ASSISTANCE_TASKS.length;
 
 interface ReviewAssistanceTaskResult {
   task: ReviewAssistanceTaskDefinition;
@@ -70,7 +80,7 @@ export class ReviewAssistanceRunner {
   async analyzeAndSave(
     outputDir: string,
     reportId: string,
-    model: LanguageModel,
+    modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
   ): Promise<ReviewAssistanceReport> {
     this.emitProgress(options, {
@@ -105,13 +115,11 @@ export class ReviewAssistanceRunner {
       reviewAssistanceEligibilityByPage:
         this.readPageGateEligibility(outputDir),
     });
-    contexts = await this.ensurePageEligibility(
+    contexts = await this.ensurePageEligibility(contexts, options, outputDir);
+    contexts = await this.addPictureSplitCandidates(
       contexts,
-      model,
-      options,
-      outputDir,
+      options.pageConcurrency,
     );
-    contexts = await this.addPictureSplitCandidates(contexts);
     const pagesSkippedByGate = contexts.filter(
       (context) => !context.reviewAssistanceEligibility.eligible,
     ).length;
@@ -134,7 +142,7 @@ export class ReviewAssistanceRunner {
     });
 
     this.logger.info(
-      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${REVIEW_ASSISTANCE_PAGE_CONCURRENCY}, task concurrency: ${REVIEW_ASSISTANCE_TASK_CONCURRENCY})...`,
+      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${options.pageConcurrency}, task concurrency: ${options.taskConcurrency})...`,
     );
     this.logger.info(
       `[ReviewAssistanceRunner] Gate summary: ${pagesEligibleForStructuralReview} eligible, ${pagesSkippedByGate} skipped by gate, ${pagesSkippedByUnavailableImage} skipped for unavailable page image`,
@@ -144,9 +152,15 @@ export class ReviewAssistanceRunner {
     let failedPages = 0;
     const pageResults = await ConcurrentPool.run(
       contexts,
-      REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
+      options.pageConcurrency,
       (context) =>
-        this.reviewPage(context, reportId, model, options, contexts.length),
+        this.reviewPage(
+          context,
+          reportId,
+          modelResolver,
+          options,
+          contexts.length,
+        ),
       (result) => {
         completedPages += 1;
         if (result.status === 'failed') {
@@ -276,7 +290,6 @@ export class ReviewAssistanceRunner {
 
   private async ensurePageEligibility(
     contexts: PageReviewContext[],
-    model: LanguageModel,
     options: ReviewAssistanceRunnerOptions,
     outputDir: string,
   ): Promise<PageReviewContext[]> {
@@ -292,7 +305,7 @@ export class ReviewAssistanceRunner {
     const gate = new ReviewAssistancePageGate();
     const updatedContexts = await ConcurrentPool.run(
       contexts,
-      REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
+      options.pageConcurrency,
       async (context) => {
         if (
           !isReviewAssistancePageGatePending(
@@ -327,10 +340,10 @@ export class ReviewAssistanceRunner {
           const reviewAssistanceEligibility = await gate.evaluate(
             context,
             image,
-            model,
+            options.pageGateModel,
             {
-              maxRetries: options.maxRetries,
-              temperature: options.temperature,
+              maxRetries: options.pageGateMaxRetries,
+              temperature: options.pageGateTemperature,
               abortSignal: options.abortSignal,
               aggregator: options.aggregator,
               outputLanguage: options.outputLanguage,
@@ -374,16 +387,14 @@ export class ReviewAssistanceRunner {
 
   private async addPictureSplitCandidates(
     contexts: PageReviewContext[],
+    concurrency: number,
   ): Promise<PageReviewContext[]> {
     const detector = new PictureSplitCandidateDetector(this.logger);
-    // Bounded concurrency: detector.detect() spawns ImageMagick subprocesses
-    // and the rest of the runner uses REVIEW_ASSISTANCE_PAGE_CONCURRENCY for
-    // page-level work. Use the same limit so a 300-page report does not fan
-    // out into hundreds of concurrent magick processes.
-    return ConcurrentPool.run(
-      contexts,
-      REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
-      (context) => this.attachSplitCandidatesToPage(context, detector),
+    // Bounded concurrency: detector.detect() spawns ImageMagick subprocesses.
+    // Use the page-level limit so a large report does not fan out into
+    // hundreds of concurrent magick processes.
+    return ConcurrentPool.run(contexts, concurrency, (context) =>
+      this.attachSplitCandidatesToPage(context, detector),
     );
   }
 
@@ -431,7 +442,7 @@ export class ReviewAssistanceRunner {
   private async reviewPage(
     context: PageReviewContext,
     reportId: string,
-    model: LanguageModel,
+    modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
     pageCount: number,
   ): Promise<ReviewAssistancePageResult> {
@@ -476,10 +487,18 @@ export class ReviewAssistanceRunner {
       );
 
       const image = new Uint8Array(await readFile(context.pageImagePath));
-      const taskResults = await Promise.all(
-        REVIEW_ASSISTANCE_TASKS.map((task) =>
-          this.reviewPageTask(context, task, image, pageCount, model, options),
-        ),
+      const taskResults = await ConcurrentPool.run(
+        [...REVIEW_ASSISTANCE_TASKS],
+        options.taskConcurrency,
+        (task) =>
+          this.reviewPageTask(
+            context,
+            task,
+            image,
+            pageCount,
+            modelResolver,
+            options,
+          ),
       );
       const succeededTaskCount = taskResults.filter(
         (result) => result.status !== 'failed',
@@ -585,7 +604,7 @@ export class ReviewAssistanceRunner {
     task: ReviewAssistanceTaskDefinition,
     image: Uint8Array,
     pageCount: number,
-    model: LanguageModel,
+    modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
   ): Promise<ReviewAssistanceTaskResult> {
     try {
@@ -596,6 +615,7 @@ export class ReviewAssistanceRunner {
       const prompt = buildReviewAssistancePrompt(context, task, {
         outputLanguage: options.outputLanguage,
       });
+      const model = modelResolver(task);
       const result = await LLMCaller.callVision({
         schema: reviewAssistancePageSchema as any,
         messages: [
@@ -1061,7 +1081,7 @@ export class ReviewAssistanceRunner {
       },
       options: {
         enabled: true,
-        concurrency: REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
+        concurrency: options.pageConcurrency,
         autoApplyThreshold: options.autoApplyThreshold,
         proposalThreshold: options.proposalThreshold,
         maxRetries: options.maxRetries,

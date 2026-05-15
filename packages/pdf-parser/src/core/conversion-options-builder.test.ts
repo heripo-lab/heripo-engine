@@ -2,9 +2,17 @@ import { describe, expect, test } from 'vitest';
 
 import { buildConversionOptions } from './conversion-options-builder';
 
+const mockCorrection = {
+  models: {
+    textCorrection: {} as any,
+    pageGate: {} as any,
+    reviewAssistance: {} as any,
+  },
+};
+
 describe('buildConversionOptions', () => {
   test('should build default conversion options', () => {
-    const result = buildConversionOptions({});
+    const result = buildConversionOptions({ correction: mockCorrection });
 
     expect(result).toEqual({
       to_formats: ['json', 'html'],
@@ -31,6 +39,7 @@ describe('buildConversionOptions', () => {
 
   test('should use custom ocr_lang when provided', () => {
     const result = buildConversionOptions({
+      correction: mockCorrection,
       ocr_lang: ['ja-JP', 'en-US'],
     });
 
@@ -43,7 +52,10 @@ describe('buildConversionOptions', () => {
   });
 
   test('should place num_threads in accelerator_options', () => {
-    const result = buildConversionOptions({ num_threads: 8 });
+    const result = buildConversionOptions({
+      correction: mockCorrection,
+      num_threads: 8,
+    });
 
     expect(result.accelerator_options).toEqual({
       device: 'mps',
@@ -53,19 +65,25 @@ describe('buildConversionOptions', () => {
   });
 
   test('should include document_timeout when provided', () => {
-    const result = buildConversionOptions({ document_timeout: 600 });
+    const result = buildConversionOptions({
+      correction: mockCorrection,
+      document_timeout: 600,
+    });
 
     expect(result.document_timeout).toBe(600);
   });
 
   test('should not include document_timeout when not provided', () => {
-    const result = buildConversionOptions({});
+    const result = buildConversionOptions({ correction: mockCorrection });
 
     expect(result).not.toHaveProperty('document_timeout');
   });
 
   test('should include document_timeout when value is 0', () => {
-    const result = buildConversionOptions({ document_timeout: 0 });
+    const result = buildConversionOptions({
+      correction: mockCorrection,
+      document_timeout: 0,
+    });
 
     expect(result.document_timeout).toBe(0);
   });
@@ -75,12 +93,7 @@ describe('buildConversionOptions', () => {
       num_threads: 4,
       document_timeout: 300,
       forceImagePdf: true,
-      strategySamplerModel: {} as any,
-      vlmProcessorModel: {} as any,
-      reviewAssistance: true,
-      reviewAssistanceConcurrency: 4,
-      skipSampling: true,
-      forcedMethod: 'vlm' as any,
+      correction: mockCorrection,
       aggregator: {} as any,
       onTokenUsage: (() => {}) as any,
       onReviewAssistanceProgress: (() => {}) as any,
@@ -91,12 +104,7 @@ describe('buildConversionOptions', () => {
     } as any);
 
     expect(result).not.toHaveProperty('forceImagePdf');
-    expect(result).not.toHaveProperty('strategySamplerModel');
-    expect(result).not.toHaveProperty('vlmProcessorModel');
-    expect(result).not.toHaveProperty('reviewAssistance');
-    expect(result).not.toHaveProperty('reviewAssistanceConcurrency');
-    expect(result).not.toHaveProperty('skipSampling');
-    expect(result).not.toHaveProperty('forcedMethod');
+    expect(result).not.toHaveProperty('correction');
     expect(result).not.toHaveProperty('aggregator');
     expect(result).not.toHaveProperty('onTokenUsage');
     expect(result).not.toHaveProperty('onReviewAssistanceProgress');
@@ -108,6 +116,7 @@ describe('buildConversionOptions', () => {
 
   test('should pass through unknown options via spread', () => {
     const result = buildConversionOptions({
+      correction: mockCorrection,
       ocr_lang: ['ko-KR'],
       page_range: [1, 10],
     } as any);
