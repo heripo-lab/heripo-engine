@@ -229,7 +229,7 @@ describe('VlmTextCorrector', () => {
       vi.mocked(ConcurrentPool.run).mockImplementation(async (items) => {
         const results = [];
         for (let i = 0; i < items.length; i++) {
-          results.push(correctionOutput);
+          results.push({ corrections: correctionOutput });
         }
         return results;
       });
@@ -294,7 +294,7 @@ describe('VlmTextCorrector', () => {
         return Buffer.from('fake-image');
       });
 
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([null]);
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([{ corrections: null }]);
 
       const result = await corrector.correctAndSave(
         '/output/report-1',
@@ -315,7 +315,9 @@ describe('VlmTextCorrector', () => {
         return Buffer.from('fake-image');
       });
 
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([{ tc: [], cc: [] }]);
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([
+        { corrections: { tc: [], cc: [] } },
+      ]);
 
       await corrector.correctAndSave('/output/report-1', mockModel, {
         concurrency: 4,
@@ -351,8 +353,8 @@ describe('VlmTextCorrector', () => {
       vi.mocked(ConcurrentPool.run).mockImplementation(
         async (_items, _concurrency, _processFn, onItemComplete) => {
           // Simulate item completion callback
-          onItemComplete?.({ tc: [], cc: [] } as any, 0);
-          return [{ tc: [], cc: [] }];
+          onItemComplete?.({ corrections: { tc: [], cc: [] } } as any, 0);
+          return [{ corrections: { tc: [], cc: [] } }];
         },
       );
 
@@ -378,8 +380,8 @@ describe('VlmTextCorrector', () => {
 
       vi.mocked(ConcurrentPool.run).mockImplementation(
         async (_items, _concurrency, _processFn, onItemComplete) => {
-          onItemComplete?.({ tc: [], cc: [] } as any, 0);
-          return [{ tc: [], cc: [] }];
+          onItemComplete?.({ corrections: { tc: [], cc: [] } } as any, 0);
+          return [{ corrections: { tc: [], cc: [] } }];
         },
       );
 
@@ -428,8 +430,8 @@ describe('VlmTextCorrector', () => {
       });
 
       vi.mocked(ConcurrentPool.run).mockResolvedValue([
-        { tc: [], cc: [] },
-        { tc: [], cc: [] },
+        { corrections: { tc: [], cc: [] } },
+        { corrections: { tc: [], cc: [] } },
       ]);
 
       const result = await corrector.correctAndSave(
@@ -490,6 +492,90 @@ describe('VlmTextCorrector', () => {
           phase: 'text-correction',
         }),
       );
+    });
+
+    test('degrades gracefully when a page image cannot be read', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        throw new Error('ENOENT: page image missing');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+      );
+
+      // A single unreadable page image must not abort the whole conversion.
+      expect(result.pagesProcessed).toBe(1);
+      expect(result.pagesFailed).toBe(1);
+      expect(result.textCorrections).toBe(0);
+      expect(LLMCaller.callVision).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[VlmTextCorrector] Page 1: failed to read page image',
+        expect.any(Error),
+      );
+    });
+
+    test('fails the review-assistance gate open when the page image cannot be read', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        throw new Error('ENOENT: page image missing');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+        {
+          reviewAssistanceGate: {
+            enabled: true,
+          },
+        },
+      );
+
+      expect(result.pagesFailed).toBe(1);
+      expect(LLMCaller.callVision).not.toHaveBeenCalled();
+
+      const sidecarCall = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(([path]) =>
+          String(path).endsWith('review_assistance_page_gate.json'),
+        );
+      expect(sidecarCall).toBeDefined();
+      const sidecar = JSON.parse(String(sidecarCall?.[1]));
+      expect(sidecar.pages[0]).toMatchObject({
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        reasons: ['page_gate_failed_open', 'page_image_not_available'],
+      });
     });
 
     test('tracks token usage via aggregator', async () => {

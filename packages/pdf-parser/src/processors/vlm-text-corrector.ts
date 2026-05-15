@@ -87,11 +87,6 @@ interface VlmTextCorrectionPageRunResult {
   reviewAssistanceEligibility?: ReviewAssistancePageEligibility;
 }
 
-type VlmTextCorrectionRawPageResult =
-  | VlmTextCorrectionOutput
-  | VlmTextCorrectionPageRunResult
-  | null;
-
 /**
  * VLM text corrector that fixes OCR errors by comparing page images
  * against OCR-extracted text.
@@ -140,7 +135,7 @@ export class VlmTextCorrector {
       `[VlmTextCorrector] Processing ${pageNumbers.length} pages (concurrency: ${concurrency})...`,
     );
 
-    const rawResults = await ConcurrentPool.run(
+    const results = await ConcurrentPool.run(
       pageNumbers,
       concurrency,
       (pageNo) => this.correctPage(outputDir, doc, pageNo, model, options),
@@ -151,9 +146,6 @@ export class VlmTextCorrector {
           );
         }
       },
-    );
-    const results = rawResults.map((result) =>
-      this.normalizePageResult(result),
     );
 
     // Aggregate results
@@ -230,19 +222,21 @@ export class VlmTextCorrector {
       pageTexts.length > 0 || pageTables.length > 0;
     const image =
       shouldRunTextCorrection || options?.reviewAssistanceGate?.enabled
-        ? this.readPageImage(outputDir, pageNo)
+        ? this.tryReadPageImage(outputDir, pageNo)
         : undefined;
 
     let corrections: VlmTextCorrectionOutput | null = { tc: [], cc: [] };
     if (shouldRunTextCorrection) {
-      corrections = await this.correctPageText(
-        image!,
-        pageNo,
-        pageTexts,
-        pageTables,
-        model,
-        options,
-      );
+      corrections = image
+        ? await this.correctPageText(
+            image,
+            pageNo,
+            pageTexts,
+            pageTables,
+            model,
+            options,
+          )
+        : null;
     } else {
       this.logger.debug(
         `[VlmTextCorrector] Page ${pageNo}: no text content, skipping`,
@@ -260,18 +254,6 @@ export class VlmTextCorrector {
     );
 
     return { corrections, reviewAssistanceEligibility };
-  }
-
-  private normalizePageResult(
-    result: VlmTextCorrectionRawPageResult,
-  ): VlmTextCorrectionPageRunResult {
-    if (result === null) {
-      return { corrections: null };
-    }
-    if ('tc' in result && 'cc' in result) {
-      return { corrections: result };
-    }
-    return result;
   }
 
   private async correctPageText(
@@ -510,6 +492,27 @@ export class VlmTextCorrector {
       `LANGUAGE CONTEXT: This document is ${languageDesc}. ` +
       'Focus on correcting characters that do not match this language.\n\n';
     return prefix + TEXT_CORRECTION_SYSTEM_PROMPT;
+  }
+
+  /**
+   * Read a page image, returning undefined when the image file is missing
+   * or unreadable. A single bad page then degrades gracefully (text
+   * correction skipped, review-assistance gate fails open) instead of
+   * rejecting the whole ConcurrentPool run and aborting the conversion.
+   */
+  private tryReadPageImage(
+    outputDir: string,
+    pageNo: number,
+  ): Uint8Array | undefined {
+    try {
+      return this.readPageImage(outputDir, pageNo);
+    } catch (error) {
+      this.logger.warn(
+        `[VlmTextCorrector] Page ${pageNo}: failed to read page image`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   /**

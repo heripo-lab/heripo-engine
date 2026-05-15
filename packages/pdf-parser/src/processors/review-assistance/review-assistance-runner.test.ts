@@ -588,6 +588,43 @@ describe('ReviewAssistanceRunner', () => {
     );
   });
 
+  test('reuses an existing page gate sidecar without re-evaluating eligibility', async () => {
+    writeFileSync(
+      join(outputDir, 'review_assistance_page_gate.json'),
+      JSON.stringify({
+        schemaName: 'HeripoReviewAssistancePageGateReport',
+        version: '1.0',
+        pages: [
+          {
+            pageNo: 1,
+            eligible: true,
+            kind: 'archaeological_data',
+            score: 88,
+            reasons: ['data table and caption visible'],
+            exclusionReasons: [],
+          },
+        ],
+      }),
+    );
+
+    const report = await new ReviewAssistanceRunner(
+      makeLogger(),
+    ).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+    );
+
+    const components = vi
+      .mocked(LLMCaller.callVision)
+      .mock.calls.map(([input]) => input.component);
+    expect(components).not.toContain('ReviewAssistancePageGate');
+    expect(components).toContain('ReviewAssistance');
+    expect(report.summary.pagesSucceeded).toBe(1);
+    expect(report.pages[0].status).toBe('succeeded');
+  });
+
   test('extracts text reference when pdfPath is provided', async () => {
     await new ReviewAssistanceRunner({
       info: vi.fn(),
