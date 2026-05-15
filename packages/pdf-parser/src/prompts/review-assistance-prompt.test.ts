@@ -41,6 +41,14 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
   test('serializes all page review context sections into prompt JSON', () => {
     const context: PageReviewContext = {
       pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['table_present'],
+        exclusionReasons: [],
+      },
       pageSize: { width: 100, height: 200 },
       pageImagePath: '/tmp/page.png',
       textBlocks: [
@@ -117,6 +125,14 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
   test('task prompt narrows allowed ops and focused context', () => {
     const context: PageReviewContext = {
       pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['table_present'],
+        exclusionReasons: [],
+      },
       pageSize: { width: 100, height: 200 },
       pageImagePath: '/tmp/page.png',
       textBlocks: [
@@ -168,6 +184,14 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
   test('출력 언어 지시를 포함한다', () => {
     const context: PageReviewContext = {
       pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: false,
+        kind: 'non_meaningful',
+        score: 0,
+        reasons: [],
+        exclusionReasons: ['no_structural_review_signal'],
+      },
       pageSize: { width: 100, height: 200 },
       pageImagePath: '/tmp/page.png',
       textBlocks: [],

@@ -94,7 +94,13 @@ describe('VlmConversionPipeline', () => {
       expect(mockCorrectorInstance.correctAndSave).toHaveBeenCalledWith(
         '/test/output',
         mockModel,
-        expect.objectContaining({ aggregator: undefined }),
+        expect.objectContaining({
+          aggregator: undefined,
+          reviewAssistanceGate: expect.objectContaining({
+            enabled: true,
+            model: mockModel,
+          }),
+        }),
       );
       expect(originalCallback).toHaveBeenCalledWith('/test/output');
     });

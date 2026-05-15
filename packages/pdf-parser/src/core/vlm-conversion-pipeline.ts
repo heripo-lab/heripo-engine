@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { VlmTextCorrector } from '../processors/vlm-text-corrector';
 import { runJqFileJson } from '../utils/jq';
+import { normalizeReviewAssistanceOptions } from './review-assistance-options';
 
 /**
  * Wraps the standard OCR callback with VLM text correction.
@@ -38,6 +39,9 @@ export class VlmConversionPipeline {
     }
 
     return async (outputDir: string) => {
+      const reviewAssistanceOptions = normalizeReviewAssistanceOptions(
+        options.reviewAssistance,
+      );
       // Pre-extract text from PDF text layer for VLM reference
       let pageTexts: Map<number, string> | undefined;
       try {
@@ -71,6 +75,15 @@ export class VlmConversionPipeline {
           onTokenUsage: options.onTokenUsage,
           documentLanguages: detectedLanguages,
           pageTexts,
+          reviewAssistanceGate: reviewAssistanceOptions.enabled
+            ? {
+                enabled: true,
+                model: options.vlmProcessorModel as LanguageModel,
+                maxRetries: reviewAssistanceOptions.maxRetries,
+                temperature: reviewAssistanceOptions.temperature,
+                outputLanguage: reviewAssistanceOptions.outputLanguage,
+              }
+            : undefined,
         },
       );
       await originalCallback(outputDir);

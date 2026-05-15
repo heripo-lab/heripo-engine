@@ -27,6 +27,14 @@ function makeContext(
 ): PageReviewContext {
   return {
     pageNo: 1,
+    reviewAssistanceEligibility: {
+      pageNo: 1,
+      eligible: true,
+      kind: 'archaeological_data',
+      score: 50,
+      reasons: ['caption_present'],
+      exclusionReasons: [],
+    },
     pageSize: { width: 100, height: 100 },
     pageImagePath: '/tmp/page.png',
     textBlocks: [],

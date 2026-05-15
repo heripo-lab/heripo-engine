@@ -32,6 +32,13 @@ import {
 } from '../../types/review-assistance-schema';
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
+import {
+  ReviewAssistancePageGate,
+  createReviewAssistancePageGateFailOpenEligibility,
+  isReviewAssistancePageGatePending,
+  readReviewAssistancePageGateReport,
+  writeReviewAssistancePageGateReport,
+} from './review-assistance-page-gate';
 import { ReviewAssistancePatcher } from './review-assistance-patcher';
 import { ReviewAssistanceValidator } from './review-assistance-validator';
 
@@ -91,7 +98,20 @@ export class ReviewAssistanceRunner {
       ));
 
     const contextBuilder = new PageReviewContextBuilder();
-    const contexts = contextBuilder.build(doc, outputDir, { pageTexts });
+    let contexts = contextBuilder.build(doc, outputDir, {
+      pageTexts,
+      reviewAssistanceEligibilityByPage:
+        this.readPageGateEligibility(outputDir),
+    });
+    contexts = await this.ensurePageEligibility(
+      contexts,
+      model,
+      options,
+      outputDir,
+    );
+    const pagesSkippedByGate = contexts.filter(
+      (context) => !context.reviewAssistanceEligibility.eligible,
+    ).length;
 
     this.emitProgress(options, {
       substage: 'review-assistance:prepare',
@@ -102,6 +122,9 @@ export class ReviewAssistanceRunner {
 
     this.logger.info(
       `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${REVIEW_ASSISTANCE_PAGE_CONCURRENCY}, task concurrency: ${REVIEW_ASSISTANCE_TASK_CONCURRENCY})...`,
+    );
+    this.logger.info(
+      `[ReviewAssistanceRunner] Gate summary: ${contexts.length - pagesSkippedByGate} eligible, ${pagesSkippedByGate} skipped for structural review`,
     );
 
     let completedPages = 0;
@@ -224,6 +247,98 @@ export class ReviewAssistanceRunner {
     }
   }
 
+  private readPageGateEligibility(
+    outputDir: string,
+  ): Map<number, PageReviewContext['reviewAssistanceEligibility']> | undefined {
+    try {
+      return readReviewAssistancePageGateReport(outputDir);
+    } catch (error) {
+      this.logger.warn(
+        '[ReviewAssistanceRunner] Failed to read page gate report, re-evaluating pages',
+        error,
+      );
+      return undefined;
+    }
+  }
+
+  private async ensurePageEligibility(
+    contexts: PageReviewContext[],
+    model: LanguageModel,
+    options: ReviewAssistanceRunnerOptions,
+    outputDir: string,
+  ): Promise<PageReviewContext[]> {
+    const pendingCount = contexts.filter((context) =>
+      isReviewAssistancePageGatePending(context.reviewAssistanceEligibility),
+    ).length;
+    if (pendingCount === 0) return contexts;
+
+    this.logger.info(
+      `[ReviewAssistanceRunner] Evaluating ${pendingCount} pages with VLM page gate`,
+    );
+
+    const gate = new ReviewAssistancePageGate();
+    const updatedContexts = await ConcurrentPool.run(
+      contexts,
+      REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
+      async (context) => {
+        if (
+          !isReviewAssistancePageGatePending(
+            context.reviewAssistanceEligibility,
+          )
+        ) {
+          return context;
+        }
+
+        try {
+          const image = new Uint8Array(await readFile(context.pageImagePath));
+          const reviewAssistanceEligibility = await gate.evaluate(
+            context,
+            image,
+            model,
+            {
+              maxRetries: options.maxRetries,
+              temperature: options.temperature,
+              abortSignal: options.abortSignal,
+              aggregator: options.aggregator,
+              outputLanguage: options.outputLanguage,
+            },
+          );
+          return { ...context, reviewAssistanceEligibility };
+        } catch (error) {
+          if (options.abortSignal?.aborted) {
+            throw error;
+          }
+          const message = this.safeErrorMessage(error);
+          this.logger.warn(
+            `[ReviewAssistanceRunner] Page ${context.pageNo}: page gate failed open`,
+            this.errorLogBinding(error),
+          );
+          return {
+            ...context,
+            reviewAssistanceEligibility:
+              createReviewAssistancePageGateFailOpenEligibility(
+                context.pageNo,
+                message,
+              ),
+          };
+        }
+      },
+      () => {
+        if (options.onTokenUsage && options.aggregator) {
+          options.onTokenUsage(
+            options.aggregator.getReport() as TokenUsageReport,
+          );
+        }
+      },
+    );
+
+    writeReviewAssistancePageGateReport(
+      outputDir,
+      updatedContexts.map((context) => context.reviewAssistanceEligibility),
+    );
+    return updatedContexts;
+  }
+
   private async reviewPage(
     context: PageReviewContext,
     reportId: string,
@@ -240,6 +355,18 @@ export class ReviewAssistanceRunner {
     });
 
     try {
+      if (!context.reviewAssistanceEligibility.eligible) {
+        this.logger.info(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: structural review skipped by gate (${context.reviewAssistanceEligibility.exclusionReasons.join(', ')})`,
+        );
+        return {
+          pageNo: context.pageNo,
+          status: 'succeeded',
+          decisions: [],
+          issues: [this.buildSkippedByGateIssue(context)],
+        };
+      }
+
       this.logger.info(
         `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review started`,
       );
@@ -524,6 +651,21 @@ export class ReviewAssistanceRunner {
     };
   }
 
+  private buildSkippedByGateIssue(
+    context: PageReviewContext,
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-skip-${context.pageNo}`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'page_skipped_by_correction_gate',
+      severity: 'info',
+      description:
+        'Page skipped for structural review because it would add review noise without improving TOC or archaeological data extraction.',
+      reasons: context.reviewAssistanceEligibility.exclusionReasons,
+    };
+  }
+
   private withTaskMetadata(
     decision: ReviewAssistanceDecision,
     task: ReviewAssistanceTaskDefinition,
@@ -776,7 +918,6 @@ export class ReviewAssistanceRunner {
           .length,
       0,
     );
-
     return {
       schemaName: 'HeripoReviewAssistanceReport',
       version: '1.0',

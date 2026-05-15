@@ -210,6 +210,11 @@ describe('PageReviewContextBuilder', () => {
     });
 
     expect(context.pageNo).toBe(1);
+    expect(context.reviewAssistanceEligibility).toMatchObject({
+      pageNo: 1,
+      eligible: true,
+      kind: 'archaeological_data',
+    });
     expect(context.pageImagePath).toBe('/out/pages/page_0.png');
     expect(context.textBlocks[0]).toMatchObject({
       ref: '#/texts/0',

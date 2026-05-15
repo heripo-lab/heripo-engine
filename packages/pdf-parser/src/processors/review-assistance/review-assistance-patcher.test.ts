@@ -208,6 +208,14 @@ function makeTable(selfRef: string, text: string): DoclingTableItem {
 function makeContext(outputDir: string): PageReviewContext {
   return {
     pageNo: 1,
+    reviewAssistanceEligibility: {
+      pageNo: 1,
+      eligible: true,
+      kind: 'archaeological_data',
+      score: 50,
+      reasons: ['caption_present'],
+      exclusionReasons: [],
+    },
     pageSize: { width: 100, height: 100 },
     pageImagePath: join(outputDir, 'pages', 'page_0.png'),
     textBlocks: [

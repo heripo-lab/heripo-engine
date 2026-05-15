@@ -59,6 +59,59 @@ const usage = {
   totalTokens: 15,
 };
 
+function makeGateResult(
+  overrides: Partial<{
+    eligible: boolean;
+    kind: 'toc' | 'archaeological_data' | 'non_meaningful';
+    score: number;
+    reasons: string[];
+    exclusionReasons: string[];
+  }> = {},
+) {
+  return {
+    output: {
+      eligible: true,
+      kind: 'archaeological_data' as const,
+      score: 90,
+      reasons: ['VLM sees data-bearing content'],
+      exclusionReasons: [],
+      ...overrides,
+    },
+    usage,
+    usedFallback: false,
+  };
+}
+
+function makeReviewResult(commands: unknown[] = []) {
+  return {
+    output: {
+      pageNo: 1,
+      commands,
+      pageNotes: [],
+    },
+    usage,
+    usedFallback: false,
+  };
+}
+
+function mockDefaultCallVision(): void {
+  vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+    if (input.component === 'ReviewAssistancePageGate') {
+      return makeGateResult();
+    }
+    return makeReviewResult([
+      {
+        op: 'replaceText',
+        targetRef: '#/texts/0',
+        payload: { text: 'Test' },
+        confidence: 0.95,
+        rationale: 'Spacing OCR noise',
+        evidence: 'Image reads Test',
+      },
+    ]);
+  });
+}
+
 const reviewBBox: DoclingBBox = {
   l: 10,
   t: 10,
@@ -111,7 +164,69 @@ function makeDoc(): DoclingDocument {
       },
     ],
     pictures: [],
-    tables: [],
+    tables: [
+      {
+        self_ref: '#/tables/0',
+        parent: { $ref: '#/body' },
+        children: [],
+        content_layer: 'body',
+        label: 'table',
+        prov: [
+          {
+            page_no: 1,
+            bbox: {
+              l: 10,
+              t: 50,
+              r: 80,
+              b: 80,
+              coord_origin: 'TOPLEFT',
+            },
+            charspan: [0, 0],
+          },
+        ],
+        captions: [],
+        references: [],
+        footnotes: [],
+        data: {
+          num_rows: 1,
+          num_cols: 1,
+          table_cells: [
+            {
+              bbox: reviewBBox,
+              row_span: 1,
+              col_span: 1,
+              start_row_offset_idx: 0,
+              end_row_offset_idx: 1,
+              start_col_offset_idx: 0,
+              end_col_offset_idx: 1,
+              text: '유구',
+              column_header: false,
+              row_header: false,
+              row_section: false,
+              fillable: false,
+            },
+          ],
+          grid: [
+            [
+              {
+                bbox: reviewBBox,
+                row_span: 1,
+                col_span: 1,
+                start_row_offset_idx: 0,
+                end_row_offset_idx: 1,
+                start_col_offset_idx: 0,
+                end_col_offset_idx: 1,
+                text: '유구',
+                column_header: false,
+                row_header: false,
+                row_section: false,
+                fillable: false,
+              },
+            ],
+          ],
+        },
+      },
+    ],
     pages: {
       '1': {
         page_no: 1,
@@ -130,6 +245,14 @@ function makeDoc(): DoclingDocument {
 function makePageContext(pageImagePath: string): PageReviewContext {
   return {
     pageNo: 1,
+    reviewAssistanceEligibility: {
+      pageNo: 1,
+      eligible: true,
+      kind: 'archaeological_data',
+      score: 50,
+      reasons: ['table_present'],
+      exclusionReasons: [],
+    },
     pageSize: { width: 100, height: 100 },
     pageImagePath,
     textBlocks: [
@@ -229,24 +352,7 @@ describe('ReviewAssistanceRunner', () => {
       return { extractText: mockExtractText } as any;
     });
     mockExtractText.mockResolvedValue(new Map([[1, 'Test']]));
-    vi.mocked(LLMCaller.callVision).mockResolvedValue({
-      output: {
-        pageNo: 1,
-        commands: [
-          {
-            op: 'replaceText',
-            targetRef: '#/texts/0',
-            payload: { text: 'Test' },
-            confidence: 0.95,
-            rationale: 'Spacing OCR noise',
-            evidence: 'Image reads Test',
-          },
-        ],
-        pageNotes: ['Text corrected'],
-      },
-      usage,
-      usedFallback: false,
-    });
+    mockDefaultCallVision();
   });
 
   afterEach(() => {
@@ -290,7 +396,14 @@ describe('ReviewAssistanceRunner', () => {
       proposalCount: 0,
       skippedCount: 0,
     });
-    expect(LLMCaller.callVision).toHaveBeenCalledTimes(6);
+    expect(LLMCaller.callVision).toHaveBeenCalledTimes(7);
+    expect(LLMCaller.callVision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: 'ReviewAssistancePageGate',
+        phase: 'page-eligibility',
+        metadata: { pageNo: 1 },
+      }),
+    );
     expect(LLMCaller.callVision).toHaveBeenCalledWith(
       expect.objectContaining({
         component: 'ReviewAssistance',
@@ -318,7 +431,7 @@ describe('ReviewAssistanceRunner', () => {
     );
     expect(onTokenUsage).toHaveBeenCalledWith(
       expect.objectContaining({
-        total: expect.objectContaining({ totalTokens: 90 }),
+        total: expect.objectContaining({ totalTokens: 105 }),
       }),
     );
     expect(onProgress).toHaveBeenCalledWith(
@@ -367,6 +480,114 @@ describe('ReviewAssistanceRunner', () => {
     expect(existsSync(join(outputDir, 'result_ocr_origin.json'))).toBe(true);
   });
 
+  test('skips non-eligible pages without structural model calls', async () => {
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult({
+          eligible: false,
+          kind: 'non_meaningful',
+          score: 10,
+          reasons: ['VLM sees cover-only page'],
+          exclusionReasons: ['cover page without body structure'],
+        });
+      }
+      return makeReviewResult();
+    });
+    const coverDoc = makeDoc();
+    coverDoc.texts[0].text = '아산 상성리유적 발굴조사보고서\n대한문화재연구원';
+    coverDoc.texts[0].orig = coverDoc.texts[0].text;
+    coverDoc.tables = [];
+    coverDoc.body.children = [{ $ref: '#/texts/0' }];
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(coverDoc));
+
+    const report = await new ReviewAssistanceRunner(
+      makeLogger(),
+    ).analyzeAndSave(outputDir, 'report-1', { modelId: 'mock-model' } as any, {
+      enabled: true,
+      concurrency: 1,
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      maxRetries: 3,
+      temperature: 0,
+      outputLanguage: 'en-US',
+    });
+
+    expect(LLMCaller.callVision).toHaveBeenCalledTimes(1);
+    expect(LLMCaller.callVision).not.toHaveBeenCalledWith(
+      expect.objectContaining({ component: 'ReviewAssistance' }),
+    );
+    expect(report.summary).toMatchObject({
+      pagesSucceeded: 1,
+      pagesFailed: 0,
+      autoAppliedCount: 0,
+      proposalCount: 0,
+    });
+    expect(report.pages[0]).toMatchObject({
+      status: 'succeeded',
+      decisions: [],
+      issues: [
+        expect.objectContaining({
+          category: 'review_execution',
+          type: 'page_skipped_by_correction_gate',
+          severity: 'info',
+          reasons: expect.arrayContaining([
+            'cover page without body structure',
+          ]),
+        }),
+      ],
+    });
+  });
+
+  test('fails open and keeps structural review running when page gate VLM fails', async () => {
+    const logger = makeLogger();
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        throw new Error('gate timeout');
+      }
+      return makeReviewResult();
+    });
+
+    const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+    );
+
+    const components = vi
+      .mocked(LLMCaller.callVision)
+      .mock.calls.map(([input]) => input.component);
+    expect(components).toContain('ReviewAssistancePageGate');
+    expect(components).toContain('ReviewAssistance');
+    expect(report.summary.pagesSucceeded).toBe(1);
+    expect(report.summary.pagesFailed).toBe(0);
+    expect(report.pages[0].status).toBe('succeeded');
+    expect(report.pages[0].error).toBeUndefined();
+
+    const gateSidecar = JSON.parse(
+      readFileSync(
+        join(outputDir, 'review_assistance_page_gate.json'),
+        'utf-8',
+      ),
+    );
+    expect(gateSidecar.pages[0]).toMatchObject({
+      pageNo: 1,
+      eligible: true,
+      kind: 'archaeological_data',
+      reasons: ['page_gate_failed_open', 'gate timeout'],
+      exclusionReasons: [],
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1: page gate failed open',
+      {
+        err: expect.objectContaining({
+          type: 'Error',
+          message: 'gate timeout',
+        }),
+      },
+    );
+  });
+
   test('extracts text reference when pdfPath is provided', async () => {
     await new ReviewAssistanceRunner({
       info: vi.fn(),
@@ -389,6 +610,9 @@ describe('ReviewAssistanceRunner', () => {
 
   test('같은 ref를 건드리는 task 충돌은 자동 반영하지 않고 proposal로 낮춘다', async () => {
     vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
       const task = input.metadata.task;
       if (task === 'text_ocr_hanja') {
         return {
@@ -493,10 +717,11 @@ describe('ReviewAssistanceRunner', () => {
       join(outputDir, 'result_ocr_origin.json'),
       JSON.stringify(ocrOrigin),
     );
-    vi.mocked(LLMCaller.callVision).mockResolvedValue({
-      output: { pageNo: 1, commands: [], pageNotes: [] },
-      usage,
-      usedFallback: false,
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      return makeReviewResult();
     });
 
     await new ReviewAssistanceRunner({
@@ -718,6 +943,14 @@ describe('ReviewAssistanceRunner', () => {
   test('한자 후보와 이미지 내부 텍스트 후보는 별도 확인 이슈로 남기지 않는다', () => {
     const context: PageReviewContext = {
       pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 50,
+        reasons: ['domain_pattern_present'],
+        exclusionReasons: [],
+      },
       pageSize: { width: 100, height: 100 },
       pageImagePath: '/tmp/page_0.png',
       textBlocks: [
@@ -964,10 +1197,11 @@ describe('ReviewAssistanceRunner', () => {
       join(outputDir, 'pages', 'page_1.png'),
       Buffer.from([4, 5, 6]),
     );
-    vi.mocked(LLMCaller.callVision).mockResolvedValue({
-      output: { pageNo: 1, commands: [], pageNotes: [] },
-      usage,
-      usedFallback: false,
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      return makeReviewResult();
     });
 
     const report = await new ReviewAssistanceRunner({

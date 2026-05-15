@@ -25,6 +25,13 @@ import {
   getPageTables,
   getPageTexts,
 } from './correction-applier';
+import {
+  type ReviewAssistancePageEligibility,
+  ReviewAssistancePageGate,
+  type ReviewAssistancePageGateContext,
+  createReviewAssistancePageGateFailOpenEligibility,
+  writeReviewAssistancePageGateReport,
+} from './review-assistance/review-assistance-page-gate';
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -53,6 +60,14 @@ export interface VlmTextCorrectorOptions {
   documentLanguages?: string[];
   /** Pre-extracted page texts from pdftotext (1-based pageNo → text) */
   pageTexts?: Map<number, string>;
+  /** Optional separate VLM page eligibility check for Review Assistance */
+  reviewAssistanceGate?: {
+    enabled?: boolean;
+    model?: LanguageModel;
+    maxRetries?: number;
+    temperature?: number;
+    outputLanguage?: string;
+  };
 }
 
 /** Result of VLM text correction */
@@ -66,6 +81,16 @@ export interface VlmTextCorrectionResult {
   /** Number of pages that failed VLM correction (OCR text kept as-is) */
   pagesFailed: number;
 }
+
+interface VlmTextCorrectionPageRunResult {
+  corrections: VlmTextCorrectionOutput | null;
+  reviewAssistanceEligibility?: ReviewAssistancePageEligibility;
+}
+
+type VlmTextCorrectionRawPageResult =
+  | VlmTextCorrectionOutput
+  | VlmTextCorrectionPageRunResult
+  | null;
 
 /**
  * VLM text corrector that fixes OCR errors by comparing page images
@@ -115,7 +140,7 @@ export class VlmTextCorrector {
       `[VlmTextCorrector] Processing ${pageNumbers.length} pages (concurrency: ${concurrency})...`,
     );
 
-    const results = await ConcurrentPool.run(
+    const rawResults = await ConcurrentPool.run(
       pageNumbers,
       concurrency,
       (pageNo) => this.correctPage(outputDir, doc, pageNo, model, options),
@@ -127,29 +152,45 @@ export class VlmTextCorrector {
         }
       },
     );
+    const results = rawResults.map((result) =>
+      this.normalizePageResult(result),
+    );
 
     // Aggregate results
     let totalTextCorrections = 0;
     let totalCellCorrections = 0;
     let pagesFailed = 0;
     for (const result of results) {
-      if (result === null) {
+      if (result.corrections === null) {
         pagesFailed++;
       } else {
-        totalTextCorrections += result.tc.length;
-        totalCellCorrections += result.cc.length;
+        totalTextCorrections += result.corrections.tc.length;
+        totalCellCorrections += result.corrections.cc.length;
       }
     }
 
     // Apply corrections to document
     pageNumbers.forEach((pageNo, i) => {
-      const corrections = results[i];
+      const corrections = results[i].corrections;
       if (corrections === null) return;
       applyCorrections(doc, pageNo, corrections, this.logger);
     });
 
     // Save corrected document
     writeFileSync(resultPath, JSON.stringify(doc, null, 2));
+
+    const gateResults = results
+      .map((result) => result.reviewAssistanceEligibility)
+      .filter(
+        (
+          result,
+        ): result is NonNullable<
+          VlmTextCorrectionPageRunResult['reviewAssistanceEligibility']
+        > => result !== undefined,
+      );
+    if (gateResults.length > 0) {
+      writeReviewAssistancePageGateReport(outputDir, gateResults);
+    }
 
     this.logger.info(
       `[VlmTextCorrector] Correction complete: ${totalTextCorrections} text, ${totalCellCorrections} cell corrections across ${pageNumbers.length} pages (${pagesFailed} failed)`,
@@ -182,21 +223,66 @@ export class VlmTextCorrector {
     pageNo: number,
     model: LanguageModel,
     options?: VlmTextCorrectorOptions,
+  ): Promise<VlmTextCorrectionPageRunResult> {
+    const pageTexts = getPageTexts(doc, pageNo);
+    const pageTables = getPageTables(doc, pageNo);
+    const shouldRunTextCorrection =
+      pageTexts.length > 0 || pageTables.length > 0;
+    const image =
+      shouldRunTextCorrection || options?.reviewAssistanceGate?.enabled
+        ? this.readPageImage(outputDir, pageNo)
+        : undefined;
+
+    let corrections: VlmTextCorrectionOutput | null = { tc: [], cc: [] };
+    if (shouldRunTextCorrection) {
+      corrections = await this.correctPageText(
+        image!,
+        pageNo,
+        pageTexts,
+        pageTables,
+        model,
+        options,
+      );
+    } else {
+      this.logger.debug(
+        `[VlmTextCorrector] Page ${pageNo}: no text content, skipping`,
+      );
+    }
+
+    const reviewAssistanceEligibility = await this.evaluateReviewAssistanceGate(
+      doc,
+      pageNo,
+      pageTexts,
+      pageTables,
+      image,
+      model,
+      options,
+    );
+
+    return { corrections, reviewAssistanceEligibility };
+  }
+
+  private normalizePageResult(
+    result: VlmTextCorrectionRawPageResult,
+  ): VlmTextCorrectionPageRunResult {
+    if (result === null) {
+      return { corrections: null };
+    }
+    if ('tc' in result && 'cc' in result) {
+      return { corrections: result };
+    }
+    return result;
+  }
+
+  private async correctPageText(
+    image: Uint8Array,
+    pageNo: number,
+    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
+    pageTables: Array<{ index: number; item: DoclingTableItem }>,
+    model: LanguageModel,
+    options?: VlmTextCorrectorOptions,
   ): Promise<VlmTextCorrectionOutput | null> {
     try {
-      const pageTexts = getPageTexts(doc, pageNo);
-      const pageTables = getPageTables(doc, pageNo);
-
-      // Skip pages with no text or table content
-      if (pageTexts.length === 0 && pageTables.length === 0) {
-        this.logger.debug(
-          `[VlmTextCorrector] Page ${pageNo}: no text content, skipping`,
-        );
-        return { tc: [], cc: [] };
-      }
-
-      const imageBase64 = this.readPageImage(outputDir, pageNo);
-
       const pageText = options?.pageTexts?.get(pageNo);
       let references: Map<number, string> | undefined;
       let tableContext: string | undefined;
@@ -235,7 +321,7 @@ export class VlmTextCorrector {
               },
               {
                 type: 'image' as const,
-                image: imageBase64,
+                image,
                 mediaType: 'image/png' as const,
               },
             ],
@@ -249,9 +335,7 @@ export class VlmTextCorrector {
         phase: 'text-correction',
       });
 
-      if (options?.aggregator) {
-        options.aggregator.track(result.usage);
-      }
+      options?.aggregator?.track(result.usage);
 
       const output = result.output as VlmTextCorrectionOutput;
 
@@ -263,7 +347,6 @@ export class VlmTextCorrector {
 
       return output;
     } catch (error) {
-      // Rethrow abort errors
       if (options?.abortSignal?.aborted) {
         throw error;
       }
@@ -274,6 +357,91 @@ export class VlmTextCorrector {
       );
       return null;
     }
+  }
+
+  private async evaluateReviewAssistanceGate(
+    doc: DoclingDocument,
+    pageNo: number,
+    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
+    pageTables: Array<{ index: number; item: DoclingTableItem }>,
+    image: Uint8Array | undefined,
+    defaultModel: LanguageModel,
+    options?: VlmTextCorrectorOptions,
+  ): Promise<ReviewAssistancePageEligibility | undefined> {
+    const gateOptions = options?.reviewAssistanceGate;
+    if (!gateOptions?.enabled) return undefined;
+    if (!image) {
+      return createReviewAssistancePageGateFailOpenEligibility(
+        pageNo,
+        'page_image_not_available',
+      );
+    }
+
+    try {
+      return await new ReviewAssistancePageGate().evaluate(
+        this.buildReviewAssistanceGateContext(
+          doc,
+          pageNo,
+          pageTexts,
+          pageTables,
+        ),
+        image,
+        gateOptions.model ?? defaultModel,
+        {
+          maxRetries: gateOptions.maxRetries,
+          temperature: gateOptions.temperature,
+          abortSignal: options?.abortSignal,
+          aggregator: options?.aggregator,
+          outputLanguage: gateOptions.outputLanguage,
+        },
+      );
+    } catch (error) {
+      if (options?.abortSignal?.aborted) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[VlmTextCorrector] Page ${pageNo}: review-assistance gate failed open`,
+        error,
+      );
+      return createReviewAssistancePageGateFailOpenEligibility(pageNo, message);
+    }
+  }
+
+  private buildReviewAssistanceGateContext(
+    doc: DoclingDocument,
+    pageNo: number,
+    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
+    pageTables: Array<{ index: number; item: DoclingTableItem }>,
+  ): ReviewAssistancePageGateContext {
+    const textByRef = new Map(doc.texts.map((text) => [text.self_ref, text]));
+    const pictures = doc.pictures
+      .filter((picture) => picture.prov.some((prov) => prov.page_no === pageNo))
+      .map((picture) => {
+        const caption = picture.captions
+          .map((ref) => textByRef.get(ref.$ref)?.text.trim())
+          .filter((text): text is string => Boolean(text))
+          .join('\n');
+        return {
+          caption: caption || undefined,
+          suspectReasons: caption ? [] : ['image_missing_caption'],
+        };
+      });
+
+    return {
+      pageNo,
+      textBlocks: pageTexts.map(({ item }) => ({
+        label: item.label,
+        text: item.text,
+        suspectReasons: [],
+      })),
+      missingTextCandidates: [],
+      tables: pageTables.map(() => ({ suspectReasons: [] })),
+      pictures,
+      orphanCaptions: [],
+      layout: { bboxWarnings: [] },
+      domainPatterns: [],
+    };
   }
 
   /**

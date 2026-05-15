@@ -164,6 +164,7 @@ function toPromptContext(
   const base = {
     pageNo: context.pageNo,
     pageSize: context.pageSize,
+    reviewAssistanceEligibility: context.reviewAssistanceEligibility,
   };
 
   switch (task.id) {
@@ -228,6 +229,7 @@ function toFullPromptContext(context: PageReviewContext): unknown {
   return {
     pageNo: context.pageNo,
     pageSize: context.pageSize,
+    reviewAssistanceEligibility: context.reviewAssistanceEligibility,
     textBlocks: context.textBlocks.map(toPromptTextBlock),
     missingTextCandidates: context.missingTextCandidates,
     tables: context.tables.map(toPromptTable),

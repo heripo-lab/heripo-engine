@@ -9,9 +9,12 @@ import type {
   DoclingTextItem,
 } from '@heripo/model';
 
+import type { ReviewAssistancePageEligibility } from './review-assistance-page-gate';
+
 import { isAbsolute, join } from 'node:path';
 
 import { matchTextToReferenceWithUnused } from '../../utils/text-reference-matcher';
+import { createReviewAssistancePageGatePendingEligibility } from './review-assistance-page-gate';
 
 export interface PageReviewTextBlock {
   ref: string;
@@ -67,6 +70,7 @@ export interface PageReviewMissingTextCandidate {
 
 export interface PageReviewContext {
   pageNo: number;
+  reviewAssistanceEligibility: ReviewAssistancePageEligibility;
   pageSize: { width: number; height: number } | null;
   pageImagePath: string;
   textBlocks: PageReviewTextBlock[];
@@ -100,6 +104,10 @@ export interface PageReviewContext {
 
 export interface PageReviewContextBuilderOptions {
   pageTexts?: Map<number, string>;
+  reviewAssistanceEligibilityByPage?: Map<
+    number,
+    ReviewAssistancePageEligibility
+  >;
 }
 
 interface RefGeometry {
@@ -183,7 +191,7 @@ export class PageReviewContextBuilder {
       return reason ? [{ targetRef: entry.ref, reason }] : [];
     });
 
-    return {
+    const contextWithoutEligibility = {
       pageNo,
       pageSize,
       pageImagePath: this.getPageImagePath(doc, outputDir, pageNo),
@@ -221,6 +229,13 @@ export class PageReviewContextBuilder {
       domainPatterns: textBlocks.flatMap((block) =>
         this.detectDomainPatterns(block.ref, block.text),
       ),
+    } satisfies Omit<PageReviewContext, 'reviewAssistanceEligibility'>;
+
+    return {
+      ...contextWithoutEligibility,
+      reviewAssistanceEligibility:
+        options.reviewAssistanceEligibilityByPage?.get(pageNo) ??
+        createReviewAssistancePageGatePendingEligibility(pageNo),
     };
   }
 
