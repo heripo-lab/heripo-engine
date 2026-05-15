@@ -104,13 +104,49 @@ describe('ReviewAssistanceWorkScheduler', () => {
     expect(items.find((item) => item.kind === 'table')).toMatchObject({
       targetRefs: ['#/tables/0'],
       task: expect.objectContaining({ id: 'tables' }),
-      priority: 'required',
+      // table_missing_caption is informational, not a severe reason
+      priority: 'normal',
     });
     expect(items.find((item) => item.kind === 'picture_split')).toMatchObject({
       contextBudget: 'tiny',
       priority: 'required',
       task: expect.objectContaining({ id: 'pictures_captions' }),
     });
+  });
+
+  test('escalates table priority to required for multi-page continuation candidates', () => {
+    const items = new ReviewAssistanceWorkScheduler().build(
+      makeContext({
+        tables: [
+          {
+            ref: '#/tables/0',
+            bbox,
+            gridPreview: [['A']],
+            emptyCellRatio: 0,
+            suspectReasons: ['multi_page_table_candidate'],
+          },
+          {
+            ref: '#/tables/1',
+            bbox,
+            gridPreview: [['B']],
+            emptyCellRatio: 0,
+            suspectReasons: ['table_missing_caption'],
+          },
+        ],
+      }),
+    );
+
+    const tableItems = items.filter((item) => item.kind === 'table');
+    expect(tableItems).toEqual([
+      expect.objectContaining({
+        targetRefs: ['#/tables/0'],
+        priority: 'required',
+      }),
+      expect.objectContaining({
+        targetRefs: ['#/tables/1'],
+        priority: 'normal',
+      }),
+    ]);
   });
 
   test('returns no work items for non-eligible pages', () => {

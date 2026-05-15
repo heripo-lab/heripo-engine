@@ -66,7 +66,17 @@ export interface ReviewAssistanceRunnerOptions {
   workItemTimeoutMs: number;
   autoApplyThreshold: number;
   proposalThreshold: number;
+  /**
+   * Total work-item attempts (including the initial call) for the re-ask
+   * loop. The same value is also forwarded to `LLMCaller.callVision` as the
+   * SDK-level transient retry budget; the two budgets are independent and
+   * compose multiplicatively, so keep this conservative (default: 3).
+   *
+   * Always clamped to at least 1 by `getWorkItemMaxAttempts` so a first
+   * attempt is guaranteed even when callers pass 0.
+   */
   maxRetries: number;
+  /** Same semantics as `maxRetries`, but applied to the `tables` task. */
   tableMaxRetries: number;
   temperature: number;
   outputLanguage: string;
@@ -986,6 +996,11 @@ export class ReviewAssistanceRunner {
     };
   }
 
+  /**
+   * Resolve the configured attempt budget for a task. The same value is used
+   * for the work-item re-ask loop and the SDK-level transient retry count
+   * forwarded to `LLMCaller.callVision`. See `ReviewAssistanceRunnerOptions.maxRetries`.
+   */
   private getTaskMaxRetries(
     task: ReviewAssistanceTaskDefinition,
     options: ReviewAssistanceRunnerOptions,
@@ -993,6 +1008,13 @@ export class ReviewAssistanceRunner {
     return task.id === 'tables' ? options.tableMaxRetries : options.maxRetries;
   }
 
+  /**
+   * Total attempts for the work-item re-ask loop, including the initial
+   * call. Floors at 1 so a first attempt is always made even when callers
+   * pass 0. The configured value is treated as the full attempt budget, not
+   * as "additional retries on top of one initial call", to avoid composing
+   * multiplicatively with the SDK retry budget on the same call.
+   */
   private getWorkItemMaxAttempts(
     workItem: ReviewAssistanceWorkItem,
     options: ReviewAssistanceRunnerOptions,

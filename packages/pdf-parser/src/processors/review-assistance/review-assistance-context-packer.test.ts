@@ -112,8 +112,20 @@ function makeContext(): PageReviewContext {
     ],
     footnotes: [{ ref: '#/texts/2', text: 'After', bbox }],
     layout: {
-      readingOrderRefs: ['#/texts/0', '#/texts/1', '#/tables/0'],
-      visualOrderRefs: ['#/texts/1', '#/texts/0', '#/tables/0'],
+      readingOrderRefs: [
+        '#/texts/0',
+        '#/tables/0',
+        '#/texts/1',
+        '#/pictures/0',
+        '#/texts/2',
+      ],
+      visualOrderRefs: [
+        '#/texts/1',
+        '#/texts/0',
+        '#/tables/0',
+        '#/pictures/0',
+        '#/texts/2',
+      ],
       bboxWarnings: [{ targetRef: '#/texts/1', reason: 'bbox_outside_page' }],
     },
     domainPatterns: [
@@ -185,12 +197,30 @@ describe('ReviewAssistanceContextPacker', () => {
     expect(tableContext.orphanCaptions.map((caption) => caption.ref)).toEqual([
       '#/texts/3',
     ]);
+    // Plan D.2: table work items must include the text immediately before and
+    // after the target table in reading order. With NEARBY_TEXT_RADIUS=2 and
+    // the fixture's small reading order, all three text blocks fall inside
+    // the window around #/tables/0 (index 1).
+    expect(tableContext.textBlocks.map((block) => block.ref).sort()).toEqual([
+      '#/texts/0',
+      '#/texts/1',
+      '#/texts/2',
+    ]);
     expect(pictureContext.pictures.map((picture) => picture.ref)).toEqual([
       '#/pictures/0',
     ]);
     expect(pictureContext.orphanCaptions.map((caption) => caption.ref)).toEqual(
       ['#/texts/4'],
     );
+    // Plan D.2: picture_caption work items must include the adjacent text
+    // blocks (in addition to caption-like blocks already kept by label).
+    // All three text blocks fall inside the radius=2 window around
+    // #/pictures/0 (index 3) in the fixture's reading order.
+    expect(pictureContext.textBlocks.map((block) => block.ref).sort()).toEqual([
+      '#/texts/0',
+      '#/texts/1',
+      '#/texts/2',
+    ]);
   });
 
   test('packs each work item kind without unrelated payloads', () => {
@@ -252,5 +282,36 @@ describe('ReviewAssistanceContextPacker', () => {
     );
 
     expect(packed).toBe(context);
+  });
+
+  test('picture_caption keeps caption-like text when reading order has no picture position', () => {
+    const context: PageReviewContext = {
+      ...makeContext(),
+      layout: {
+        readingOrderRefs: [],
+        visualOrderRefs: [],
+        bboxWarnings: [],
+      },
+    };
+    const packed = new ReviewAssistanceContextPacker().pack(
+      context,
+      makeItem({
+        kind: 'picture_caption',
+        targetRefs: ['#/pictures/0'],
+        task: {
+          ...task,
+          id: 'pictures_captions',
+          allowedOps: ['updatePictureCaption'],
+        },
+      }),
+    );
+
+    // nearbyTextRefs is empty, so the filter's OR fallbacks must keep
+    // caption-labeled, caption_like_body_text, and picture_internal_text
+    // blocks even when none of them are listed as nearby refs.
+    expect(packed.textBlocks.map((block) => block.ref).sort()).toEqual([
+      '#/texts/1',
+      '#/texts/2',
+    ]);
   });
 });

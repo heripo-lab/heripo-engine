@@ -61,6 +61,8 @@ const TEXT_ROLE_REASONS = new Set([
   'footnote_like_body_text',
 ]);
 
+const SEVERE_TABLE_REASONS = new Set(['multi_page_table_candidate']);
+
 export class ReviewAssistanceWorkScheduler {
   build(context: PageReviewContext): ReviewAssistanceWorkItem[] {
     if (!context.reviewAssistanceEligibility.eligible) return [];
@@ -302,13 +304,20 @@ export class ReviewAssistanceWorkScheduler {
     return [...new Set(values.filter(Boolean))];
   }
 
+  /**
+   * Tables surfaced as `multi_page_table_candidate` are escalated to
+   * `required` priority because continuation links are easy to lose during
+   * structural review. Other suspect reasons (e.g. `table_missing_caption`,
+   * `table_many_empty_cells`) are informational and stay at `normal`.
+   *
+   * Previous behavior used `reason.includes('table')` which matched every
+   * suspect reason starting with `table_` and silently promoted nearly every
+   * table to `required`.
+   */
   private priorityForTableReasons(
     reasons: string[],
   ): ReviewAssistanceWorkItemPriority {
-    const severeReasons = ['table', 'multi_page_table'];
-    return reasons.some((reason) =>
-      severeReasons.some((category) => reason.includes(category)),
-    )
+    return reasons.some((reason) => SEVERE_TABLE_REASONS.has(reason))
       ? 'required'
       : 'normal';
   }

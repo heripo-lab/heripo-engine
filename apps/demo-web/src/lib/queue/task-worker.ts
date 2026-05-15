@@ -231,21 +231,18 @@ function buildPDFCorrectionOptions(
   }
 
   const stageRetries = options.correction.maxRetries;
-  const correction = {
+  const correction: PDFConvertOptions['correction'] = {
     models: {
       textCorrection: createModel(options.correction.models.textCorrection),
       pageGate: createModel(options.correction.models.pageGate),
       reviewAssistance: createModel(options.correction.models.reviewAssistance),
-      ...(options.correction.models.tableCorrection
-        ? {
-            tableCorrection: createModel(
-              options.correction.models.tableCorrection,
-            ),
-          }
-        : {}),
-      ...(Object.keys(reviewAssistanceTasks).length > 0
-        ? { reviewAssistanceTasks }
-        : {}),
+      tableCorrection: options.correction.models.tableCorrection
+        ? createModel(options.correction.models.tableCorrection)
+        : undefined,
+      reviewAssistanceTasks:
+        Object.keys(reviewAssistanceTasks).length > 0
+          ? reviewAssistanceTasks
+          : undefined,
     },
     concurrency: options.correction.concurrency,
     localModelConcurrency: options.correction.localModelConcurrency,
@@ -258,7 +255,7 @@ function buildPDFCorrectionOptions(
     },
     outputLanguage: options.correction.outputLanguage,
   };
-  return correction as PDFConvertOptions['correction'];
+  return correction;
 }
 
 const PROCESSING_STEPS = [

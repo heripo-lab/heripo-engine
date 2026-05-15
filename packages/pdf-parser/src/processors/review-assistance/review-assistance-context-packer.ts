@@ -1,6 +1,17 @@
 import type { PageReviewContext } from './page-review-context-builder';
 import type { ReviewAssistanceWorkItem } from './review-assistance-work-scheduler';
 
+/**
+ * Number of text blocks to include on each side of a non-text target (table,
+ * picture) when packing context for `table` and `picture_caption` work items.
+ *
+ * Plan D.2 requires the packed context to include the text immediately
+ * before/after the target so the model can ground captions and continuation
+ * candidates. We walk `layout.readingOrderRefs` outward from the target ref
+ * and collect up to this many text refs in each direction.
+ */
+const NEARBY_TEXT_RADIUS = 2;
+
 export class ReviewAssistanceContextPacker {
   pack(
     context: PageReviewContext,
@@ -249,16 +260,54 @@ export class ReviewAssistanceContextPacker {
     );
   }
 
+  /**
+   * Collect text refs adjacent to the given non-text target refs.
+   *
+   * Used for `table` and `picture_caption` work items where `targetRefs`
+   * contain table or picture refs that never match a text block's own ref.
+   * We walk `layout.readingOrderRefs` outward from each target position and
+   * collect up to `NEARBY_TEXT_RADIUS` text refs on each side. Returns an
+   * empty set when the reading order does not contain any of the target
+   * refs (e.g. reading order is empty or the target was excluded upstream).
+   */
   private nearbyTextRefs(
     context: PageReviewContext,
     targetRefs: Set<string>,
   ): Set<string> {
-    const directTextRefs = new Set(
-      context.textBlocks
-        .filter((block) => targetRefs.has(block.ref))
-        .map((block) => block.ref),
-    );
-    return this.expandTextRefsWithNeighbors(context, directTextRefs);
+    const textRefSet = new Set(context.textBlocks.map((block) => block.ref));
+    const readingOrder = context.layout.readingOrderRefs;
+    const nearby = new Set<string>();
+
+    for (let index = 0; index < readingOrder.length; index += 1) {
+      if (!targetRefs.has(readingOrder[index])) continue;
+      let collectedBefore = 0;
+      for (
+        let offset = 1;
+        offset <= index && collectedBefore < NEARBY_TEXT_RADIUS;
+        offset += 1
+      ) {
+        const candidate = readingOrder[index - offset];
+        if (textRefSet.has(candidate)) {
+          nearby.add(candidate);
+          collectedBefore += 1;
+        }
+      }
+      let collectedAfter = 0;
+      for (
+        let offset = 1;
+        index + offset < readingOrder.length &&
+        collectedAfter < NEARBY_TEXT_RADIUS;
+        offset += 1
+      ) {
+        const candidate = readingOrder[index + offset];
+        if (textRefSet.has(candidate)) {
+          nearby.add(candidate);
+          collectedAfter += 1;
+        }
+      }
+    }
+
+    return nearby;
   }
 
   private expandTextRefsWithNeighbors(
