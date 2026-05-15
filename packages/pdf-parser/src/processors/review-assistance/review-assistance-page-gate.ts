@@ -58,6 +58,9 @@ const REVIEW_ASSISTANCE_PAGE_GATE_TEMPERATURE = 0;
 const MAX_REASON_COUNT = 12;
 const MAX_CONTEXT_TEXT_LENGTH = 1_800;
 
+export const REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON =
+  'page_image_not_available';
+
 const reviewAssistancePageGateSchema = z.object({
   eligible: z.boolean(),
   kind: z.enum(['toc', 'archaeological_data', 'non_meaningful']),

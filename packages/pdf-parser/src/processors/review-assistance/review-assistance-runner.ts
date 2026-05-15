@@ -33,6 +33,7 @@ import {
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
 import {
+  REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
   ReviewAssistancePageGate,
   createReviewAssistancePageGateFailOpenEligibility,
   isReviewAssistancePageGatePending,
@@ -112,6 +113,16 @@ export class ReviewAssistanceRunner {
     const pagesSkippedByGate = contexts.filter(
       (context) => !context.reviewAssistanceEligibility.eligible,
     ).length;
+    const pagesSkippedByUnavailableImage = contexts.filter(
+      (context) =>
+        context.reviewAssistanceEligibility.eligible &&
+        this.hasUnavailablePageImageGateReason(context),
+    ).length;
+    const pagesEligibleForStructuralReview = contexts.filter(
+      (context) =>
+        context.reviewAssistanceEligibility.eligible &&
+        !this.hasUnavailablePageImageGateReason(context),
+    ).length;
 
     this.emitProgress(options, {
       substage: 'review-assistance:prepare',
@@ -124,7 +135,7 @@ export class ReviewAssistanceRunner {
       `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${REVIEW_ASSISTANCE_PAGE_CONCURRENCY}, task concurrency: ${REVIEW_ASSISTANCE_TASK_CONCURRENCY})...`,
     );
     this.logger.info(
-      `[ReviewAssistanceRunner] Gate summary: ${contexts.length - pagesSkippedByGate} eligible, ${pagesSkippedByGate} skipped for structural review`,
+      `[ReviewAssistanceRunner] Gate summary: ${pagesEligibleForStructuralReview} eligible, ${pagesSkippedByGate} skipped by gate, ${pagesSkippedByUnavailableImage} skipped for unavailable page image`,
     );
 
     let completedPages = 0;
@@ -290,7 +301,27 @@ export class ReviewAssistanceRunner {
         }
 
         try {
-          const image = new Uint8Array(await readFile(context.pageImagePath));
+          let image: Uint8Array;
+          try {
+            image = new Uint8Array(await readFile(context.pageImagePath));
+          } catch (error) {
+            if (options.abortSignal?.aborted) {
+              throw error;
+            }
+            this.logger.warn(
+              `[ReviewAssistanceRunner] Page ${context.pageNo}: page image unavailable for page gate`,
+              this.errorLogBinding(error),
+            );
+            return {
+              ...context,
+              reviewAssistanceEligibility:
+                createReviewAssistancePageGateFailOpenEligibility(
+                  context.pageNo,
+                  REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+                ),
+            };
+          }
+
           const reviewAssistanceEligibility = await gate.evaluate(
             context,
             image,
@@ -364,6 +395,21 @@ export class ReviewAssistanceRunner {
           status: 'succeeded',
           decisions: [],
           issues: [this.buildSkippedByGateIssue(context)],
+        };
+      }
+
+      if (this.hasUnavailablePageImageGateReason(context)) {
+        this.logger.warn(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: structural review skipped because page image is not available`,
+        );
+        return {
+          pageNo: context.pageNo,
+          status: 'succeeded',
+          decisions: [],
+          issues: [
+            ...this.buildIssues(context),
+            this.buildUnavailablePageImageIssue(context),
+          ],
         };
       }
 
@@ -664,6 +710,34 @@ export class ReviewAssistanceRunner {
         'Page skipped for structural review because it would add review noise without improving TOC or archaeological data extraction.',
       reasons: context.reviewAssistanceEligibility.exclusionReasons,
     };
+  }
+
+  private buildUnavailablePageImageIssue(
+    context: PageReviewContext,
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-execution-${context.pageNo}-page-image-not-available`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'page_image_not_available',
+      severity: 'warning',
+      description:
+        'Structural review was skipped because the page image is not available.',
+      reasons: [
+        ...new Set([
+          REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+          ...context.reviewAssistanceEligibility.reasons,
+        ]),
+      ],
+    };
+  }
+
+  private hasUnavailablePageImageGateReason(
+    context: PageReviewContext,
+  ): boolean {
+    return context.reviewAssistanceEligibility.reasons.includes(
+      REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+    );
   }
 
   private withTaskMetadata(

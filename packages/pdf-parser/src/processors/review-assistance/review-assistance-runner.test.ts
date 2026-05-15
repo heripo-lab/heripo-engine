@@ -588,6 +588,58 @@ describe('ReviewAssistanceRunner', () => {
     );
   });
 
+  test('records a no-op result when the page image is unavailable before gate evaluation', async () => {
+    const logger = makeLogger();
+    rmSync(join(outputDir, 'pages', 'page_0.png'), { force: true });
+
+    const report = await new ReviewAssistanceRunner(logger).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+    );
+
+    expect(LLMCaller.callVision).not.toHaveBeenCalled();
+    expect(report.summary.pagesSucceeded).toBe(1);
+    expect(report.summary.pagesFailed).toBe(0);
+    expect(report.pages[0]).toMatchObject({
+      status: 'succeeded',
+      decisions: [],
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          category: 'review_execution',
+          type: 'page_image_not_available',
+          severity: 'warning',
+          reasons: expect.arrayContaining([
+            'page_gate_failed_open',
+            'page_image_not_available',
+          ]),
+        }),
+      ]),
+    });
+
+    const gateSidecar = JSON.parse(
+      readFileSync(
+        join(outputDir, 'review_assistance_page_gate.json'),
+        'utf-8',
+      ),
+    );
+    expect(gateSidecar.pages[0]).toMatchObject({
+      pageNo: 1,
+      eligible: true,
+      kind: 'archaeological_data',
+      reasons: ['page_gate_failed_open', 'page_image_not_available'],
+      exclusionReasons: [],
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1: page image unavailable for page gate',
+      expect.any(Object),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[ReviewAssistanceRunner] Page 1/1: structural review skipped because page image is not available',
+    );
+  });
+
   test('reuses an existing page gate sidecar without re-evaluating eligibility', async () => {
     writeFileSync(
       join(outputDir, 'review_assistance_page_gate.json'),
@@ -623,6 +675,52 @@ describe('ReviewAssistanceRunner', () => {
     expect(components).toContain('ReviewAssistance');
     expect(report.summary.pagesSucceeded).toBe(1);
     expect(report.pages[0].status).toBe('succeeded');
+  });
+
+  test('reuses a page-image-unavailable gate sidecar without structural model calls', async () => {
+    rmSync(join(outputDir, 'pages', 'page_0.png'), { force: true });
+    writeFileSync(
+      join(outputDir, 'review_assistance_page_gate.json'),
+      JSON.stringify({
+        schemaName: 'HeripoReviewAssistancePageGateReport',
+        version: '1.0',
+        pages: [
+          {
+            pageNo: 1,
+            eligible: true,
+            kind: 'archaeological_data',
+            score: 100,
+            reasons: ['page_gate_failed_open', 'page_image_not_available'],
+            exclusionReasons: [],
+          },
+        ],
+      }),
+    );
+
+    const report = await new ReviewAssistanceRunner(
+      makeLogger(),
+    ).analyzeAndSave(
+      outputDir,
+      'report-1',
+      { modelId: 'mock-model' } as any,
+      makeOptions(),
+    );
+
+    expect(LLMCaller.callVision).not.toHaveBeenCalled();
+    expect(report.summary.pagesSucceeded).toBe(1);
+    expect(report.summary.pagesFailed).toBe(0);
+    expect(report.pages[0]).toMatchObject({
+      status: 'succeeded',
+      decisions: [],
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          category: 'review_execution',
+          type: 'page_image_not_available',
+          severity: 'warning',
+          reasons: expect.arrayContaining(['page_image_not_available']),
+        }),
+      ]),
+    });
   });
 
   test('extracts text reference when pdfPath is provided', async () => {

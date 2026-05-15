@@ -26,6 +26,7 @@ import {
   getPageTexts,
 } from './correction-applier';
 import {
+  REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
   type ReviewAssistancePageEligibility,
   ReviewAssistancePageGate,
   type ReviewAssistancePageGateContext,
@@ -355,7 +356,7 @@ export class VlmTextCorrector {
     if (!image) {
       return createReviewAssistancePageGateFailOpenEligibility(
         pageNo,
-        'page_image_not_available',
+        REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
       );
     }
 
