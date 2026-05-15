@@ -13,6 +13,20 @@ export type ReviewAssistanceFailurePolicy = 'partial_page';
 
 export type ReviewAssistancePageStatus = 'succeeded' | 'failed';
 
+export type ReviewAssistanceWorkItemKind =
+  | 'text_ocr_hanja'
+  | 'text_integrity'
+  | 'text_role_footnote'
+  | 'table'
+  | 'picture_caption'
+  | 'picture_split'
+  | 'layout_bbox_order';
+
+export type ReviewAssistanceCallTraceValidation =
+  | 'passed'
+  | 'reasked'
+  | 'failed';
+
 export type ReviewAssistanceIssueCategory =
   | 'text'
   | 'table'
@@ -170,6 +184,19 @@ export interface ReviewAssistancePageResult {
   };
 }
 
+export interface ReviewAssistanceCallTrace {
+  workItemId: string;
+  kind: ReviewAssistanceWorkItemKind;
+  pageNo: number;
+  targetRefs: string[];
+  modelId?: string;
+  attempts: number;
+  startedAt: string;
+  durationMs: number;
+  validation: ReviewAssistanceCallTraceValidation;
+  failureReasons?: string[];
+}
+
 export interface ReviewAssistanceReport {
   schemaName: ReviewAssistanceReportSchemaName;
   version: ReviewAssistanceReportVersion;
@@ -185,6 +212,9 @@ export interface ReviewAssistanceReport {
     autoApplyThreshold: number;
     proposalThreshold: number;
     maxRetries: number;
+    tableMaxRetries?: number;
+    localModelConcurrency?: number;
+    workItemTimeoutMs?: number;
     temperature: number;
     outputLanguage: string;
     failurePolicy: ReviewAssistanceFailurePolicy;
@@ -201,6 +231,7 @@ export interface ReviewAssistanceReport {
     textIntegrityIssueCount?: number;
   };
   pages: ReviewAssistancePageResult[];
+  callTraces: ReviewAssistanceCallTrace[];
 }
 
 export interface ReviewAssistanceProgressEvent {

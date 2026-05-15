@@ -393,6 +393,43 @@ export function AdvancedOptionsCard({
                 </div>
               )}
             </form.Field>
+            <form.Field name="correction.localModelConcurrency">
+              {(field: OptionalNumberFieldApi) => (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Local Work Items</span>
+                  <SelectWithTooltip
+                    value={String(field.state.value ?? 1)}
+                    onValueChange={(v) => field.handleChange(parseInt(v, 10))}
+                    disabled={disabled}
+                    className="w-20"
+                    options={[
+                      { value: '1', label: '1' },
+                      { value: '2', label: '2' },
+                      { value: '3', label: '3' },
+                      { value: '4', label: '4' },
+                    ]}
+                  />
+                </div>
+              )}
+            </form.Field>
+            <form.Field name="correction.workItemTimeoutMs">
+              {(field: OptionalNumberFieldApi) => (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Work Item Timeout</span>
+                  <SelectWithTooltip
+                    value={String(field.state.value ?? 1_800_000)}
+                    onValueChange={(v) => field.handleChange(parseInt(v, 10))}
+                    disabled={disabled}
+                    className="w-28"
+                    options={[
+                      { value: '600000', label: '10 min' },
+                      { value: '1800000', label: '30 min' },
+                      { value: '3600000', label: '60 min' },
+                    ]}
+                  />
+                </div>
+              )}
+            </form.Field>
           </div>
         </div>
 

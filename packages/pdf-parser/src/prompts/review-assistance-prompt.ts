@@ -129,7 +129,11 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
 export function buildReviewAssistancePrompt(
   context: PageReviewContext,
   task?: ReviewAssistanceTaskDefinition,
-  options: { outputLanguage?: string } = {},
+  options: {
+    outputLanguage?: string;
+    validationFeedback?: string[];
+    attempt?: number;
+  } = {},
 ): string {
   const taskPrompt = task
     ? [
@@ -146,10 +150,20 @@ export function buildReviewAssistancePrompt(
         `Write rationale and pageNotes in ${outputLanguage}. Keep evidence as a short verbatim source snippet when possible. Keep JSON keys, op names, refs, and payload text unchanged.`,
       ].join('\n')
     : undefined;
+  const feedbackPrompt =
+    options.validationFeedback && options.validationFeedback.length > 0
+      ? [
+          `VALIDATION FEEDBACK FOR ATTEMPT ${options.attempt ?? 2}:`,
+          'Your previous JSON response failed deterministic validation. Self-check the target refs, payload shape, allowed ops, confidence, and page number before returning the next JSON object.',
+          'Fix only the listed validation failures. If the correction cannot be grounded with the provided refs and image, return no commands.',
+          ...options.validationFeedback.map((reason) => `- ${reason}`),
+        ].join('\n')
+      : undefined;
   return [
     REVIEW_ASSISTANCE_SYSTEM_PROMPT,
     languagePrompt,
     taskPrompt,
+    feedbackPrompt,
     'PAGE CONTEXT JSON:',
     JSON.stringify(toPromptContext(context, task)),
   ]

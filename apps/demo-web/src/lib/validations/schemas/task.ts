@@ -61,6 +61,8 @@ const correctionOptionsSchema = z.object({
   // Optional per-stage retry overrides. When unset, each stage uses the
   // top-level `maxRetries` value.
   maxRetries: correctionMaxRetriesSchema,
+  localModelConcurrency: z.number().int().positive().max(16).optional(),
+  workItemTimeoutMs: z.number().int().positive().max(7_200_000).optional(),
 });
 
 /**

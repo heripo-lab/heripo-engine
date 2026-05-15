@@ -231,7 +231,7 @@ function buildPDFCorrectionOptions(
   }
 
   const stageRetries = options.correction.maxRetries;
-  return {
+  const correction = {
     models: {
       textCorrection: createModel(options.correction.models.textCorrection),
       pageGate: createModel(options.correction.models.pageGate),
@@ -248,6 +248,8 @@ function buildPDFCorrectionOptions(
         : {}),
     },
     concurrency: options.correction.concurrency,
+    localModelConcurrency: options.correction.localModelConcurrency,
+    workItemTimeoutMs: options.correction.workItemTimeoutMs,
     maxRetries: {
       textCorrection: stageRetries?.textCorrection ?? options.maxRetries,
       pageGate: stageRetries?.pageGate ?? options.maxRetries,
@@ -256,6 +258,7 @@ function buildPDFCorrectionOptions(
     },
     outputLanguage: options.correction.outputLanguage,
   };
+  return correction as PDFConvertOptions['correction'];
 }
 
 const PROCESSING_STEPS = [

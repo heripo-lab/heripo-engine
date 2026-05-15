@@ -207,7 +207,26 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
       },
       pageSize: { width: 100, height: 200 },
       pageImagePath: '/tmp/page.png',
-      textBlocks: [],
+      textBlocks: [
+        {
+          ref: '#/texts/0',
+          label: 'text',
+          text: 'Inside picture',
+          suspectReasons: ['picture_internal_text'],
+        },
+        {
+          ref: '#/texts/1',
+          label: 'text',
+          text: 'Caption-like',
+          suspectReasons: ['caption_like_body_text'],
+        },
+        {
+          ref: '#/texts/2',
+          label: 'caption',
+          text: 'Caption label',
+          suspectReasons: [],
+        },
+      ],
       missingTextCandidates: [],
       tables: [],
       pictures: [
@@ -239,6 +258,9 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('Allowed ops for this task');
     expect(prompt).toContain('"splitCandidate"');
     expect(prompt).toContain('picture_split_boundary_candidate');
+    expect(prompt).toContain('picture_internal_text');
+    expect(prompt).toContain('caption_like_body_text');
+    expect(prompt).toContain('Caption label');
   });
 
   test('출력 언어 지시를 포함한다', () => {
@@ -276,5 +298,39 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain(
       'Keep evidence as a short verbatim source snippet when possible',
     );
+  });
+
+  test('includes validation feedback for re-ask attempts', () => {
+    const context: PageReviewContext = {
+      pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['text'],
+        exclusionReasons: [],
+      },
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [],
+      missingTextCandidates: [],
+      tables: [],
+      pictures: [],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: [],
+        visualOrderRefs: [],
+        bboxWarnings: [],
+      },
+      domainPatterns: [],
+    };
+    const prompt = buildReviewAssistancePrompt(context, undefined, {
+      validationFeedback: ['target_ref_not_found'],
+    });
+
+    expect(prompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
+    expect(prompt).toContain('- target_ref_not_found');
   });
 });

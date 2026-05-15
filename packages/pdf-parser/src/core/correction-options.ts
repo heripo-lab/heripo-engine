@@ -2,6 +2,8 @@ import type { LanguageModel } from 'ai';
 
 import type { ReviewAssistanceTaskId } from '../prompts/review-assistance-prompt';
 
+import { PDF_CONVERTER } from '../config/constants';
+
 export interface PDFCorrectionModelOptions {
   textCorrection: LanguageModel;
   pageGate: LanguageModel;
@@ -33,6 +35,8 @@ export interface PDFCorrectionOptions {
   models: PDFCorrectionModelOptions;
   concurrency?: PDFCorrectionConcurrencyOptions;
   maxRetries?: PDFCorrectionMaxRetriesOptions;
+  localModelConcurrency?: number;
+  workItemTimeoutMs?: number;
   outputLanguage?: string;
   pageGate?: PDFCorrectionPageGateOptions;
   autoApplyThreshold?: number;
@@ -44,6 +48,8 @@ export interface NormalizedPDFCorrectionOptions {
   models: PDFCorrectionModelOptions;
   concurrency: Required<PDFCorrectionConcurrencyOptions>;
   maxRetries: Required<PDFCorrectionMaxRetriesOptions>;
+  localModelConcurrency: number;
+  workItemTimeoutMs: number;
   outputLanguage: string;
   pageGate: Required<PDFCorrectionPageGateOptions>;
   autoApplyThreshold: number;
@@ -66,6 +72,8 @@ export const PDF_CORRECTION_DEFAULTS: Omit<
     reviewAssistance: 3,
     tableCorrection: 3,
   },
+  localModelConcurrency: 1,
+  workItemTimeoutMs: PDF_CONVERTER.DEFAULT_TIMEOUT_MS,
   outputLanguage: 'en-US',
   pageGate: {
     structuralNoiseThreshold: 0.5,
@@ -189,6 +197,14 @@ export function normalizePDFCorrectionOptions(
         PDF_CORRECTION_DEFAULTS.maxRetries.tableCorrection,
       ),
     },
+    localModelConcurrency: normalizePositiveInt(
+      value.localModelConcurrency,
+      PDF_CORRECTION_DEFAULTS.localModelConcurrency,
+    ),
+    workItemTimeoutMs: normalizePositiveInt(
+      value.workItemTimeoutMs,
+      PDF_CORRECTION_DEFAULTS.workItemTimeoutMs,
+    ),
     outputLanguage: normalizeOutputLanguage(value.outputLanguage),
     pageGate: {
       structuralNoiseThreshold: normalizeThreshold(

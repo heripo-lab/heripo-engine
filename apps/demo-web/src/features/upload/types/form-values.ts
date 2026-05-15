@@ -43,6 +43,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
     },
     outputLanguage: 'ko-KR',
     maxRetries: undefined,
+    localModelConcurrency: 1,
+    workItemTimeoutMs: 1_800_000,
   },
   // LLM Models
   fallbackModel: 'openai/gpt-5.4',

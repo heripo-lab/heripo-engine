@@ -21,7 +21,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
-  REVIEW_ASSISTANCE_TASKS,
   type ReviewAssistanceTaskDefinition,
   buildReviewAssistancePrompt,
 } from '../../prompts/review-assistance-prompt';
@@ -33,6 +32,12 @@ import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
 import { PictureSplitCandidateDetector } from './picture-split-candidate-detector';
 import {
+  type ReviewAssistanceCallTrace,
+  type ReviewAssistanceCallTraceValidation,
+  ReviewAssistanceCheckpointStore,
+} from './review-assistance-checkpoint-store';
+import { ReviewAssistanceContextPacker } from './review-assistance-context-packer';
+import {
   REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
   ReviewAssistancePageGate,
   createReviewAssistancePageGateFailOpenEligibility,
@@ -42,6 +47,10 @@ import {
 } from './review-assistance-page-gate';
 import { ReviewAssistancePatcher } from './review-assistance-patcher';
 import { ReviewAssistanceValidator } from './review-assistance-validator';
+import {
+  type ReviewAssistanceWorkItem,
+  ReviewAssistanceWorkScheduler,
+} from './review-assistance-work-scheduler';
 
 export type ReviewAssistanceModelResolver = (
   task: ReviewAssistanceTaskDefinition,
@@ -53,6 +62,8 @@ export interface ReviewAssistanceRunnerOptions {
   pageGateTemperature: number;
   pageConcurrency: number;
   taskConcurrency: number;
+  localModelConcurrency: number;
+  workItemTimeoutMs: number;
   autoApplyThreshold: number;
   proposalThreshold: number;
   maxRetries: number;
@@ -67,12 +78,13 @@ export interface ReviewAssistanceRunnerOptions {
   pageTexts?: Map<number, string>;
 }
 
-interface ReviewAssistanceTaskResult {
-  task: ReviewAssistanceTaskDefinition;
+interface ReviewAssistanceWorkItemResult {
+  workItem: ReviewAssistanceWorkItem;
   status: 'succeeded' | 'empty' | 'failed';
   decisions: ReviewAssistanceDecision[];
   issue?: ReviewAssistanceIssue;
   errorMessage?: string;
+  callTrace: ReviewAssistanceCallTrace;
 }
 
 export class ReviewAssistanceRunner {
@@ -147,9 +159,17 @@ export class ReviewAssistanceRunner {
       `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${options.pageConcurrency}, task concurrency: ${options.taskConcurrency})...`,
     );
     this.logger.info(
+      `[ReviewAssistanceRunner] Local work item scheduler: concurrency ${options.localModelConcurrency}, timeout ${options.workItemTimeoutMs}ms`,
+    );
+    this.logger.info(
       `[ReviewAssistanceRunner] Gate summary: ${pagesEligibleForStructuralReview} eligible, ${pagesSkippedByGate} skipped by gate, ${pagesSkippedByUnavailableImage} skipped for unavailable page image`,
     );
 
+    const checkpointStore = ReviewAssistanceCheckpointStore.open(
+      outputDir,
+      reportId,
+    );
+    const callTraces = [...checkpointStore.getCallTraces()];
     let completedPages = 0;
     let failedPages = 0;
     const pageResults = await ConcurrentPool.run(
@@ -162,6 +182,8 @@ export class ReviewAssistanceRunner {
           modelResolver,
           options,
           contexts.length,
+          checkpointStore,
+          callTraces,
         ),
       (result) => {
         completedPages += 1;
@@ -228,7 +250,12 @@ export class ReviewAssistanceRunner {
       ),
     });
 
-    const report = this.buildReport(reportId, options, patched.pages);
+    const report = this.buildReport(
+      reportId,
+      options,
+      patched.pages,
+      callTraces,
+    );
     this.emitProgress(options, {
       substage: 'review-assistance:write-report',
       status: 'started',
@@ -430,6 +457,8 @@ export class ReviewAssistanceRunner {
     modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
     pageCount: number,
+    checkpointStore?: ReviewAssistanceCheckpointStore,
+    callTraces: ReviewAssistanceCallTrace[] = [],
   ): Promise<ReviewAssistancePageResult> {
     this.emitProgress(options, {
       substage: 'review-assistance:page',
@@ -444,19 +473,21 @@ export class ReviewAssistanceRunner {
         this.logger.info(
           `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: structural review skipped by gate (${context.reviewAssistanceEligibility.exclusionReasons.join(', ')})`,
         );
-        return {
+        const result: ReviewAssistancePageResult = {
           pageNo: context.pageNo,
           status: 'succeeded',
           decisions: [],
           issues: [this.buildSkippedByGateIssue(context)],
         };
+        checkpointStore?.recordPage(result);
+        return result;
       }
 
       if (this.hasUnavailablePageImageGateReason(context)) {
         this.logger.warn(
           `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: structural review skipped because page image is not available`,
         );
-        return {
+        const result: ReviewAssistancePageResult = {
           pageNo: context.pageNo,
           status: 'succeeded',
           decisions: [],
@@ -465,6 +496,8 @@ export class ReviewAssistanceRunner {
             this.buildUnavailablePageImageIssue(context),
           ],
         };
+        checkpointStore?.recordPage(result);
+        return result;
       }
 
       this.logger.info(
@@ -472,36 +505,104 @@ export class ReviewAssistanceRunner {
       );
 
       const image = new Uint8Array(await readFile(context.pageImagePath));
-      const taskResults = await ConcurrentPool.run(
-        [...REVIEW_ASSISTANCE_TASKS],
-        options.taskConcurrency,
-        (task) =>
-          this.reviewPageTask(
+      const scheduler = new ReviewAssistanceWorkScheduler();
+      const workItems = scheduler.build(context);
+
+      if (workItems.length === 0) {
+        const result: ReviewAssistancePageResult = {
+          pageNo: context.pageNo,
+          status: 'succeeded',
+          decisions: [],
+          issues: this.buildIssues(context),
+        };
+        checkpointStore?.recordPage(result);
+        return result;
+      }
+
+      const checkpointPage = checkpointStore?.getPartialPage(context.pageNo);
+      const completedCheckpointWorkItemIds = new Set(
+        workItems
+          .filter((workItem) =>
+            checkpointStore?.hasCompletedWorkItem(workItem.id),
+          )
+          .map((workItem) => workItem.id),
+      );
+      const failedCheckpointWorkItemIds = new Set(
+        workItems
+          .filter((workItem) => checkpointStore?.hasFailedWorkItem(workItem.id))
+          .map((workItem) => workItem.id),
+      );
+      const pendingWorkItems = workItems.filter(
+        (workItem) =>
+          !completedCheckpointWorkItemIds.has(workItem.id) &&
+          !failedCheckpointWorkItemIds.has(workItem.id),
+      );
+
+      if (pendingWorkItems.length === 0 && checkpointPage) {
+        this.logger.info(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review resumed from checkpoint (${workItems.length} work items)`,
+        );
+        return checkpointPage;
+      }
+
+      const workItemResults: ReviewAssistanceWorkItemResult[] = [];
+      await ConcurrentPool.run(
+        pendingWorkItems,
+        options.localModelConcurrency,
+        (workItem) =>
+          this.reviewWorkItem(
             context,
-            task,
+            workItem,
             image,
             pageCount,
             modelResolver,
             options,
           ),
-      );
-      const succeededTaskCount = taskResults.filter(
-        (result) => result.status !== 'failed',
-      ).length;
-      const failedTaskResults = taskResults.filter(
-        (result) => result.status === 'failed',
+        (result) => {
+          workItemResults.push(result);
+          this.upsertCallTrace(callTraces, result.callTrace);
+          const partialPage = this.buildPageResultFromWorkItems(
+            context,
+            checkpointPage,
+            workItemResults,
+          );
+          checkpointStore?.recordWorkItem({
+            workItemId: result.workItem.id,
+            page: partialPage,
+            trace: result.callTrace,
+            failed:
+              result.status === 'failed'
+                ? {
+                    reason: result.errorMessage ?? 'failed',
+                    attempts: result.callTrace.attempts,
+                  }
+                : undefined,
+          });
+        },
       );
 
-      if (succeededTaskCount === 0) {
+      const succeededLiveWorkItemResults = workItemResults.filter(
+        (result) => result.status !== 'failed',
+      );
+      const succeededWorkItemCount =
+        completedCheckpointWorkItemIds.size +
+        succeededLiveWorkItemResults.length;
+      const failedTaskResults = workItemResults.filter(
+        (result) => result.status === 'failed',
+      );
+      const failedWorkItemCount =
+        failedCheckpointWorkItemIds.size + failedTaskResults.length;
+
+      if (succeededWorkItemCount === 0 && failedWorkItemCount > 0) {
         this.logger.warn(
-          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: all review tasks failed`,
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: all review work items failed`,
           {
             err: {
               type: 'ReviewAssistanceTaskFailure',
               message: failedTaskResults
                 .map(
                   (result) =>
-                    `${result.task.id}: ${result.errorMessage ?? 'failed'}`,
+                    `${result.workItem.id}: ${result.errorMessage ?? 'failed'}`,
                 )
                 .join('; '),
             },
@@ -513,7 +614,7 @@ export class ReviewAssistanceRunner {
           decisions: [],
           issues: [
             ...this.buildIssues(context),
-            ...taskResults.flatMap((result) =>
+            ...workItemResults.flatMap((result) =>
               result.issue ? [result.issue] : [],
             ),
           ],
@@ -521,32 +622,25 @@ export class ReviewAssistanceRunner {
             message: failedTaskResults
               .map(
                 (result) =>
-                  `${result.task.id}: ${result.errorMessage ?? 'failed'}`,
+                  `${result.workItem.id}: ${result.errorMessage ?? 'failed'}`,
               )
               .join('; '),
           },
         };
       }
 
-      const decisions = this.mergeTaskDecisions(
-        taskResults.flatMap((result) => result.decisions),
+      const pageResult = this.buildPageResultFromWorkItems(
+        context,
+        checkpointPage,
+        workItemResults,
       );
 
       this.logger.info(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${decisions.length} decisions from ${succeededTaskCount}/${REVIEW_ASSISTANCE_TASKS.length} tasks)`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${pageResult.decisions.length} decisions from ${succeededWorkItemCount}/${workItems.length} work items)`,
       );
 
-      return {
-        pageNo: context.pageNo,
-        status: 'succeeded',
-        decisions,
-        issues: [
-          ...this.buildIssues(context),
-          ...taskResults.flatMap((result) =>
-            result.issue ? [result.issue] : [],
-          ),
-        ],
-      };
+      checkpointStore?.recordPage(pageResult);
+      return pageResult;
     } catch (error) {
       if (options.abortSignal?.aborted) {
         throw error;
@@ -584,100 +678,382 @@ export class ReviewAssistanceRunner {
     }
   }
 
-  private async reviewPageTask(
+  private async reviewWorkItem(
     context: PageReviewContext,
-    task: ReviewAssistanceTaskDefinition,
+    workItem: ReviewAssistanceWorkItem,
     image: Uint8Array,
     pageCount: number,
     modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
-  ): Promise<ReviewAssistanceTaskResult> {
+  ): Promise<ReviewAssistanceWorkItemResult> {
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
+    const model = modelResolver(workItem.task);
+    const modelId = this.getModelId(model);
+    let attempts = 0;
+    let validationFeedback: string[] = [];
+
     try {
       this.logger.info(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task started`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item started`,
       );
 
-      const prompt = buildReviewAssistancePrompt(context, task, {
-        outputLanguage: options.outputLanguage,
-      });
-      const model = modelResolver(task);
-      const result = await LLMCaller.callVision({
-        schema: reviewAssistancePageSchema as any,
-        messages: [
+      const packer = new ReviewAssistanceContextPacker();
+      const packedContext = packer.pack(context, workItem);
+      const maxAttempts = this.getWorkItemMaxAttempts(workItem, options);
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        attempts = attempt;
+        const prompt = buildReviewAssistancePrompt(
+          packedContext,
+          workItem.task,
           {
-            role: 'user' as const,
-            content: [
-              { type: 'text' as const, text: prompt },
+            outputLanguage: options.outputLanguage,
+            validationFeedback,
+            attempt,
+          },
+        );
+        const result = await this.withWorkItemTimeout(
+          LLMCaller.callVision({
+            schema: reviewAssistancePageSchema as any,
+            messages: [
               {
-                type: 'image' as const,
-                image,
-                mediaType: 'image/png' as const,
+                role: 'user' as const,
+                content: [
+                  { type: 'text' as const, text: prompt },
+                  {
+                    type: 'image' as const,
+                    image,
+                    mediaType: 'image/png' as const,
+                  },
+                ],
               },
             ],
-          },
-        ],
-        primaryModel: model,
-        maxRetries:
-          task.id === 'tables' ? options.tableMaxRetries : options.maxRetries,
-        temperature: options.temperature,
-        abortSignal: options.abortSignal,
-        component: 'ReviewAssistance',
-        phase: 'page-review',
-        metadata: { pageNo: context.pageNo, pageCount, task: task.id },
+            primaryModel: model,
+            maxRetries: this.getTaskMaxRetries(workItem.task, options),
+            temperature: options.temperature,
+            abortSignal: options.abortSignal,
+            component: 'ReviewAssistance',
+            phase: 'work-item-review',
+            metadata: {
+              pageNo: context.pageNo,
+              pageCount,
+              task: workItem.task.id,
+              workItemId: workItem.id,
+              workItemKind: workItem.kind,
+              targetRefs: workItem.targetRefs.join(','),
+              attempt,
+            },
+          }),
+          options.workItemTimeoutMs,
+          workItem,
+        );
+
+        options.aggregator?.track(result.usage);
+
+        const output = result.output as ReviewAssistancePageOutput;
+        const decisions = this.validateWorkItemOutput(
+          packedContext,
+          output,
+          workItem,
+          options,
+        );
+        const failureReasons = this.getValidationFailureReasons(decisions);
+        if (failureReasons.length === 0) {
+          const validation: ReviewAssistanceCallTraceValidation =
+            attempt > 1 ? 'reasked' : 'passed';
+          const callTrace = this.buildCallTrace(workItem, {
+            modelId,
+            attempts,
+            startedAt,
+            startedAtMs,
+            validation,
+            failureReasons: validation === 'reasked' ? validationFeedback : [],
+          });
+
+          this.logger.info(
+            `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item completed (${decisions.length} decisions, attempts: ${attempt})`,
+          );
+
+          return {
+            workItem,
+            status: 'succeeded',
+            decisions,
+            callTrace,
+          };
+        }
+
+        validationFeedback = failureReasons;
+      }
+
+      const callTrace = this.buildCallTrace(workItem, {
+        modelId,
+        attempts,
+        startedAt,
+        startedAtMs,
+        validation: 'failed',
+        failureReasons: validationFeedback,
       });
 
-      options.aggregator?.track(result.usage);
-
-      const output = result.output as ReviewAssistancePageOutput;
-      const validator = new ReviewAssistanceValidator();
-      const decisions = validator
-        .validatePageOutput(context, output, {
-          autoApplyThreshold: options.autoApplyThreshold,
-          proposalThreshold: options.proposalThreshold,
-          allowAutoApply: true,
-        })
-        .map((decision) => this.withTaskMetadata(decision, task))
-        .map((decision) => this.enforceTaskAllowedOps(decision, task));
-
-      this.logger.info(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task completed (${decisions.length} decisions)`,
+      this.logger.warn(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item failed validation after ${attempts} attempts`,
+        {
+          err: {
+            type: 'ReviewAssistanceValidationFailure',
+            message: validationFeedback.join('; '),
+          },
+        },
       );
 
       return {
-        task,
-        status: 'succeeded',
-        decisions,
+        workItem,
+        status: 'failed',
+        decisions: [],
+        issue: this.buildWorkItemValidationIssue(
+          context,
+          workItem,
+          validationFeedback,
+        ),
+        errorMessage: validationFeedback.join('; '),
+        callTrace,
       };
     } catch (error) {
       if (options.abortSignal?.aborted) {
         throw error;
       }
 
+      const callTrace = this.buildCallTrace(workItem, {
+        modelId,
+        attempts: Math.max(attempts, 1),
+        startedAt,
+        startedAtMs,
+        validation: 'failed',
+        failureReasons: [this.safeErrorMessage(error)],
+      });
+
       if (this.isNoOutputGeneratedError(error)) {
         this.logger.warn(
-          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task produced no structured output; recording no-op result`,
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item produced no structured output; recording no-op result`,
           this.errorLogBinding(error),
         );
         return {
-          task,
+          workItem,
           status: 'empty',
           decisions: [],
-          issue: this.buildNoOutputIssue(context, task),
+          issue: this.buildNoOutputIssue(context, workItem.task),
+          errorMessage: this.safeErrorMessage(error),
+          callTrace,
         };
       }
 
       this.logger.warn(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task failed`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item failed`,
         this.errorLogBinding(error),
       );
       return {
-        task,
+        workItem,
         status: 'failed',
         decisions: [],
-        issue: this.buildTaskFailureIssue(context, task, error),
+        issue: this.buildWorkItemFailureIssue(context, workItem, error),
         errorMessage: this.safeErrorMessage(error),
+        callTrace,
       };
     }
+  }
+
+  private validateWorkItemOutput(
+    context: PageReviewContext,
+    output: ReviewAssistancePageOutput,
+    workItem: ReviewAssistanceWorkItem,
+    options: ReviewAssistanceRunnerOptions,
+  ): ReviewAssistanceDecision[] {
+    const validator = new ReviewAssistanceValidator();
+    return validator
+      .validatePageOutput(context, output, {
+        autoApplyThreshold: options.autoApplyThreshold,
+        proposalThreshold: options.proposalThreshold,
+        allowAutoApply: true,
+      })
+      .map((decision) => this.withTaskMetadata(decision, workItem.task))
+      .map((decision) => this.withWorkItemMetadata(decision, workItem))
+      .map((decision) => this.enforceTaskAllowedOps(decision, workItem.task));
+  }
+
+  private withWorkItemMetadata(
+    decision: ReviewAssistanceDecision,
+    workItem: ReviewAssistanceWorkItem,
+  ): ReviewAssistanceDecision {
+    return {
+      ...decision,
+      reasons: [
+        `review_work_item:${workItem.id}`,
+        `review_work_item_kind:${workItem.kind}`,
+        ...decision.reasons,
+      ],
+      metadata: {
+        ...decision.metadata,
+        reviewWorkItem: {
+          id: workItem.id,
+          kind: workItem.kind,
+          targetRefs: workItem.targetRefs,
+          priority: workItem.priority,
+          contextBudget: workItem.contextBudget,
+        },
+      },
+    };
+  }
+
+  private getValidationFailureReasons(
+    decisions: ReviewAssistanceDecision[],
+  ): string[] {
+    const failureReasons = decisions.flatMap((decision) =>
+      decision.reasons.filter((reason) =>
+        this.isDeterministicValidationFailureReason(reason),
+      ),
+    );
+    return [...new Set(failureReasons)];
+  }
+
+  private isDeterministicValidationFailureReason(reason: string): boolean {
+    return (
+      reason.startsWith('invalid_') ||
+      reason.endsWith('_not_found') ||
+      reason.includes('_ref_not_found') ||
+      reason.includes('page_number_mismatch') ||
+      reason.includes('target_already_modified') ||
+      reason.includes('not_in_text_refs') ||
+      reason.includes('negative_index') ||
+      reason.includes('out_of_preview_range') ||
+      reason.includes('not_rectangular') ||
+      reason.includes('requires_') ||
+      reason.includes('without_boundary_candidate') ||
+      reason.includes('outside_source') ||
+      reason.includes('region_count_mismatch') ||
+      reason.includes('boundary_not_supported') ||
+      reason.startsWith('task_op_not_allowed:')
+    );
+  }
+
+  private async withWorkItemTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    workItem: ReviewAssistanceWorkItem,
+  ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(
+              new Error(
+                `Review assistance work item timeout after ${timeoutMs}ms: ${workItem.id}`,
+              ),
+            );
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  private buildCallTrace(
+    workItem: ReviewAssistanceWorkItem,
+    options: {
+      modelId?: string;
+      attempts: number;
+      startedAt: string;
+      startedAtMs: number;
+      validation: ReviewAssistanceCallTraceValidation;
+      failureReasons?: string[];
+    },
+  ): ReviewAssistanceCallTrace {
+    return {
+      workItemId: workItem.id,
+      kind: workItem.kind,
+      pageNo: workItem.pageNo,
+      targetRefs: workItem.targetRefs,
+      modelId: options.modelId,
+      attempts: options.attempts,
+      startedAt: options.startedAt,
+      durationMs: Math.max(0, Date.now() - options.startedAtMs),
+      validation: options.validation,
+      failureReasons:
+        options.failureReasons && options.failureReasons.length > 0
+          ? [...new Set(options.failureReasons)]
+          : undefined,
+    };
+  }
+
+  private getTaskMaxRetries(
+    task: ReviewAssistanceTaskDefinition,
+    options: ReviewAssistanceRunnerOptions,
+  ): number {
+    return task.id === 'tables' ? options.tableMaxRetries : options.maxRetries;
+  }
+
+  private getWorkItemMaxAttempts(
+    workItem: ReviewAssistanceWorkItem,
+    options: ReviewAssistanceRunnerOptions,
+  ): number {
+    return Math.max(1, this.getTaskMaxRetries(workItem.task, options));
+  }
+
+  private getModelId(model: LanguageModel): string | undefined {
+    const modelId =
+      (model as { modelId?: unknown }).modelId ??
+      (model as { id?: unknown }).id;
+    return typeof modelId === 'string' ? modelId : undefined;
+  }
+
+  private buildPageResultFromWorkItems(
+    context: PageReviewContext,
+    checkpointPage: ReviewAssistancePageResult | undefined,
+    workItemResults: ReviewAssistanceWorkItemResult[],
+  ): ReviewAssistancePageResult {
+    const decisions = this.mergeTaskDecisions([
+      ...(checkpointPage?.decisions ?? []),
+      ...workItemResults.flatMap((result) => result.decisions),
+    ]);
+    const issues = this.dedupeIssues([
+      ...(checkpointPage?.issues ?? this.buildIssues(context)),
+      ...workItemResults.flatMap((result) =>
+        result.issue ? [result.issue] : [],
+      ),
+    ]);
+    return {
+      pageNo: context.pageNo,
+      status: 'succeeded',
+      decisions,
+      issues,
+    };
+  }
+
+  private dedupeIssues(
+    issues: ReviewAssistanceIssue[],
+  ): ReviewAssistanceIssue[] {
+    const seen = new Set<string>();
+    return issues.filter((issue) => {
+      const key = issue.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private upsertCallTrace(
+    callTraces: ReviewAssistanceCallTrace[],
+    trace: ReviewAssistanceCallTrace,
+  ): void {
+    const index = callTraces.findIndex(
+      (entry) => entry.workItemId === trace.workItemId,
+    );
+    if (index === -1) {
+      callTraces.push(trace);
+      return;
+    }
+    callTraces[index] = trace;
   }
 
   private isNoOutputGeneratedError(error: unknown): boolean {
@@ -745,19 +1121,48 @@ export class ReviewAssistanceRunner {
     };
   }
 
-  private buildTaskFailureIssue(
+  private buildWorkItemFailureIssue(
     context: PageReviewContext,
-    task: ReviewAssistanceTaskDefinition,
+    workItem: ReviewAssistanceWorkItem,
     error: unknown,
   ): ReviewAssistanceIssue {
     return {
-      id: `review-execution-${context.pageNo}-${task.id}-failed`,
+      id: `review-execution-${context.pageNo}-${workItem.id}-failed`,
       pageNo: context.pageNo,
       category: 'review_execution',
-      type: 'task_model_error',
+      type: 'work_item_model_error',
       severity: 'warning',
-      description: `${task.label} 작업이 실패했습니다. 해당 영역을 직접 확인하세요.`,
-      reasons: [`review_task:${task.id}`, this.safeErrorMessage(error)],
+      description: `${workItem.task.label} work item failed. Review the target refs manually.`,
+      refs: workItem.targetRefs,
+      reasons: [
+        `review_task:${workItem.task.id}`,
+        `review_work_item:${workItem.id}`,
+        `review_work_item_kind:${workItem.kind}`,
+        this.safeErrorMessage(error),
+      ],
+    };
+  }
+
+  private buildWorkItemValidationIssue(
+    context: PageReviewContext,
+    workItem: ReviewAssistanceWorkItem,
+    reasons: string[],
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-execution-${context.pageNo}-${workItem.id}-validation-failed`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'work_item_validation_failed',
+      severity: 'warning',
+      description:
+        'Work item output failed deterministic validation after re-asking.',
+      refs: workItem.targetRefs,
+      reasons: [
+        `review_task:${workItem.task.id}`,
+        `review_work_item:${workItem.id}`,
+        `review_work_item_kind:${workItem.kind}`,
+        ...reasons,
+      ],
     };
   }
 
@@ -1018,6 +1423,7 @@ export class ReviewAssistanceRunner {
     reportId: string,
     options: ReviewAssistanceRunnerOptions,
     pages: ReviewAssistancePageResult[],
+    callTraces: ReviewAssistanceCallTrace[] = [],
   ): ReviewAssistanceReport {
     const autoAppliedCount = pages.reduce(
       (sum, page) =>
@@ -1056,7 +1462,7 @@ export class ReviewAssistanceRunner {
           .length,
       0,
     );
-    return {
+    const report = {
       schemaName: 'HeripoReviewAssistanceReport',
       version: '1.0',
       reportId,
@@ -1071,6 +1477,9 @@ export class ReviewAssistanceRunner {
         autoApplyThreshold: options.autoApplyThreshold,
         proposalThreshold: options.proposalThreshold,
         maxRetries: options.maxRetries,
+        tableMaxRetries: options.tableMaxRetries,
+        localModelConcurrency: options.localModelConcurrency,
+        workItemTimeoutMs: options.workItemTimeoutMs,
         temperature: options.temperature,
         outputLanguage: options.outputLanguage,
         failurePolicy: 'partial_page',
@@ -1088,7 +1497,9 @@ export class ReviewAssistanceRunner {
         textIntegrityIssueCount,
       },
       pages,
+      callTraces,
     };
+    return report as ReviewAssistanceReport;
   }
 
   private buildIssues(context: PageReviewContext): ReviewAssistanceIssue[] {

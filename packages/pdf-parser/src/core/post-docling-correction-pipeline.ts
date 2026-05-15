@@ -74,6 +74,8 @@ export class PostDoclingCorrectionPipeline {
           pageGateTemperature: correction.temperature,
           pageConcurrency: correction.concurrency.pages,
           taskConcurrency: correction.concurrency.reviewTasks,
+          localModelConcurrency: correction.localModelConcurrency,
+          workItemTimeoutMs: correction.workItemTimeoutMs,
           autoApplyThreshold: correction.autoApplyThreshold,
           proposalThreshold: correction.proposalThreshold,
           maxRetries: correction.maxRetries.reviewAssistance,

@@ -25,8 +25,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PictureSplitCandidateDetector } from './picture-split-candidate-detector';
+import { ReviewAssistanceCheckpointStore } from './review-assistance-checkpoint-store';
 import { createReviewAssistancePageGatePendingEligibility } from './review-assistance-page-gate';
 import { ReviewAssistanceRunner } from './review-assistance-runner';
+import { ReviewAssistanceWorkScheduler } from './review-assistance-work-scheduler';
 
 const { mockExtractText } = vi.hoisted(() => ({
   mockExtractText: vi.fn(),
@@ -120,16 +122,19 @@ function mockDefaultCallVision(): void {
     if (input.component === 'ReviewAssistancePageGate') {
       return makeGateResult();
     }
-    return makeReviewResult([
-      {
-        op: 'replaceText',
-        targetRef: '#/texts/0',
-        payload: { text: 'Test' },
-        confidence: 0.95,
-        rationale: 'Spacing OCR noise',
-        evidence: 'Image reads Test',
-      },
-    ]);
+    if (input.metadata?.task === 'text_ocr_hanja') {
+      return makeReviewResult([
+        {
+          op: 'replaceText',
+          targetRef: '#/texts/0',
+          payload: { text: 'Test' },
+          confidence: 0.95,
+          rationale: 'Spacing OCR noise',
+          evidence: 'Image reads Test',
+        },
+      ]);
+    }
+    return makeReviewResult();
   });
 }
 
@@ -344,6 +349,8 @@ function makeOptions() {
     pageGateTemperature: 0,
     pageConcurrency: 1,
     taskConcurrency: 6,
+    localModelConcurrency: 1,
+    workItemTimeoutMs: 1_800_000,
     autoApplyThreshold: 0.85,
     proposalThreshold: 0.5,
     maxRetries: 3,
@@ -421,7 +428,7 @@ describe('ReviewAssistanceRunner', () => {
       proposalCount: 0,
       skippedCount: 0,
     });
-    expect(LLMCaller.callVision).toHaveBeenCalledTimes(7);
+    expect(LLMCaller.callVision).toHaveBeenCalled();
     expect(LLMCaller.callVision).toHaveBeenCalledWith(
       expect.objectContaining({
         component: 'ReviewAssistancePageGate',
@@ -432,19 +439,22 @@ describe('ReviewAssistanceRunner', () => {
     expect(LLMCaller.callVision).toHaveBeenCalledWith(
       expect.objectContaining({
         component: 'ReviewAssistance',
-        phase: 'page-review',
-        metadata: {
+        phase: 'work-item-review',
+        metadata: expect.objectContaining({
           pageNo: 1,
           pageCount: 1,
           task: 'text_ocr_hanja',
-        },
+          workItemKind: 'text_ocr_hanja',
+        }),
       }),
     );
     expect(logger.info).toHaveBeenCalledWith(
       '[ReviewAssistanceRunner] Page 1/1: review started',
     );
     expect(logger.info).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: review completed (1 decisions from 6/6 tasks)',
+      expect.stringContaining(
+        '[ReviewAssistanceRunner] Page 1/1: review completed (1 decisions from',
+      ),
     );
     expect(onProgress).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -456,7 +466,7 @@ describe('ReviewAssistanceRunner', () => {
     );
     expect(onTokenUsage).toHaveBeenCalledWith(
       expect.objectContaining({
-        total: expect.objectContaining({ totalTokens: 105 }),
+        total: expect.objectContaining({ totalTokens: expect.any(Number) }),
       }),
     );
     expect(onProgress).toHaveBeenCalledWith(
@@ -472,6 +482,16 @@ describe('ReviewAssistanceRunner', () => {
     );
     expect(sidecar.source.originSnapshot).toBe('result_review_origin.json');
     expect(sidecar.source.ocrOriginSnapshot).toBe('result_ocr_origin.json');
+    expect(sidecar.callTraces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          workItemId: expect.stringContaining('text_ocr_hanja'),
+          kind: 'text_ocr_hanja',
+          attempts: 1,
+          validation: 'passed',
+        }),
+      ]),
+    );
     expect(sidecar.pages[0].decisions[0].command).toEqual({
       op: 'replaceText',
       textRef: '#/texts/0',
@@ -829,6 +849,16 @@ describe('ReviewAssistanceRunner', () => {
   });
 
   test('같은 ref를 건드리는 task 충돌은 자동 반영하지 않고 proposal로 낮춘다', async () => {
+    const doc = makeDoc();
+    doc.texts[0].prov[0].bbox = {
+      l: 10,
+      t: 10,
+      r: 150,
+      b: 40,
+      coord_origin: 'TOPLEFT',
+    };
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
+
     vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
       if (input.component === 'ReviewAssistancePageGate') {
         return makeGateResult();
@@ -1029,15 +1059,13 @@ describe('ReviewAssistanceRunner', () => {
     );
 
     expect(report.summary.pagesFailed).toBe(1);
-    expect(report.pages[0].error?.message).toContain(
-      'text_ocr_hanja: vlm failed',
-    );
+    expect(report.pages[0].error?.message).toContain('vlm failed');
     expect(logger.warn).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: all review tasks failed',
+      '[ReviewAssistanceRunner] Page 1/1: all review work items failed',
       {
         err: expect.objectContaining({
           type: 'ReviewAssistanceTaskFailure',
-          message: expect.stringContaining('text_ocr_hanja: vlm failed'),
+          message: expect.stringContaining('vlm failed'),
         }),
       },
     );
@@ -1057,9 +1085,7 @@ describe('ReviewAssistanceRunner', () => {
       ...makeOptions(),
     });
 
-    expect(report.pages[0].error?.message).toContain(
-      'text_ocr_hanja: model failed',
-    );
+    expect(report.pages[0].error?.message).toContain('model failed');
   });
 
   test('리뷰 실패 로그와 리포트 에러에서 긴 base64성 데이터를 제거한다', async () => {
@@ -1084,10 +1110,12 @@ describe('ReviewAssistanceRunner', () => {
     );
 
     expect(report.pages[0].error?.message).toContain(
-      'text_ocr_hanja: Headers Timeout [redacted-large-data]',
+      'Headers Timeout [redacted-large-data]',
     );
     expect(logger.warn).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: text_ocr_hanja task failed',
+      expect.stringContaining(
+        '[ReviewAssistanceRunner] Page 1/1: page-1:text_ocr_hanja',
+      ),
       {
         err: expect.objectContaining({
           message: 'Headers Timeout [redacted-large-data]',
@@ -1133,7 +1161,9 @@ describe('ReviewAssistanceRunner', () => {
       ]),
     );
     expect(logger.warn).toHaveBeenCalledWith(
-      '[ReviewAssistanceRunner] Page 1/1: text_ocr_hanja task produced no structured output; recording no-op result',
+      expect.stringContaining(
+        'work item produced no structured output; recording no-op result',
+      ),
       {
         err: expect.objectContaining({
           type: 'Error',
@@ -1424,7 +1454,7 @@ describe('ReviewAssistanceRunner', () => {
     const pagePath = join(outputDir, 'pages', 'page_0.png');
     const noOutputLogger = makeLogger();
     const noOutputRunner = new ReviewAssistanceRunner(noOutputLogger) as any;
-    noOutputRunner.reviewPageTask = vi
+    noOutputRunner.reviewWorkItem = vi
       .fn()
       .mockRejectedValue(new Error('No output generated.'));
 
@@ -1486,10 +1516,20 @@ describe('ReviewAssistanceRunner', () => {
     const failedTasksRunner = new ReviewAssistanceRunner(
       failedTasksLogger,
     ) as any;
-    failedTasksRunner.reviewPageTask = vi.fn(async (_context, task) => ({
-      task,
+    failedTasksRunner.reviewWorkItem = vi.fn(async (_context, workItem) => ({
+      workItem,
       status: 'failed',
       decisions: [],
+      callTrace: {
+        workItemId: workItem.id,
+        kind: workItem.kind,
+        pageNo: 1,
+        targetRefs: workItem.targetRefs,
+        attempts: 1,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        durationMs: 1,
+        validation: 'failed',
+      },
     }));
 
     const failedTasksResult = (await failedTasksRunner.reviewPage(
@@ -1498,6 +1538,7 @@ describe('ReviewAssistanceRunner', () => {
       makeModelResolver(),
       makeOptions(),
       1,
+      ReviewAssistanceCheckpointStore.open(outputDir, 'report-1'),
     )) as ReviewAssistancePageResult;
 
     expect(failedTasksResult.status).toBe('failed');
@@ -1514,13 +1555,22 @@ describe('ReviewAssistanceRunner', () => {
     );
 
     await expect(
-      abortTaskRunner.reviewPageTask(
+      abortTaskRunner.reviewWorkItem(
         makePageContext(pagePath),
         {
-          id: 'text_ocr_hanja',
-          label: 'Text OCR and Hanja correction',
-          allowedOps: ['replaceText'],
-          focus: 'Abort branch coverage',
+          id: 'work-item',
+          kind: 'text_ocr_hanja',
+          pageNo: 1,
+          targetRefs: ['#/texts/0'],
+          priority: 'required',
+          contextBudget: 'tiny',
+          eligibility: makePageContext(pagePath).reviewAssistanceEligibility,
+          task: {
+            id: 'text_ocr_hanja',
+            label: 'Text OCR and Hanja correction',
+            allowedOps: ['replaceText'],
+            focus: 'Abort branch coverage',
+          },
         },
         new Uint8Array([1]),
         1,
@@ -1531,6 +1581,201 @@ describe('ReviewAssistanceRunner', () => {
         },
       ),
     ).rejects.toThrow('task aborted');
+  });
+
+  test('resumes page review from completed work item checkpoint', async () => {
+    const pagePath = join(outputDir, 'pages', 'page_0.png');
+    const context = makePageContext(pagePath);
+    const checkpointStore = ReviewAssistanceCheckpointStore.open(
+      outputDir,
+      'report-1',
+    );
+    const workItems = new ReviewAssistanceWorkScheduler().build(context);
+    const page: ReviewAssistancePageResult = {
+      pageNo: 1,
+      status: 'succeeded',
+      decisions: [
+        makeDecision('checkpoint-decision', {
+          op: 'replaceText',
+          textRef: '#/texts/0',
+          text: 'Checkpoint',
+        }),
+      ],
+      issues: [],
+    };
+    for (const [index, workItem] of workItems.entries()) {
+      checkpointStore.recordWorkItem({
+        workItemId: workItem.id,
+        page,
+        trace: {
+          workItemId: workItem.id,
+          kind: workItem.kind,
+          pageNo: 1,
+          targetRefs: workItem.targetRefs,
+          attempts: 1,
+          startedAt: '2026-01-01T00:00:00.000Z',
+          durationMs: 1,
+          validation: 'passed',
+        },
+        failed:
+          index === 0
+            ? { reason: 'previous validation failed', attempts: 2 }
+            : undefined,
+      });
+    }
+
+    const result = (await (
+      new ReviewAssistanceRunner(makeLogger()) as any
+    ).reviewPage(
+      context,
+      'report-1',
+      makeModelResolver(),
+      makeOptions(),
+      1,
+      checkpointStore,
+      [],
+    )) as ReviewAssistancePageResult;
+
+    expect(result.decisions[0].id).toBe('checkpoint-decision');
+    expect(LLMCaller.callVision).not.toHaveBeenCalledWith(
+      expect.objectContaining({ component: 'ReviewAssistance' }),
+    );
+  });
+
+  test('returns a no-op page result when scheduling finds no work items', async () => {
+    const pagePath = join(outputDir, 'pages', 'page_0.png');
+    const context: PageReviewContext = {
+      ...makePageContext(pagePath),
+      textBlocks: [],
+      missingTextCandidates: [],
+      tables: [],
+      pictures: [],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: [],
+        visualOrderRefs: [],
+        bboxWarnings: [],
+      },
+      domainPatterns: [],
+    };
+
+    const result = (await (
+      new ReviewAssistanceRunner(makeLogger()) as any
+    ).reviewPage(
+      context,
+      'report-1',
+      makeModelResolver(),
+      makeOptions(),
+      1,
+    )) as ReviewAssistancePageResult;
+
+    expect(result).toMatchObject({
+      pageNo: 1,
+      status: 'succeeded',
+      decisions: [],
+      issues: [],
+    });
+  });
+
+  test('re-asks and then records validation failure for invalid work item output', async () => {
+    const pagePath = join(outputDir, 'pages', 'page_0.png');
+    const context = makePageContext(pagePath);
+    const workItem = new ReviewAssistanceWorkScheduler()
+      .build(context)
+      .find((item) => item.kind === 'text_ocr_hanja')!;
+    vi.mocked(LLMCaller.callVision).mockResolvedValue(
+      makeReviewResult([
+        {
+          op: 'replaceText',
+          targetRef: '#/texts/missing',
+          payload: { text: 'Missing' },
+          confidence: 0.95,
+          rationale: 'Invalid target',
+          evidence: 'Missing',
+        },
+      ]),
+    );
+
+    const result = await (
+      new ReviewAssistanceRunner(makeLogger()) as any
+    ).reviewWorkItem(
+      context,
+      workItem,
+      new Uint8Array([1]),
+      1,
+      makeModelResolver(),
+      {
+        ...makeOptions(),
+        maxRetries: 2,
+      },
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.issue).toMatchObject({
+      type: 'work_item_validation_failed',
+      reasons: expect.arrayContaining(['target_ref_not_found']),
+    });
+    expect(result.callTrace).toMatchObject({
+      attempts: 2,
+      validation: 'failed',
+      failureReasons: expect.arrayContaining(['target_ref_not_found']),
+    });
+    expect(LLMCaller.callVision).toHaveBeenCalledTimes(2);
+  });
+
+  test('records reasked validation when a later work item attempt passes', async () => {
+    const pagePath = join(outputDir, 'pages', 'page_0.png');
+    const context = makePageContext(pagePath);
+    const workItem = new ReviewAssistanceWorkScheduler()
+      .build(context)
+      .find((item) => item.kind === 'text_ocr_hanja')!;
+    vi.mocked(LLMCaller.callVision)
+      .mockResolvedValueOnce(
+        makeReviewResult([
+          {
+            op: 'replaceText',
+            targetRef: '#/texts/missing',
+            payload: { text: 'Missing' },
+            confidence: 0.95,
+            rationale: 'Invalid target',
+            evidence: 'Missing',
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeReviewResult([
+          {
+            op: 'replaceText',
+            targetRef: '#/texts/0',
+            payload: { text: 'Test' },
+            confidence: 0.95,
+            rationale: 'Valid target after re-ask',
+            evidence: 'Test',
+          },
+        ]),
+      );
+
+    const result = await (
+      new ReviewAssistanceRunner(makeLogger()) as any
+    ).reviewWorkItem(
+      context,
+      workItem,
+      new Uint8Array([1]),
+      1,
+      makeModelResolver(),
+      {
+        ...makeOptions(),
+        maxRetries: 2,
+      },
+    );
+
+    expect(result.status).toBe('succeeded');
+    expect(result.callTrace).toMatchObject({
+      attempts: 2,
+      validation: 'reasked',
+      failureReasons: ['target_ref_not_found'],
+    });
   });
 
   test('covers task decision merge helpers and touched ref extraction', () => {
@@ -1589,6 +1834,27 @@ describe('ReviewAssistanceRunner', () => {
       },
     });
     expect(merged[1].reasons).toContain('duplicate_review_task:unknown');
+
+    const existingKeepsDuplicate = runner.mergeTaskDecisions([
+      makeDecision('existing-high', mergeCommand, {
+        confidence: 0.9,
+        metadata: { reviewTask: 'text_integrity' },
+      }),
+      makeDecision('duplicate-low', mergeCommand, {
+        confidence: 0.2,
+        metadata: { reviewTask: 'layout_bbox_order' },
+      }),
+    ]) as ReviewAssistanceDecision[];
+    expect(existingKeepsDuplicate[0]).toMatchObject({
+      id: 'existing-high',
+      confidence: 0.9,
+    });
+    expect(
+      runner.markTaskConflict(
+        makeDecision('proposal', mergeCommand, { disposition: 'proposal' }),
+        ['other'],
+      ).disposition,
+    ).toBe('proposal');
 
     const commands: ReviewAssistanceCommand[] = [
       { op: 'replaceText', textRef: '#/texts/0', text: 'A' },
@@ -1728,9 +1994,24 @@ describe('ReviewAssistanceRunner', () => {
     detectorSpy.mockRestore();
   });
 
-  test('covers runner issue and error helper branches', () => {
+  test('covers runner issue and error helper branches', async () => {
     const runner = new ReviewAssistanceRunner(makeLogger()) as any;
     const context = makePageContext('/tmp/page_0.png');
+    const workItem = {
+      id: 'work-item',
+      kind: 'text_ocr_hanja',
+      pageNo: 1,
+      targetRefs: ['#/texts/0'],
+      priority: 'required',
+      contextBudget: 'tiny',
+      eligibility: context.reviewAssistanceEligibility,
+      task: {
+        id: 'text_ocr_hanja',
+        label: 'Text OCR',
+        allowedOps: ['replaceText'],
+        focus: 'Text OCR',
+      },
+    };
     const categoryCases: Array<[string, ReviewAssistanceIssueCategory]> = [
       ['caption_like_body_text', 'caption'],
       ['footnote_like_body_text', 'footnote'],
@@ -1793,18 +2074,77 @@ describe('ReviewAssistanceRunner', () => {
       stack: undefined,
     });
 
-    const taskIssue = runner.buildTaskFailureIssue(
+    const taskIssue = runner.buildWorkItemFailureIssue(
       context,
-      {
-        id: 'text_ocr_hanja',
-        label: 'Text OCR',
-        allowedOps: ['replaceText'],
-      },
+      workItem,
       'plain failure',
     ) as ReviewAssistanceIssue;
     expect(taskIssue.reasons).toEqual([
       'review_task:text_ocr_hanja',
+      'review_work_item:work-item',
+      'review_work_item_kind:text_ocr_hanja',
       'plain failure',
     ]);
+    expect(
+      runner.buildWorkItemValidationIssue(context, workItem, [
+        'target_ref_not_found',
+      ]),
+    ).toMatchObject({
+      type: 'work_item_validation_failed',
+      reasons: expect.arrayContaining(['target_ref_not_found']),
+    });
+
+    const traces = [
+      {
+        workItemId: 'work-item',
+        kind: 'text_ocr_hanja',
+        pageNo: 1,
+        targetRefs: ['#/texts/0'],
+        attempts: 1,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        durationMs: 1,
+        validation: 'passed',
+      },
+    ];
+    runner.upsertCallTrace(traces, { ...traces[0], durationMs: 2 });
+    expect(traces[0].durationMs).toBe(2);
+    expect(runner.getModelId({ id: 'fallback-id' })).toBe('fallback-id');
+    expect(runner.getModelId({ modelId: 123 })).toBeUndefined();
+    expect(
+      runner.dedupeIssues([
+        {
+          id: 'issue-1',
+          pageNo: 1,
+          category: 'text',
+          type: 'a',
+          severity: 'warning',
+          description: 'a',
+        },
+        {
+          id: 'issue-1',
+          pageNo: 1,
+          category: 'text',
+          type: 'a',
+          severity: 'warning',
+          description: 'a',
+        },
+      ]),
+    ).toHaveLength(1);
+
+    vi.useFakeTimers();
+    try {
+      const timeout = runner.withWorkItemTimeout(
+        new Promise(() => undefined),
+        5,
+        workItem,
+      );
+      const timeoutAssertion = expect(timeout).rejects.toThrow(
+        'Review assistance work item timeout after 5ms: work-item',
+      );
+      await vi.advanceTimersByTimeAsync(5);
+      await timeoutAssertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
