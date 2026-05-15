@@ -366,6 +366,7 @@ describe('PostDoclingCorrectionPipeline', () => {
         pageConcurrency: 3,
         taskConcurrency: 2,
         maxRetries: 5,
+        tableMaxRetries: 6,
         outputLanguage: 'ko-KR',
         aggregator,
         abortSignal: abortController.signal,

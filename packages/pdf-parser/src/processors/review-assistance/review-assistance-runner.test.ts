@@ -347,6 +347,7 @@ function makeOptions() {
     autoApplyThreshold: 0.85,
     proposalThreshold: 0.5,
     maxRetries: 3,
+    tableMaxRetries: 3,
     temperature: 0,
     outputLanguage: 'en-US',
   };
@@ -502,6 +503,33 @@ describe('ReviewAssistanceRunner', () => {
     expect(ocrOriginDoc.texts[0].text).toBe('T e s t');
     expect(existsSync(join(outputDir, 'result_review_origin.json'))).toBe(true);
     expect(existsSync(join(outputDir, 'result_ocr_origin.json'))).toBe(true);
+  });
+
+  test('uses table-specific retry limit only for the tables task', async () => {
+    await new ReviewAssistanceRunner(makeLogger()).analyzeAndSave(
+      outputDir,
+      'report-1',
+      makeModelResolver(),
+      {
+        ...makeOptions(),
+        maxRetries: 4,
+        tableMaxRetries: 7,
+      },
+    );
+
+    const reviewCalls = vi
+      .mocked(LLMCaller.callVision)
+      .mock.calls.map(([input]) => input as any)
+      .filter((input) => input.component === 'ReviewAssistance');
+    const tableCall = reviewCalls.find(
+      (input) => input.metadata.task === 'tables',
+    );
+    const textCall = reviewCalls.find(
+      (input) => input.metadata.task === 'text_ocr_hanja',
+    );
+
+    expect(tableCall).toEqual(expect.objectContaining({ maxRetries: 7 }));
+    expect(textCall).toEqual(expect.objectContaining({ maxRetries: 4 }));
   });
 
   test('skips non-eligible pages without structural model calls', async () => {

@@ -56,6 +56,7 @@ export interface ReviewAssistanceRunnerOptions {
   autoApplyThreshold: number;
   proposalThreshold: number;
   maxRetries: number;
+  tableMaxRetries: number;
   temperature: number;
   outputLanguage: string;
   pdfPath?: string;
@@ -616,7 +617,8 @@ export class ReviewAssistanceRunner {
           },
         ],
         primaryModel: model,
-        maxRetries: options.maxRetries,
+        maxRetries:
+          task.id === 'tables' ? options.tableMaxRetries : options.maxRetries,
         temperature: options.temperature,
         abortSignal: options.abortSignal,
         component: 'ReviewAssistance',
