@@ -16,7 +16,11 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { createHash } from 'node:crypto';
 
-import { bboxContainmentRatio, bboxToTopLeftRect } from './bbox-geometry';
+import {
+  bboxContainmentRatio,
+  bboxGeometryOptionsForPage,
+  bboxToTopLeftRect,
+} from './bbox-geometry';
 
 const TRUSTED_VLM_AUTO_APPLY_THRESHOLD = 0.7;
 
@@ -964,10 +968,14 @@ export class ReviewAssistanceValidator {
     orientation: 'horizontal' | 'vertical',
     pageSize: PageReviewContext['pageSize'],
   ): boolean {
+    const geometryOptions = bboxGeometryOptionsForPage(
+      regions.map((region) => region.bbox),
+      pageSize,
+    );
     for (let i = 0; i < regions.length; i++) {
       for (let j = i + 1; j < regions.length; j++) {
-        const a = bboxToTopLeftRect(regions[i].bbox, pageSize);
-        const b = bboxToTopLeftRect(regions[j].bbox, pageSize);
+        const a = bboxToTopLeftRect(regions[i].bbox, pageSize, geometryOptions);
+        const b = bboxToTopLeftRect(regions[j].bbox, pageSize, geometryOptions);
         if (orientation === 'vertical') {
           const separated = a.right <= b.left || b.right <= a.left;
           const overlap = this.axisOverlapRatio(

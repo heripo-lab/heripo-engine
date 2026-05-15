@@ -8,7 +8,9 @@ import type { DoclingBBox } from '@heripo/model';
  * processors (detector, context builder, validator) can compute geometry
  * the same way. When page size is unknown, the fallback height is the
  * larger of `bbox.t` and `bbox.b`, which preserves the bbox shape even if
- * the absolute page position is approximate.
+ * the absolute page position is approximate. For comparisons across multiple
+ * bboxes on the same page, pass shared options from `bboxGeometryOptionsForPage`
+ * so all BOTTOMLEFT bboxes are flipped against the same approximate height.
  */
 
 export interface TopLeftRect {
@@ -20,14 +22,42 @@ export interface TopLeftRect {
 
 export type PageSize = { width: number; height: number } | null;
 
+export interface BboxGeometryOptions {
+  fallbackPageHeight?: number;
+}
+
+export function bboxGeometryOptionsForPage(
+  bboxes: Iterable<DoclingBBox | null | undefined>,
+  pageSize: PageSize,
+): BboxGeometryOptions {
+  if (pageSize) return {};
+
+  let fallbackPageHeight: number | undefined;
+  for (const bbox of bboxes) {
+    if (!bbox) continue;
+    const maxY = Math.max(bbox.t, bbox.b);
+    if (!Number.isFinite(maxY)) continue;
+    fallbackPageHeight =
+      fallbackPageHeight === undefined
+        ? maxY
+        : Math.max(fallbackPageHeight, maxY);
+  }
+
+  return fallbackPageHeight === undefined ? {} : { fallbackPageHeight };
+}
+
 export function bboxToTopLeftRect(
   bbox: DoclingBBox,
   pageSize: PageSize,
+  options: BboxGeometryOptions = {},
 ): TopLeftRect {
   const left = Math.min(bbox.l, bbox.r);
   const right = Math.max(bbox.l, bbox.r);
   if (bbox.coord_origin === 'BOTTOMLEFT') {
-    const pageHeight = pageSize?.height ?? Math.max(bbox.t, bbox.b);
+    const pageHeight =
+      pageSize?.height ??
+      options.fallbackPageHeight ??
+      Math.max(bbox.t, bbox.b);
     return {
       left,
       right,
@@ -47,9 +77,13 @@ export function topLeftRectToBbox(
   rect: TopLeftRect,
   original: DoclingBBox,
   pageSize: PageSize,
+  options: BboxGeometryOptions = {},
 ): DoclingBBox {
   if (original.coord_origin === 'BOTTOMLEFT') {
-    const pageHeight = pageSize?.height ?? Math.max(original.t, original.b);
+    const pageHeight =
+      pageSize?.height ??
+      options.fallbackPageHeight ??
+      Math.max(original.t, original.b);
     return {
       l: rect.left,
       r: rect.right,
@@ -86,8 +120,9 @@ export function bboxContainmentRatio(
   outer: DoclingBBox,
   pageSize: PageSize,
 ): number {
-  const innerRect = bboxToTopLeftRect(inner, pageSize);
-  const outerRect = bboxToTopLeftRect(outer, pageSize);
+  const options = bboxGeometryOptionsForPage([inner, outer], pageSize);
+  const innerRect = bboxToTopLeftRect(inner, pageSize, options);
+  const outerRect = bboxToTopLeftRect(outer, pageSize, options);
   const innerArea = rectArea(innerRect);
   if (innerArea === 0) return 0;
   return rectIntersectionArea(innerRect, outerRect) / innerArea;

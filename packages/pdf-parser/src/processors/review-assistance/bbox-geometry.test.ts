@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   bboxContainmentRatio,
+  bboxGeometryOptionsForPage,
   bboxToTopLeftRect,
   rectArea,
   rectIntersectionArea,
@@ -54,6 +55,64 @@ describe('bbox-geometry', () => {
       right: 20,
       bottom: 80,
     });
+  });
+
+  test('uses shared fallback height when provided for BOTTOMLEFT conversion', () => {
+    expect(
+      bboxToTopLeftRect(bottomLeftBbox, null, { fallbackPageHeight: 200 }),
+    ).toEqual({
+      left: 0,
+      top: 110,
+      right: 20,
+      bottom: 190,
+    });
+    expect(
+      topLeftRectToBbox(
+        { left: 0, top: 110, right: 20, bottom: 190 },
+        bottomLeftBbox,
+        null,
+        { fallbackPageHeight: 200 },
+      ),
+    ).toMatchObject({
+      l: 0,
+      r: 20,
+      t: 90,
+      b: 10,
+      coord_origin: 'BOTTOMLEFT',
+    });
+  });
+
+  test('builds shared page geometry options only when page size is missing', () => {
+    const tallerBbox: DoclingBBox = {
+      l: 0,
+      t: 130,
+      r: 20,
+      b: 120,
+      coord_origin: 'BOTTOMLEFT',
+    };
+    const invalidBbox: DoclingBBox = {
+      l: 0,
+      t: Number.NaN,
+      r: 20,
+      b: Number.NaN,
+      coord_origin: 'BOTTOMLEFT',
+    };
+
+    expect(
+      bboxGeometryOptionsForPage(
+        [undefined, bottomLeftBbox, null, tallerBbox],
+        null,
+      ),
+    ).toEqual({ fallbackPageHeight: 130 });
+    expect(
+      bboxGeometryOptionsForPage([bottomLeftBbox], {
+        width: 100,
+        height: 100,
+      }),
+    ).toEqual({});
+    expect(bboxGeometryOptionsForPage([undefined, invalidBbox], null)).toEqual(
+      {},
+    );
   });
 
   test('round-trips bbox through top-left rect for both coord origins', () => {
@@ -162,5 +221,32 @@ describe('bbox-geometry', () => {
       coord_origin: 'TOPLEFT',
     };
     expect(bboxContainmentRatio(zeroArea, outer, pageSize)).toBe(0);
+  });
+
+  test('uses one inferred fallback height for containment without page size', () => {
+    const outer: DoclingBBox = {
+      l: 0,
+      t: 200,
+      r: 100,
+      b: 100,
+      coord_origin: 'BOTTOMLEFT',
+    };
+    const belowOuter: DoclingBBox = {
+      l: 10,
+      t: 90,
+      r: 20,
+      b: 80,
+      coord_origin: 'BOTTOMLEFT',
+    };
+    const insideOuter: DoclingBBox = {
+      l: 10,
+      t: 180,
+      r: 20,
+      b: 160,
+      coord_origin: 'BOTTOMLEFT',
+    };
+
+    expect(bboxContainmentRatio(belowOuter, outer, null)).toBe(0);
+    expect(bboxContainmentRatio(insideOuter, outer, null)).toBe(1);
   });
 });

@@ -14,7 +14,11 @@ import type { ReviewAssistancePageEligibility } from './review-assistance-page-g
 import { isAbsolute, join } from 'node:path';
 
 import { matchTextToReferenceWithUnused } from '../../utils/text-reference-matcher';
-import { bboxContainmentRatio, bboxToTopLeftRect } from './bbox-geometry';
+import {
+  bboxContainmentRatio,
+  bboxGeometryOptionsForPage,
+  bboxToTopLeftRect,
+} from './bbox-geometry';
 import { createReviewAssistancePageGatePendingEligibility } from './review-assistance-page-gate';
 
 export interface PageReviewTextBlock {
@@ -611,11 +615,15 @@ export class PageReviewContextBuilder {
     geometries: RefGeometry[],
     pageSize: { width: number; height: number } | null,
   ): string[] {
+    const geometryOptions = bboxGeometryOptionsForPage(
+      geometries.map((entry) => entry.bbox),
+      pageSize,
+    );
     return geometries
       .filter((entry) => entry.bbox)
       .sort((a, b) => {
-        const boxA = bboxToTopLeftRect(a.bbox!, pageSize);
-        const boxB = bboxToTopLeftRect(b.bbox!, pageSize);
+        const boxA = bboxToTopLeftRect(a.bbox!, pageSize, geometryOptions);
+        const boxB = bboxToTopLeftRect(b.bbox!, pageSize, geometryOptions);
         return boxA.top - boxB.top || boxA.left - boxB.left;
       })
       .map((entry) => entry.ref);
@@ -944,8 +952,9 @@ export class PageReviewContextBuilder {
     pageSize: { width: number; height: number } | null,
   ): number {
     if (!a || !b) return Number.POSITIVE_INFINITY;
-    const rectA = bboxToTopLeftRect(a, pageSize);
-    const rectB = bboxToTopLeftRect(b, pageSize);
+    const geometryOptions = bboxGeometryOptionsForPage([a, b], pageSize);
+    const rectA = bboxToTopLeftRect(a, pageSize, geometryOptions);
+    const rectB = bboxToTopLeftRect(b, pageSize, geometryOptions);
     const centerA = {
       x: (rectA.left + rectA.right) / 2,
       y: (rectA.top + rectA.bottom) / 2,
