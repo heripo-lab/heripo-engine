@@ -77,7 +77,11 @@ function makeContext(
         footnoteRefs: ['#/texts/4'],
         footnoteMarkers: ['※'],
         emptyCellRatio: 0.2,
+        previousPageTableRefs: ['#/tables/8'],
+        previousPageTableSummary:
+          'Previous page table shares 층위 and 깊이 columns',
         nextPageTableRefs: ['#/tables/9'],
+        nextPageTableSummary: 'Next page table continues 층위 and 깊이 columns',
         suspectReasons: ['multi_page_table_candidate'],
       },
       {
@@ -171,6 +175,9 @@ describe('TableCorrectionContextBuilder', () => {
         rowCount: 10,
         colCount: 2,
         hasSpans: true,
+        previousPageTableSummary:
+          'Previous page table shares 층위 and 깊이 columns',
+        nextPageTableSummary: 'Next page table continues 층위 and 깊이 columns',
       },
       otherTablesOnPage: [expect.objectContaining({ ref: '#/tables/1' })],
       validationHints: expect.arrayContaining([

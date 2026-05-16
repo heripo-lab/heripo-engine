@@ -28,6 +28,11 @@ function makeContext(): TableCorrectionContext {
       footnoteRefs: [],
       footnoteMarkers: ['※'],
       emptyCellRatio: 0,
+      previousPageTableRefs: ['#/tables/prev'],
+      previousPageTableSummary:
+        'Previous page table keeps Layer and Depth columns',
+      nextPageTableRefs: ['#/tables/next'],
+      nextPageTableSummary: 'Next page table continues Layer and Depth columns',
       suspectReasons: ['multi_page_table_candidate'],
     },
     tableCountOnPage: 2,
@@ -101,6 +106,12 @@ describe('table correction prompt', () => {
     expect(prompt).toContain('TABLE CORRECTION CONTEXT JSON');
     expect(prompt).toContain('"targetTable"');
     expect(prompt).toContain('"otherTablesOnPage"');
+    expect(prompt).toContain(
+      '"previousPageTableSummary":"Previous page table keeps Layer and Depth columns"',
+    );
+    expect(prompt).toContain(
+      '"nextPageTableSummary":"Next page table continues Layer and Depth columns"',
+    );
     expect(prompt).toContain('"multiple_tables_on_page"');
   });
 

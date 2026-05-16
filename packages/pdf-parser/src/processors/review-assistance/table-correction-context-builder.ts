@@ -25,7 +25,9 @@ export interface TableCorrectionTableIdentity {
   footnoteMarkers?: string[];
   emptyCellRatio: number;
   previousPageTableRefs?: string[];
+  previousPageTableSummary?: string;
   nextPageTableRefs?: string[];
+  nextPageTableSummary?: string;
   suspectReasons: string[];
 }
 
@@ -145,7 +147,9 @@ export class TableCorrectionContextBuilder {
       footnoteMarkers: table.footnoteMarkers,
       emptyCellRatio: table.emptyCellRatio,
       previousPageTableRefs: table.previousPageTableRefs,
+      previousPageTableSummary: table.previousPageTableSummary,
       nextPageTableRefs: table.nextPageTableRefs,
+      nextPageTableSummary: table.nextPageTableSummary,
       suspectReasons: table.suspectReasons,
     };
   }
