@@ -4,9 +4,11 @@ import type { DoclingAPIClient } from 'docling-sdk';
 import type { PDFConvertOptions } from './pdf-converter';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { PdfLanguageDetector } from '../detectors/pdf-language-detector';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
@@ -25,6 +27,17 @@ vi.mock('./image-pdf-converter', () => ({
 
 vi.mock('./docling-conversion-executor', () => ({
   DoclingConversionExecutor: vi.fn(),
+}));
+
+const pdfLanguageDetectorMocks = vi.hoisted(() => ({
+  detect: vi.fn(),
+}));
+
+vi.mock('../detectors/pdf-language-detector', () => ({
+  DEFAULT_OCR_LANGUAGES: ['ko-KR', 'en-US'],
+  PdfLanguageDetector: vi.fn(function () {
+    return { detect: pdfLanguageDetectorMocks.detect };
+  }),
 }));
 
 vi.mock('node:fs', () => ({
@@ -100,8 +113,18 @@ describe('PDFConverter', () => {
     } as unknown as DoclingAPIClient;
 
     converter = new PDFConverter(logger, client);
+    pdfLanguageDetectorMocks.detect.mockReset();
+    pdfLanguageDetectorMocks.detect.mockResolvedValue({
+      detectedLanguages: ['ko-KR'],
+      reason: 'test language detection',
+      sampledPages: 1,
+      totalPages: 1,
+      source: 'text-layer',
+    });
 
     vi.mocked(join).mockImplementation((...args) => args.join('/'));
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(rmSync).mockImplementation(() => undefined);
 
     // Mock DoclingConversionExecutor
     mockExecute = vi.fn().mockResolvedValue(null);
@@ -359,7 +382,7 @@ describe('PDFConverter', () => {
         'report123',
         onComplete,
         false,
-        withCorrection(),
+        withCorrection({ ocr_lang: ['ko-KR'] }),
       );
 
       expect(PdfTextExtractor).not.toHaveBeenCalled();
@@ -452,6 +475,122 @@ describe('PDFConverter', () => {
       );
 
       expect(result).toEqual(aggregator.getReport());
+    });
+
+    test('detects OCR languages for local PDFs and passes them to conversion', async () => {
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        withCorrection(),
+      );
+
+      expect(PdfLanguageDetector).toHaveBeenCalled();
+      expect(pdfLanguageDetectorMocks.detect).toHaveBeenCalledWith(
+        '/test/doc.pdf',
+        expect.stringContaining('output/report123/_language_detection'),
+        expect.objectContaining({
+          model: undefined,
+          abortSignal: undefined,
+          aggregator: expect.any(LLMTokenUsageAggregator),
+        }),
+      );
+      expect(mockExecute).toHaveBeenCalledWith(
+        'file:///test/doc.pdf',
+        'report123',
+        expect.any(Function),
+        false,
+        expect.objectContaining({ ocr_lang: ['ko-KR'] }),
+        undefined,
+      );
+    });
+
+    test('emits token usage after language detection when usage was tracked', async () => {
+      const aggregator = new LLMTokenUsageAggregator();
+      const onTokenUsage = vi.fn();
+      pdfLanguageDetectorMocks.detect.mockImplementationOnce(async () => {
+        aggregator.track({
+          component: 'PdfLanguageDetector',
+          phase: 'language-detection',
+          model: 'primary',
+          modelName: 'language-model',
+          inputTokens: 3,
+          outputTokens: 2,
+          totalTokens: 5,
+        });
+        return {
+          detectedLanguages: ['ko-KR'],
+          reason: 'test language detection',
+          sampledPages: 1,
+          totalPages: 1,
+          source: 'text-layer',
+        };
+      });
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        withCorrection({ aggregator, onTokenUsage }),
+      );
+
+      expect(onTokenUsage).toHaveBeenCalledWith(aggregator.getReport());
+    });
+
+    test('does not emit token usage after language detection when report is empty', async () => {
+      const onTokenUsage = vi.fn();
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        withCorrection({ onTokenUsage }),
+      );
+
+      expect(onTokenUsage).not.toHaveBeenCalled();
+    });
+
+    test('cleans up language detection temporary directory when it exists', async () => {
+      vi.mocked(existsSync).mockReturnValueOnce(true);
+
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        withCorrection(),
+      );
+
+      expect(rmSync).toHaveBeenCalledWith(
+        expect.stringContaining('output/report123/_language_detection'),
+        {
+          recursive: true,
+          force: true,
+        },
+      );
+    });
+
+    test('skips language detection when OCR languages are already provided', async () => {
+      await converter.convert(
+        'file:///test/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        withCorrection({ ocr_lang: ['ja-JP', 'en-US'] }),
+      );
+
+      expect(pdfLanguageDetectorMocks.detect).not.toHaveBeenCalled();
+      expect(mockExecute).toHaveBeenCalledWith(
+        'file:///test/doc.pdf',
+        'report123',
+        expect.any(Function),
+        false,
+        expect.objectContaining({ ocr_lang: ['ja-JP', 'en-US'] }),
+        undefined,
+      );
     });
   });
 

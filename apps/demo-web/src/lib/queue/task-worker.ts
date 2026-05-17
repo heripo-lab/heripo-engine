@@ -408,6 +408,11 @@ export async function runTaskWorker(
       chunkedConversion: true,
       num_threads: options.threadCount,
       forceImagePdf: options.forceImagePdf,
+      ...(options.languageDetectionModel
+        ? {
+            languageDetectionModel: createModel(options.languageDetectionModel),
+          }
+        : {}),
       ...(isPublicMode && !task.isOtpBypass && options.documentValidationModel
         ? {
             documentValidationModel: createModel(

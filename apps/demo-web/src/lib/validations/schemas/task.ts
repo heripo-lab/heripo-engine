@@ -76,6 +76,9 @@ export const processingOptionsSchema = z.object({
   // Document type validation
   documentValidationModel: llmModelSchema.optional(),
 
+  // PDF language detection for OCR language hints
+  languageDetectionModel: llmModelSchema.optional(),
+
   // Force image PDF pre-conversion
   forceImagePdf: z.boolean().default(false),
 
