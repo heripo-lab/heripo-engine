@@ -118,7 +118,7 @@ function makeDoc(): DoclingDocument {
         ],
         captions: [],
         references: [],
-        footnotes: [],
+        footnotes: [{ $ref: '#/texts/1' }],
         data: {
           num_rows: 2,
           num_cols: 2,
@@ -135,7 +135,7 @@ function makeDoc(): DoclingDocument {
                 end_col_offset_idx: 1,
                 text: 'Layer',
                 column_header: true,
-                row_header: false,
+                row_header: true,
                 row_section: false,
                 fillable: false,
               },
@@ -147,7 +147,7 @@ function makeDoc(): DoclingDocument {
                 end_row_offset_idx: 1,
                 start_col_offset_idx: 1,
                 end_col_offset_idx: 2,
-                text: 'Depth',
+                text: 'Depth 10cm※',
                 column_header: true,
                 row_header: false,
                 row_section: false,
@@ -210,6 +210,11 @@ describe('PageReviewContextBuilder', () => {
     });
 
     expect(context.pageNo).toBe(1);
+    expect(context.reviewAssistanceEligibility).toMatchObject({
+      pageNo: 1,
+      eligible: true,
+      kind: 'archaeological_data',
+    });
     expect(context.pageImagePath).toBe('/out/pages/page_0.png');
     expect(context.textBlocks[0]).toMatchObject({
       ref: '#/texts/0',
@@ -232,6 +237,16 @@ describe('PageReviewContextBuilder', () => {
       'table_missing_caption',
       'table_many_empty_cells',
     ]);
+    expect(context.tables[0]).toMatchObject({
+      rowCount: 2,
+      colCount: 2,
+      hasSpans: false,
+      headerRows: [0],
+      headerColumns: [0],
+      unitHints: ['10cm'],
+      footnoteRefs: ['#/texts/1'],
+      footnoteMarkers: ['※'],
+    });
     expect(context.orphanCaptions[0]).toMatchObject({
       ref: '#/texts/1',
       captionLikeBodyText: true,
@@ -255,6 +270,36 @@ describe('PageReviewContextBuilder', () => {
     expect(patterns).toContain('layer_code');
     expect(patterns).toContain('unit');
     expect(patterns).toContain('institution_name');
+  });
+
+  test('uses explicit table_cells metadata when Docling provides it', () => {
+    const doc = makeDoc();
+    doc.tables[0].data.grid[1][0].column_header = true;
+    doc.tables[0].data.table_cells = doc.tables[0].data.grid.flat();
+
+    const [context] = new PageReviewContextBuilder().build(doc, '/out');
+
+    expect(context.tables[0]).toMatchObject({
+      headerRows: [0, 1],
+      headerColumns: [0],
+      unitHints: ['10cm'],
+      footnoteMarkers: ['※'],
+    });
+  });
+
+  test('captures multi-character units (mm, m²) without shadowing them with `m`', () => {
+    const doc = makeDoc();
+    // Mix of units that share prefixes: mm vs m, m² vs m.
+    doc.tables[0].data.grid[0][1].text = 'Depth 10mm';
+    doc.tables[0].data.grid[1][1].text = 'Area 5m² Trench 2m';
+
+    const [context] = new PageReviewContextBuilder().build(doc, '/out');
+
+    expect(context.tables[0].unitHints).toEqual(
+      expect.arrayContaining(['10mm', '5m²', '2m']),
+    );
+    expect(context.tables[0].unitHints).not.toContain('10m');
+    expect(context.tables[0].unitHints).not.toContain('5m');
   });
 
   test('한자 OCR 후보 텍스트를 의심 사유로 표시한다', () => {
@@ -497,9 +542,10 @@ describe('PageReviewContextBuilder', () => {
     expect(first.tables[0].nextPageTableRefs).toEqual(['#/tables/1']);
     expect(second.tables[0].previousPageTableRefs).toEqual(['#/tables/0']);
     expect(first.pictures[0].caption).toBe('Table 1');
-    expect(first.pictures[0].suspectReasons).toContain(
+    expect(first.pictures[0].suspectReasons).not.toContain(
       'large_picture_split_candidate',
     );
+    expect(first.pictures[0].splitCandidate).toBeUndefined();
     expect(first.layout.bboxWarnings.map((warning) => warning.reason)).toEqual(
       expect.arrayContaining([
         'bbox_outside_page',

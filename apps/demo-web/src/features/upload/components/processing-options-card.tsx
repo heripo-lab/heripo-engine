@@ -35,6 +35,11 @@ interface NumberFieldApi {
   handleChange: (value: number) => void;
 }
 
+interface StringFieldApi {
+  state: { value: string };
+  handleChange: (value: string) => void;
+}
+
 interface BooleanFieldApi {
   state: { value: boolean };
   handleChange: (value: boolean) => void;
@@ -141,7 +146,7 @@ function ToggleSwitch({
 }
 
 /**
- * Vision model select dropdown for Korean detection and VLM correction models
+ * Vision model select dropdown for post-Docling correction models.
  */
 function VisionModelSelect({
   label,
@@ -149,12 +154,14 @@ function VisionModelSelect({
   value,
   onChange,
   disabled,
+  optional = false,
 }: {
   label: string;
   description: string;
   value: string | undefined;
   onChange: (value: string | undefined) => void;
   disabled: boolean;
+  optional?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -176,7 +183,9 @@ function VisionModelSelect({
             <SelectValue placeholder="Select model" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={NONE_VALUE}>None (disabled)</SelectItem>
+            {optional && (
+              <SelectItem value={NONE_VALUE}>None (use default)</SelectItem>
+            )}
             {Object.entries(MODELS_BY_PROVIDER).map(([provider, models]) => (
               <SelectGroup key={provider}>
                 <SelectLabel>{provider}</SelectLabel>
@@ -225,68 +234,41 @@ export function ProcessingOptionsCard({
           )}
         </CardTitle>
         <CardDescription>
-          Configure Korean detection, OCR, and processing settings
+          Configure mandatory correction, OCR, and processing settings
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Korean Report Detection Section */}
-
-        {/* Forced Method */}
-        <form.Field name="forcedMethod">
-          {(field: OptionalStringFieldApi) => (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">OCR Strategy</label>
-              <p className="text-muted-foreground text-xs">
-                Auto detects Korean reports and applies VLM correction; manual
-                forces a specific method
-              </p>
-              <DisabledWrapper disabled={disabled}>
-                <Select
-                  value={field.state.value ?? 'auto'}
-                  onValueChange={(v) =>
-                    field.handleChange(v === 'auto' ? undefined : v)
-                  }
-                  disabled={disabled}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select strategy" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">
-                      Auto (Korean Detection)
-                    </SelectItem>
-                    <SelectItem value="ocrmac">Force ocrmac (OCR)</SelectItem>
-                    <SelectItem value="vlm">
-                      Force VLM (Vision Language Model)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </DisabledWrapper>
-            </div>
-          )}
-        </form.Field>
-
-        {/* Korean Detection Model */}
-        <form.Field name="strategySamplerModel">
-          {(field: OptionalStringFieldApi) => (
+        <form.Field name="correction.models.textCorrection">
+          {(field: StringFieldApi) => (
             <VisionModelSelect
-              label="Korean Detection Model"
-              description="Frontier VLM for sampling pages to detect Korean reports"
+              label="Text Correction Model"
+              description="Corrects OCR text and table cell text after Docling ocrmac conversion"
               value={field.state.value}
-              onChange={field.handleChange}
+              onChange={(value) => value && field.handleChange(value)}
               disabled={disabled}
             />
           )}
         </form.Field>
 
-        {/* VLM Processor Model */}
-        <form.Field name="vlmProcessorModel">
-          {(field: OptionalStringFieldApi) => (
+        <form.Field name="correction.models.pageGate">
+          {(field: StringFieldApi) => (
             <VisionModelSelect
-              label="VLM Processor Model"
-              description="VLM for full-page text correction when the Korean report path is chosen"
+              label="Page Gate Model"
+              description="Classifies pages for structural review noise control"
               value={field.state.value}
-              onChange={field.handleChange}
+              onChange={(value) => value && field.handleChange(value)}
+              disabled={disabled}
+            />
+          )}
+        </form.Field>
+
+        <form.Field name="correction.models.reviewAssistance">
+          {(field: StringFieldApi) => (
+            <VisionModelSelect
+              label="Review Assistance Model"
+              description="Runs structural review tasks for eligible pages"
+              value={field.state.value}
+              onChange={(value) => value && field.handleChange(value)}
               disabled={disabled}
             />
           )}
@@ -334,13 +316,14 @@ export function ProcessingOptionsCard({
           )}
         </form.Field>
 
-        {/* VLM Concurrency */}
-        <form.Field name="vlmConcurrency">
+        <form.Field name="correction.concurrency.pages">
           {(field: NumberFieldApi) => (
             <div className="space-y-2">
-              <label className="text-sm font-medium">VLM Concurrency</label>
+              <label className="text-sm font-medium">
+                Correction Page Concurrency
+              </label>
               <p className="text-muted-foreground text-xs">
-                Number of concurrent VLM page processing requests
+                Number of concurrent page-level correction requests
               </p>
               <DisabledWrapper disabled={disabled}>
                 <Select
@@ -358,6 +341,35 @@ export function ProcessingOptionsCard({
                     <SelectItem value="10">10 concurrent</SelectItem>
                     <SelectItem value="20">20 concurrent</SelectItem>
                     <SelectItem value="50">50 concurrent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </DisabledWrapper>
+            </div>
+          )}
+        </form.Field>
+
+        <form.Field name="correction.outputLanguage">
+          {(field: StringFieldApi) => (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Correction Output Language
+              </label>
+              <p className="text-muted-foreground text-xs">
+                Language of AI-written reasons, descriptions, and issues in the
+                correction report (BCP 47 tag)
+              </p>
+              <DisabledWrapper disabled={disabled}>
+                <Select
+                  value={field.state.value}
+                  onValueChange={(v) => field.handleChange(v)}
+                  disabled={disabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ko-KR">한국어 (ko-KR)</SelectItem>
+                    <SelectItem value="en-US">English (en-US)</SelectItem>
                   </SelectContent>
                 </Select>
               </DisabledWrapper>

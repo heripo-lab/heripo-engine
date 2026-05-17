@@ -20,7 +20,7 @@
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Usage](#usage)
-- [OCR Strategy System](#ocr-strategy-system)
+- [Mandatory Correction Pipeline](#mandatory-correction-pipeline)
 - [Review Assistance](#review-assistance)
 - [Document Type Validation](#document-type-validation)
 - [Large PDF Chunked Conversion](#large-pdf-chunked-conversion)
@@ -36,15 +36,16 @@
 
 ## Key Features
 
-- **High-Quality OCR**: Document recognition using Docling SDK (ocrmac / Apple Vision Framework)
-- **Korean Report VLM Correction**: Automatically detects Korean reports and applies VLM text correction to all pages
+- **Fixed ocrmac OCR**: Docling conversion always uses ocrmac / Apple Vision Framework
+- **Mandatory VLM Correction**: Post-Docling correction always runs with text correction, page gating, and structural review models
 - **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
 - **Document Type Validation**: Optional LLM-based validation that a PDF is an archaeological report
 - **Chunked Conversion**: Split large PDFs into chunks for reliable processing
 - **Image PDF Fallback**: Automatic fallback to image-based PDF when conversion fails
-- **Review Assistance**: Optional page-level VLM review that writes audit proposals and can auto-apply high-confidence fixes
+- **Review Assistance**: Page-level VLM review writes audit proposals, skips low-value pages with observable reasons, and can auto-apply high-confidence fixes
+- **Table Correction**: Table-specific work items validate cells, spans, headers, units, footnotes, and adjacent-page continuations
 - **AbortSignal Support**: Cancel ongoing parsing operations
 - **Server Crash Recovery**: Automatic restart of docling-serve on ECONNREFUSED
 
@@ -84,7 +85,7 @@ python3.11 --version
 
 #### 4. poppler (PDF text extraction)
 
-Required for PDF page counting (`pdfinfo`) and text layer extraction (`pdftotext`), used by the OCR strategy system's text layer pre-check.
+Required for PDF page counting (`pdfinfo`) and text layer extraction (`pdftotext`), used as a post-Docling correction reference.
 
 ```bash
 brew install poppler
@@ -140,6 +141,7 @@ yarn add @heripo/pdf-parser @heripo/logger
 ### Basic Usage
 
 ```typescript
+import { openai } from '@ai-sdk/openai';
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
 
@@ -156,6 +158,8 @@ const pdfParser = new PDFParser({
   logger,
 });
 
+const correctionModel = openai('gpt-5.1');
+
 // Initialize (environment setup and start docling-serve)
 await pdfParser.init();
 
@@ -168,7 +172,15 @@ const tokenUsageReport = await pdfParser.parse(
     console.log('PDF conversion complete:', outputPath);
   },
   false, // cleanupAfterCallback
-  {}, // PDFConvertOptions
+  {
+    correction: {
+      models: {
+        textCorrection: correctionModel,
+        pageGate: correctionModel,
+        reviewAssistance: correctionModel,
+      },
+    },
+  }, // PDFConvertOptions
 );
 
 // Token usage report (null when no LLM usage)
@@ -201,22 +213,40 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
-    // OCR strategy options
-    strategySamplerModel: openai('gpt-5.1'),
-    vlmProcessorModel: openai('gpt-5.1'),
-    vlmConcurrency: 3,
-
-    // Document validation
-    documentValidationModel: openai('gpt-5.1'),
-
-    // Optional page-level review assistance
-    reviewAssistance: {
-      enabled: true,
+    // Mandatory post-Docling correction
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1'),
+        reviewAssistance: openai('gpt-5.1'),
+        tableCorrection: openai('gpt-5.1'),
+        reviewAssistanceTasks: {
+          text_ocr_hanja: openai('gpt-5.1'),
+          tables: openai('gpt-5.1'),
+        },
+      },
+      concurrency: {
+        pages: 1,
+        reviewTasks: 4,
+        tables: 1,
+      },
+      localModelConcurrency: 1,
+      workItemTimeoutMs: 900000,
+      maxRetries: {
+        textCorrection: 3,
+        pageGate: 3,
+        reviewAssistance: 3,
+        tableCorrection: 3,
+      },
       autoApplyThreshold: 0.85,
       proposalThreshold: 0.5,
+      temperature: 0,
       outputLanguage: 'en-US',
     },
     onReviewAssistanceProgress: (event) => console.log(event),
+
+    // Document validation
+    documentValidationModel: openai('gpt-5.1'),
 
     // Chunked conversion for large PDFs
     chunkedConversion: true,
@@ -244,58 +274,52 @@ Clean up resources after work is complete:
 await pdfParser.dispose();
 ```
 
-## OCR Strategy System
+## Mandatory Correction Pipeline
 
-### Why This Strategy?
+### Why ocrmac Is Fixed
 
 **ocrmac (Apple Vision Framework) is an excellent OCR engine** -- it's free, GPU-accelerated, and delivers high-quality results. For processing thousands to millions of archaeological reports, there's no better solution.
 
-**However, Korean archaeological reports often need script-aware correction.** Hanja restoration, CJK mojibake, phonetic substitutions, and institution names can be unreliable with standard OCR alone. Rather than using VLM as the primary OCR engine, the system runs the fast ocrmac pipeline first and then applies VLM text correction to Korean reports.
+`@heripo/pdf-parser` no longer samples OCR strategies or switches to a VLM OCR path. Docling conversion always uses ocrmac. VLMs are used only after Docling conversion as a mandatory correction stage.
 
-### Two-Stage Korean Detection (`OcrStrategySampler`)
+### Required Correction Contract
 
-1. **Text Layer Pre-Check** (zero cost): Extracts the document's text layer using `pdftotext` and checks for Hangul. If Hangul is present, the document is immediately treated as Korean.
-2. **VLM Sampling** (only when needed): Samples up to 15 pages (trimming 10% from front/back to skip covers and appendices) and analyzes them with a Vision LLM. Uses early exit when `ko-KR` is detected.
+Every `parse()` call must provide `correction.models.textCorrection`, `correction.models.pageGate`, and `correction.models.reviewAssistance`. If any required correction model is missing, parsing fails before conversion callback wrapping.
 
-### Full-Document Correction (`VlmTextCorrector`)
+The correction stage runs in this order:
 
-When a Korean report is detected, every page is sent to the VLM for correction:
+1. Save `result_ocr_origin.json` before mutations.
+2. Run page-level text and table-cell OCR correction with `textCorrection`.
+3. Run the Review Assistance page gate with `pageGate` and write `review_assistance_page_gate.json`.
+4. Run structural Review Assistance work items with task-specific models.
+5. Run table-specific correction work items for each detected table.
+6. Write `review_assistance_checkpoint.json` during execution and `review_assistance.json` at the end.
 
-- Extracts OCR text elements and table cells from each page
-- Uses `pdftotext` reference text as a quality anchor
-- VLM returns substitution-based corrections (find -> replace)
-- Failed page corrections are gracefully skipped, preserving original OCR text
+Text correction applies to every page with text or table content. The page gate only controls structural Review Assistance noise; it does not disable OCR text correction.
 
-### Strategy Options
+### Local Model Execution
 
-```typescript
-const tokenUsageReport = await pdfParser.parse(
-  'file:///path/to/input.pdf',
-  'report-001',
-  async (outputPath) => console.log(outputPath),
-  false,
-  {
-    // Enable OCR strategy sampling (provide a Vision LLM model)
-    strategySamplerModel: openai('gpt-5.1'),
+The correction pipeline is optimized for local VLMs: small contexts, many calls, deterministic validation, retry loops, bounded concurrency, and resumable checkpoints. For local models, start with `concurrency.pages: 1`, `concurrency.tables: 1`, `localModelConcurrency: 1`, `temperature: 0`, and a generous `workItemTimeoutMs`. Increase concurrency only after the model is stable.
 
-    // VLM model for text correction (required when Korean reports are detected)
-    vlmProcessorModel: openai('gpt-5.1'),
+### Rollout Smoke Test
 
-    // Concurrency for VLM page processing (default: 1)
-    vlmConcurrency: 3,
+Repository contributors can run the correction rollout smoke test against two local demo archaeological report artifacts:
 
-    // Skip sampling and force a specific OCR method
-    forcedMethod: 'ocrmac', // or 'vlm'
-  },
-);
+```bash
+pnpm --filter @heripo/pdf-parser smoke:correction
 ```
+
+The smoke test copies existing demo artifacts into `/private/tmp/heripo-pdf-parser-correction-smoke`, runs correction with a deterministic local fake model, verifies `review_assistance.json`, table work-item traces, validation status, and checkpoint resume behavior. It exercises pipeline mechanics; semantic table quality still depends on the configured real local VLM.
 
 ## Review Assistance
 
-`reviewAssistance` enables an optional page-level VLM review after Docling
-conversion. It inspects rendered page images, text, tables, captions, pictures,
-reading order, roles, bounding boxes, and domain patterns, then writes an audit
-report while applying only high-confidence fixes.
+Review Assistance always runs after text correction, but it does not process every page with the same intensity. The page gate marks covers, chapter covers, barcode/ISBN pages, and decorative pages as low-value for structural review. Skipped pages remain observable in `review_assistance.json` with an info issue and skip reason.
+
+Eligible pages are split into small work items for text OCR/Hanja review, text integrity, text role/footnote review, tables, pictures/captions, layout/bbox/order, and table-specific correction. Each call records timing, model id, attempts, target refs, and deterministic validation status in `review_assistance.json`.
+
+### Table Correction Strategy
+
+Tables are treated as first-class correction targets. The scheduler creates one table-specific work item per table so pages with multiple tables keep independent bbox, crop, context, and validation state. The table validator checks target identity, same-page table mixing, cells, spans, headers, units, footnotes, empty-cell expansion, and adjacent-page continuation refs before any command can become an auto-apply or proposal decision.
 
 ```typescript
 const tokenUsageReport = await pdfParser.parse(
@@ -304,13 +328,21 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
-    strategySamplerModel: openai('gpt-5.1'),
-    vlmProcessorModel: openai('gpt-5.1'),
-    reviewAssistance: {
-      enabled: true,
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1-mini'),
+        reviewAssistance: openai('gpt-5.1'),
+        tableCorrection: openai('gpt-5.1'),
+      },
       autoApplyThreshold: 0.85,
       proposalThreshold: 0.5,
-      maxRetries: 3,
+      maxRetries: {
+        textCorrection: 3,
+        pageGate: 3,
+        reviewAssistance: 3,
+        tableCorrection: 3,
+      },
       temperature: 0,
       outputLanguage: 'en-US',
     },
@@ -321,11 +353,7 @@ const tokenUsageReport = await pdfParser.parse(
 );
 ```
 
-Review Assistance requires a local `file://` PDF and either
-`vlmProcessorModel` or `strategySamplerModel`. It updates `result.json` with
-auto-applied fixes, keeps snapshots in `result_review_origin.json` and
-`result_ocr_origin.json`, and writes `review_assistance.json` containing
-per-page decisions, issues, proposals, and summary counts.
+Review Assistance requires a local `file://` PDF for page image and text-layer references. It updates `result.json` with auto-applied fixes, keeps snapshots in `result_review_origin.json` and `result_ocr_origin.json`, writes `review_assistance_page_gate.json`, and writes `review_assistance.json` containing per-page decisions, issues, proposals, call traces, validation status, and summary counts.
 
 ## Document Type Validation
 
@@ -341,6 +369,13 @@ try {
     async (outputPath) => console.log(outputPath),
     false,
     {
+      correction: {
+        models: {
+          textCorrection: openai('gpt-5.1'),
+          pageGate: openai('gpt-5.1'),
+          reviewAssistance: openai('gpt-5.1'),
+        },
+      },
       documentValidationModel: openai('gpt-5.1'),
     },
   );
@@ -362,6 +397,13 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1'),
+        reviewAssistance: openai('gpt-5.1'),
+      },
+    },
     chunkedConversion: true,
     chunkSize: 50, // Pages per chunk (default: configured in constants)
     chunkMaxRetries: 3, // Max retry attempts per failed chunk (default: configured in constants)
@@ -396,6 +438,13 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1'),
+        reviewAssistance: openai('gpt-5.1'),
+      },
+    },
     forceImagePdf: true, // Always convert to image PDF first
   },
 );
@@ -419,7 +468,15 @@ try {
     'report-001',
     async (outputPath) => console.log(outputPath),
     false,
-    {},
+    {
+      correction: {
+        models: {
+          textCorrection: openai('gpt-5.1'),
+          pageGate: openai('gpt-5.1'),
+          reviewAssistance: openai('gpt-5.1'),
+        },
+      },
+    },
     controller.signal, // AbortSignal
   );
 } catch (error) {
@@ -561,12 +618,8 @@ await pdfParser.dispose();
 
 ```typescript
 type PDFConvertOptions = {
-  // OCR strategy options
-  strategySamplerModel?: LanguageModel; // Vision LLM for OCR strategy sampling
-  vlmProcessorModel?: LanguageModel; // Vision LLM for text correction
-  vlmConcurrency?: number; // Parallel page processing (default: 1)
-  skipSampling?: boolean; // Skip strategy sampling
-  forcedMethod?: 'ocrmac' | 'vlm'; // Force specific OCR method
+  // Mandatory post-Docling correction
+  correction: PDFCorrectionOptions;
 
   // Image PDF options
   forceImagePdf?: boolean; // Force pre-conversion to image-based PDF
@@ -579,8 +632,7 @@ type PDFConvertOptions = {
   document_timeout?: number; // Document processing timeout in seconds
   documentValidationModel?: LanguageModel; // LLM for document type validation
 
-  // Review Assistance
-  reviewAssistance?: boolean | ReviewAssistanceOptions; // Optional page-level review
+  // Correction progress
   onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void; // Progress callback
 
   // Chunked conversion (large PDFs)
@@ -595,27 +647,47 @@ type PDFConvertOptions = {
 };
 ```
 
-### ReviewAssistanceOptions
+### PDFCorrectionOptions
 
 ```typescript
-interface ReviewAssistanceOptions {
-  enabled?: boolean; // Enable page-level review assistance
+interface PDFCorrectionOptions {
+  models: {
+    textCorrection: LanguageModel; // Required: page text and table-cell OCR correction
+    pageGate: LanguageModel; // Required: structural Review Assistance page gate
+    reviewAssistance: LanguageModel; // Required: default structural review model
+    tableCorrection?: LanguageModel; // Optional: table-specific correction override
+    reviewAssistanceTasks?: Partial<
+      Record<
+        | 'text_ocr_hanja'
+        | 'text_integrity'
+        | 'text_role_footnote'
+        | 'tables'
+        | 'pictures_captions'
+        | 'layout_bbox_order',
+        LanguageModel
+      >
+    >;
+  };
+  concurrency?: {
+    pages?: number; // Page-level text correction and page gate concurrency
+    reviewTasks?: number; // Structural Review Assistance work-item concurrency
+    tables?: number; // Table-specific correction concurrency
+  };
+  maxRetries?: {
+    textCorrection?: number;
+    pageGate?: number;
+    reviewAssistance?: number;
+    tableCorrection?: number;
+  };
+  localModelConcurrency?: number; // Bounded local model request concurrency
+  workItemTimeoutMs?: number; // Per-work-item timeout
+  outputLanguage?: string; // Human-readable review reason language (default: en-US)
+  pageGate?: {
+    structuralNoiseThreshold?: number;
+  };
   autoApplyThreshold?: number; // Minimum confidence for direct mutation (default: 0.85)
   proposalThreshold?: number; // Minimum confidence for sidecar proposal (default: 0.5)
-  maxRetries?: number; // Max retries per page-level VLM call (default: 3)
   temperature?: number; // VLM generation temperature (default: 0)
-  outputLanguage?: string; // Human-readable review reason language (default: en-US)
-}
-```
-
-### ConvertWithStrategyResult
-
-```typescript
-interface ConvertWithStrategyResult {
-  /** The OCR strategy that was determined */
-  strategy: OcrStrategy;
-  /** Token usage report from sampling and/or VLM processing (null when no LLM usage occurs) */
-  tokenUsageReport: TokenUsageReport | null;
 }
 ```
 

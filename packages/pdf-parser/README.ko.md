@@ -20,7 +20,7 @@
 - [사전 요구사항](#사전-요구사항)
 - [설치](#설치)
 - [사용법](#사용법)
-- [OCR 전략 시스템](#ocr-전략-시스템)
+- [필수 보정 파이프라인](#필수-보정-파이프라인)
 - [Review Assistance](#review-assistance)
 - [문서 유형 검증](#문서-유형-검증)
 - [대용량 PDF 청크 변환](#대용량-pdf-청크-변환)
@@ -36,15 +36,16 @@
 
 ## 주요 기능
 
-- **고품질 OCR**: Docling SDK를 활용한 문서 인식 (ocrmac / Apple Vision Framework)
-- **한국어 보고서 VLM 보정**: 한국어 보고서를 자동 감지하고 모든 페이지에 VLM 텍스트 보정을 적용
+- **ocrmac 고정 OCR**: Docling 변환은 항상 ocrmac / Apple Vision Framework를 사용
+- **필수 VLM 보정**: Docling 이후 텍스트 보정, page gate, 구조 review 모델을 항상 실행
 - **Apple Silicon 최적화**: M1/M2/M3/M4/M5 칩에서 GPU 가속 지원
 - **자동 환경 설정**: Python 가상환경 및 docling-serve 자동 설치
 - **이미지 추출**: PDF 내 이미지 자동 추출 및 저장
 - **문서 유형 검증**: LLM 기반 고고학 보고서 여부 검증 (선택)
 - **청크 변환**: 대용량 PDF를 청크로 분할하여 안정적으로 처리
 - **이미지 PDF 폴백**: 변환 실패 시 이미지 기반 PDF로 자동 재시도
-- **Review Assistance**: 선택적 page-level VLM review로 audit proposal을 기록하고 고신뢰도 수정만 자동 적용
+- **Review Assistance**: page-level VLM review로 audit proposal을 기록하고, 의미 낮은 페이지는 관찰 가능한 사유와 함께 skip하며, 고신뢰도 수정만 자동 적용
+- **표 보정 강화**: 표별 work item으로 셀, span, header, 단위, 각주, 인접 페이지 연속표를 검증
 - **AbortSignal 지원**: 진행 중인 파싱 작업 취소
 - **서버 크래시 복구**: ECONNREFUSED 발생 시 docling-serve 자동 재시작
 
@@ -84,7 +85,7 @@ python3.11 --version
 
 #### 4. poppler (PDF 텍스트 추출)
 
-PDF 페이지 수 확인(`pdfinfo`)과 텍스트 레이어 추출(`pdftotext`)에 필요하며, OCR 전략 시스템의 텍스트 레이어 사전 검사에 사용됩니다.
+PDF 페이지 수 확인(`pdfinfo`)과 텍스트 레이어 추출(`pdftotext`)에 필요하며, Docling 이후 보정의 참조 텍스트로 사용됩니다.
 
 ```bash
 brew install poppler
@@ -140,6 +141,7 @@ yarn add @heripo/pdf-parser @heripo/logger
 ### 기본 사용법
 
 ```typescript
+import { openai } from '@ai-sdk/openai';
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
 
@@ -156,6 +158,8 @@ const pdfParser = new PDFParser({
   logger,
 });
 
+const correctionModel = openai('gpt-5.1');
+
 // 초기화 (환경 설정 및 docling-serve 시작)
 await pdfParser.init();
 
@@ -168,7 +172,15 @@ const tokenUsageReport = await pdfParser.parse(
     console.log('PDF 변환 완료:', outputPath);
   },
   false, // cleanupAfterCallback
-  {}, // PDFConvertOptions
+  {
+    correction: {
+      models: {
+        textCorrection: correctionModel,
+        pageGate: correctionModel,
+        reviewAssistance: correctionModel,
+      },
+    },
+  }, // PDFConvertOptions
 );
 
 // 토큰 사용량 리포트 (LLM 사용이 없으면 null)
@@ -201,22 +213,40 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
-    // OCR 전략 옵션
-    strategySamplerModel: openai('gpt-5.1'),
-    vlmProcessorModel: openai('gpt-5.1'),
-    vlmConcurrency: 3,
-
-    // 문서 유형 검증
-    documentValidationModel: openai('gpt-5.1'),
-
-    // 선택적 page-level review assistance
-    reviewAssistance: {
-      enabled: true,
+    // Docling 이후 필수 보정
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1'),
+        reviewAssistance: openai('gpt-5.1'),
+        tableCorrection: openai('gpt-5.1'),
+        reviewAssistanceTasks: {
+          text_ocr_hanja: openai('gpt-5.1'),
+          tables: openai('gpt-5.1'),
+        },
+      },
+      concurrency: {
+        pages: 1,
+        reviewTasks: 4,
+        tables: 1,
+      },
+      localModelConcurrency: 1,
+      workItemTimeoutMs: 900000,
+      maxRetries: {
+        textCorrection: 3,
+        pageGate: 3,
+        reviewAssistance: 3,
+        tableCorrection: 3,
+      },
       autoApplyThreshold: 0.85,
       proposalThreshold: 0.5,
+      temperature: 0,
       outputLanguage: 'ko-KR',
     },
     onReviewAssistanceProgress: (event) => console.log(event),
+
+    // 문서 유형 검증
+    documentValidationModel: openai('gpt-5.1'),
 
     // 대용량 PDF 청크 변환
     chunkedConversion: true,
@@ -244,58 +274,52 @@ const tokenUsageReport = await pdfParser.parse(
 await pdfParser.dispose();
 ```
 
-## OCR 전략 시스템
+## 필수 보정 파이프라인
 
-### 왜 이 전략인가?
+### ocrmac을 고정하는 이유
 
 **ocrmac(Apple Vision Framework)은 매우 우수한 OCR 엔진입니다** -- 무료이고, GPU 가속을 지원하며, 고품질 결과를 제공합니다. 수천~수백만 권의 고고학 보고서를 처리할 때 이만한 솔루션이 없습니다.
 
-**그러나 한국어 고고학 보고서는 문자 체계 인식 보정이 자주 필요합니다.** 한자 복원, CJK mojibake, 음독 치환, 기관명 등은 표준 OCR만으로 안정적으로 처리하기 어렵습니다. VLM을 기본 OCR 엔진으로 쓰는 대신, 빠른 ocrmac 파이프라인을 먼저 실행한 뒤 한국어 보고서에 VLM 텍스트 보정을 적용합니다.
+`@heripo/pdf-parser`는 더 이상 OCR strategy를 sampling하거나 VLM OCR 경로로 전환하지 않습니다. Docling 변환은 항상 ocrmac으로 실행하고, VLM은 Docling 이후 필수 보정 단계에서만 사용합니다.
 
-### 2단계 한국어 감지 (`OcrStrategySampler`)
+### 필수 correction 계약
 
-1. **텍스트 레이어 사전 검사** (비용 없음): `pdftotext`로 문서의 텍스트 레이어를 추출하여 한글을 확인합니다. 한글이 있으면 즉시 한국어 문서로 판별합니다.
-2. **VLM 샘플링** (필요 시에만): 최대 15페이지를 샘플링(앞뒤 10%는 표지·부록으로 제외)하여 Vision LLM으로 언어를 판정합니다. `ko-KR` 감지 시 즉시 종료합니다.
+모든 `parse()` 호출은 `correction.models.textCorrection`, `correction.models.pageGate`, `correction.models.reviewAssistance`를 제공해야 합니다. 필수 모델이 누락되면 변환 callback을 감싸기 전에 명확히 실패합니다.
 
-### 전체 문서 보정 (`VlmTextCorrector`)
+보정 단계는 다음 순서로 실행됩니다.
 
-한국어 보고서가 감지되면, 모든 페이지를 VLM에 전송하여 보정합니다:
+1. 변경 전 `result_ocr_origin.json`을 저장합니다.
+2. `textCorrection` 모델로 페이지 텍스트와 표 셀 OCR을 보정합니다.
+3. `pageGate` 모델로 Review Assistance page gate를 실행하고 `review_assistance_page_gate.json`을 기록합니다.
+4. task별 모델로 구조 Review Assistance work item을 실행합니다.
+5. 감지된 표마다 table-specific correction work item을 실행합니다.
+6. 실행 중 `review_assistance_checkpoint.json`을 기록하고, 완료 시 `review_assistance.json`을 기록합니다.
 
-- 각 페이지의 OCR 텍스트 요소와 표 셀을 추출
-- `pdftotext` 참조 텍스트를 품질 기준으로 활용
-- VLM이 치환 기반 보정(find -> replace)을 반환
-- 실패한 페이지는 원본 OCR 텍스트를 유지하며 건너뜀
+텍스트 보정은 텍스트나 표가 있는 모든 페이지에 적용됩니다. page gate는 구조적 Review Assistance 노이즈만 제어하며, OCR 텍스트 보정 범위를 줄이지 않습니다.
 
-### 전략 옵션
+### 로컬 모델 권장 실행 방식
 
-```typescript
-const tokenUsageReport = await pdfParser.parse(
-  'file:///path/to/input.pdf',
-  'report-001',
-  async (outputPath) => console.log(outputPath),
-  false,
-  {
-    // OCR 전략 샘플링 활성화 (Vision LLM 모델 제공)
-    strategySamplerModel: openai('gpt-5.1'),
+보정 파이프라인은 로컬 VLM 기준으로 설계되었습니다. 큰 context 하나보다 작은 context를 자주 호출하고, deterministic validator와 retry, timeout, checkpoint/resume으로 안정성을 확보합니다. 처음에는 `concurrency.pages: 1`, `concurrency.tables: 1`, `localModelConcurrency: 1`, `temperature: 0`, 충분한 `workItemTimeoutMs`로 시작하고, 모델이 안정화된 뒤 동시성을 높이는 것을 권장합니다.
 
-    // VLM 텍스트 보정 모델 (한국어 보고서 감지 시 필요)
-    vlmProcessorModel: openai('gpt-5.1'),
+### 롤아웃 smoke test
 
-    // VLM 페이지 처리 동시성 (기본값: 1)
-    vlmConcurrency: 3,
+레포 contributor는 로컬 demo 고고학 보고서 산출물 2종으로 correction rollout smoke test를 실행할 수 있습니다.
 
-    // 샘플링을 건너뛰고 특정 OCR 방식 강제
-    forcedMethod: 'ocrmac', // 또는 'vlm'
-  },
-);
+```bash
+pnpm --filter @heripo/pdf-parser smoke:correction
 ```
+
+이 smoke test는 기존 demo artifact를 `/private/tmp/heripo-pdf-parser-correction-smoke`로 복사하고, deterministic local fake model로 correction을 실행한 뒤 `review_assistance.json`, 표 work-item trace, validation status, checkpoint resume 동작을 검증합니다. 파이프라인 기계적 경로를 검증하는 용도이며, 의미론적 표 보정 품질은 실제로 설정한 로컬 VLM 품질에 의존합니다.
 
 ## Review Assistance
 
-`reviewAssistance`는 Docling 변환 후 선택적으로 실행되는 page-level VLM
-review입니다. 렌더링된 페이지 이미지, 텍스트, 테이블, 캡션, 그림, reading
-order, role, bounding box, 도메인 패턴을 점검하고, 고신뢰도 수정만
-`result.json`에 적용하면서 audit report를 남깁니다.
+Review Assistance는 텍스트 보정 이후 항상 실행되지만 모든 페이지를 같은 강도로 처리하지 않습니다. page gate가 표지, 챕터 표지, 바코드/ISBN 페이지, 장식 중심 페이지를 구조 review 저가치 페이지로 분류합니다. skip된 페이지도 `review_assistance.json`에 info issue와 skip reason으로 남습니다.
+
+eligible page는 text OCR/Hanja, text integrity, text role/footnote, tables, pictures/captions, layout/bbox/order, table-specific correction 같은 작은 work item으로 쪼개집니다. 각 호출의 timing, model id, attempts, target refs, deterministic validation status는 `review_assistance.json`에 기록됩니다.
+
+### 표 보정 전략
+
+표는 page 부속물이 아니라 1급 보정 대상으로 처리합니다. scheduler는 표마다 독립 table-specific work item을 만들기 때문에 한 페이지에 표가 여러 개 있어도 bbox, crop, context, validation 상태가 섞이지 않습니다. table validator는 target identity, 같은 페이지 다른 표 내용 혼입, cell, span, header, unit, footnote, empty-cell expansion, adjacent-page continuation ref를 확인한 뒤에야 auto-apply 또는 proposal 결정을 허용합니다.
 
 ```typescript
 const tokenUsageReport = await pdfParser.parse(
@@ -304,13 +328,21 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
-    strategySamplerModel: openai('gpt-5.1'),
-    vlmProcessorModel: openai('gpt-5.1'),
-    reviewAssistance: {
-      enabled: true,
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1-mini'),
+        reviewAssistance: openai('gpt-5.1'),
+        tableCorrection: openai('gpt-5.1'),
+      },
       autoApplyThreshold: 0.85,
       proposalThreshold: 0.5,
-      maxRetries: 3,
+      maxRetries: {
+        textCorrection: 3,
+        pageGate: 3,
+        reviewAssistance: 3,
+        tableCorrection: 3,
+      },
       temperature: 0,
       outputLanguage: 'ko-KR',
     },
@@ -321,10 +353,7 @@ const tokenUsageReport = await pdfParser.parse(
 );
 ```
 
-Review Assistance는 로컬 `file://` PDF와 `vlmProcessorModel` 또는
-`strategySamplerModel`이 필요합니다. 고신뢰도 수정은 `result.json`에 적용하고,
-원본 snapshot은 `result_review_origin.json`, `result_ocr_origin.json`에 보존하며,
-페이지별 결정, 이슈, proposal, 요약 count는 `review_assistance.json`에 기록합니다.
+Review Assistance는 page image와 text-layer reference를 위해 로컬 `file://` PDF를 필요로 합니다. 고신뢰도 수정은 `result.json`에 적용하고, 원본 snapshot은 `result_review_origin.json`, `result_ocr_origin.json`에 보존하며, `review_assistance_page_gate.json`과 페이지별 결정, 이슈, proposal, call trace, validation status, 요약 count를 담은 `review_assistance.json`을 기록합니다.
 
 ## 문서 유형 검증
 
@@ -340,6 +369,13 @@ try {
     async (outputPath) => console.log(outputPath),
     false,
     {
+      correction: {
+        models: {
+          textCorrection: openai('gpt-5.1'),
+          pageGate: openai('gpt-5.1'),
+          reviewAssistance: openai('gpt-5.1'),
+        },
+      },
       documentValidationModel: openai('gpt-5.1'),
     },
   );
@@ -361,6 +397,13 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1'),
+        reviewAssistance: openai('gpt-5.1'),
+      },
+    },
     chunkedConversion: true,
     chunkSize: 50, // 청크당 페이지 수 (기본값: 상수에서 설정)
     chunkMaxRetries: 3, // 실패한 청크의 최대 재시도 횟수 (기본값: 상수에서 설정)
@@ -395,6 +438,13 @@ const tokenUsageReport = await pdfParser.parse(
   async (outputPath) => console.log(outputPath),
   false,
   {
+    correction: {
+      models: {
+        textCorrection: openai('gpt-5.1'),
+        pageGate: openai('gpt-5.1'),
+        reviewAssistance: openai('gpt-5.1'),
+      },
+    },
     forceImagePdf: true, // 항상 이미지 PDF로 먼저 변환
   },
 );
@@ -418,7 +468,15 @@ try {
     'report-001',
     async (outputPath) => console.log(outputPath),
     false,
-    {},
+    {
+      correction: {
+        models: {
+          textCorrection: openai('gpt-5.1'),
+          pageGate: openai('gpt-5.1'),
+          reviewAssistance: openai('gpt-5.1'),
+        },
+      },
+    },
     controller.signal, // AbortSignal
   );
 } catch (error) {
@@ -560,12 +618,8 @@ await pdfParser.dispose();
 
 ```typescript
 type PDFConvertOptions = {
-  // OCR 전략 옵션
-  strategySamplerModel?: LanguageModel; // OCR 전략 샘플링용 Vision LLM
-  vlmProcessorModel?: LanguageModel; // 텍스트 보정용 Vision LLM
-  vlmConcurrency?: number; // 병렬 페이지 처리 (기본값: 1)
-  skipSampling?: boolean; // 전략 샘플링 건너뛰기
-  forcedMethod?: 'ocrmac' | 'vlm'; // 특정 OCR 방식 강제
+  // Docling 이후 필수 보정
+  correction: PDFCorrectionOptions;
 
   // 이미지 PDF 옵션
   forceImagePdf?: boolean; // 이미지 기반 PDF 사전 변환 강제
@@ -578,8 +632,7 @@ type PDFConvertOptions = {
   document_timeout?: number; // 문서 처리 타임아웃 (초)
   documentValidationModel?: LanguageModel; // 문서 유형 검증용 LLM
 
-  // Review Assistance
-  reviewAssistance?: boolean | ReviewAssistanceOptions; // 선택적 page-level review
+  // 보정 진행 상황
   onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void; // 진행 상황 callback
 
   // 청크 변환 (대용량 PDF)
@@ -594,27 +647,47 @@ type PDFConvertOptions = {
 };
 ```
 
-### ReviewAssistanceOptions
+### PDFCorrectionOptions
 
 ```typescript
-interface ReviewAssistanceOptions {
-  enabled?: boolean; // page-level review assistance 활성화
+interface PDFCorrectionOptions {
+  models: {
+    textCorrection: LanguageModel; // 필수: 페이지 텍스트와 표 셀 OCR 보정
+    pageGate: LanguageModel; // 필수: 구조 Review Assistance page gate
+    reviewAssistance: LanguageModel; // 필수: 기본 구조 review 모델
+    tableCorrection?: LanguageModel; // 선택: 표 전용 보정 override
+    reviewAssistanceTasks?: Partial<
+      Record<
+        | 'text_ocr_hanja'
+        | 'text_integrity'
+        | 'text_role_footnote'
+        | 'tables'
+        | 'pictures_captions'
+        | 'layout_bbox_order',
+        LanguageModel
+      >
+    >;
+  };
+  concurrency?: {
+    pages?: number; // 페이지 단위 text correction/page gate 동시성
+    reviewTasks?: number; // 구조 Review Assistance work-item 동시성
+    tables?: number; // 표 전용 보정 동시성
+  };
+  maxRetries?: {
+    textCorrection?: number;
+    pageGate?: number;
+    reviewAssistance?: number;
+    tableCorrection?: number;
+  };
+  localModelConcurrency?: number; // 로컬 모델 요청 동시성 상한
+  workItemTimeoutMs?: number; // work item별 timeout
+  outputLanguage?: string; // 사람이 읽는 review reason 언어 (기본값: en-US)
+  pageGate?: {
+    structuralNoiseThreshold?: number;
+  };
   autoApplyThreshold?: number; // 자동 적용 최소 confidence (기본값: 0.85)
   proposalThreshold?: number; // sidecar proposal 최소 confidence (기본값: 0.5)
-  maxRetries?: number; // page-level VLM 호출별 최대 재시도 횟수 (기본값: 3)
   temperature?: number; // VLM 생성 temperature (기본값: 0)
-  outputLanguage?: string; // 사람이 읽는 review reason 언어 (기본값: en-US)
-}
-```
-
-### ConvertWithStrategyResult
-
-```typescript
-interface ConvertWithStrategyResult {
-  /** 결정된 OCR 전략 */
-  strategy: OcrStrategy;
-  /** 샘플링 및/또는 VLM 처리의 토큰 사용량 리포트 (LLM 사용이 없으면 null) */
-  tokenUsageReport: TokenUsageReport | null;
 }
 ```
 

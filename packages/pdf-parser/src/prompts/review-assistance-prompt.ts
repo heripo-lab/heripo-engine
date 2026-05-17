@@ -47,7 +47,9 @@ Rules:
 - Suggest updateTextRole for repeated page headers, page footers, footnotes, and captions misclassified as body text.
 - Suggest addText only when visible document text outside picture regions is missing from Docling and the bbox is clear.
 - Suggest removeText only for clear duplicate, empty, OCR-noise, or picture-internal non-caption text.
-- Suggest addPicture or splitPicture with page-coordinate bboxes when the page image clearly shows missing or combined pictures.
+- Suggest addPicture with page-coordinate bboxes when the page image clearly shows a missing external picture region.
+- Suggest splitPicture only when the picture context includes splitCandidate and the page image confirms clearly separated sub-images with visible gutters, borders, or component boundaries.
+- Do not split a single large photo, map, cover artwork, barcode, or decorative image.
 - Suggest updateBbox only when the existing bbox is clearly outside the visual element.
 - Suggest linkContinuedTable only for adjacent-page tables with compatible columns, headers, or captions.
 - Keep confidence conservative for delete, hide, merge, split, replaceTable, updateBbox, and continued-table commands.
@@ -113,7 +115,7 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
         'removeText',
       ],
       focus:
-        'Inspect picture regions and external captions only. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures with high confidence when they are not external captions.',
+        'Inspect picture regions and external captions only. Split a picture only when its context includes splitCandidate and the page image confirms clear internal boundaries. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures with high confidence when they are not external captions.',
     },
     {
       id: 'layout_bbox_order',
@@ -127,7 +129,11 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
 export function buildReviewAssistancePrompt(
   context: PageReviewContext,
   task?: ReviewAssistanceTaskDefinition,
-  options: { outputLanguage?: string } = {},
+  options: {
+    outputLanguage?: string;
+    validationFeedback?: string[];
+    attempt?: number;
+  } = {},
 ): string {
   const taskPrompt = task
     ? [
@@ -144,10 +150,20 @@ export function buildReviewAssistancePrompt(
         `Write rationale and pageNotes in ${outputLanguage}. Keep evidence as a short verbatim source snippet when possible. Keep JSON keys, op names, refs, and payload text unchanged.`,
       ].join('\n')
     : undefined;
+  const feedbackPrompt =
+    options.validationFeedback && options.validationFeedback.length > 0
+      ? [
+          `VALIDATION FEEDBACK FOR ATTEMPT ${options.attempt ?? 2}:`,
+          'Your previous JSON response failed deterministic validation. Self-check the target refs, payload shape, allowed ops, confidence, and page number before returning the next JSON object.',
+          'Fix only the listed validation failures. If the correction cannot be grounded with the provided refs and image, return no commands.',
+          ...options.validationFeedback.map((reason) => `- ${reason}`),
+        ].join('\n')
+      : undefined;
   return [
     REVIEW_ASSISTANCE_SYSTEM_PROMPT,
     languagePrompt,
     taskPrompt,
+    feedbackPrompt,
     'PAGE CONTEXT JSON:',
     JSON.stringify(toPromptContext(context, task)),
   ]
@@ -164,6 +180,7 @@ function toPromptContext(
   const base = {
     pageNo: context.pageNo,
     pageSize: context.pageSize,
+    reviewAssistanceEligibility: context.reviewAssistanceEligibility,
   };
 
   switch (task.id) {
@@ -228,6 +245,7 @@ function toFullPromptContext(context: PageReviewContext): unknown {
   return {
     pageNo: context.pageNo,
     pageSize: context.pageSize,
+    reviewAssistanceEligibility: context.reviewAssistanceEligibility,
     textBlocks: context.textBlocks.map(toPromptTextBlock),
     missingTextCandidates: context.missingTextCandidates,
     tables: context.tables.map(toPromptTable),
@@ -273,6 +291,14 @@ function toPromptTable(table: PageReviewContext['tables'][number]) {
     caption: table.caption,
     bbox: table.bbox,
     gridPreview: table.gridPreview,
+    rowCount: table.rowCount,
+    colCount: table.colCount,
+    hasSpans: table.hasSpans,
+    headerRows: table.headerRows,
+    headerColumns: table.headerColumns,
+    unitHints: table.unitHints,
+    footnoteRefs: table.footnoteRefs,
+    footnoteMarkers: table.footnoteMarkers,
     emptyCellRatio: table.emptyCellRatio,
     previousPageTableRefs: table.previousPageTableRefs,
     previousPageTableSummary: table.previousPageTableSummary,
@@ -299,6 +325,7 @@ function toPromptPicture(picture: PageReviewContext['pictures'][number]) {
     caption: picture.caption,
     imageUri: picture.imageUri,
     bbox: picture.bbox,
+    splitCandidate: picture.splitCandidate,
     suspectReasons: picture.suspectReasons,
   };
 }

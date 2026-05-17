@@ -141,7 +141,7 @@ function parsePdf(
 
 /**
  * Merge VLM token usage into an existing TokenUsageReport.
- * VlmPipeline components are prepended (pipeline order: VLM -> document processing).
+ * Post-Docling correction components are prepended (pipeline order: correction -> document processing).
  */
 function mergeVlmUsage(
   target: TokenUsageReport,
@@ -155,7 +155,7 @@ function mergeVlmUsage(
 
 /**
  * Combine VLM and document-processor token usage reports.
- * VLM components are prepended (pipeline order: VLM -> document processing).
+ * Correction components are prepended (pipeline order: correction -> document processing).
  */
 function combineTokenReports(
   vlm: TokenUsageReport | null,
@@ -193,6 +193,69 @@ function calculateTotalCost(usage: TokenUsageReport): number {
     }
   }
   return Math.round(total * 1_000_000) / 1_000_000;
+}
+
+function buildPDFCorrectionOptions(
+  options: QueuedTask['options'],
+): PDFConvertOptions['correction'] {
+  const taskModels = options.correction.models.reviewAssistanceTasks;
+  const reviewAssistanceTasks: NonNullable<
+    PDFConvertOptions['correction']['models']['reviewAssistanceTasks']
+  > = {};
+
+  if (taskModels?.textOcrHanja) {
+    reviewAssistanceTasks.text_ocr_hanja = createModel(taskModels.textOcrHanja);
+  }
+  if (taskModels?.textIntegrity) {
+    reviewAssistanceTasks.text_integrity = createModel(
+      taskModels.textIntegrity,
+    );
+  }
+  if (taskModels?.textRoleFootnote) {
+    reviewAssistanceTasks.text_role_footnote = createModel(
+      taskModels.textRoleFootnote,
+    );
+  }
+  if (taskModels?.tables) {
+    reviewAssistanceTasks.tables = createModel(taskModels.tables);
+  }
+  if (taskModels?.picturesCaptions) {
+    reviewAssistanceTasks.pictures_captions = createModel(
+      taskModels.picturesCaptions,
+    );
+  }
+  if (taskModels?.layoutBboxOrder) {
+    reviewAssistanceTasks.layout_bbox_order = createModel(
+      taskModels.layoutBboxOrder,
+    );
+  }
+
+  const stageRetries = options.correction.maxRetries;
+  const correction: PDFConvertOptions['correction'] = {
+    models: {
+      textCorrection: createModel(options.correction.models.textCorrection),
+      pageGate: createModel(options.correction.models.pageGate),
+      reviewAssistance: createModel(options.correction.models.reviewAssistance),
+      tableCorrection: options.correction.models.tableCorrection
+        ? createModel(options.correction.models.tableCorrection)
+        : undefined,
+      reviewAssistanceTasks:
+        Object.keys(reviewAssistanceTasks).length > 0
+          ? reviewAssistanceTasks
+          : undefined,
+    },
+    concurrency: options.correction.concurrency,
+    localModelConcurrency: options.correction.localModelConcurrency,
+    workItemTimeoutMs: options.correction.workItemTimeoutMs,
+    maxRetries: {
+      textCorrection: stageRetries?.textCorrection ?? options.maxRetries,
+      pageGate: stageRetries?.pageGate ?? options.maxRetries,
+      reviewAssistance: stageRetries?.reviewAssistance ?? options.maxRetries,
+      tableCorrection: stageRetries?.tableCorrection ?? options.maxRetries,
+    },
+    outputLanguage: options.correction.outputLanguage,
+  };
+  return correction;
 }
 
 const PROCESSING_STEPS = [
@@ -337,20 +400,14 @@ export async function runTaskWorker(
     let artifactDir: string;
     let vlmTokenUsage: TokenUsageReport | null = null;
 
-    // Build PDF convert options with Korean report detection fields
+    // Build PDF convert options with mandatory post-Docling correction.
     const isPublicMode = process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true';
 
     const pdfConvertOptions: PDFConvertOptions = {
+      correction: buildPDFCorrectionOptions(options),
       chunkedConversion: true,
       num_threads: options.threadCount,
       forceImagePdf: options.forceImagePdf,
-      ...(options.strategySamplerModel
-        ? { strategySamplerModel: createModel(options.strategySamplerModel) }
-        : {}),
-      ...(options.vlmProcessorModel
-        ? { vlmProcessorModel: createModel(options.vlmProcessorModel) }
-        : {}),
-      ...(options.forcedMethod ? { forcedMethod: options.forcedMethod } : {}),
       ...(isPublicMode && !task.isOtpBypass && options.documentValidationModel
         ? {
             documentValidationModel: createModel(
@@ -358,7 +415,6 @@ export async function runTaskWorker(
             ),
           }
         : {}),
-      vlmConcurrency: options.vlmConcurrency,
       onTokenUsage: (report: TokenUsageReport) => {
         const tokenEvent: SSEEvent = {
           type: 'token-usage',

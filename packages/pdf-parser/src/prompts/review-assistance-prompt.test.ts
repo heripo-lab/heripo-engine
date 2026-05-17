@@ -36,11 +36,25 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       'Do not leave them as generic review notes',
     );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'Suggest splitPicture only when the picture context includes splitCandidate',
+    );
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'Do not split a single large photo',
+    );
   });
 
   test('serializes all page review context sections into prompt JSON', () => {
     const context: PageReviewContext = {
       pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['table_present'],
+        exclusionReasons: [],
+      },
       pageSize: { width: 100, height: 200 },
       pageImagePath: '/tmp/page.png',
       textBlocks: [
@@ -79,6 +93,11 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
           ref: '#/pictures/0',
           caption: 'Figure 1',
           imageUri: 'images/pic_0.png',
+          splitCandidate: {
+            score: 0.82,
+            orientation: 'vertical',
+            reasons: ['vertical_gutter_with_content_on_both_sides'],
+          },
           suspectReasons: [],
         },
       ],
@@ -112,11 +131,70 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('"nextPageTableRefs"');
     expect(prompt).toContain('"domainPatterns"');
     expect(prompt).toContain('"pictures"');
+    expect(prompt).toContain('"splitCandidate"');
+  });
+
+  test('table task serializes table-specific context and orphan table captions', () => {
+    const task = REVIEW_ASSISTANCE_TASKS.find((entry) => entry.id === 'tables');
+    const context: PageReviewContext = {
+      pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['table_present'],
+        exclusionReasons: [],
+      },
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [],
+      missingTextCandidates: [],
+      tables: [
+        {
+          ref: '#/tables/0',
+          caption: 'Table 1',
+          gridPreview: [['A']],
+          rowCount: 1,
+          colCount: 1,
+          emptyCellRatio: 0,
+          suspectReasons: [],
+        },
+      ],
+      pictures: [],
+      orphanCaptions: [
+        {
+          ref: '#/texts/1',
+          text: 'Table 1',
+          currentLabel: 'text',
+          captionLikeBodyText: true,
+          nearestMediaRefs: [{ ref: '#/tables/0', kind: 'table', distance: 2 }],
+        },
+      ],
+      footnotes: [],
+      layout: { readingOrderRefs: [], visualOrderRefs: [], bboxWarnings: [] },
+      domainPatterns: [],
+    };
+
+    const prompt = buildReviewAssistancePrompt(context, task);
+
+    expect(prompt).toContain('TASK: Tables and continued tables');
+    expect(prompt).toContain('"tables"');
+    expect(prompt).toContain('"orphanCaptions"');
+    expect(prompt).toContain('"rowCount":1');
   });
 
   test('task prompt narrows allowed ops and focused context', () => {
     const context: PageReviewContext = {
       pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['table_present'],
+        exclusionReasons: [],
+      },
       pageSize: { width: 100, height: 200 },
       pageImagePath: '/tmp/page.png',
       textBlocks: [
@@ -163,11 +241,89 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('Allowed ops for this task: replaceText');
     expect(prompt).toContain('"domainPatterns"');
     expect(prompt).not.toContain('"gridPreview"');
+    expect(prompt).not.toContain('"splitCandidate"');
+  });
+
+  test('picture task exposes split candidates only for candidate-backed pictures', () => {
+    const context: PageReviewContext = {
+      pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['picture_present'],
+        exclusionReasons: [],
+      },
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [
+        {
+          ref: '#/texts/0',
+          label: 'text',
+          text: 'Inside picture',
+          suspectReasons: ['picture_internal_text'],
+        },
+        {
+          ref: '#/texts/1',
+          label: 'text',
+          text: 'Caption-like',
+          suspectReasons: ['caption_like_body_text'],
+        },
+        {
+          ref: '#/texts/2',
+          label: 'caption',
+          text: 'Caption label',
+          suspectReasons: [],
+        },
+      ],
+      missingTextCandidates: [],
+      tables: [],
+      pictures: [
+        {
+          ref: '#/pictures/0',
+          bbox: { l: 0, t: 0, r: 100, b: 100, coord_origin: 'TOPLEFT' },
+          splitCandidate: {
+            score: 0.88,
+            orientation: 'vertical',
+            reasons: ['vertical_gutter_with_content_on_both_sides'],
+          },
+          suspectReasons: ['picture_split_boundary_candidate'],
+        },
+      ],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: ['#/pictures/0'],
+        visualOrderRefs: ['#/pictures/0'],
+        bboxWarnings: [],
+      },
+      domainPatterns: [],
+    };
+    const task = REVIEW_ASSISTANCE_TASKS.find(
+      (entry) => entry.id === 'pictures_captions',
+    )!;
+    const prompt = buildReviewAssistancePrompt(context, task);
+
+    expect(prompt).toContain('Allowed ops for this task');
+    expect(prompt).toContain('"splitCandidate"');
+    expect(prompt).toContain('picture_split_boundary_candidate');
+    expect(prompt).toContain('picture_internal_text');
+    expect(prompt).toContain('caption_like_body_text');
+    expect(prompt).toContain('Caption label');
   });
 
   test('출력 언어 지시를 포함한다', () => {
     const context: PageReviewContext = {
       pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: false,
+        kind: 'non_meaningful',
+        score: 0,
+        reasons: [],
+        exclusionReasons: ['no_structural_review_signal'],
+      },
       pageSize: { width: 100, height: 200 },
       pageImagePath: '/tmp/page.png',
       textBlocks: [],
@@ -192,5 +348,39 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain(
       'Keep evidence as a short verbatim source snippet when possible',
     );
+  });
+
+  test('includes validation feedback for re-ask attempts', () => {
+    const context: PageReviewContext = {
+      pageNo: 1,
+      reviewAssistanceEligibility: {
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        score: 80,
+        reasons: ['text'],
+        exclusionReasons: [],
+      },
+      pageSize: { width: 100, height: 200 },
+      pageImagePath: '/tmp/page.png',
+      textBlocks: [],
+      missingTextCandidates: [],
+      tables: [],
+      pictures: [],
+      orphanCaptions: [],
+      footnotes: [],
+      layout: {
+        readingOrderRefs: [],
+        visualOrderRefs: [],
+        bboxWarnings: [],
+      },
+      domainPatterns: [],
+    };
+    const prompt = buildReviewAssistancePrompt(context, undefined, {
+      validationFeedback: ['target_ref_not_found'],
+    });
+
+    expect(prompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
+    expect(prompt).toContain('- target_ref_not_found');
   });
 });

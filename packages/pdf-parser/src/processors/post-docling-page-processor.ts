@@ -25,6 +25,14 @@ import {
   getPageTables,
   getPageTexts,
 } from './correction-applier';
+import {
+  REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+  type ReviewAssistancePageEligibility,
+  ReviewAssistancePageGate,
+  type ReviewAssistancePageGateContext,
+  createReviewAssistancePageGateFailOpenEligibility,
+  writeReviewAssistancePageGateReport,
+} from './review-assistance/review-assistance-page-gate';
 
 /** Default concurrency for parallel page processing */
 const DEFAULT_CONCURRENCY = 1;
@@ -35,8 +43,8 @@ const DEFAULT_MAX_RETRIES = 3;
 /** Default temperature for VLM generation */
 const DEFAULT_TEMPERATURE = 0;
 
-/** Options for VlmTextCorrector */
-export interface VlmTextCorrectorOptions {
+/** Options for PostDoclingPageProcessor */
+export interface PostDoclingPageProcessorOptions {
   /** Number of concurrent page processing (default: 1) */
   concurrency?: number;
   /** Maximum retries per VLM call (default: 3) */
@@ -53,10 +61,21 @@ export interface VlmTextCorrectorOptions {
   documentLanguages?: string[];
   /** Pre-extracted page texts from pdftotext (1-based pageNo → text) */
   pageTexts?: Map<number, string>;
+  /**
+   * Optional separate VLM page eligibility check for Review Assistance.
+   * Object presence alone activates the gate — there is no `enabled` flag,
+   * so callers either configure the gate or omit it entirely.
+   */
+  reviewAssistanceGate?: {
+    model: LanguageModel;
+    maxRetries?: number;
+    temperature?: number;
+    outputLanguage?: string;
+  };
 }
 
-/** Result of VLM text correction */
-export interface VlmTextCorrectionResult {
+/** Result of post-Docling page processing (text correction + page gate) */
+export interface PostDoclingPageProcessingResult {
   /** Total number of text corrections applied */
   textCorrections: number;
   /** Total number of cell corrections applied */
@@ -67,15 +86,25 @@ export interface VlmTextCorrectionResult {
   pagesFailed: number;
 }
 
+interface PostDoclingPageRunResult {
+  corrections: VlmTextCorrectionOutput | null;
+  reviewAssistanceEligibility?: ReviewAssistancePageEligibility;
+}
+
 /**
- * VLM text corrector that fixes OCR errors by comparing page images
- * against OCR-extracted text.
+ * Post-Docling per-page processor. Runs two VLM calls per page that share
+ * the same page image read:
  *
- * Reads the DoclingDocument from the OCR output directory, sends each page's
- * text elements and table cells to a VLM for correction, then merges
- * corrections back and saves the updated document.
+ * 1. Text correction — fixes OCR errors in page text and table cells.
+ * 2. Review Assistance page gate (optional, configured via
+ *    `reviewAssistanceGate`) — decides whether the page is worth queueing
+ *    for structural review and writes a sidecar report.
+ *
+ * Reads the DoclingDocument from the OCR output directory, applies text
+ * corrections, merges them back, saves the updated document, and writes
+ * the page-gate sidecar when the gate is enabled.
  */
-export class VlmTextCorrector {
+export class PostDoclingPageProcessor {
   constructor(private readonly logger: LoggerMethods) {}
 
   /**
@@ -90,16 +119,16 @@ export class VlmTextCorrector {
   async correctAndSave(
     outputDir: string,
     model: LanguageModel,
-    options?: VlmTextCorrectorOptions,
-  ): Promise<VlmTextCorrectionResult> {
-    this.logger.info('[VlmTextCorrector] Starting text correction...');
+    options?: PostDoclingPageProcessorOptions,
+  ): Promise<PostDoclingPageProcessingResult> {
+    this.logger.info('[PostDoclingPageProcessor] Starting text correction...');
 
     const resultPath = join(outputDir, 'result.json');
     const doc: DoclingDocument = JSON.parse(readFileSync(resultPath, 'utf-8'));
 
     const allPageNumbers = this.getPageNumbers(doc);
     if (allPageNumbers.length === 0) {
-      this.logger.info('[VlmTextCorrector] No pages to process');
+      this.logger.info('[PostDoclingPageProcessor] No pages to process');
       return {
         textCorrections: 0,
         cellCorrections: 0,
@@ -112,7 +141,7 @@ export class VlmTextCorrector {
 
     const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;
     this.logger.info(
-      `[VlmTextCorrector] Processing ${pageNumbers.length} pages (concurrency: ${concurrency})...`,
+      `[PostDoclingPageProcessor] Processing ${pageNumbers.length} pages (concurrency: ${concurrency})...`,
     );
 
     const results = await ConcurrentPool.run(
@@ -133,17 +162,17 @@ export class VlmTextCorrector {
     let totalCellCorrections = 0;
     let pagesFailed = 0;
     for (const result of results) {
-      if (result === null) {
+      if (result.corrections === null) {
         pagesFailed++;
       } else {
-        totalTextCorrections += result.tc.length;
-        totalCellCorrections += result.cc.length;
+        totalTextCorrections += result.corrections.tc.length;
+        totalCellCorrections += result.corrections.cc.length;
       }
     }
 
     // Apply corrections to document
     pageNumbers.forEach((pageNo, i) => {
-      const corrections = results[i];
+      const corrections = results[i].corrections;
       if (corrections === null) return;
       applyCorrections(doc, pageNo, corrections, this.logger);
     });
@@ -151,8 +180,21 @@ export class VlmTextCorrector {
     // Save corrected document
     writeFileSync(resultPath, JSON.stringify(doc, null, 2));
 
+    const gateResults = results
+      .map((result) => result.reviewAssistanceEligibility)
+      .filter(
+        (
+          result,
+        ): result is NonNullable<
+          PostDoclingPageRunResult['reviewAssistanceEligibility']
+        > => result !== undefined,
+      );
+    if (gateResults.length > 0) {
+      writeReviewAssistancePageGateReport(outputDir, gateResults);
+    }
+
     this.logger.info(
-      `[VlmTextCorrector] Correction complete: ${totalTextCorrections} text, ${totalCellCorrections} cell corrections across ${pageNumbers.length} pages (${pagesFailed} failed)`,
+      `[PostDoclingPageProcessor] Correction complete: ${totalTextCorrections} text, ${totalCellCorrections} cell corrections across ${pageNumbers.length} pages (${pagesFailed} failed)`,
     );
 
     return {
@@ -181,22 +223,56 @@ export class VlmTextCorrector {
     doc: DoclingDocument,
     pageNo: number,
     model: LanguageModel,
-    options?: VlmTextCorrectorOptions,
+    options?: PostDoclingPageProcessorOptions,
+  ): Promise<PostDoclingPageRunResult> {
+    const pageTexts = getPageTexts(doc, pageNo);
+    const pageTables = getPageTables(doc, pageNo);
+    const shouldRunTextCorrection =
+      pageTexts.length > 0 || pageTables.length > 0;
+    const image =
+      shouldRunTextCorrection || options?.reviewAssistanceGate
+        ? this.tryReadPageImage(outputDir, pageNo)
+        : undefined;
+
+    let corrections: VlmTextCorrectionOutput | null = { tc: [], cc: [] };
+    if (shouldRunTextCorrection) {
+      corrections = image
+        ? await this.correctPageText(
+            image,
+            pageNo,
+            pageTexts,
+            pageTables,
+            model,
+            options,
+          )
+        : null;
+    } else {
+      this.logger.debug(
+        `[PostDoclingPageProcessor] Page ${pageNo}: no text content, skipping`,
+      );
+    }
+
+    const reviewAssistanceEligibility = await this.evaluateReviewAssistanceGate(
+      doc,
+      pageNo,
+      pageTexts,
+      pageTables,
+      image,
+      options,
+    );
+
+    return { corrections, reviewAssistanceEligibility };
+  }
+
+  private async correctPageText(
+    image: Uint8Array,
+    pageNo: number,
+    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
+    pageTables: Array<{ index: number; item: DoclingTableItem }>,
+    model: LanguageModel,
+    options?: PostDoclingPageProcessorOptions,
   ): Promise<VlmTextCorrectionOutput | null> {
     try {
-      const pageTexts = getPageTexts(doc, pageNo);
-      const pageTables = getPageTables(doc, pageNo);
-
-      // Skip pages with no text or table content
-      if (pageTexts.length === 0 && pageTables.length === 0) {
-        this.logger.debug(
-          `[VlmTextCorrector] Page ${pageNo}: no text content, skipping`,
-        );
-        return { tc: [], cc: [] };
-      }
-
-      const imageBase64 = this.readPageImage(outputDir, pageNo);
-
       const pageText = options?.pageTexts?.get(pageNo);
       let references: Map<number, string> | undefined;
       let tableContext: string | undefined;
@@ -235,7 +311,7 @@ export class VlmTextCorrector {
               },
               {
                 type: 'image' as const,
-                image: imageBase64,
+                image,
                 mediaType: 'image/png' as const,
               },
             ],
@@ -245,35 +321,116 @@ export class VlmTextCorrector {
         maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
         temperature: options?.temperature ?? DEFAULT_TEMPERATURE,
         abortSignal: options?.abortSignal,
-        component: 'VlmTextCorrector',
+        component: 'PostDoclingPageProcessor',
         phase: 'text-correction',
       });
 
-      if (options?.aggregator) {
-        options.aggregator.track(result.usage);
-      }
+      options?.aggregator?.track(result.usage);
 
       const output = result.output as VlmTextCorrectionOutput;
 
       if (output.tc.length > 0 || output.cc.length > 0) {
         this.logger.debug(
-          `[VlmTextCorrector] Page ${pageNo}: ${output.tc.length} text, ${output.cc.length} cell corrections`,
+          `[PostDoclingPageProcessor] Page ${pageNo}: ${output.tc.length} text, ${output.cc.length} cell corrections`,
         );
       }
 
       return output;
     } catch (error) {
-      // Rethrow abort errors
       if (options?.abortSignal?.aborted) {
         throw error;
       }
 
       this.logger.warn(
-        `[VlmTextCorrector] Page ${pageNo}: VLM correction failed, keeping OCR text`,
+        `[PostDoclingPageProcessor] Page ${pageNo}: VLM correction failed, keeping OCR text`,
         error,
       );
       return null;
     }
+  }
+
+  private async evaluateReviewAssistanceGate(
+    doc: DoclingDocument,
+    pageNo: number,
+    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
+    pageTables: Array<{ index: number; item: DoclingTableItem }>,
+    image: Uint8Array | undefined,
+    options?: PostDoclingPageProcessorOptions,
+  ): Promise<ReviewAssistancePageEligibility | undefined> {
+    const gateOptions = options?.reviewAssistanceGate;
+    if (!gateOptions) return undefined;
+    if (!image) {
+      return createReviewAssistancePageGateFailOpenEligibility(
+        pageNo,
+        REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+      );
+    }
+
+    try {
+      return await new ReviewAssistancePageGate().evaluate(
+        this.buildReviewAssistanceGateContext(
+          doc,
+          pageNo,
+          pageTexts,
+          pageTables,
+        ),
+        image,
+        gateOptions.model,
+        {
+          maxRetries: gateOptions.maxRetries,
+          temperature: gateOptions.temperature,
+          abortSignal: options?.abortSignal,
+          aggregator: options?.aggregator,
+          outputLanguage: gateOptions.outputLanguage,
+        },
+      );
+    } catch (error) {
+      if (options?.abortSignal?.aborted) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[PostDoclingPageProcessor] Page ${pageNo}: review-assistance gate failed open`,
+        error,
+      );
+      return createReviewAssistancePageGateFailOpenEligibility(pageNo, message);
+    }
+  }
+
+  private buildReviewAssistanceGateContext(
+    doc: DoclingDocument,
+    pageNo: number,
+    pageTexts: Array<{ index: number; item: DoclingTextItem }>,
+    pageTables: Array<{ index: number; item: DoclingTableItem }>,
+  ): ReviewAssistancePageGateContext {
+    const textByRef = new Map(doc.texts.map((text) => [text.self_ref, text]));
+    const pictures = doc.pictures
+      .filter((picture) => picture.prov.some((prov) => prov.page_no === pageNo))
+      .map((picture) => {
+        const caption = picture.captions
+          .map((ref) => textByRef.get(ref.$ref)?.text.trim())
+          .filter((text): text is string => Boolean(text))
+          .join('\n');
+        return {
+          caption: caption || undefined,
+          suspectReasons: caption ? [] : ['image_missing_caption'],
+        };
+      });
+
+    return {
+      pageNo,
+      textBlocks: pageTexts.map(({ item }) => ({
+        label: item.label,
+        text: item.text,
+        suspectReasons: [],
+      })),
+      missingTextCandidates: [],
+      tables: pageTables.map(() => ({ suspectReasons: [] })),
+      pictures,
+      orphanCaptions: [],
+      layout: { bboxWarnings: [] },
+      domainPatterns: [],
+    };
   }
 
   /**
@@ -342,6 +499,27 @@ export class VlmTextCorrector {
       `LANGUAGE CONTEXT: This document is ${languageDesc}. ` +
       'Focus on correcting characters that do not match this language.\n\n';
     return prefix + TEXT_CORRECTION_SYSTEM_PROMPT;
+  }
+
+  /**
+   * Read a page image, returning undefined when the image file is missing
+   * or unreadable. A single bad page then degrades gracefully (text
+   * correction skipped, review-assistance gate fails open) instead of
+   * rejecting the whole ConcurrentPool run and aborting the conversion.
+   */
+  private tryReadPageImage(
+    outputDir: string,
+    pageNo: number,
+  ): Uint8Array | undefined {
+    try {
+      return this.readPageImage(outputDir, pageNo);
+    } catch (error) {
+      this.logger.warn(
+        `[PostDoclingPageProcessor] Page ${pageNo}: failed to read page image`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   /**

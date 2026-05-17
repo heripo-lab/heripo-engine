@@ -16,6 +16,12 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { createHash } from 'node:crypto';
 
+import {
+  bboxContainmentRatio,
+  bboxGeometryOptionsForPage,
+  bboxToTopLeftRect,
+} from './bbox-geometry';
+
 const TRUSTED_VLM_AUTO_APPLY_THRESHOLD = 0.7;
 
 export interface ReviewAssistanceValidatorOptions {
@@ -408,6 +414,12 @@ export class ReviewAssistanceValidator {
           this.validateBbox(context, region.bbox, reasons),
         );
         this.validateSplitRegions(command.regions, reasons);
+        this.validateSplitPicture(
+          context,
+          command.pictureRef,
+          command.regions,
+          reasons,
+        );
         break;
       case 'updateBbox':
         if (!this.refExists(command.targetRef, refs)) {
@@ -843,10 +855,12 @@ export class ReviewAssistanceValidator {
       reasons.push('table_cell_negative_index');
       return;
     }
-    if (
-      row >= table.gridPreview.length ||
-      col >= table.gridPreview[row].length
-    ) {
+    const rowLimit = table.rowCount ?? table.gridPreview.length;
+    const colLimit =
+      table.colCount === undefined
+        ? (table.gridPreview[row]?.length ?? table.gridPreview[0]?.length ?? 0)
+        : table.colCount;
+    if (row >= rowLimit || col >= colLimit) {
       reasons.push('table_cell_out_of_preview_range');
     }
   }
@@ -891,6 +905,115 @@ export class ReviewAssistanceValidator {
         }
       }
     }
+  }
+
+  private validateSplitPicture(
+    context: PageReviewContext,
+    pictureRef: string,
+    regions: ReviewAssistanceImageRegion[],
+    reasons: string[],
+  ): void {
+    const picture = context.pictures.find((entry) => entry.ref === pictureRef);
+    if (!picture) return;
+    if (!picture.splitCandidate) {
+      reasons.push('split_picture_without_boundary_candidate');
+      return;
+    }
+    if (!picture.bbox) {
+      reasons.push('split_picture_source_bbox_missing');
+      return;
+    }
+
+    for (const region of regions) {
+      if (
+        bboxContainmentRatio(region.bbox, picture.bbox, context.pageSize) < 0.9
+      ) {
+        reasons.push('split_picture_region_outside_source');
+        break;
+      }
+    }
+
+    const expectedRegionCount = picture.splitCandidate.suggestedRegions?.length;
+    if (expectedRegionCount && regions.length !== expectedRegionCount) {
+      reasons.push('split_picture_region_count_mismatch');
+    }
+
+    if (
+      picture.splitCandidate.orientation &&
+      !this.splitRegionsMatchOrientation(
+        regions,
+        picture.splitCandidate.orientation,
+        context.pageSize,
+      )
+    ) {
+      reasons.push('split_picture_boundary_not_supported');
+    }
+  }
+
+  private splitRegionsMatchOrientation(
+    regions: ReviewAssistanceImageRegion[],
+    orientation: 'horizontal' | 'vertical' | 'grid',
+    pageSize: PageReviewContext['pageSize'],
+  ): boolean {
+    if (orientation === 'grid') {
+      return (
+        regions.length >= 4 &&
+        this.hasSeparatedRegionPair(regions, 'vertical', pageSize) &&
+        this.hasSeparatedRegionPair(regions, 'horizontal', pageSize)
+      );
+    }
+    return this.hasSeparatedRegionPair(regions, orientation, pageSize);
+  }
+
+  private hasSeparatedRegionPair(
+    regions: ReviewAssistanceImageRegion[],
+    orientation: 'horizontal' | 'vertical',
+    pageSize: PageReviewContext['pageSize'],
+  ): boolean {
+    const geometryOptions = bboxGeometryOptionsForPage(
+      regions.map((region) => region.bbox),
+      pageSize,
+    );
+    for (let i = 0; i < regions.length; i++) {
+      for (let j = i + 1; j < regions.length; j++) {
+        const a = bboxToTopLeftRect(regions[i].bbox, pageSize, geometryOptions);
+        const b = bboxToTopLeftRect(regions[j].bbox, pageSize, geometryOptions);
+        if (orientation === 'vertical') {
+          const separated = a.right <= b.left || b.right <= a.left;
+          const overlap = this.axisOverlapRatio(
+            a.top,
+            a.bottom,
+            b.top,
+            b.bottom,
+          );
+          if (separated && overlap >= 0.5) return true;
+        } else {
+          const separated = a.bottom <= b.top || b.bottom <= a.top;
+          const overlap = this.axisOverlapRatio(
+            a.left,
+            a.right,
+            b.left,
+            b.right,
+          );
+          if (separated && overlap >= 0.5) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private axisOverlapRatio(
+    aStart: number,
+    aEnd: number,
+    bStart: number,
+    bEnd: number,
+  ): number {
+    const overlap = Math.max(
+      0,
+      Math.min(aEnd, bEnd) - Math.max(aStart, bStart),
+    );
+    const minLength = Math.min(aEnd - aStart, bEnd - bStart);
+    return minLength <= 0 ? 0 : overlap / minLength;
   }
 
   private missingTextMatches(
@@ -1091,17 +1214,30 @@ export class ReviewAssistanceValidator {
     /* v8 ignore next -- structured schema should provide arrays; kept for untrusted LLM payload defense */
     if (!Array.isArray(value)) return [];
     return value.map((row) =>
-      Array.isArray(row)
-        ? row.map((cell) => ({
-            text:
-              typeof cell === 'object' &&
-              cell !== null &&
-              typeof (cell as { text?: unknown }).text === 'string'
-                ? (cell as { text: string }).text
-                : '',
-          }))
-        : [],
+      Array.isArray(row) ? row.map((cell) => this.tableCellValue(cell)) : [],
     );
+  }
+
+  private tableCellValue(value: unknown): ReviewAssistanceTableCell {
+    if (!value || typeof value !== 'object') {
+      return { text: '' };
+    }
+    const record = value as Record<string, unknown>;
+    const cell: ReviewAssistanceTableCell = {
+      text: typeof record.text === 'string' ? record.text : '',
+    };
+    if (typeof record.rowSpan === 'number') cell.rowSpan = record.rowSpan;
+    if (typeof record.colSpan === 'number') cell.colSpan = record.colSpan;
+    if (typeof record.columnHeader === 'boolean') {
+      cell.columnHeader = record.columnHeader;
+    }
+    if (typeof record.rowHeader === 'boolean')
+      cell.rowHeader = record.rowHeader;
+    // Preserve bbox so ReviewAssistancePatcher.buildTableData can place each
+    // cell precisely instead of falling back to the table-level prov bbox.
+    const bbox = this.bboxValue(record.bbox);
+    if (bbox) cell.bbox = bbox;
+    return cell;
   }
 
   private imageRegionsValue(value: unknown): ReviewAssistanceImageRegion[] {

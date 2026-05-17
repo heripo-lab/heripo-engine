@@ -21,6 +21,18 @@ import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
 import { buildConversionOptions } from './conversion-options-builder';
 
+const mockCorrection = {
+  models: {
+    textCorrection: {} as any,
+    pageGate: {} as any,
+    reviewAssistance: {} as any,
+  },
+};
+
+function withCorrection(overrides: Record<string, unknown> = {}) {
+  return { correction: mockCorrection, ...overrides } as any;
+}
+
 vi.mock('@heripo/shared', () => ({
   spawnAsync: vi.fn(),
 }));
@@ -283,7 +295,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // Local file server started and stopped
@@ -335,7 +347,7 @@ describe('ChunkedPDFConverter', () => {
           'report-1',
           mockOnComplete,
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Failed to detect page count from PDF');
     });
@@ -357,7 +369,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // Called twice (1 failure + 1 retry success)
@@ -383,7 +395,7 @@ describe('ChunkedPDFConverter', () => {
           'report-1',
           mockOnComplete,
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Persistent error');
 
@@ -409,7 +421,7 @@ describe('ChunkedPDFConverter', () => {
           'report-1',
           mockOnComplete,
           false,
-          {},
+          withCorrection(),
           controller.signal,
         ),
       ).rejects.toThrow('aborted');
@@ -455,7 +467,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // 3 pic_ + 3 image_ = 6 total copies
@@ -521,7 +533,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // 3 image_ files only
@@ -552,7 +564,7 @@ describe('ChunkedPDFConverter', () => {
         'my-report',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(mockOnComplete).toHaveBeenCalledWith('/test/cwd/output/my-report');
@@ -573,7 +585,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         true,
-        {},
+        withCorrection(),
       );
 
       // Both chunks dir and output dir cleaned up
@@ -599,7 +611,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(writeFileSync).toHaveBeenCalledWith(
@@ -620,7 +632,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(trackTaskProgress).toHaveBeenCalledWith(
@@ -651,7 +663,7 @@ describe('ChunkedPDFConverter', () => {
           'report-1',
           mockOnComplete,
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('OCR engine crashed');
     });
@@ -671,7 +683,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // ZIP and extracted dirs are cleaned per chunk
@@ -703,7 +715,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         true,
-        {},
+        withCorrection(),
       );
 
       // _chunks dir cleaned up
@@ -746,7 +758,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // All 3 orphaned pic_ files deleted
@@ -797,7 +809,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // pic_0 and pic_2 deleted (orphaned)
@@ -838,7 +850,7 @@ describe('ChunkedPDFConverter', () => {
           'report-1',
           mockOnComplete,
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Failed to detect page count from PDF');
     });
@@ -880,7 +892,7 @@ describe('ChunkedPDFConverter', () => {
           'report-1',
           mockOnComplete,
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('ImageMagick crashed');
 
@@ -908,7 +920,7 @@ describe('ChunkedPDFConverter', () => {
           'report-1',
           mockOnComplete,
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Callback error');
 
@@ -952,7 +964,7 @@ describe('ChunkedPDFConverter', () => {
         'report-1',
         mockOnComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       // Merger should have been called with picFileOffsets [0, 3]

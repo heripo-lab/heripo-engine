@@ -9,9 +9,17 @@ import type {
   DoclingTextItem,
 } from '@heripo/model';
 
+import type { ReviewAssistancePageEligibility } from './review-assistance-page-gate';
+
 import { isAbsolute, join } from 'node:path';
 
 import { matchTextToReferenceWithUnused } from '../../utils/text-reference-matcher';
+import {
+  bboxContainmentRatio,
+  bboxGeometryOptionsForPage,
+  bboxToTopLeftRect,
+} from './bbox-geometry';
+import { createReviewAssistancePageGatePendingEligibility } from './review-assistance-page-gate';
 
 export interface PageReviewTextBlock {
   ref: string;
@@ -30,6 +38,14 @@ export interface PageReviewTable {
   caption?: string;
   bbox?: DoclingBBox;
   gridPreview: string[][];
+  rowCount?: number;
+  colCount?: number;
+  hasSpans?: boolean;
+  headerRows?: number[];
+  headerColumns?: number[];
+  unitHints?: string[];
+  footnoteRefs?: string[];
+  footnoteMarkers?: string[];
   emptyCellRatio: number;
   previousPageTableRefs?: string[];
   previousPageTableSummary?: string;
@@ -38,11 +54,19 @@ export interface PageReviewTable {
   suspectReasons: string[];
 }
 
+export interface PageReviewPictureSplitCandidate {
+  score: number;
+  orientation?: 'horizontal' | 'vertical' | 'grid';
+  reasons: string[];
+  suggestedRegions?: Array<{ bbox: DoclingBBox; confidence: number }>;
+}
+
 export interface PageReviewPicture {
   ref: string;
   caption?: string;
   imageUri?: string;
   bbox?: DoclingBBox;
+  splitCandidate?: PageReviewPictureSplitCandidate;
   suspectReasons: string[];
 }
 
@@ -67,6 +91,7 @@ export interface PageReviewMissingTextCandidate {
 
 export interface PageReviewContext {
   pageNo: number;
+  reviewAssistanceEligibility: ReviewAssistancePageEligibility;
   pageSize: { width: number; height: number } | null;
   pageImagePath: string;
   textBlocks: PageReviewTextBlock[];
@@ -100,6 +125,10 @@ export interface PageReviewContext {
 
 export interface PageReviewContextBuilderOptions {
   pageTexts?: Map<number, string>;
+  reviewAssistanceEligibilityByPage?: Map<
+    number,
+    ReviewAssistancePageEligibility
+  >;
 }
 
 interface RefGeometry {
@@ -183,7 +212,7 @@ export class PageReviewContextBuilder {
       return reason ? [{ targetRef: entry.ref, reason }] : [];
     });
 
-    return {
+    const contextWithoutEligibility = {
       pageNo,
       pageSize,
       pageImagePath: this.getPageImagePath(doc, outputDir, pageNo),
@@ -221,6 +250,13 @@ export class PageReviewContextBuilder {
       domainPatterns: textBlocks.flatMap((block) =>
         this.detectDomainPatterns(block.ref, block.text),
       ),
+    } satisfies Omit<PageReviewContext, 'reviewAssistanceEligibility'>;
+
+    return {
+      ...contextWithoutEligibility,
+      reviewAssistanceEligibility:
+        options.reviewAssistanceEligibilityByPage?.get(pageNo) ??
+        createReviewAssistancePageGatePendingEligibility(pageNo),
     };
   }
 
@@ -489,7 +525,7 @@ export class PageReviewContextBuilder {
     const insidePicture = pictures.some(
       (picture) =>
         picture.bbox &&
-        this.containmentRatio(block.bbox!, picture.bbox, pageSize) >= 0.8,
+        bboxContainmentRatio(block.bbox!, picture.bbox, pageSize) >= 0.8,
     );
     if (!insidePicture) return block;
     if (block.suspectReasons.includes('picture_internal_text')) return block;
@@ -508,6 +544,15 @@ export class PageReviewContextBuilder {
     const ref = `#/tables/${index}`;
     const gridPreview = this.buildGridPreview(item.data.grid);
     const emptyCellRatio = this.getEmptyCellRatio(item.data.grid);
+    const tableCells = this.getTableCells(item);
+    const headerRows = this.getHeaderRows(tableCells);
+    const headerColumns = this.getHeaderColumns(tableCells);
+    const unitHints = this.detectUnitHints(
+      tableCells.map((cell) => cell.text).join('\n'),
+    );
+    const footnoteMarkers = this.detectFootnoteMarkers(
+      tableCells.map((cell) => cell.text).join('\n'),
+    );
     const suspectReasons: string[] = [];
 
     if (!this.getCaptionText(item.captions, facts)) {
@@ -525,6 +570,16 @@ export class PageReviewContextBuilder {
       caption: this.getCaptionText(item.captions, facts),
       bbox: this.getProvForPage(item.prov, pageNo)?.bbox,
       gridPreview,
+      rowCount: item.data.num_rows,
+      colCount: item.data.num_cols,
+      hasSpans: tableCells.some(
+        (cell) => cell.row_span > 1 || cell.col_span > 1,
+      ),
+      headerRows,
+      headerColumns,
+      unitHints,
+      footnoteRefs: item.footnotes.map((ref) => ref.$ref),
+      footnoteMarkers,
       emptyCellRatio,
       previousPageTableRefs: facts.tableRefsByPage.get(pageNo - 1),
       previousPageTableSummary: facts.tableSummariesByPage
@@ -548,9 +603,6 @@ export class PageReviewContextBuilder {
     const image = (item as unknown as { image?: { uri?: string } }).image;
     const suspectReasons = caption ? [] : ['image_missing_caption'];
     const bbox = this.getProvForPage(item.prov, pageNo)?.bbox;
-    if (bbox && this.isLargePictureBbox(bbox)) {
-      suspectReasons.push('large_picture_split_candidate');
-    }
     return {
       ref: `#/pictures/${index}`,
       caption,
@@ -590,11 +642,15 @@ export class PageReviewContextBuilder {
     geometries: RefGeometry[],
     pageSize: { width: number; height: number } | null,
   ): string[] {
+    const geometryOptions = bboxGeometryOptionsForPage(
+      geometries.map((entry) => entry.bbox),
+      pageSize,
+    );
     return geometries
       .filter((entry) => entry.bbox)
       .sort((a, b) => {
-        const boxA = this.toTopLeftRect(a.bbox!, pageSize);
-        const boxB = this.toTopLeftRect(b.bbox!, pageSize);
+        const boxA = bboxToTopLeftRect(a.bbox!, pageSize, geometryOptions);
+        const boxB = bboxToTopLeftRect(b.bbox!, pageSize, geometryOptions);
         return boxA.top - boxB.top || boxA.left - boxB.left;
       })
       .map((entry) => entry.ref);
@@ -735,6 +791,28 @@ export class PageReviewContextBuilder {
       );
   }
 
+  private getTableCells(item: DoclingTableItem): DoclingTableCell[] {
+    return item.data.table_cells.length > 0
+      ? item.data.table_cells
+      : item.data.grid.flat();
+  }
+
+  private getHeaderRows(cells: DoclingTableCell[]): number[] {
+    return this.uniqueNumbers(
+      cells
+        .filter((cell) => cell.column_header)
+        .map((cell) => cell.start_row_offset_idx),
+    );
+  }
+
+  private getHeaderColumns(cells: DoclingTableCell[]): number[] {
+    return this.uniqueNumbers(
+      cells
+        .filter((cell) => cell.row_header)
+        .map((cell) => cell.start_col_offset_idx),
+    );
+  }
+
   private getEmptyCellRatio(grid: DoclingTableCell[][]): number {
     let total = 0;
     let empty = 0;
@@ -747,6 +825,28 @@ export class PageReviewContextBuilder {
       }
     }
     return total === 0 ? 0 : empty / total;
+  }
+
+  private detectUnitHints(text: string): string[] {
+    // Alternation order matters: regex matches the leftmost branch first,
+    // so longer units (mm, m²) must precede their shorter prefixes (m).
+    return this.uniqueStrings(
+      text.match(/\d+(?:\.\d+)?\s?(?:mm|cm|m²|m|㎝|㎜|㎡|kg|g|점|개)/giu) ?? [],
+    ).slice(0, 20);
+  }
+
+  private detectFootnoteMarkers(text: string): string[] {
+    return this.uniqueStrings(
+      text.match(/(?:※|\*|[¹²³⁴⁵⁶⁷⁸⁹]|\[[0-9]+\]|\([0-9]+\))/gu) ?? [],
+    ).slice(0, 20);
+  }
+
+  private uniqueNumbers(values: number[]): number[] {
+    return [...new Set(values.filter(Number.isFinite))].sort((a, b) => a - b);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
   }
 
   private hasAdjacentCompatibleTable(
@@ -891,16 +991,12 @@ export class PageReviewContextBuilder {
     return /^(?<marker>\d+[\).]|[*†‡])/.exec(text.trim())?.groups?.marker;
   }
 
-  private isLargePictureBbox(bbox: DoclingBBox): boolean {
-    return Math.abs(bbox.r - bbox.l) * Math.abs(bbox.t - bbox.b) > 100_000;
-  }
-
   private getBboxWarningReason(
     bbox: DoclingBBox | undefined,
     pageSize: { width: number; height: number } | null,
   ): string | null {
     if (!bbox) return null;
-    const rect = this.toTopLeftRect(bbox, pageSize);
+    const rect = bboxToTopLeftRect(bbox, pageSize);
     if (rect.right <= rect.left || rect.bottom <= rect.top) {
       return 'invalid_bbox_order';
     }
@@ -927,8 +1023,9 @@ export class PageReviewContextBuilder {
     pageSize: { width: number; height: number } | null,
   ): number {
     if (!a || !b) return Number.POSITIVE_INFINITY;
-    const rectA = this.toTopLeftRect(a, pageSize);
-    const rectB = this.toTopLeftRect(b, pageSize);
+    const geometryOptions = bboxGeometryOptionsForPage([a, b], pageSize);
+    const rectA = bboxToTopLeftRect(a, pageSize, geometryOptions);
+    const rectB = bboxToTopLeftRect(b, pageSize, geometryOptions);
     const centerA = {
       x: (rectA.left + rectA.right) / 2,
       y: (rectA.top + rectA.bottom) / 2,
@@ -938,48 +1035,5 @@ export class PageReviewContextBuilder {
       y: (rectB.top + rectB.bottom) / 2,
     };
     return Math.hypot(centerA.x - centerB.x, centerA.y - centerB.y);
-  }
-
-  private containmentRatio(
-    inner: DoclingBBox,
-    outer: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
-  ): number {
-    const innerRect = this.toTopLeftRect(inner, pageSize);
-    const outerRect = this.toTopLeftRect(outer, pageSize);
-    const intersectionWidth = Math.max(
-      0,
-      Math.min(innerRect.right, outerRect.right) -
-        Math.max(innerRect.left, outerRect.left),
-    );
-    const intersectionHeight = Math.max(
-      0,
-      Math.min(innerRect.bottom, outerRect.bottom) -
-        Math.max(innerRect.top, outerRect.top),
-    );
-    const innerArea =
-      (innerRect.right - innerRect.left) * (innerRect.bottom - innerRect.top);
-    if (innerArea <= 0) return 0;
-    return (intersectionWidth * intersectionHeight) / innerArea;
-  }
-
-  private toTopLeftRect(
-    bbox: DoclingBBox,
-    pageSize: { width: number; height: number } | null,
-  ): { left: number; top: number; right: number; bottom: number } {
-    if (bbox.coord_origin === 'BOTTOMLEFT' && pageSize) {
-      return {
-        left: Math.min(bbox.l, bbox.r),
-        top: pageSize.height - Math.max(bbox.t, bbox.b),
-        right: Math.max(bbox.l, bbox.r),
-        bottom: pageSize.height - Math.min(bbox.t, bbox.b),
-      };
-    }
-    return {
-      left: Math.min(bbox.l, bbox.r),
-      top: Math.min(bbox.t, bbox.b),
-      right: Math.max(bbox.l, bbox.r),
-      bottom: Math.max(bbox.t, bbox.b),
-    };
   }
 }

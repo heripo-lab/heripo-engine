@@ -42,16 +42,28 @@ vi.mock('../environment/docling-environment', () => {
 
 vi.mock('./pdf-converter', () => {
   const convert = vi.fn();
-  const convertWithStrategy = vi.fn();
   const PDFConverter = vi.fn(function () {
-    return { convert, convertWithStrategy };
+    return { convert };
   });
   return {
     PDFConverter,
     __convertMock: convert,
-    __convertWithStrategyMock: convertWithStrategy,
   };
 });
+
+const mockModel = { modelId: 'test-model' } as any;
+
+const withCorrection = (overrides: Record<string, unknown> = {}) =>
+  ({
+    correction: {
+      models: {
+        textCorrection: mockModel,
+        pageGate: mockModel,
+        reviewAssistance: mockModel,
+      },
+    },
+    ...overrides,
+  }) as any;
 
 const makeLogger = () =>
   ({
@@ -67,8 +79,6 @@ const DoclingEnvironment = (EnvMod as any).DoclingEnvironment as any;
 const envMocks = (EnvMod as any).__envMocks as any;
 const PDFConverter = (ConvMod as any).PDFConverter as any;
 const convertMock = (ConvMod as any).__convertMock as any;
-const convertWithStrategyMock = (ConvMod as any)
-  .__convertWithStrategyMock as any;
 
 const mockDoclingEnvironment = (
   startServerMock = vi.fn().mockResolvedValue(undefined),
@@ -301,7 +311,13 @@ describe('PDFParser', () => {
     const logger = makeLogger();
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
     await expect(
-      parser.parse('http://file.pdf', 'r1', vi.fn(), true, { num_threads: 2 }),
+      parser.parse(
+        'http://file.pdf',
+        'r1',
+        vi.fn(),
+        true,
+        withCorrection({ num_threads: 2 }),
+      ),
     ).rejects.toThrow(
       'PDFParser is not initialized. Call init() before using parse()',
     );
@@ -321,7 +337,7 @@ describe('PDFParser', () => {
       'report-1',
       onComplete,
       false,
-      { num_threads: 4 },
+      withCorrection({ num_threads: 4 }),
     );
 
     expect(PDFConverter).toHaveBeenCalledWith(
@@ -335,13 +351,13 @@ describe('PDFParser', () => {
       'report-1',
       onComplete,
       false,
-      { num_threads: 4 },
+      withCorrection({ num_threads: 4 }),
       undefined,
     );
     expect(result).toBe('OK');
   });
 
-  test('parse returns TokenUsageReport from converter via strategy flow', async () => {
+  test('parse returns TokenUsageReport from converter', async () => {
     doclingClient.health.mockResolvedValueOnce();
 
     const mockReport = {
@@ -365,15 +381,7 @@ describe('PDFParser', () => {
       ],
       total: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
     };
-    convertWithStrategyMock.mockResolvedValueOnce({
-      strategy: {
-        method: 'vlm',
-        reason: 'Forced: vlm',
-        sampledPages: 0,
-        totalPages: 0,
-      },
-      tokenUsageReport: mockReport,
-    });
+    convertMock.mockResolvedValueOnce(mockReport);
 
     const logger = makeLogger();
     const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
@@ -384,7 +392,7 @@ describe('PDFParser', () => {
       'report-vlm',
       vi.fn(),
       false,
-      { forcedMethod: 'vlm', vlmProcessorModel: {} as any },
+      withCorrection(),
     );
 
     expect(result).toBe(mockReport);
@@ -404,7 +412,7 @@ describe('PDFParser', () => {
       'report-std',
       vi.fn(),
       false,
-      { num_threads: 4 },
+      withCorrection({ num_threads: 4 }),
     );
 
     expect(result).toBeNull();
@@ -422,10 +430,13 @@ describe('PDFParser', () => {
     // Clear mock calls from init
     vi.mocked(SystemChecks.checkCommandExists).mockClear();
 
-    await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
-      num_threads: 4,
-      forceImagePdf: true,
-    });
+    await parser.parse(
+      'http://file.pdf',
+      'report-1',
+      vi.fn(),
+      false,
+      withCorrection({ num_threads: 4, forceImagePdf: true }),
+    );
 
     expect(SystemChecks.checkCommandExists).toHaveBeenCalledWith(
       'magick',
@@ -453,10 +464,13 @@ describe('PDFParser', () => {
     );
 
     await expect(
-      parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
-        num_threads: 4,
-        forceImagePdf: true,
-      }),
+      parser.parse(
+        'http://file.pdf',
+        'report-1',
+        vi.fn(),
+        false,
+        withCorrection({ num_threads: 4, forceImagePdf: true }),
+      ),
     ).rejects.toThrow('ImageMagick is not installed');
   });
 
@@ -471,10 +485,13 @@ describe('PDFParser', () => {
     // Clear mock calls from init
     vi.mocked(SystemChecks.checkCommandExists).mockClear();
 
-    await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
-      num_threads: 4,
-      forceImagePdf: true,
-    });
+    await parser.parse(
+      'http://file.pdf',
+      'report-1',
+      vi.fn(),
+      false,
+      withCorrection({ num_threads: 4, forceImagePdf: true }),
+    );
 
     // Should NOT call checkCommandExists during parse since external server
     expect(SystemChecks.checkCommandExists).not.toHaveBeenCalled();
@@ -494,9 +511,13 @@ describe('PDFParser', () => {
     await parser.init();
 
     const onComplete = vi.fn();
-    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-      num_threads: 4,
-    });
+    await parser.parse(
+      'http://file.pdf',
+      'report-1',
+      onComplete,
+      false,
+      withCorrection({ num_threads: 4 }),
+    );
 
     expect(PDFConverter).toHaveBeenCalledWith(
       logger,
@@ -519,9 +540,13 @@ describe('PDFParser', () => {
     await parser.init();
 
     const onComplete = vi.fn();
-    await parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-      num_threads: 4,
-    });
+    await parser.parse(
+      'http://file.pdf',
+      'report-1',
+      onComplete,
+      false,
+      withCorrection({ num_threads: 4 }),
+    );
 
     expect(PDFConverter).toHaveBeenCalledWith(
       logger,
@@ -672,7 +697,7 @@ describe('PDFParser', () => {
         'report-1',
         onComplete,
         false,
-        { num_threads: 4 },
+        withCorrection({ num_threads: 4 }),
       );
 
       expect(logger.warn).toHaveBeenCalledWith(
@@ -695,9 +720,13 @@ describe('PDFParser', () => {
 
       const onComplete = vi.fn();
       await expect(
-        parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-          num_threads: 4,
-        }),
+        parser.parse(
+          'http://file.pdf',
+          'report-1',
+          onComplete,
+          false,
+          withCorrection({ num_threads: 4 }),
+        ),
       ).rejects.toThrow('ECONNREFUSED');
 
       expect(logger.warn).not.toHaveBeenCalled();
@@ -726,9 +755,13 @@ describe('PDFParser', () => {
 
       const onComplete = vi.fn();
       await expect(
-        parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-          num_threads: 4,
-        }),
+        parser.parse(
+          'http://file.pdf',
+          'report-1',
+          onComplete,
+          false,
+          withCorrection({ num_threads: 4 }),
+        ),
       ).rejects.toThrow('ECONNREFUSED');
 
       expect(logger.warn).toHaveBeenCalledWith(
@@ -748,9 +781,13 @@ describe('PDFParser', () => {
 
       const onComplete = vi.fn();
       await expect(
-        parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-          num_threads: 4,
-        }),
+        parser.parse(
+          'http://file.pdf',
+          'report-1',
+          onComplete,
+          false,
+          withCorrection({ num_threads: 4 }),
+        ),
       ).rejects.toThrow('Some other error');
 
       expect(logger.warn).not.toHaveBeenCalled();
@@ -769,9 +806,13 @@ describe('PDFParser', () => {
 
       const onComplete = vi.fn();
       await expect(
-        parser.parse('http://file.pdf', 'report-1', onComplete, false, {
-          num_threads: 4,
-        }),
+        parser.parse(
+          'http://file.pdf',
+          'report-1',
+          onComplete,
+          false,
+          withCorrection({ num_threads: 4 }),
+        ),
       ).rejects.toBe('string error');
 
       expect(logger.warn).not.toHaveBeenCalled();
@@ -799,7 +840,7 @@ describe('PDFParser', () => {
         'report-1',
         vi.fn(),
         false,
-        { num_threads: 4 },
+        withCorrection({ num_threads: 4 }),
       );
 
       expect(logger.warn).toHaveBeenCalledWith(
@@ -830,7 +871,7 @@ describe('PDFParser', () => {
         'report-1',
         vi.fn(),
         false,
-        { num_threads: 4 },
+        withCorrection({ num_threads: 4 }),
       );
 
       expect(result).toBe('OK');
@@ -861,7 +902,7 @@ describe('PDFParser', () => {
         'report-1',
         vi.fn(),
         false,
-        { num_threads: 4 },
+        withCorrection({ num_threads: 4 }),
       );
 
       expect(result).toBe('OK');
@@ -889,7 +930,7 @@ describe('PDFParser', () => {
         'report-1',
         vi.fn(),
         false,
-        { num_threads: 4 },
+        withCorrection({ num_threads: 4 }),
       );
 
       expect(result).toBe('OK');
@@ -919,7 +960,7 @@ describe('PDFParser', () => {
         'report-1',
         vi.fn(),
         false,
-        { num_threads: 4 },
+        withCorrection({ num_threads: 4 }),
       );
 
       expect(result).toBe('OK');
@@ -1004,341 +1045,13 @@ describe('PDFParser', () => {
           'report-1',
           onComplete,
           false,
-          { num_threads: 4 },
+          withCorrection({ num_threads: 4 }),
           abortController.signal,
         ),
       ).rejects.toThrow('Aborted');
 
       // Should NOT attempt recovery when aborted
       expect(logger.warn).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('strategy-based flow', () => {
-    test('parse routes to strategy flow when strategySamplerModel is provided', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-
-      const mockReport = {
-        components: [],
-        total: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-      };
-      convertWithStrategyMock.mockResolvedValueOnce({
-        strategy: {
-          method: 'ocrmac',
-          reason: 'Sampling skipped',
-          sampledPages: 0,
-          totalPages: 0,
-        },
-        tokenUsageReport: mockReport,
-      });
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-      await parser.init();
-
-      const fakeModel = {} as any;
-      const result = await parser.parse(
-        'http://file.pdf',
-        'report-1',
-        vi.fn(),
-        false,
-        { strategySamplerModel: fakeModel },
-      );
-
-      expect(convertWithStrategyMock).toHaveBeenCalledWith(
-        'http://file.pdf',
-        'report-1',
-        expect.any(Function),
-        false,
-        { strategySamplerModel: fakeModel },
-        undefined,
-      );
-      expect(result).toBe(mockReport);
-      // Should NOT call legacy convert
-      expect(convertMock).not.toHaveBeenCalled();
-    });
-
-    test('parse routes to strategy flow when forcedMethod is provided', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-
-      convertWithStrategyMock.mockResolvedValueOnce({
-        strategy: {
-          method: 'vlm',
-          reason: 'Forced: vlm',
-          sampledPages: 0,
-          totalPages: 0,
-        },
-        tokenUsageReport: null,
-      });
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-      await parser.init();
-
-      const result = await parser.parse(
-        'http://file.pdf',
-        'report-1',
-        vi.fn(),
-        true,
-        { forcedMethod: 'vlm' },
-      );
-
-      expect(convertWithStrategyMock).toHaveBeenCalled();
-      expect(result).toBeNull();
-      expect(convertMock).not.toHaveBeenCalled();
-    });
-
-    test('parse routes to strategy flow when Review Assistance is enabled', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-
-      convertWithStrategyMock.mockResolvedValueOnce({
-        strategy: {
-          method: 'ocrmac',
-          reason: 'Sampling skipped',
-          sampledPages: 0,
-          totalPages: 0,
-        },
-        tokenUsageReport: null,
-      });
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-      await parser.init();
-
-      const result = await parser.parse(
-        'http://file.pdf',
-        'report-1',
-        vi.fn(),
-        false,
-        { reviewAssistance: true },
-      );
-
-      expect(convertWithStrategyMock).toHaveBeenCalled();
-      expect(convertMock).not.toHaveBeenCalled();
-      expect(result).toBeNull();
-    });
-
-    test('parse uses legacy flow when Review Assistance object is disabled', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-      convertMock.mockResolvedValueOnce('legacy-result');
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-      await parser.init();
-
-      const result = await parser.parse(
-        'http://file.pdf',
-        'report-1',
-        vi.fn(),
-        false,
-        { reviewAssistance: {} },
-      );
-
-      expect(convertMock).toHaveBeenCalled();
-      expect(convertWithStrategyMock).not.toHaveBeenCalled();
-      expect(result).toBe('legacy-result');
-    });
-
-    test('parse returns null tokenUsageReport from strategy flow', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-
-      convertWithStrategyMock.mockResolvedValueOnce({
-        strategy: {
-          method: 'vlm',
-          reason: 'Korean document detected',
-          sampledPages: 3,
-          totalPages: 50,
-        },
-        tokenUsageReport: null,
-      });
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-      await parser.init();
-
-      const result = await parser.parse(
-        'file:///tmp/doc.pdf',
-        'report-2',
-        vi.fn(),
-        false,
-        { forcedMethod: 'vlm', vlmProcessorModel: {} as any },
-      );
-
-      expect(result).toBeNull();
-    });
-
-    test('strategy flow recovers from ECONNREFUSED on local server', async () => {
-      doclingClient.health.mockResolvedValue(undefined);
-      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
-      const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
-      killSpy.mockResolvedValue(undefined);
-
-      // First call fails with ECONNREFUSED, second succeeds
-      const econnRefusedError = new Error(
-        'connect ECONNREFUSED 127.0.0.1:5001',
-      );
-      convertWithStrategyMock
-        .mockRejectedValueOnce(econnRefusedError)
-        .mockResolvedValueOnce({
-          strategy: {
-            method: 'ocrmac',
-            reason: 'Sampling skipped',
-            sampledPages: 0,
-            totalPages: 0,
-          },
-          tokenUsageReport: null,
-        });
-
-      mockDoclingEnvironment();
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, port: 5001 });
-      await parser.init();
-
-      const result = await parser.parse(
-        'http://file.pdf',
-        'report-1',
-        vi.fn(),
-        false,
-        { forcedMethod: 'ocrmac' },
-      );
-
-      expect(logger.warn).toHaveBeenCalledWith(
-        '[PDFParser] Connection refused, attempting server recovery...',
-      );
-      expect(result).toBeNull();
-    });
-
-    test('strategy flow does not recover on external server', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-
-      const econnRefusedError = new Error(
-        'connect ECONNREFUSED 127.0.0.1:5001',
-      );
-      convertWithStrategyMock.mockRejectedValueOnce(econnRefusedError);
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-      await parser.init();
-
-      await expect(
-        parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
-          forcedMethod: 'ocrmac',
-        }),
-      ).rejects.toThrow('ECONNREFUSED');
-
-      expect(logger.warn).not.toHaveBeenCalled();
-    });
-
-    test('strategy flow throws immediately when abortSignal is aborted', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
-
-      const abortError = new Error('Aborted');
-      abortError.name = 'AbortError';
-      convertWithStrategyMock.mockRejectedValueOnce(abortError);
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, port: 5001 });
-      await parser.init();
-
-      const abortController = new AbortController();
-      abortController.abort();
-
-      await expect(
-        parser.parse(
-          'http://file.pdf',
-          'report-1',
-          vi.fn(),
-          false,
-          { forcedMethod: 'ocrmac' },
-          abortController.signal,
-        ),
-      ).rejects.toThrow('Aborted');
-
-      expect(logger.warn).not.toHaveBeenCalled();
-    });
-
-    test('strategy flow throws after recovery attempt exhausted', async () => {
-      doclingClient.health.mockResolvedValue(undefined);
-      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
-      const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
-      killSpy.mockResolvedValue(undefined);
-
-      const econnRefusedError = new Error(
-        'connect ECONNREFUSED 127.0.0.1:5001',
-      );
-      convertWithStrategyMock
-        .mockRejectedValueOnce(econnRefusedError)
-        .mockRejectedValueOnce(econnRefusedError);
-
-      mockDoclingEnvironment();
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, port: 5001 });
-      await parser.init();
-
-      await expect(
-        parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
-          forcedMethod: 'ocrmac',
-        }),
-      ).rejects.toThrow('ECONNREFUSED');
-    });
-
-    test('strategy flow passes enableImagePdfFallback=true for local server', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
-
-      convertWithStrategyMock.mockResolvedValueOnce({
-        strategy: {
-          method: 'ocrmac',
-          reason: 'Sampling skipped',
-          sampledPages: 0,
-          totalPages: 0,
-        },
-        tokenUsageReport: null,
-      });
-
-      const logger = makeLogger();
-      const parser = new PDFParser({
-        logger,
-        port: 5001,
-        enableImagePdfFallback: true,
-      });
-      await parser.init();
-
-      await parser.parse('http://file.pdf', 'report-1', vi.fn(), false, {
-        forcedMethod: 'ocrmac',
-      });
-
-      // PDFConverter should be created with enableImagePdfFallback=true
-      expect(PDFConverter).toHaveBeenCalledWith(
-        logger,
-        expect.any(Object),
-        true,
-        expect.any(Number),
-      );
-    });
-
-    test('strategy flow uses legacy flow when neither strategySamplerModel nor forcedMethod set', async () => {
-      doclingClient.health.mockResolvedValueOnce();
-      convertMock.mockResolvedValueOnce('legacy-result');
-
-      const logger = makeLogger();
-      const parser = new PDFParser({ logger, baseUrl: 'http://example.com' });
-      await parser.init();
-
-      const result = await parser.parse(
-        'http://file.pdf',
-        'report-1',
-        vi.fn(),
-        false,
-        { num_threads: 4 },
-      );
-
-      expect(convertMock).toHaveBeenCalled();
-      expect(convertWithStrategyMock).not.toHaveBeenCalled();
-      expect(result).toBe('legacy-result');
     });
   });
 });

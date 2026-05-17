@@ -17,7 +17,6 @@ import {
   type PDFConvertOptions,
   PDFConverter,
 } from './pdf-converter';
-import { isReviewAssistanceEnabled } from './review-assistance-options';
 
 type Options = {
   logger: LoggerMethods;
@@ -391,12 +390,6 @@ export class PDFParser {
       );
     }
 
-    // Use strategy-based flow when new options are provided
-    const useStrategyFlow =
-      options.strategySamplerModel !== undefined ||
-      options.forcedMethod !== undefined ||
-      isReviewAssistanceEnabled(options.reviewAssistance);
-
     return this.executeWithRecovery(async () => {
       const effectiveFallbackEnabled =
         this.enableImagePdfFallback && !this.baseUrl;
@@ -406,18 +399,6 @@ export class PDFParser {
         effectiveFallbackEnabled,
         this.timeout,
       );
-
-      if (useStrategyFlow) {
-        const result = await converter.convertWithStrategy(
-          url,
-          reportId,
-          onComplete,
-          cleanupAfterCallback,
-          options,
-          abortSignal,
-        );
-        return result.tokenUsageReport;
-      }
 
       return converter.convert(
         url,

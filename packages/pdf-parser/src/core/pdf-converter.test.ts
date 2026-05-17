@@ -1,6 +1,9 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type { DoclingAPIClient } from 'docling-sdk';
 
+import type { PDFConvertOptions } from './pdf-converter';
+
+import { LLMTokenUsageAggregator } from '@heripo/shared';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -41,9 +44,40 @@ vi.mock('../validators/document-type-validator', () => ({
   DocumentTypeValidator: vi.fn(),
 }));
 
-vi.mock('./vlm-conversion-pipeline', () => ({
-  VlmConversionPipeline: vi.fn(),
-}));
+vi.mock('./post-docling-correction-pipeline', () => {
+  const wrapCallback = vi.fn(
+    (
+      _pdfPath: string | undefined,
+      _reportId: string,
+      _options: unknown,
+      originalCallback: unknown,
+    ) => originalCallback,
+  );
+  const PostDoclingCorrectionPipeline = vi.fn(function () {
+    return { wrapCallback };
+  });
+  return {
+    PostDoclingCorrectionPipeline,
+    __wrapCallbackMock: wrapCallback,
+  };
+});
+
+const mockModel = { modelId: 'test-model' } as any;
+
+function withCorrection(
+  overrides: Omit<Partial<PDFConvertOptions>, 'correction'> = {},
+): PDFConvertOptions {
+  return {
+    correction: {
+      models: {
+        textCorrection: mockModel,
+        pageGate: mockModel,
+        reviewAssistance: mockModel,
+      },
+    },
+    ...overrides,
+  } as PDFConvertOptions;
+}
 
 describe('PDFConverter', () => {
   let logger: LoggerMethods;
@@ -115,7 +149,7 @@ describe('PDFConverter', () => {
           'report-1',
           vi.fn(),
           false,
-          { chunkedConversion: true },
+          withCorrection({ chunkedConversion: true }),
         );
 
         expect(ChunkedPDFConverter).toHaveBeenCalledWith(
@@ -140,7 +174,11 @@ describe('PDFConverter', () => {
           'report-1',
           vi.fn(),
           false,
-          { chunkedConversion: true, chunkSize: 20, chunkMaxRetries: 5 },
+          withCorrection({
+            chunkedConversion: true,
+            chunkSize: 20,
+            chunkMaxRetries: 5,
+          }),
         );
 
         expect(ChunkedPDFConverter).toHaveBeenCalledWith(
@@ -157,7 +195,7 @@ describe('PDFConverter', () => {
           'report-1',
           vi.fn(),
           true,
-          { chunkedConversion: true },
+          withCorrection({ chunkedConversion: true }),
         );
 
         expect(ChunkedPDFConverter).not.toHaveBeenCalled();
@@ -181,7 +219,7 @@ describe('PDFConverter', () => {
           'report-fallback',
           vi.fn(),
           false,
-          { chunkedConversion: true },
+          withCorrection({ chunkedConversion: true }),
         );
 
         expect(logger.warn).toHaveBeenCalledWith(
@@ -203,7 +241,7 @@ describe('PDFConverter', () => {
             'report-abort',
             vi.fn(),
             false,
-            { chunkedConversion: true },
+            withCorrection({ chunkedConversion: true }),
           ),
         ).rejects.toThrow('Chunked PDF conversion was aborted');
 
@@ -226,7 +264,7 @@ describe('PDFConverter', () => {
           'report-non-error',
           vi.fn(),
           false,
-          { chunkedConversion: true },
+          withCorrection({ chunkedConversion: true }),
         );
 
         expect(logger.warn).toHaveBeenCalledWith(
@@ -260,7 +298,7 @@ describe('PDFConverter', () => {
         'report123',
         onComplete,
         false,
-        { documentValidationModel: mockModel },
+        withCorrection({ documentValidationModel: mockModel }),
       );
 
       expect(PdfTextExtractor).toHaveBeenCalledWith(logger);
@@ -279,7 +317,7 @@ describe('PDFConverter', () => {
         'report123',
         onComplete,
         false,
-        { documentValidationModel: mockModel },
+        withCorrection({ documentValidationModel: mockModel }),
       );
 
       expect(PdfTextExtractor).not.toHaveBeenCalled();
@@ -296,7 +334,7 @@ describe('PDFConverter', () => {
         'report123',
         onComplete,
         false,
-        { documentValidationModel: mockModel },
+        withCorrection({ documentValidationModel: mockModel }),
       );
 
       expect(mockValidate).toHaveBeenCalledTimes(1);
@@ -307,7 +345,7 @@ describe('PDFConverter', () => {
         'report456',
         onComplete,
         false,
-        { documentValidationModel: mockModel },
+        withCorrection({ documentValidationModel: mockModel }),
       );
 
       expect(mockValidate).toHaveBeenCalledTimes(1);
@@ -321,7 +359,7 @@ describe('PDFConverter', () => {
         'report123',
         onComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(PdfTextExtractor).not.toHaveBeenCalled();
@@ -338,7 +376,7 @@ describe('PDFConverter', () => {
         'report123',
         onComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(DoclingConversionExecutor).toHaveBeenCalledWith(
@@ -351,7 +389,7 @@ describe('PDFConverter', () => {
         'report123',
         onComplete,
         false,
-        {},
+        expect.objectContaining({ correction: expect.any(Object) }),
         undefined,
       );
     });
@@ -364,7 +402,7 @@ describe('PDFConverter', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
         abortController.signal,
       );
 
@@ -373,7 +411,7 @@ describe('PDFConverter', () => {
         'report123',
         expect.any(Function),
         false,
-        {},
+        expect.objectContaining({ correction: expect.any(Object) }),
         abortController.signal,
       );
     });
@@ -384,13 +422,36 @@ describe('PDFConverter', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
       );
 
       expect(logger.info).toHaveBeenCalledWith(
         '[PDFConverter] Converting:',
         'http://test.com/doc.pdf',
       );
+    });
+
+    test('should return aggregated token report when token usage was tracked', async () => {
+      const aggregator = new LLMTokenUsageAggregator();
+      aggregator.track({
+        component: 'PostDoclingPageProcessor',
+        phase: 'text-correction',
+        model: 'primary',
+        modelName: 'test-model',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+      });
+
+      const result = await converter.convert(
+        'http://test.com/doc.pdf',
+        'report123',
+        vi.fn(),
+        false,
+        withCorrection({ aggregator }),
+      );
+
+      expect(result).toEqual(aggregator.getReport());
     });
   });
 
@@ -411,7 +472,7 @@ describe('PDFConverter', () => {
           'report-abort-fallback',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
           abortController.signal,
         ),
       ).rejects.toThrow('Task failed: Processing failed');
@@ -435,7 +496,7 @@ describe('PDFConverter', () => {
           'report-fail',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Task failed: Processing failed');
 
@@ -463,7 +524,7 @@ describe('PDFConverter', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
       );
 
       expect(mockImagePdfConverter.convert).toHaveBeenCalledWith(
@@ -505,7 +566,7 @@ describe('PDFConverter', () => {
           'report-fail',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow(ImagePdfFallbackError);
 
@@ -536,7 +597,7 @@ describe('PDFConverter', () => {
           'report-fail',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow(ImagePdfFallbackError);
 
@@ -567,7 +628,7 @@ describe('PDFConverter', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
       );
 
       expect(logger.info).toHaveBeenCalledWith(
@@ -583,7 +644,7 @@ describe('PDFConverter', () => {
         'report-force-img',
         vi.fn(),
         false,
-        { forceImagePdf: true },
+        withCorrection({ forceImagePdf: true }),
       );
 
       expect(logger.info).toHaveBeenCalledWith(
@@ -600,7 +661,7 @@ describe('PDFConverter', () => {
         'report-std-no-force',
         vi.fn(),
         false,
-        { forceImagePdf: false },
+        withCorrection({ forceImagePdf: false }),
       );
 
       expect(ImagePdfConverter).not.toHaveBeenCalled();
@@ -620,7 +681,7 @@ describe('PDFConverter', () => {
           'report-force-err',
           vi.fn(),
           false,
-          { forceImagePdf: true },
+          withCorrection({ forceImagePdf: true }),
         ),
       ).rejects.toThrow('convert failed');
     });
@@ -639,7 +700,7 @@ describe('PDFConverter', () => {
         'report-force-img',
         vi.fn(),
         false,
-        { forceImagePdf: true },
+        withCorrection({ forceImagePdf: true }),
       );
 
       expect(mockExecute).toHaveBeenCalledWith(

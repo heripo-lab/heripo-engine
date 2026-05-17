@@ -23,10 +23,29 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   documentValidationModel: 'openai/gpt-5.4',
   // Force image PDF pre-conversion
   forceImagePdf: false,
-  // Korean report detection
-  strategySamplerModel: 'openai/gpt-5.4',
-  vlmProcessorModel: 'google/gemini-3.1-flash-lite',
-  forcedMethod: undefined,
+  // Mandatory post-Docling correction.
+  // NOTE: demo-web defaults assume cloud VLMs (Gemini, OpenAI) where higher
+  // page concurrency is safe. For local models prefer a smaller value
+  // (the pdf-parser library default is 1) to keep GPU/memory usage bounded —
+  // see Phase D in docs/plans/pdf-parser-correction-gating.md.
+  correction: {
+    models: {
+      textCorrection: 'google/gemini-3.1-flash-lite',
+      pageGate: 'google/gemini-3.1-flash-lite',
+      reviewAssistance: 'google/gemini-3.1-flash-lite',
+      tableCorrection: undefined,
+      reviewAssistanceTasks: {},
+    },
+    concurrency: {
+      pages: 10,
+      reviewTasks: 6,
+      tables: 1,
+    },
+    outputLanguage: 'ko-KR',
+    maxRetries: undefined,
+    localModelConcurrency: 1,
+    workItemTimeoutMs: 1_800_000,
+  },
   // LLM Models
   fallbackModel: 'openai/gpt-5.4',
   validatorModel: 'openai/gpt-5.4',
@@ -34,8 +53,6 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   tocExtractorModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
   visionTocExtractorModel: 'google/gemini-3-flash-preview',
   captionParserModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
-  // VLM text correction
-  vlmConcurrency: 10,
   // Batch & Retry
   textCleanerBatchSize: 20,
   captionParserBatchSize: 0,

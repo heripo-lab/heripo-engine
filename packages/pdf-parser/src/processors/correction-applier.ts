@@ -72,7 +72,7 @@ export function applyCorrections(
             );
           }
           logger.warn(
-            `[VlmTextCorrector] Page ${pageNo}, text ${correction.i}: ` +
+            `[PostDoclingPageProcessor] Page ${pageNo}, text ${correction.i}: ` +
               `find string not found, skipping substitution`,
           );
           return acc;

@@ -13,7 +13,6 @@ import type {
 import type { LLMTokenUsageAggregator } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
-import type { NormalizedReviewAssistanceOptions } from '../../core/review-assistance-options';
 import type { PageReviewContext } from './page-review-context-builder';
 
 import { ConcurrentPool, LLMCaller } from '@heripo/shared';
@@ -22,7 +21,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
-  REVIEW_ASSISTANCE_TASKS,
   type ReviewAssistanceTaskDefinition,
   buildReviewAssistancePrompt,
 } from '../../prompts/review-assistance-prompt';
@@ -32,10 +30,57 @@ import {
 } from '../../types/review-assistance-schema';
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
+import { PictureSplitCandidateDetector } from './picture-split-candidate-detector';
+import {
+  type ReviewAssistanceCallTrace,
+  type ReviewAssistanceCallTraceValidation,
+  ReviewAssistanceCheckpointStore,
+} from './review-assistance-checkpoint-store';
+import { ReviewAssistanceContextPacker } from './review-assistance-context-packer';
+import {
+  REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+  ReviewAssistancePageGate,
+  createReviewAssistancePageGateFailOpenEligibility,
+  isReviewAssistancePageGatePending,
+  readReviewAssistancePageGateReport,
+  writeReviewAssistancePageGateReport,
+} from './review-assistance-page-gate';
 import { ReviewAssistancePatcher } from './review-assistance-patcher';
 import { ReviewAssistanceValidator } from './review-assistance-validator';
+import {
+  type ReviewAssistanceWorkItem,
+  ReviewAssistanceWorkScheduler,
+} from './review-assistance-work-scheduler';
+import { TableCorrectionRunner } from './table-correction-runner';
 
-export interface ReviewAssistanceRunnerOptions extends NormalizedReviewAssistanceOptions {
+export type ReviewAssistanceModelResolver = (
+  task: ReviewAssistanceTaskDefinition,
+) => LanguageModel;
+
+export interface ReviewAssistanceRunnerOptions {
+  pageGateModel: LanguageModel;
+  pageGateMaxRetries: number;
+  pageGateTemperature: number;
+  pageConcurrency: number;
+  taskConcurrency: number;
+  localModelConcurrency: number;
+  workItemTimeoutMs: number;
+  autoApplyThreshold: number;
+  proposalThreshold: number;
+  /**
+   * Total work-item attempts (including the initial call) for the re-ask
+   * loop. The same value is also forwarded to `LLMCaller.callVision` as the
+   * SDK-level transient retry budget; the two budgets are independent and
+   * compose multiplicatively, so keep this conservative (default: 3).
+   *
+   * Always clamped to at least 1 by `getWorkItemMaxAttempts` so a first
+   * attempt is guaranteed even when callers pass 0.
+   */
+  maxRetries: number;
+  /** Same semantics as `maxRetries`, but applied to the `tables` task. */
+  tableMaxRetries: number;
+  temperature: number;
+  outputLanguage: string;
   pdfPath?: string;
   abortSignal?: AbortSignal;
   aggregator?: LLMTokenUsageAggregator;
@@ -44,15 +89,13 @@ export interface ReviewAssistanceRunnerOptions extends NormalizedReviewAssistanc
   pageTexts?: Map<number, string>;
 }
 
-const REVIEW_ASSISTANCE_PAGE_CONCURRENCY = 1;
-const REVIEW_ASSISTANCE_TASK_CONCURRENCY = REVIEW_ASSISTANCE_TASKS.length;
-
-interface ReviewAssistanceTaskResult {
-  task: ReviewAssistanceTaskDefinition;
+interface ReviewAssistanceWorkItemResult {
+  workItem: ReviewAssistanceWorkItem;
   status: 'succeeded' | 'empty' | 'failed';
   decisions: ReviewAssistanceDecision[];
   issue?: ReviewAssistanceIssue;
   errorMessage?: string;
+  callTrace: ReviewAssistanceCallTrace;
 }
 
 export class ReviewAssistanceRunner {
@@ -61,7 +104,7 @@ export class ReviewAssistanceRunner {
   async analyzeAndSave(
     outputDir: string,
     reportId: string,
-    model: LanguageModel,
+    modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
   ): Promise<ReviewAssistanceReport> {
     this.emitProgress(options, {
@@ -85,13 +128,36 @@ export class ReviewAssistanceRunner {
     );
     const pageTexts =
       options.pageTexts ??
-      (await this.extractPageTexts(
+      (await PdfTextExtractor.tryExtract(
+        this.logger,
         options.pdfPath,
         Object.keys(doc.pages).length,
       ));
 
     const contextBuilder = new PageReviewContextBuilder();
-    const contexts = contextBuilder.build(doc, outputDir, { pageTexts });
+    let contexts = contextBuilder.build(doc, outputDir, {
+      pageTexts,
+      reviewAssistanceEligibilityByPage:
+        this.readPageGateEligibility(outputDir),
+    });
+    contexts = await this.ensurePageEligibility(contexts, options, outputDir);
+    contexts = await this.addPictureSplitCandidates(
+      contexts,
+      options.pageConcurrency,
+    );
+    const pagesSkippedByGate = contexts.filter(
+      (context) => !context.reviewAssistanceEligibility.eligible,
+    ).length;
+    const pagesSkippedByUnavailableImage = contexts.filter(
+      (context) =>
+        context.reviewAssistanceEligibility.eligible &&
+        this.hasUnavailablePageImageGateReason(context),
+    ).length;
+    const pagesEligibleForStructuralReview = contexts.filter(
+      (context) =>
+        context.reviewAssistanceEligibility.eligible &&
+        !this.hasUnavailablePageImageGateReason(context),
+    ).length;
 
     this.emitProgress(options, {
       substage: 'review-assistance:prepare',
@@ -101,16 +167,35 @@ export class ReviewAssistanceRunner {
     });
 
     this.logger.info(
-      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${REVIEW_ASSISTANCE_PAGE_CONCURRENCY}, task concurrency: ${REVIEW_ASSISTANCE_TASK_CONCURRENCY})...`,
+      `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${options.pageConcurrency}, task concurrency: ${options.taskConcurrency})...`,
+    );
+    this.logger.info(
+      `[ReviewAssistanceRunner] Local work item scheduler: concurrency ${options.localModelConcurrency}, timeout ${options.workItemTimeoutMs}ms`,
+    );
+    this.logger.info(
+      `[ReviewAssistanceRunner] Gate summary: ${pagesEligibleForStructuralReview} eligible, ${pagesSkippedByGate} skipped by gate, ${pagesSkippedByUnavailableImage} skipped for unavailable page image`,
     );
 
+    const checkpointStore = ReviewAssistanceCheckpointStore.open(
+      outputDir,
+      reportId,
+    );
+    const callTraces = [...checkpointStore.getCallTraces()];
     let completedPages = 0;
     let failedPages = 0;
     const pageResults = await ConcurrentPool.run(
       contexts,
-      REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
+      options.pageConcurrency,
       (context) =>
-        this.reviewPage(context, reportId, model, options, contexts.length),
+        this.reviewPage(
+          context,
+          reportId,
+          modelResolver,
+          options,
+          contexts.length,
+          checkpointStore,
+          callTraces,
+        ),
       (result) => {
         completedPages += 1;
         if (result.status === 'failed') {
@@ -176,7 +261,12 @@ export class ReviewAssistanceRunner {
       ),
     });
 
-    const report = this.buildReport(reportId, options, patched.pages);
+    const report = this.buildReport(
+      reportId,
+      options,
+      patched.pages,
+      callTraces,
+    );
     this.emitProgress(options, {
       substage: 'review-assistance:write-report',
       status: 'started',
@@ -207,29 +297,179 @@ export class ReviewAssistanceRunner {
     return report;
   }
 
-  private async extractPageTexts(
-    pdfPath: string | undefined,
-    totalPages: number,
-  ): Promise<Map<number, string> | undefined> {
-    if (!pdfPath) return undefined;
+  private readPageGateEligibility(
+    outputDir: string,
+  ): Map<number, PageReviewContext['reviewAssistanceEligibility']> | undefined {
     try {
-      const extractor = new PdfTextExtractor(this.logger);
-      return await extractor.extractText(pdfPath, totalPages);
+      return readReviewAssistancePageGateReport(outputDir);
     } catch (error) {
       this.logger.warn(
-        '[ReviewAssistanceRunner] pdftotext extraction failed, proceeding without text reference',
+        '[ReviewAssistanceRunner] Failed to read page gate report, re-evaluating pages',
         error,
       );
       return undefined;
     }
   }
 
+  private async ensurePageEligibility(
+    contexts: PageReviewContext[],
+    options: ReviewAssistanceRunnerOptions,
+    outputDir: string,
+  ): Promise<PageReviewContext[]> {
+    const pendingCount = contexts.filter((context) =>
+      isReviewAssistancePageGatePending(context.reviewAssistanceEligibility),
+    ).length;
+    if (pendingCount === 0) return contexts;
+
+    this.logger.info(
+      `[ReviewAssistanceRunner] Evaluating ${pendingCount} pages with VLM page gate`,
+    );
+
+    const gate = new ReviewAssistancePageGate();
+    const updatedContexts = await ConcurrentPool.run(
+      contexts,
+      options.pageConcurrency,
+      async (context) => {
+        if (
+          !isReviewAssistancePageGatePending(
+            context.reviewAssistanceEligibility,
+          )
+        ) {
+          return context;
+        }
+
+        try {
+          let image: Uint8Array;
+          try {
+            image = new Uint8Array(await readFile(context.pageImagePath));
+          } catch (error) {
+            if (options.abortSignal?.aborted) {
+              throw error;
+            }
+            this.logger.warn(
+              `[ReviewAssistanceRunner] Page ${context.pageNo}: page image unavailable for page gate`,
+              this.errorLogBinding(error),
+            );
+            return {
+              ...context,
+              reviewAssistanceEligibility:
+                createReviewAssistancePageGateFailOpenEligibility(
+                  context.pageNo,
+                  REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+                ),
+            };
+          }
+
+          const reviewAssistanceEligibility = await gate.evaluate(
+            context,
+            image,
+            options.pageGateModel,
+            {
+              maxRetries: options.pageGateMaxRetries,
+              temperature: options.pageGateTemperature,
+              abortSignal: options.abortSignal,
+              aggregator: options.aggregator,
+              outputLanguage: options.outputLanguage,
+            },
+          );
+          return { ...context, reviewAssistanceEligibility };
+        } catch (error) {
+          if (options.abortSignal?.aborted) {
+            throw error;
+          }
+          const message = this.safeErrorMessage(error);
+          this.logger.warn(
+            `[ReviewAssistanceRunner] Page ${context.pageNo}: page gate failed open`,
+            this.errorLogBinding(error),
+          );
+          return {
+            ...context,
+            reviewAssistanceEligibility:
+              createReviewAssistancePageGateFailOpenEligibility(
+                context.pageNo,
+                message,
+              ),
+          };
+        }
+      },
+      () => {
+        if (options.onTokenUsage && options.aggregator) {
+          options.onTokenUsage(
+            options.aggregator.getReport() as TokenUsageReport,
+          );
+        }
+      },
+    );
+
+    writeReviewAssistancePageGateReport(
+      outputDir,
+      updatedContexts.map((context) => context.reviewAssistanceEligibility),
+    );
+    return updatedContexts;
+  }
+
+  private async addPictureSplitCandidates(
+    contexts: PageReviewContext[],
+    concurrency: number,
+  ): Promise<PageReviewContext[]> {
+    const detector = new PictureSplitCandidateDetector(this.logger);
+    // Bounded concurrency: detector.detect() spawns ImageMagick subprocesses.
+    // Use the page-level limit so a large report does not fan out into
+    // hundreds of concurrent magick processes.
+    return ConcurrentPool.run(contexts, concurrency, (context) =>
+      this.attachSplitCandidatesToPage(context, detector),
+    );
+  }
+
+  private async attachSplitCandidatesToPage(
+    context: PageReviewContext,
+    detector: PictureSplitCandidateDetector,
+  ): Promise<PageReviewContext> {
+    if (
+      !context.reviewAssistanceEligibility.eligible ||
+      this.hasUnavailablePageImageGateReason(context) ||
+      context.pictures.length === 0
+    ) {
+      return context;
+    }
+
+    const pictures: PageReviewContext['pictures'] = [];
+    for (const picture of context.pictures) {
+      if (!picture.bbox) {
+        pictures.push(picture);
+        continue;
+      }
+      const splitCandidate = await detector.detect({
+        pageImagePath: context.pageImagePath,
+        pageSize: context.pageSize,
+        pictureBbox: picture.bbox,
+      });
+      if (!splitCandidate) {
+        pictures.push(picture);
+        continue;
+      }
+      pictures.push({
+        ...picture,
+        splitCandidate,
+        suspectReasons: [
+          ...new Set([
+            ...picture.suspectReasons,
+            'picture_split_boundary_candidate',
+          ]),
+        ],
+      });
+    }
+    return { ...context, pictures };
+  }
+
   private async reviewPage(
     context: PageReviewContext,
     reportId: string,
-    model: LanguageModel,
+    modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
     pageCount: number,
+    checkpointStore?: ReviewAssistanceCheckpointStore,
+    callTraces: ReviewAssistanceCallTrace[] = [],
   ): Promise<ReviewAssistancePageResult> {
     this.emitProgress(options, {
       substage: 'review-assistance:page',
@@ -240,33 +480,140 @@ export class ReviewAssistanceRunner {
     });
 
     try {
+      if (!context.reviewAssistanceEligibility.eligible) {
+        this.logger.info(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: structural review skipped by gate (${context.reviewAssistanceEligibility.exclusionReasons.join(', ')})`,
+        );
+        const result: ReviewAssistancePageResult = {
+          pageNo: context.pageNo,
+          status: 'succeeded',
+          decisions: [],
+          issues: [this.buildSkippedByGateIssue(context)],
+        };
+        checkpointStore?.recordPage(result);
+        return result;
+      }
+
+      if (this.hasUnavailablePageImageGateReason(context)) {
+        this.logger.warn(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: structural review skipped because page image is not available`,
+        );
+        const result: ReviewAssistancePageResult = {
+          pageNo: context.pageNo,
+          status: 'succeeded',
+          decisions: [],
+          issues: [
+            ...this.buildIssues(context),
+            this.buildUnavailablePageImageIssue(context),
+          ],
+        };
+        checkpointStore?.recordPage(result);
+        return result;
+      }
+
       this.logger.info(
         `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review started`,
       );
 
       const image = new Uint8Array(await readFile(context.pageImagePath));
-      const taskResults = await Promise.all(
-        REVIEW_ASSISTANCE_TASKS.map((task) =>
-          this.reviewPageTask(context, task, image, pageCount, model, options),
-        ),
+      const scheduler = new ReviewAssistanceWorkScheduler();
+      const workItems = scheduler.build(context);
+
+      if (workItems.length === 0) {
+        const result: ReviewAssistancePageResult = {
+          pageNo: context.pageNo,
+          status: 'succeeded',
+          decisions: [],
+          issues: this.buildIssues(context),
+        };
+        checkpointStore?.recordPage(result);
+        return result;
+      }
+
+      const checkpointPage = checkpointStore?.getPartialPage(context.pageNo);
+      const completedCheckpointWorkItemIds = new Set(
+        workItems
+          .filter((workItem) =>
+            checkpointStore?.hasCompletedWorkItem(workItem.id),
+          )
+          .map((workItem) => workItem.id),
       );
-      const succeededTaskCount = taskResults.filter(
-        (result) => result.status !== 'failed',
-      ).length;
-      const failedTaskResults = taskResults.filter(
-        (result) => result.status === 'failed',
+      const failedCheckpointWorkItemIds = new Set(
+        workItems
+          .filter((workItem) => checkpointStore?.hasFailedWorkItem(workItem.id))
+          .map((workItem) => workItem.id),
+      );
+      const pendingWorkItems = workItems.filter(
+        (workItem) =>
+          !completedCheckpointWorkItemIds.has(workItem.id) &&
+          !failedCheckpointWorkItemIds.has(workItem.id),
       );
 
-      if (succeededTaskCount === 0) {
+      if (pendingWorkItems.length === 0 && checkpointPage) {
+        this.logger.info(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review resumed from checkpoint (${workItems.length} work items)`,
+        );
+        return checkpointPage;
+      }
+
+      const workItemResults: ReviewAssistanceWorkItemResult[] = [];
+      await ConcurrentPool.run(
+        pendingWorkItems,
+        options.localModelConcurrency,
+        (workItem) =>
+          this.reviewWorkItem(
+            context,
+            workItem,
+            image,
+            pageCount,
+            modelResolver,
+            options,
+          ),
+        (result) => {
+          workItemResults.push(result);
+          this.upsertCallTrace(callTraces, result.callTrace);
+          const partialPage = this.buildPageResultFromWorkItems(
+            context,
+            checkpointPage,
+            workItemResults,
+          );
+          checkpointStore?.recordWorkItem({
+            workItemId: result.workItem.id,
+            page: partialPage,
+            trace: result.callTrace,
+            failed:
+              result.status === 'failed'
+                ? {
+                    reason: result.errorMessage ?? 'failed',
+                    attempts: result.callTrace.attempts,
+                  }
+                : undefined,
+          });
+        },
+      );
+
+      const succeededLiveWorkItemResults = workItemResults.filter(
+        (result) => result.status !== 'failed',
+      );
+      const succeededWorkItemCount =
+        completedCheckpointWorkItemIds.size +
+        succeededLiveWorkItemResults.length;
+      const failedTaskResults = workItemResults.filter(
+        (result) => result.status === 'failed',
+      );
+      const failedWorkItemCount =
+        failedCheckpointWorkItemIds.size + failedTaskResults.length;
+
+      if (succeededWorkItemCount === 0 && failedWorkItemCount > 0) {
         this.logger.warn(
-          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: all review tasks failed`,
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: all review work items failed`,
           {
             err: {
               type: 'ReviewAssistanceTaskFailure',
               message: failedTaskResults
                 .map(
                   (result) =>
-                    `${result.task.id}: ${result.errorMessage ?? 'failed'}`,
+                    `${result.workItem.id}: ${result.errorMessage ?? 'failed'}`,
                 )
                 .join('; '),
             },
@@ -278,7 +625,7 @@ export class ReviewAssistanceRunner {
           decisions: [],
           issues: [
             ...this.buildIssues(context),
-            ...taskResults.flatMap((result) =>
+            ...workItemResults.flatMap((result) =>
               result.issue ? [result.issue] : [],
             ),
           ],
@@ -286,32 +633,25 @@ export class ReviewAssistanceRunner {
             message: failedTaskResults
               .map(
                 (result) =>
-                  `${result.task.id}: ${result.errorMessage ?? 'failed'}`,
+                  `${result.workItem.id}: ${result.errorMessage ?? 'failed'}`,
               )
               .join('; '),
           },
         };
       }
 
-      const decisions = this.mergeTaskDecisions(
-        taskResults.flatMap((result) => result.decisions),
+      const pageResult = this.buildPageResultFromWorkItems(
+        context,
+        checkpointPage,
+        workItemResults,
       );
 
       this.logger.info(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${decisions.length} decisions from ${succeededTaskCount}/${REVIEW_ASSISTANCE_TASKS.length} tasks)`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${pageResult.decisions.length} decisions from ${succeededWorkItemCount}/${workItems.length} work items)`,
       );
 
-      return {
-        pageNo: context.pageNo,
-        status: 'succeeded',
-        decisions,
-        issues: [
-          ...this.buildIssues(context),
-          ...taskResults.flatMap((result) =>
-            result.issue ? [result.issue] : [],
-          ),
-        ],
-      };
+      checkpointStore?.recordPage(pageResult);
+      return pageResult;
     } catch (error) {
       if (options.abortSignal?.aborted) {
         throw error;
@@ -349,98 +689,439 @@ export class ReviewAssistanceRunner {
     }
   }
 
-  private async reviewPageTask(
+  private async reviewWorkItem(
     context: PageReviewContext,
-    task: ReviewAssistanceTaskDefinition,
+    workItem: ReviewAssistanceWorkItem,
     image: Uint8Array,
     pageCount: number,
-    model: LanguageModel,
+    modelResolver: ReviewAssistanceModelResolver,
     options: ReviewAssistanceRunnerOptions,
-  ): Promise<ReviewAssistanceTaskResult> {
+  ): Promise<ReviewAssistanceWorkItemResult> {
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
+    const model = modelResolver(workItem.task);
+    const modelId = this.getModelId(model);
+    let attempts = 0;
+    let validationFeedback: string[] = [];
+
     try {
       this.logger.info(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task started`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item started`,
       );
 
-      const prompt = buildReviewAssistancePrompt(context, task, {
-        outputLanguage: options.outputLanguage,
-      });
-      const result = await LLMCaller.callVision({
-        schema: reviewAssistancePageSchema as any,
-        messages: [
-          {
-            role: 'user' as const,
-            content: [
-              { type: 'text' as const, text: prompt },
+      const tableCorrection =
+        workItem.kind === 'table'
+          ? this.createTableCorrectionWorkContext(context, workItem)
+          : undefined;
+      const packer = new ReviewAssistanceContextPacker();
+      const packedContext =
+        tableCorrection?.context.scopedPageContext ??
+        packer.pack(context, workItem);
+      const maxAttempts = this.getWorkItemMaxAttempts(workItem, options);
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        attempts = attempt;
+        const prompt = tableCorrection
+          ? tableCorrection.runner.buildPrompt(tableCorrection.context, {
+              outputLanguage: options.outputLanguage,
+              validationFeedback,
+              attempt,
+            })
+          : buildReviewAssistancePrompt(packedContext, workItem.task, {
+              outputLanguage: options.outputLanguage,
+              validationFeedback,
+              attempt,
+            });
+        const result = await this.withWorkItemTimeout(
+          LLMCaller.callVision({
+            schema: reviewAssistancePageSchema as any,
+            messages: [
               {
-                type: 'image' as const,
-                image,
-                mediaType: 'image/png' as const,
+                role: 'user' as const,
+                content: [
+                  { type: 'text' as const, text: prompt },
+                  {
+                    type: 'image' as const,
+                    image,
+                    mediaType: 'image/png' as const,
+                  },
+                ],
               },
             ],
-          },
-        ],
-        primaryModel: model,
-        maxRetries: options.maxRetries,
-        temperature: options.temperature,
-        abortSignal: options.abortSignal,
-        component: 'ReviewAssistance',
-        phase: 'page-review',
-        metadata: { pageNo: context.pageNo, pageCount, task: task.id },
+            primaryModel: model,
+            maxRetries: this.getTaskMaxRetries(workItem.task, options),
+            temperature: options.temperature,
+            abortSignal: options.abortSignal,
+            component: 'ReviewAssistance',
+            phase: 'work-item-review',
+            metadata: {
+              pageNo: context.pageNo,
+              pageCount,
+              task: workItem.task.id,
+              workItemId: workItem.id,
+              workItemKind: workItem.kind,
+              targetRefs: workItem.targetRefs.join(','),
+              attempt,
+            },
+          }),
+          options.workItemTimeoutMs,
+          workItem,
+        );
+
+        options.aggregator?.track(result.usage);
+
+        const output = result.output as ReviewAssistancePageOutput;
+        const decisions = tableCorrection
+          ? this.decorateWorkItemDecisions(
+              tableCorrection.runner.validateOutput(
+                tableCorrection.context,
+                output,
+                {
+                  autoApplyThreshold: options.autoApplyThreshold,
+                  proposalThreshold: options.proposalThreshold,
+                  allowAutoApply: true,
+                },
+              ),
+              workItem,
+            )
+          : this.validateWorkItemOutput(
+              packedContext,
+              output,
+              workItem,
+              options,
+            );
+        const failureReasons = this.getValidationFailureReasons(decisions);
+        if (failureReasons.length === 0) {
+          const validation: ReviewAssistanceCallTraceValidation =
+            attempt > 1 ? 'reasked' : 'passed';
+          const callTrace = this.buildCallTrace(workItem, {
+            modelId,
+            attempts,
+            startedAt,
+            startedAtMs,
+            validation,
+            failureReasons: validation === 'reasked' ? validationFeedback : [],
+          });
+
+          this.logger.info(
+            `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item completed (${decisions.length} decisions, attempts: ${attempt})`,
+          );
+
+          return {
+            workItem,
+            status: 'succeeded',
+            decisions,
+            callTrace,
+          };
+        }
+
+        validationFeedback = failureReasons;
+      }
+
+      const callTrace = this.buildCallTrace(workItem, {
+        modelId,
+        attempts,
+        startedAt,
+        startedAtMs,
+        validation: 'failed',
+        failureReasons: validationFeedback,
       });
 
-      options.aggregator?.track(result.usage);
-
-      const output = result.output as ReviewAssistancePageOutput;
-      const validator = new ReviewAssistanceValidator();
-      const decisions = validator
-        .validatePageOutput(context, output, {
-          autoApplyThreshold: options.autoApplyThreshold,
-          proposalThreshold: options.proposalThreshold,
-          allowAutoApply: true,
-        })
-        .map((decision) => this.withTaskMetadata(decision, task))
-        .map((decision) => this.enforceTaskAllowedOps(decision, task));
-
-      this.logger.info(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task completed (${decisions.length} decisions)`,
+      this.logger.warn(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item failed validation after ${attempts} attempts`,
+        {
+          err: {
+            type: 'ReviewAssistanceValidationFailure',
+            message: validationFeedback.join('; '),
+          },
+        },
       );
 
       return {
-        task,
-        status: 'succeeded',
-        decisions,
+        workItem,
+        status: 'failed',
+        decisions: [],
+        issue: this.buildWorkItemValidationIssue(
+          context,
+          workItem,
+          validationFeedback,
+        ),
+        errorMessage: validationFeedback.join('; '),
+        callTrace,
       };
     } catch (error) {
       if (options.abortSignal?.aborted) {
         throw error;
       }
 
+      const callTrace = this.buildCallTrace(workItem, {
+        modelId,
+        attempts: Math.max(attempts, 1),
+        startedAt,
+        startedAtMs,
+        validation: 'failed',
+        failureReasons: [this.safeErrorMessage(error)],
+      });
+
       if (this.isNoOutputGeneratedError(error)) {
         this.logger.warn(
-          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task produced no structured output; recording no-op result`,
+          `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item produced no structured output; recording no-op result`,
           this.errorLogBinding(error),
         );
         return {
-          task,
+          workItem,
           status: 'empty',
           decisions: [],
-          issue: this.buildNoOutputIssue(context, task),
+          issue: this.buildNoOutputIssue(context, workItem.task),
+          errorMessage: this.safeErrorMessage(error),
+          callTrace,
         };
       }
 
       this.logger.warn(
-        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${task.id} task failed`,
+        `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: ${workItem.id} work item failed`,
         this.errorLogBinding(error),
       );
       return {
-        task,
+        workItem,
         status: 'failed',
         decisions: [],
-        issue: this.buildTaskFailureIssue(context, task, error),
+        issue: this.buildWorkItemFailureIssue(context, workItem, error),
         errorMessage: this.safeErrorMessage(error),
+        callTrace,
       };
     }
+  }
+
+  private createTableCorrectionWorkContext(
+    context: PageReviewContext,
+    workItem: ReviewAssistanceWorkItem,
+  ): {
+    runner: TableCorrectionRunner;
+    context: ReturnType<TableCorrectionRunner['buildContext']>;
+  } {
+    const runner = new TableCorrectionRunner();
+    return {
+      runner,
+      context: runner.buildContext(context, workItem),
+    };
+  }
+
+  private validateWorkItemOutput(
+    context: PageReviewContext,
+    output: ReviewAssistancePageOutput,
+    workItem: ReviewAssistanceWorkItem,
+    options: ReviewAssistanceRunnerOptions,
+  ): ReviewAssistanceDecision[] {
+    const validator = new ReviewAssistanceValidator();
+    return this.decorateWorkItemDecisions(
+      validator.validatePageOutput(context, output, {
+        autoApplyThreshold: options.autoApplyThreshold,
+        proposalThreshold: options.proposalThreshold,
+        allowAutoApply: true,
+      }),
+      workItem,
+    );
+  }
+
+  private decorateWorkItemDecisions(
+    decisions: ReviewAssistanceDecision[],
+    workItem: ReviewAssistanceWorkItem,
+  ): ReviewAssistanceDecision[] {
+    return decisions
+      .map((decision) => this.withTaskMetadata(decision, workItem.task))
+      .map((decision) => this.withWorkItemMetadata(decision, workItem))
+      .map((decision) => this.enforceTaskAllowedOps(decision, workItem.task));
+  }
+
+  private withWorkItemMetadata(
+    decision: ReviewAssistanceDecision,
+    workItem: ReviewAssistanceWorkItem,
+  ): ReviewAssistanceDecision {
+    return {
+      ...decision,
+      reasons: [
+        `review_work_item:${workItem.id}`,
+        `review_work_item_kind:${workItem.kind}`,
+        ...decision.reasons,
+      ],
+      metadata: {
+        ...decision.metadata,
+        reviewWorkItem: {
+          id: workItem.id,
+          kind: workItem.kind,
+          targetRefs: workItem.targetRefs,
+          priority: workItem.priority,
+          contextBudget: workItem.contextBudget,
+        },
+      },
+    };
+  }
+
+  private getValidationFailureReasons(
+    decisions: ReviewAssistanceDecision[],
+  ): string[] {
+    const failureReasons = decisions.flatMap((decision) =>
+      decision.reasons.filter((reason) =>
+        this.isDeterministicValidationFailureReason(reason),
+      ),
+    );
+    return [...new Set(failureReasons)];
+  }
+
+  private isDeterministicValidationFailureReason(reason: string): boolean {
+    return (
+      reason.startsWith('invalid_') ||
+      reason.endsWith('_not_found') ||
+      reason.includes('_ref_not_found') ||
+      reason.includes('page_number_mismatch') ||
+      reason.includes('target_already_modified') ||
+      reason.includes('not_in_text_refs') ||
+      reason.includes('negative_index') ||
+      reason.includes('out_of_preview_range') ||
+      reason.includes('not_rectangular') ||
+      reason.includes('requires_') ||
+      reason.includes('without_boundary_candidate') ||
+      reason.includes('outside_source') ||
+      reason.includes('region_count_mismatch') ||
+      reason.includes('boundary_not_supported') ||
+      reason.startsWith('table_correction_') ||
+      reason.startsWith('task_op_not_allowed:')
+    );
+  }
+
+  private async withWorkItemTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    workItem: ReviewAssistanceWorkItem,
+  ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(
+              new Error(
+                `Review assistance work item timeout after ${timeoutMs}ms: ${workItem.id}`,
+              ),
+            );
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  private buildCallTrace(
+    workItem: ReviewAssistanceWorkItem,
+    options: {
+      modelId?: string;
+      attempts: number;
+      startedAt: string;
+      startedAtMs: number;
+      validation: ReviewAssistanceCallTraceValidation;
+      failureReasons?: string[];
+    },
+  ): ReviewAssistanceCallTrace {
+    return {
+      workItemId: workItem.id,
+      kind: workItem.kind,
+      pageNo: workItem.pageNo,
+      targetRefs: workItem.targetRefs,
+      modelId: options.modelId,
+      attempts: options.attempts,
+      startedAt: options.startedAt,
+      durationMs: Math.max(0, Date.now() - options.startedAtMs),
+      validation: options.validation,
+      failureReasons:
+        options.failureReasons && options.failureReasons.length > 0
+          ? [...new Set(options.failureReasons)]
+          : undefined,
+    };
+  }
+
+  /**
+   * Resolve the configured attempt budget for a task. The same value is used
+   * for the work-item re-ask loop and the SDK-level transient retry count
+   * forwarded to `LLMCaller.callVision`. See `ReviewAssistanceRunnerOptions.maxRetries`.
+   */
+  private getTaskMaxRetries(
+    task: ReviewAssistanceTaskDefinition,
+    options: ReviewAssistanceRunnerOptions,
+  ): number {
+    return task.id === 'tables' ? options.tableMaxRetries : options.maxRetries;
+  }
+
+  /**
+   * Total attempts for the work-item re-ask loop, including the initial
+   * call. Floors at 1 so a first attempt is always made even when callers
+   * pass 0. The configured value is treated as the full attempt budget, not
+   * as "additional retries on top of one initial call", to avoid composing
+   * multiplicatively with the SDK retry budget on the same call.
+   */
+  private getWorkItemMaxAttempts(
+    workItem: ReviewAssistanceWorkItem,
+    options: ReviewAssistanceRunnerOptions,
+  ): number {
+    return Math.max(1, this.getTaskMaxRetries(workItem.task, options));
+  }
+
+  private getModelId(model: LanguageModel): string | undefined {
+    const modelId =
+      (model as { modelId?: unknown }).modelId ??
+      (model as { id?: unknown }).id;
+    return typeof modelId === 'string' ? modelId : undefined;
+  }
+
+  private buildPageResultFromWorkItems(
+    context: PageReviewContext,
+    checkpointPage: ReviewAssistancePageResult | undefined,
+    workItemResults: ReviewAssistanceWorkItemResult[],
+  ): ReviewAssistancePageResult {
+    const decisions = this.mergeTaskDecisions([
+      ...(checkpointPage?.decisions ?? []),
+      ...workItemResults.flatMap((result) => result.decisions),
+    ]);
+    const issues = this.dedupeIssues([
+      ...(checkpointPage?.issues ?? this.buildIssues(context)),
+      ...workItemResults.flatMap((result) =>
+        result.issue ? [result.issue] : [],
+      ),
+    ]);
+    return {
+      pageNo: context.pageNo,
+      status: 'succeeded',
+      decisions,
+      issues,
+    };
+  }
+
+  private dedupeIssues(
+    issues: ReviewAssistanceIssue[],
+  ): ReviewAssistanceIssue[] {
+    const seen = new Set<string>();
+    return issues.filter((issue) => {
+      const key = issue.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private upsertCallTrace(
+    callTraces: ReviewAssistanceCallTrace[],
+    trace: ReviewAssistanceCallTrace,
+  ): void {
+    const index = callTraces.findIndex(
+      (entry) => entry.workItemId === trace.workItemId,
+    );
+    if (index === -1) {
+      callTraces.push(trace);
+      return;
+    }
+    callTraces[index] = trace;
   }
 
   private isNoOutputGeneratedError(error: unknown): boolean {
@@ -508,20 +1189,92 @@ export class ReviewAssistanceRunner {
     };
   }
 
-  private buildTaskFailureIssue(
+  private buildWorkItemFailureIssue(
     context: PageReviewContext,
-    task: ReviewAssistanceTaskDefinition,
+    workItem: ReviewAssistanceWorkItem,
     error: unknown,
   ): ReviewAssistanceIssue {
     return {
-      id: `review-execution-${context.pageNo}-${task.id}-failed`,
+      id: `review-execution-${context.pageNo}-${workItem.id}-failed`,
       pageNo: context.pageNo,
       category: 'review_execution',
-      type: 'task_model_error',
+      type: 'work_item_model_error',
       severity: 'warning',
-      description: `${task.label} 작업이 실패했습니다. 해당 영역을 직접 확인하세요.`,
-      reasons: [`review_task:${task.id}`, this.safeErrorMessage(error)],
+      description: `${workItem.task.label} work item failed. Review the target refs manually.`,
+      refs: workItem.targetRefs,
+      reasons: [
+        `review_task:${workItem.task.id}`,
+        `review_work_item:${workItem.id}`,
+        `review_work_item_kind:${workItem.kind}`,
+        this.safeErrorMessage(error),
+      ],
     };
+  }
+
+  private buildWorkItemValidationIssue(
+    context: PageReviewContext,
+    workItem: ReviewAssistanceWorkItem,
+    reasons: string[],
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-execution-${context.pageNo}-${workItem.id}-validation-failed`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'work_item_validation_failed',
+      severity: 'warning',
+      description:
+        'Work item output failed deterministic validation after re-asking.',
+      refs: workItem.targetRefs,
+      reasons: [
+        `review_task:${workItem.task.id}`,
+        `review_work_item:${workItem.id}`,
+        `review_work_item_kind:${workItem.kind}`,
+        ...reasons,
+      ],
+    };
+  }
+
+  private buildSkippedByGateIssue(
+    context: PageReviewContext,
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-skip-${context.pageNo}`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'page_skipped_by_correction_gate',
+      severity: 'info',
+      description:
+        'Page skipped for structural review because it would add review noise without improving TOC or archaeological data extraction.',
+      reasons: context.reviewAssistanceEligibility.exclusionReasons,
+    };
+  }
+
+  private buildUnavailablePageImageIssue(
+    context: PageReviewContext,
+  ): ReviewAssistanceIssue {
+    return {
+      id: `review-execution-${context.pageNo}-page-image-not-available`,
+      pageNo: context.pageNo,
+      category: 'review_execution',
+      type: 'page_image_not_available',
+      severity: 'warning',
+      description:
+        'Structural review was skipped because the page image is not available.',
+      reasons: [
+        ...new Set([
+          REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+          ...context.reviewAssistanceEligibility.reasons,
+        ]),
+      ],
+    };
+  }
+
+  private hasUnavailablePageImageGateReason(
+    context: PageReviewContext,
+  ): boolean {
+    return context.reviewAssistanceEligibility.reasons.includes(
+      REVIEW_ASSISTANCE_PAGE_IMAGE_NOT_AVAILABLE_REASON,
+    );
   }
 
   private withTaskMetadata(
@@ -738,6 +1491,7 @@ export class ReviewAssistanceRunner {
     reportId: string,
     options: ReviewAssistanceRunnerOptions,
     pages: ReviewAssistancePageResult[],
+    callTraces: ReviewAssistanceCallTrace[] = [],
   ): ReviewAssistanceReport {
     const autoAppliedCount = pages.reduce(
       (sum, page) =>
@@ -776,8 +1530,7 @@ export class ReviewAssistanceRunner {
           .length,
       0,
     );
-
-    return {
+    const report = {
       schemaName: 'HeripoReviewAssistanceReport',
       version: '1.0',
       reportId,
@@ -788,10 +1541,13 @@ export class ReviewAssistanceRunner {
       },
       options: {
         enabled: true,
-        concurrency: REVIEW_ASSISTANCE_PAGE_CONCURRENCY,
+        concurrency: options.pageConcurrency,
         autoApplyThreshold: options.autoApplyThreshold,
         proposalThreshold: options.proposalThreshold,
         maxRetries: options.maxRetries,
+        tableMaxRetries: options.tableMaxRetries,
+        localModelConcurrency: options.localModelConcurrency,
+        workItemTimeoutMs: options.workItemTimeoutMs,
         temperature: options.temperature,
         outputLanguage: options.outputLanguage,
         failurePolicy: 'partial_page',
@@ -809,7 +1565,9 @@ export class ReviewAssistanceRunner {
         textIntegrityIssueCount,
       },
       pages,
+      callTraces,
     };
+    return report as ReviewAssistanceReport;
   }
 
   private buildIssues(context: PageReviewContext): ReviewAssistanceIssue[] {
@@ -973,8 +1731,8 @@ export class ReviewAssistanceRunner {
         return `앞뒤 페이지 표와 이어질 가능성이 있습니다${preview}`;
       case 'image_missing_caption':
         return `캡션이 없는 이미지입니다${preview}`;
-      case 'large_picture_split_candidate':
-        return `큰 이미지 bbox라 복합 이미지 분할 후보입니다${preview}`;
+      case 'picture_split_boundary_candidate':
+        return `이미지 내부에 분할 경계 후보가 있습니다${preview}`;
       case 'hanja_term':
         return `한자 용어가 포함되어 이미지 대조가 필요합니다${preview}`;
       case 'institution_name':

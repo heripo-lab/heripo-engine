@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { applyCorrections } from './correction-applier';
-import { VlmTextCorrector } from './vlm-text-corrector';
+import { PostDoclingPageProcessor } from './post-docling-page-processor';
 
 vi.mock('@heripo/shared', () => ({
   ConcurrentPool: { run: vi.fn() },
@@ -176,7 +176,7 @@ function mockVlmResponse(
   return {
     output,
     usage: {
-      component: 'VlmTextCorrector',
+      component: 'PostDoclingPageProcessor',
       phase: 'text-correction',
       model: 'primary',
       modelName: 'test-vlm',
@@ -188,14 +188,14 @@ function mockVlmResponse(
   };
 }
 
-describe('VlmTextCorrector', () => {
+describe('PostDoclingPageProcessor', () => {
   let logger: LoggerMethods;
-  let corrector: VlmTextCorrector;
+  let corrector: PostDoclingPageProcessor;
 
   beforeEach(() => {
     vi.clearAllMocks();
     logger = createMockLogger();
-    corrector = new VlmTextCorrector(logger);
+    corrector = new PostDoclingPageProcessor(logger);
 
     // Default: readFileSync returns image data for page images
     vi.mocked(readFileSync).mockImplementation((path: any) => {
@@ -229,7 +229,7 @@ describe('VlmTextCorrector', () => {
       vi.mocked(ConcurrentPool.run).mockImplementation(async (items) => {
         const results = [];
         for (let i = 0; i < items.length; i++) {
-          results.push(correctionOutput);
+          results.push({ corrections: correctionOutput });
         }
         return results;
       });
@@ -280,7 +280,7 @@ describe('VlmTextCorrector', () => {
       expect(result.pagesProcessed).toBe(0);
       expect(result.textCorrections).toBe(0);
       expect(logger.info).toHaveBeenCalledWith(
-        '[VlmTextCorrector] No pages to process',
+        '[PostDoclingPageProcessor] No pages to process',
       );
     });
 
@@ -294,7 +294,7 @@ describe('VlmTextCorrector', () => {
         return Buffer.from('fake-image');
       });
 
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([null]);
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([{ corrections: null }]);
 
       const result = await corrector.correctAndSave(
         '/output/report-1',
@@ -315,7 +315,9 @@ describe('VlmTextCorrector', () => {
         return Buffer.from('fake-image');
       });
 
-      vi.mocked(ConcurrentPool.run).mockResolvedValue([{ tc: [], cc: [] }]);
+      vi.mocked(ConcurrentPool.run).mockResolvedValue([
+        { corrections: { tc: [], cc: [] } },
+      ]);
 
       await corrector.correctAndSave('/output/report-1', mockModel, {
         concurrency: 4,
@@ -342,7 +344,7 @@ describe('VlmTextCorrector', () => {
       const mockAggregator = {
         track: vi.fn(),
         getReport: vi.fn().mockReturnValue({
-          components: [{ component: 'VlmTextCorrector' }],
+          components: [{ component: 'PostDoclingPageProcessor' }],
           total: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
         }),
       };
@@ -351,8 +353,8 @@ describe('VlmTextCorrector', () => {
       vi.mocked(ConcurrentPool.run).mockImplementation(
         async (_items, _concurrency, _processFn, onItemComplete) => {
           // Simulate item completion callback
-          onItemComplete?.({ tc: [], cc: [] } as any, 0);
-          return [{ tc: [], cc: [] }];
+          onItemComplete?.({ corrections: { tc: [], cc: [] } } as any, 0);
+          return [{ corrections: { tc: [], cc: [] } }];
         },
       );
 
@@ -378,8 +380,8 @@ describe('VlmTextCorrector', () => {
 
       vi.mocked(ConcurrentPool.run).mockImplementation(
         async (_items, _concurrency, _processFn, onItemComplete) => {
-          onItemComplete?.({ tc: [], cc: [] } as any, 0);
-          return [{ tc: [], cc: [] }];
+          onItemComplete?.({ corrections: { tc: [], cc: [] } } as any, 0);
+          return [{ corrections: { tc: [], cc: [] } }];
         },
       );
 
@@ -428,8 +430,8 @@ describe('VlmTextCorrector', () => {
       });
 
       vi.mocked(ConcurrentPool.run).mockResolvedValue([
-        { tc: [], cc: [] },
-        { tc: [], cc: [] },
+        { corrections: { tc: [], cc: [] } },
+        { corrections: { tc: [], cc: [] } },
       ]);
 
       const result = await corrector.correctAndSave(
@@ -486,10 +488,278 @@ describe('VlmTextCorrector', () => {
           primaryModel: mockModel,
           maxRetries: 5,
           temperature: 0.2,
-          component: 'VlmTextCorrector',
+          component: 'PostDoclingPageProcessor',
           phase: 'text-correction',
         }),
       );
+    });
+
+    test('degrades gracefully when a page image cannot be read', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        throw new Error('ENOENT: page image missing');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+      );
+
+      // A single unreadable page image must not abort the whole conversion.
+      expect(result.pagesProcessed).toBe(1);
+      expect(result.pagesFailed).toBe(1);
+      expect(result.textCorrections).toBe(0);
+      expect(LLMCaller.callVision).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PostDoclingPageProcessor] Page 1: failed to read page image',
+        expect.any(Error),
+      );
+    });
+
+    test('fails the review-assistance gate open when the page image cannot be read', async () => {
+      const doc = createTestDoc([createTextItem('text', 'text', 1)]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        throw new Error('ENOENT: page image missing');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+        {
+          reviewAssistanceGate: {
+            model: mockModel,
+          },
+        },
+      );
+
+      expect(result.pagesFailed).toBe(1);
+      expect(LLMCaller.callVision).not.toHaveBeenCalled();
+
+      const sidecarCall = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(([path]) =>
+          String(path).endsWith('review_assistance_page_gate.json'),
+        );
+      expect(sidecarCall).toBeDefined();
+      const sidecar = JSON.parse(String(sidecarCall?.[1]));
+      expect(sidecar.pages[0]).toMatchObject({
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        reasons: ['page_gate_failed_open', 'page_image_not_available'],
+      });
+    });
+
+    test('propagates review-assistance gate errors when aborted', async () => {
+      const doc = createTestDoc([]);
+      const abortController = new AbortController();
+      abortController.abort();
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockRejectedValue(
+        new Error('gate aborted'),
+      );
+
+      await expect(
+        corrector.correctAndSave('/output/report-1', mockModel, {
+          abortSignal: abortController.signal,
+          reviewAssistanceGate: {
+            model: mockModel,
+          },
+        }),
+      ).rejects.toThrow('gate aborted');
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        '[PostDoclingPageProcessor] Page 1: review-assistance gate failed open',
+        expect.any(Error),
+      );
+    });
+
+    test('passes page table and picture caption context to the review-assistance gate', async () => {
+      const bodyText = createTextItem('본문', 'text', 1);
+      bodyText.self_ref = '#/texts/0';
+      const captionText = createTextItem('Lámina 1', 'caption', 1);
+      captionText.self_ref = '#/texts/1';
+      const table = createTableItem([createTableCell('유구', 0, 0)], 1);
+      const doc = createTestDoc([bodyText, captionText], [table]);
+      doc.pictures = [
+        {
+          self_ref: '#/pictures/0',
+          label: 'picture',
+          prov: [
+            {
+              page_no: 1,
+              bbox: { l: 0, t: 0, r: 100, b: 100, coord_origin: 'BOTTOMLEFT' },
+              charspan: [0, 0],
+            },
+          ],
+          captions: [{ $ref: '#/texts/1' }],
+          references: [],
+          footnotes: [],
+          annotations: [],
+        } as any,
+        {
+          self_ref: '#/pictures/1',
+          label: 'picture',
+          prov: [
+            {
+              page_no: 1,
+              bbox: {
+                l: 100,
+                t: 100,
+                r: 180,
+                b: 180,
+                coord_origin: 'BOTTOMLEFT',
+              },
+              charspan: [0, 0],
+            },
+          ],
+          captions: [],
+          references: [],
+          footnotes: [],
+          annotations: [],
+        } as any,
+      ];
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+        if (input.component === 'ReviewAssistancePageGate') {
+          return {
+            output: {
+              eligible: true,
+              kind: 'archaeological_data',
+              score: 90,
+              reasons: ['captioned picture and table'],
+              exclusionReasons: [],
+            },
+            usage: {
+              component: 'ReviewAssistancePageGate',
+              phase: 'page-eligibility',
+              model: 'primary',
+              modelName: 'test-vlm',
+              inputTokens: 10,
+              outputTokens: 5,
+              totalTokens: 15,
+            },
+            usedFallback: false,
+          };
+        }
+        return mockVlmResponse({ tc: [], cc: [] });
+      });
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        reviewAssistanceGate: {
+          model: mockModel,
+        },
+      });
+
+      const pageGateCall = vi
+        .mocked(LLMCaller.callVision)
+        .mock.calls.find(
+          ([input]) => input.component === 'ReviewAssistancePageGate',
+        );
+      const prompt = (pageGateCall?.[0].messages[0].content as any[]).find(
+        (entry: any) => entry.type === 'text',
+      ).text as string;
+      expect(prompt).toContain('"tableCount":1');
+      expect(prompt).toContain('"caption":"Lámina 1"');
+      expect(prompt).toContain('"suspectReasons":[]');
+      expect(prompt).toContain('"suspectReasons":["image_missing_caption"]');
+    });
+
+    test('uses stringified non-Error review-assistance gate failures for fail-open reasons', async () => {
+      const doc = createTestDoc([]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockRejectedValue('gate string failure');
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        reviewAssistanceGate: {
+          model: mockModel,
+        },
+      });
+
+      const sidecarCall = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(([path]) =>
+          String(path).endsWith('review_assistance_page_gate.json'),
+        );
+      const sidecar = JSON.parse(String(sidecarCall?.[1]));
+      expect(sidecar.pages[0]).toMatchObject({
+        reasons: ['page_gate_failed_open', 'gate string failure'],
+      });
     });
 
     test('tracks token usage via aggregator', async () => {
@@ -555,7 +825,7 @@ describe('VlmTextCorrector', () => {
 
       expect(result.pagesFailed).toBe(1);
       expect(logger.warn).toHaveBeenCalledWith(
-        '[VlmTextCorrector] Page 1: VLM correction failed, keeping OCR text',
+        '[PostDoclingPageProcessor] Page 1: VLM correction failed, keeping OCR text',
         expect.any(Error),
       );
     });
@@ -629,6 +899,295 @@ describe('VlmTextCorrector', () => {
 
       // Should not call VLM for empty pages
       expect(LLMCaller.callVision).not.toHaveBeenCalled();
+    });
+
+    test('corrects cover, chapter cover, and barcode pages when text exists', async () => {
+      const doc = createTestDoc([
+        createTextItem('아산 상성리유적 발굴조사보고서', 'section_header', 1),
+        createTextItem('제2장 조사내용', 'section_header', 2),
+        createTextItem('ISBN 979-11-0000-000-0', 'text', 3),
+      ]);
+      doc.pages['2'] = {
+        page_no: 2,
+        size: { width: 595, height: 842 },
+        image: {
+          mimetype: 'image/png',
+          dpi: 200,
+          size: { width: 2480, height: 3508 },
+          uri: 'pages/page_1.png',
+        },
+      };
+      doc.pages['3'] = {
+        page_no: 3,
+        size: { width: 595, height: 842 },
+        image: {
+          mimetype: 'image/png',
+          dpi: 200,
+          size: { width: 2480, height: 3508 },
+          uri: 'pages/page_2.png',
+        },
+      };
+      doc.pages['4'] = {
+        page_no: 4,
+        size: { width: 595, height: 842 },
+        image: {
+          mimetype: 'image/png',
+          dpi: 200,
+          size: { width: 2480, height: 3508 },
+          uri: 'pages/page_3.png',
+        },
+      };
+      doc.pictures = [
+        {
+          self_ref: '#/pictures/0',
+          label: 'picture',
+          prov: [
+            {
+              page_no: 4,
+              bbox: { l: 0, t: 0, r: 595, b: 842, coord_origin: 'TOPLEFT' },
+              charspan: [0, 0],
+            },
+          ],
+          captions: [],
+          references: [],
+          footnotes: [],
+          annotations: [],
+          children: [],
+          content_layer: 'body',
+        } as any,
+      ];
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockResolvedValue(
+        mockVlmResponse({ tc: [], cc: [] }) as any,
+      );
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+      );
+
+      expect(result.pagesProcessed).toBe(4);
+      expect(LLMCaller.callVision).toHaveBeenCalledTimes(3);
+      const prompts = vi
+        .mocked(LLMCaller.callVision)
+        .mock.calls.map(
+          (call) =>
+            (call[0].messages[0].content as any[]).find(
+              (entry: any) => entry.type === 'text',
+            ).text as string,
+        );
+      expect(prompts[0]).toContain('아산 상성리유적 발굴조사보고서');
+      expect(prompts[1]).toContain('제2장 조사내용');
+      expect(prompts[2]).toContain('ISBN 979-11-0000-000-0');
+    });
+
+    test('runs a separate VLM page gate when review assistance is enabled', async () => {
+      const doc = createTestDoc([
+        createTextItem('rapport de fouille', 'text', 1),
+      ]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+        if (input.component === 'ReviewAssistancePageGate') {
+          return {
+            output: {
+              eligible: false,
+              kind: 'non_meaningful',
+              score: 15,
+              reasons: ['cover-only page'],
+              exclusionReasons: ['no structural review target'],
+            },
+            usage: {
+              component: 'ReviewAssistancePageGate',
+              phase: 'page-eligibility',
+              model: 'primary',
+              modelName: 'test-vlm',
+              inputTokens: 20,
+              outputTokens: 10,
+              totalTokens: 30,
+            },
+            usedFallback: false,
+          };
+        }
+        return mockVlmResponse({ tc: [], cc: [] });
+      });
+
+      await corrector.correctAndSave('/output/report-1', mockModel, {
+        reviewAssistanceGate: {
+          model: mockModel,
+          outputLanguage: 'en-US',
+        },
+      });
+
+      expect(LLMCaller.callVision).toHaveBeenCalledTimes(2);
+      expect(LLMCaller.callVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: 'PostDoclingPageProcessor',
+          phase: 'text-correction',
+        }),
+      );
+      expect(LLMCaller.callVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: 'ReviewAssistancePageGate',
+          phase: 'page-eligibility',
+          metadata: { pageNo: 1 },
+        }),
+      );
+      expect(writeFileSync).toHaveBeenCalledWith(
+        '/output/report-1/review_assistance_page_gate.json',
+        expect.stringContaining('no structural review target'),
+      );
+    });
+
+    test('fails open when the review assistance page gate VLM call fails', async () => {
+      const doc = createTestDoc([
+        createTextItem('rapport de fouille', 'text', 1),
+      ]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+        if (input.component === 'ReviewAssistancePageGate') {
+          throw new Error('gate timeout');
+        }
+        return mockVlmResponse({ tc: [], cc: [] });
+      });
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+        {
+          reviewAssistanceGate: {
+            model: mockModel,
+          },
+        },
+      );
+
+      expect(result.pagesProcessed).toBe(1);
+      expect(result.pagesFailed).toBe(0);
+      expect(LLMCaller.callVision).toHaveBeenCalledTimes(2);
+
+      const sidecarCall = vi
+        .mocked(writeFileSync)
+        .mock.calls.find(([path]) =>
+          String(path).endsWith('review_assistance_page_gate.json'),
+        );
+      expect(sidecarCall).toBeDefined();
+      const sidecar = JSON.parse(String(sidecarCall?.[1]));
+      expect(sidecar.pages[0]).toMatchObject({
+        pageNo: 1,
+        eligible: true,
+        kind: 'archaeological_data',
+        reasons: ['page_gate_failed_open', 'gate timeout'],
+        exclusionReasons: [],
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[PostDoclingPageProcessor] Page 1: review-assistance gate failed open',
+        expect.any(Error),
+      );
+    });
+
+    test('runs only the page gate for image-only pages when review assistance is enabled', async () => {
+      const doc = createTestDoc([]);
+
+      vi.mocked(readFileSync).mockImplementation((path: any) => {
+        if (String(path).endsWith('result.json')) {
+          return Buffer.from(JSON.stringify(doc));
+        }
+        return Buffer.from('fake-image');
+      });
+
+      vi.mocked(ConcurrentPool.run).mockImplementation(
+        async (items, _concurrency, processFn) => {
+          const results = [];
+          for (let i = 0; i < items.length; i++) {
+            results.push(await processFn(items[i], i));
+          }
+          return results;
+        },
+      );
+      vi.mocked(LLMCaller.callVision).mockResolvedValue({
+        output: {
+          eligible: false,
+          kind: 'non_meaningful',
+          score: 5,
+          reasons: ['blank or decorative page'],
+          exclusionReasons: ['no structural review target'],
+        },
+        usage: {
+          component: 'ReviewAssistancePageGate',
+          phase: 'page-eligibility',
+          model: 'primary',
+          modelName: 'test-vlm',
+          inputTokens: 20,
+          outputTokens: 10,
+          totalTokens: 30,
+        },
+        usedFallback: false,
+      } as any);
+
+      const result = await corrector.correctAndSave(
+        '/output/report-1',
+        mockModel,
+        {
+          reviewAssistanceGate: {
+            model: mockModel,
+          },
+        },
+      );
+
+      expect(result.pagesProcessed).toBe(1);
+      expect(LLMCaller.callVision).toHaveBeenCalledTimes(1);
+      expect(LLMCaller.callVision).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: 'ReviewAssistancePageGate',
+        }),
+      );
     });
 
     test('filters out text items with non-text labels (e.g., picture)', async () => {
@@ -814,7 +1373,7 @@ describe('VlmTextCorrector', () => {
       await corrector.correctAndSave('/output/report-1', mockModel);
 
       expect(logger.debug).toHaveBeenCalledWith(
-        '[VlmTextCorrector] Page 1: 1 text, 0 cell corrections',
+        '[PostDoclingPageProcessor] Page 1: 1 text, 0 cell corrections',
       );
     });
   });

@@ -13,6 +13,18 @@ import { trackTaskProgress } from '../utils/task-progress-tracker';
 import { buildConversionOptions } from './conversion-options-builder';
 import { DoclingConversionExecutor } from './docling-conversion-executor';
 
+const mockCorrection = {
+  models: {
+    textCorrection: {} as any,
+    pageGate: {} as any,
+    reviewAssistance: {} as any,
+  },
+};
+
+function withCorrection(overrides: Record<string, unknown> = {}) {
+  return { correction: mockCorrection, ...overrides } as any;
+}
+
 vi.mock('./conversion-options-builder', () => ({
   buildConversionOptions: vi.fn(),
 }));
@@ -137,7 +149,7 @@ describe('DoclingConversionExecutor', () => {
         'report123',
         onComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(result).toBeNull();
@@ -184,7 +196,7 @@ describe('DoclingConversionExecutor', () => {
         'report456',
         onComplete,
         true,
-        {},
+        withCorrection(),
       );
 
       expect(onComplete).toHaveBeenCalledWith('/test/cwd/output/report456');
@@ -214,7 +226,7 @@ describe('DoclingConversionExecutor', () => {
           'report789',
           onComplete,
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Callback error');
 
@@ -242,7 +254,7 @@ describe('DoclingConversionExecutor', () => {
         'report-no-files',
         onComplete,
         true,
-        {},
+        withCorrection(),
       );
 
       expect(rmSync).not.toHaveBeenCalled();
@@ -262,7 +274,7 @@ describe('DoclingConversionExecutor', () => {
           'report-fail',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Task failed: Processing failed');
     });
@@ -281,7 +293,7 @@ describe('DoclingConversionExecutor', () => {
           'report-download-fail',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Download failed');
     });
@@ -301,7 +313,7 @@ describe('DoclingConversionExecutor', () => {
           'report-process-fail',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Processing failed');
 
@@ -328,7 +340,7 @@ describe('DoclingConversionExecutor', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
       );
 
       expect(logger.info).toHaveBeenCalledWith(
@@ -359,7 +371,7 @@ describe('DoclingConversionExecutor', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
       );
 
       expect(logger.info).toHaveBeenCalledWith(
@@ -413,7 +425,7 @@ describe('DoclingConversionExecutor', () => {
           'report-server-stop',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
         ),
       ).rejects.toThrow('Task failed');
 
@@ -460,7 +472,7 @@ describe('DoclingConversionExecutor', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
       );
 
       expect(trackTaskProgress).toHaveBeenCalledWith(
@@ -489,7 +501,7 @@ describe('DoclingConversionExecutor', () => {
         'report-render',
         onComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(renderAndUpdatePageImages).toHaveBeenCalledWith(
@@ -515,7 +527,7 @@ describe('DoclingConversionExecutor', () => {
         'report-skip-render',
         onComplete,
         false,
-        {},
+        withCorrection(),
       );
 
       expect(renderAndUpdatePageImages).not.toHaveBeenCalled();
@@ -541,7 +553,7 @@ describe('DoclingConversionExecutor', () => {
           'report-abort-docling',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
           abortController.signal,
         ),
       ).rejects.toThrow('PDF conversion was aborted');
@@ -569,7 +581,7 @@ describe('DoclingConversionExecutor', () => {
           'report-abort-callback',
           vi.fn(),
           false,
-          {},
+          withCorrection(),
           abortController.signal,
         ),
       ).rejects.toThrow('PDF conversion was aborted');
@@ -595,7 +607,7 @@ describe('DoclingConversionExecutor', () => {
         'report123',
         vi.fn(),
         false,
-        {},
+        withCorrection(),
       );
 
       expect(
