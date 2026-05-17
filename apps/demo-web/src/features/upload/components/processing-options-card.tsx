@@ -234,10 +234,23 @@ export function ProcessingOptionsCard({
           )}
         </CardTitle>
         <CardDescription>
-          Configure mandatory correction, OCR, and processing settings
+          Configure language detection, correction, OCR, and processing settings
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <form.Field name="languageDetectionModel">
+          {(field: OptionalStringFieldApi) => (
+            <VisionModelSelect
+              label="Language Detection Model"
+              description="Detects document languages for Docling OCR hints when the PDF text layer is insufficient"
+              value={field.state.value}
+              onChange={field.handleChange}
+              disabled={disabled}
+              optional
+            />
+          )}
+        </form.Field>
+
         <form.Field name="correction.models.textCorrection">
           {(field: StringFieldApi) => (
             <VisionModelSelect

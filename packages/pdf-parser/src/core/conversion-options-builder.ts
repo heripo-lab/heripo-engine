@@ -4,6 +4,8 @@ import type { PDFConvertOptions } from './pdf-converter';
 
 import { omit } from 'es-toolkit';
 
+import { DEFAULT_OCR_LANGUAGES } from '../detectors/pdf-language-detector';
+
 /**
  * Build Docling ConversionOptions from PDFConvertOptions.
  * Strips pdf-parser-specific fields and configures OCR settings.
@@ -11,6 +13,8 @@ import { omit } from 'es-toolkit';
 export function buildConversionOptions(
   options: PDFConvertOptions,
 ): ConversionOptions {
+  const ocrLanguages = options.ocr_lang ?? DEFAULT_OCR_LANGUAGES;
+
   return {
     ...omit(options, [
       'num_threads',
@@ -24,13 +28,17 @@ export function buildConversionOptions(
       'chunkSize',
       'chunkMaxRetries',
       'documentValidationModel',
+      'languageDetectionModel',
     ]),
     to_formats: ['json', 'html'],
     image_export_mode: 'embedded',
+    // Docling currently reads this top-level field in addition to ocr_options.
+    // Keep it populated even when language detection is skipped.
+    ocr_lang: ocrLanguages,
     ocr_engine: 'ocrmac',
     ocr_options: {
       kind: 'ocrmac',
-      lang: options.ocr_lang ?? ['ko-KR', 'en-US'],
+      lang: ocrLanguages,
       recognition: 'accurate',
       framework: 'livetext',
     },

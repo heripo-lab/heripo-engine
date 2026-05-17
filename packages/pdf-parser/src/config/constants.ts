@@ -59,7 +59,7 @@ export const DOCLING_ENVIRONMENT = {
 export const PAGE_RENDERING = {
   /** Default rendering DPI for VLM text recognition quality */
   DEFAULT_DPI: 200,
-  /** Low-resolution DPI for OCR strategy sampling */
+  /** Low-resolution DPI for language detection sampling */
   SAMPLE_DPI: 150,
 } as const;
 

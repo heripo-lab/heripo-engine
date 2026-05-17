@@ -21,6 +21,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   threadCount: 4,
   // Document type validation
   documentValidationModel: 'openai/gpt-5.4',
+  // PDF language detection for OCR language hints
+  languageDetectionModel: 'openai/gpt-5.4',
   // Force image PDF pre-conversion
   forceImagePdf: false,
   // Mandatory post-Docling correction.

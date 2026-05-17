@@ -9,9 +9,16 @@ import type { ConversionOptions, DoclingAPIClient } from 'docling-sdk';
 import type { PDFCorrectionOptions } from './correction-options';
 
 import { LLMTokenUsageAggregator } from '@heripo/shared';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { CHUNKED_CONVERSION, PDF_CONVERTER } from '../config/constants';
+import {
+  DEFAULT_OCR_LANGUAGES,
+  PdfLanguageDetector,
+} from '../detectors/pdf-language-detector';
 import { ImagePdfFallbackError } from '../errors/image-pdf-fallback-error';
+import { PageRenderer } from '../processors/page-renderer';
 import { PdfTextExtractor } from '../processors/pdf-text-extractor';
 import { DocumentTypeValidator } from '../validators/document-type-validator';
 import { ChunkedPDFConverter } from './chunked-pdf-converter';
@@ -66,6 +73,8 @@ export type PDFConvertOptions = Omit<
   chunkSize?: number;
   /** Max retry attempts per failed chunk (default: CHUNKED_CONVERSION.DEFAULT_MAX_RETRIES) */
   chunkMaxRetries?: number;
+  /** Vision model for document language detection when the PDF text layer is insufficient */
+  languageDetectionModel?: LanguageModel;
   /** LLM model for document type validation (opt-in: skipped when not set) */
   documentValidationModel?: LanguageModel;
 };
@@ -116,8 +125,13 @@ export class PDFConverter {
     this.logger.info('[PDFConverter] Converting:', url);
 
     const aggregator = options.aggregator ?? new LLMTokenUsageAggregator();
-    const trackedOptions: PDFConvertOptions = { ...options, aggregator };
     const pdfPath = url.startsWith('file://') ? url.slice(7) : undefined;
+    const trackedOptions = await this.withDetectedLanguages(
+      pdfPath,
+      reportId,
+      { ...options, aggregator },
+      abortSignal,
+    );
     const correctedOnComplete = new PostDoclingCorrectionPipeline(
       this.logger,
     ).wrapCallback(pdfPath, reportId, trackedOptions, onComplete, abortSignal);
@@ -186,6 +200,69 @@ export class PDFConverter {
     }
 
     return this.buildTokenReport(aggregator) ?? conversionReport;
+  }
+
+  private async withDetectedLanguages(
+    pdfPath: string | undefined,
+    reportId: string,
+    options: PDFConvertOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<PDFConvertOptions> {
+    if (options.ocr_lang && options.ocr_lang.length > 0) {
+      this.logger.info(
+        `[PDFConverter] OCR languages provided: ${JSON.stringify(options.ocr_lang)}`,
+      );
+      return options;
+    }
+
+    if (!pdfPath) {
+      this.logger.info(
+        '[PDFConverter] Local PDF not available; OCR languages will use defaults',
+      );
+      return {
+        ...options,
+        ocr_lang: [...DEFAULT_OCR_LANGUAGES],
+      };
+    }
+
+    const languageDetectionDir = join(
+      process.cwd(),
+      'output',
+      reportId,
+      '_language_detection',
+    );
+    const detector = new PdfLanguageDetector(
+      this.logger,
+      new PageRenderer(this.logger),
+      new PdfTextExtractor(this.logger),
+    );
+
+    try {
+      const result = await detector.detect(pdfPath, languageDetectionDir, {
+        model: options.languageDetectionModel,
+        aggregator: options.aggregator,
+        abortSignal,
+      });
+      this.logger.info(
+        `[PDFConverter] OCR languages detected: ${JSON.stringify(result.detectedLanguages)} (${result.reason})`,
+      );
+
+      if (options.onTokenUsage && options.aggregator) {
+        const tokenReport = this.buildTokenReport(options.aggregator);
+        if (tokenReport) {
+          options.onTokenUsage(tokenReport);
+        }
+      }
+
+      return {
+        ...options,
+        ocr_lang: result.detectedLanguages,
+      };
+    } finally {
+      if (existsSync(languageDetectionDir)) {
+        rmSync(languageDetectionDir, { recursive: true, force: true });
+      }
+    }
   }
 
   /**

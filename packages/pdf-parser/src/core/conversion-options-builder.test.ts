@@ -17,6 +17,7 @@ describe('buildConversionOptions', () => {
     expect(result).toEqual({
       to_formats: ['json', 'html'],
       image_export_mode: 'embedded',
+      ocr_lang: ['ko-KR', 'en-US'],
       ocr_engine: 'ocrmac',
       ocr_options: {
         kind: 'ocrmac',
@@ -43,6 +44,7 @@ describe('buildConversionOptions', () => {
       ocr_lang: ['ja-JP', 'en-US'],
     });
 
+    expect(result.ocr_lang).toEqual(['ja-JP', 'en-US']);
     expect(result.ocr_options).toEqual({
       kind: 'ocrmac',
       lang: ['ja-JP', 'en-US'],
@@ -101,6 +103,7 @@ describe('buildConversionOptions', () => {
       chunkSize: 20,
       chunkMaxRetries: 5,
       documentValidationModel: {} as any,
+      languageDetectionModel: {} as any,
     } as any);
 
     expect(result).not.toHaveProperty('forceImagePdf');
@@ -112,6 +115,7 @@ describe('buildConversionOptions', () => {
     expect(result).not.toHaveProperty('chunkSize');
     expect(result).not.toHaveProperty('chunkMaxRetries');
     expect(result).not.toHaveProperty('documentValidationModel');
+    expect(result).not.toHaveProperty('languageDetectionModel');
   });
 
   test('should pass through unknown options via spread', () => {
