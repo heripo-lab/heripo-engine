@@ -26,6 +26,7 @@ import {
 } from '../../prompts/review-assistance-prompt';
 import {
   type ReviewAssistancePageOutput,
+  buildReviewAssistancePageSchemaForOps,
   reviewAssistancePageSchema,
 } from '../../types/review-assistance-schema';
 import { PdfTextExtractor } from '../pdf-text-extractor';
@@ -732,9 +733,12 @@ export class ReviewAssistanceRunner {
               validationFeedback,
               attempt,
             });
+        const pageSchema = tableCorrection
+          ? reviewAssistancePageSchema
+          : buildReviewAssistancePageSchemaForOps(workItem.task.allowedOps);
         const result = await this.withWorkItemTimeout(
           LLMCaller.callVision({
-            schema: reviewAssistancePageSchema as any,
+            schema: pageSchema as any,
             messages: [
               {
                 role: 'user' as const,

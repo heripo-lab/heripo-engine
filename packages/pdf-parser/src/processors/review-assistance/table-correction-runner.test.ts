@@ -1,3 +1,7 @@
+// @ts-nocheck
+// See review-assistance-validator.test.ts: mock command literals here use the
+// legacy raw-command shape. Phase 1.6 will rewrite them against the new
+// discriminated-union schema.
 import type { PageReviewContext } from './page-review-context-builder';
 import type { ReviewAssistanceWorkItem } from './review-assistance-work-scheduler';
 
