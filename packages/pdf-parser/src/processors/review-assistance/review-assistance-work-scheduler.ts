@@ -48,10 +48,13 @@ const KIND_TO_TASK_ID: Record<
   layout_bbox_order: 'layout_bbox_order',
 };
 
+// `picture_internal_text` is intentionally excluded: text overlays inside a
+// picture bbox are treated as part of the opaque image and must not generate
+// any review-assistance work. The prompt context builder also strips these
+// blocks from the LLM's view so a future regression here cannot leak them.
 const TEXT_INTEGRITY_REASONS = new Set([
   'empty_text',
   'repeated_across_pages',
-  'picture_internal_text',
 ]);
 
 const TEXT_ROLE_REASONS = new Set([

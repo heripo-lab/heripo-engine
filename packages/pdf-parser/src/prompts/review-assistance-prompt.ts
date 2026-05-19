@@ -23,11 +23,11 @@ Output shape:
 Each command in commands[] is one of the op-specific shapes below. There is NO top-level "targetRef" wrapper and NO "payload" wrapper — write every op-specific field directly on the command object. Every command also includes the shared metadata fields "confidence" (number 0..1), "rationale" (string), and "evidence" (string or null).
 
 - { "op": "replaceText", "textRef": <ref>, "text": <full corrected text>, confidence, rationale, evidence }
-- { "op": "addText", "bbox": { "l", "t", "r", "b" }, "text": <text>, "label": <label>, "pageNo": <int or null>, "afterRef": <ref or null>, confidence, rationale, evidence }
-- { "op": "updateTextRole", "textRef": <ref>, "label": <new role>, confidence, rationale, evidence }
+- { "op": "addText", "bbox": { "l", "t", "r", "b" }, "text": <text>, "label": <one of: "text" | "caption" | "footnote" | "section_header" | "list_item" | "page_header" | "page_footer">, "pageNo": <int or null>, "afterRef": <ref or null>, confidence, rationale, evidence }
+- { "op": "updateTextRole", "textRef": <ref>, "label": <one of: "text" | "caption" | "footnote" | "section_header" | "list_item" | "page_header" | "page_footer">, confidence, rationale, evidence }
 - { "op": "removeText", "textRef": <ref>, confidence, rationale, evidence }
 - { "op": "mergeTexts", "textRefs": [<ref>, ...at least 2], "text": <merged text>, "keepRef": <ref kept>, confidence, rationale, evidence }
-- { "op": "splitText", "textRef": <ref>, "parts": [{ "text", "label": <or null> }, ...at least 2], confidence, rationale, evidence }
+- { "op": "splitText", "textRef": <ref>, "parts": [{ "text", "label": <or null, from the same enum as above> }, ...at least 2], confidence, rationale, evidence }
 - { "op": "updateTableCell", "tableRef": <ref>, "row": <int>, "col": <int>, "text": <cell text>, confidence, rationale, evidence }
 - { "op": "replaceTable", "tableRef": <ref>, "grid": [[{ "text", "bbox": <or null>, "rowSpan": <or null>, "colSpan": <or null>, "columnHeader": <or null>, "rowHeader": <or null> }, ...], ...], "caption": <or null>, confidence, rationale, evidence }
 - { "op": "linkContinuedTable", "sourceTableRef": <ref>, "continuedTableRef": <ref>, "relation": "continues_on_next_page" | "continued_from_previous_page", confidence, rationale, evidence }
@@ -47,9 +47,8 @@ Rules:
 - Hanja correction is high priority. When suspectReasons includes "hanja_ocr_candidate" or domainPatterns includes "hanja_term", inspect the image directly and restore supported Hanja such as 山, 峰, 川, 橋, 洞, 里, 面, 邑, 寺, 城, 墓, 窯, 遺蹟, 文化財, 硏究院, 財團.
 - For image-supported Hanja corrections, use high confidence and a concise rationale. Do not leave them as generic review notes unless the glyph is genuinely unreadable.
 - If no grounded correction or review command is needed, return {"pageNo": <current pageNo>, "commands": [], "pageNotes": []}.
-- Treat each picture bbox as an opaque image. Do not extract, add, correct, split, or reclassify labels, legends, handwriting, signs, or other text inside a picture as document text.
-- Only external captions outside or directly adjacent to a picture should become text captions. Use updatePictureCaption only for the caption, and do not put picture-internal labels into captions.
-- If a Docling text block is clearly inside a picture and is not an external caption, trust the visual page and emit a high-confidence removeText command. Use manual review only when the block location is ambiguous.
+- Treat each picture bbox as an opaque image. Text overlays inside a picture (labels, legends, signs, handwriting, axis tick marks, photo captions burned into the image) are part of the image, not document text. Do NOT correct, relabel, remove, split, merge, or otherwise touch them — they are filtered out of the page context you receive, so any ref you might invent for them will fail. Picture-internal text remains in the Docling output as-is.
+- Only text outside the picture bbox can be linked as an external caption via updatePictureCaption. Do not invent picture-internal labels as captions.
 - For table cell text errors, prefer updateTableCell. Use replaceTable only when the visible grid structure is clearly wrong.
 - Suggest updatePictureCaption when a nearby caption is visible or already extracted but unlinked.
 - If a caption remains as body text, connect it to the nearest matching table or picture; do not rewrite the caption text unless OCR is visibly wrong.
@@ -65,7 +64,7 @@ Rules:
 - Keep confidence conservative for delete, hide, merge, split, replaceTable, updateBbox, and continued-table commands.
 - Keep each command small and concrete. Do not include unrelated paragraphs as captions.
 - For replaceText, set textRef to the text ref and write the full corrected text in the "text" field. Do not put the corrected replacement only in evidence.
-- For updateTextRole, both "textRef" and "label" are required first-class fields. Do not nest them inside any wrapper object.
+- For updateTextRole, both "textRef" and "label" are required first-class fields. "label" must be one of the seven docling text labels: "text", "caption", "footnote", "section_header", "list_item", "page_header", "page_footer". Do NOT invent labels like "toc_entry", "title", "subtitle", "abstract", or "heading" — pick the closest match from the enum (e.g. a table-of-contents entry stays "text"; a chapter heading is "section_header"; a page-marginalia note is "page_header" or "page_footer" depending on placement).
 - For moveNode, write "sourceRef", "targetRef", and "position" ("before" or "after") directly on the command. Only moveNode and updateBbox embed a ref under the name "targetRef" — for every other op use the op-specific ref field.
 - For updateTableCell, write row, col, and text directly on the command. For updatePictureCaption, write pictureRef and caption directly.
 - Keep rationale and pageNotes concise. Do not include chain-of-thought, user-intent analysis, or summaries of unrelated document content.
@@ -124,10 +123,9 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
         'addPicture',
         'splitPicture',
         'hidePicture',
-        'removeText',
       ],
       focus:
-        'Inspect picture regions and external captions only. Split a picture only when its context includes splitCandidate and the page image confirms clear internal boundaries. Treat all text inside a picture bbox as opaque image content: do not extract it as document text and do not put internal labels into captions. Remove Docling text blocks inside pictures with high confidence when they are not external captions.',
+        'Inspect picture regions and external captions only. Split a picture only when its context includes splitCandidate and the page image confirms clear internal boundaries. Treat every picture bbox as an opaque image: text overlays (labels, legends, signs, handwriting) inside a picture are part of the image and must NOT be reviewed, removed, relabeled, or extracted as captions. Only text blocks outside the picture bbox can become updatePictureCaption targets.',
     },
     {
       id: 'layout_bbox_order',
@@ -183,11 +181,28 @@ export function buildReviewAssistancePrompt(
     .join('\n\n');
 }
 
+/**
+ * Drop text blocks that sit inside a picture bbox. We treat pictures as
+ * opaque: text overlays (labels, legends, signs, handwriting) are part of
+ * the image, not document text — they must not be corrected, relabeled,
+ * removed, or otherwise touched by review-assistance. By stripping them
+ * from the LLM's view, the model cannot emit commands against them.
+ */
+function dropPictureInternalText<T extends { suspectReasons: string[] }>(
+  blocks: readonly T[],
+): T[] {
+  return blocks.filter(
+    (block) => !block.suspectReasons.includes('picture_internal_text'),
+  );
+}
+
 function toPromptContext(
   context: PageReviewContext,
   task?: ReviewAssistanceTaskDefinition,
 ): unknown {
   if (!task) return toFullPromptContext(context);
+
+  const reviewableTextBlocks = dropPictureInternalText(context.textBlocks);
 
   const base = {
     pageNo: context.pageNo,
@@ -199,20 +214,20 @@ function toPromptContext(
     case 'text_ocr_hanja':
       return {
         ...base,
-        textBlocks: context.textBlocks.map(toPromptTextBlock),
+        textBlocks: reviewableTextBlocks.map(toPromptTextBlock),
         domainPatterns: context.domainPatterns,
       };
     case 'text_integrity':
       return {
         ...base,
-        textBlocks: context.textBlocks.map(toPromptTextBlock),
+        textBlocks: reviewableTextBlocks.map(toPromptTextBlock),
         missingTextCandidates: context.missingTextCandidates,
         pictures: context.pictures.map(toPromptPictureGeometry),
       };
     case 'text_role_footnote':
       return {
         ...base,
-        textBlocks: context.textBlocks.map(toPromptTextBlock),
+        textBlocks: reviewableTextBlocks.map(toPromptTextBlock),
         orphanCaptions: context.orphanCaptions,
         footnotes: context.footnotes,
         tables: context.tables.map(toPromptTableCaptionTarget),
@@ -233,10 +248,11 @@ function toPromptContext(
         orphanCaptions: context.orphanCaptions.filter((caption) =>
           caption.nearestMediaRefs.some((ref) => ref.kind === 'picture'),
         ),
-        textBlocks: context.textBlocks
+        // Only external caption candidates are shown — picture-internal
+        // overlays stay invisible to the model on this task.
+        textBlocks: reviewableTextBlocks
           .filter(
             (block) =>
-              block.suspectReasons.includes('picture_internal_text') ||
               block.suspectReasons.includes('caption_like_body_text') ||
               block.label === 'caption',
           )
@@ -245,7 +261,7 @@ function toPromptContext(
     case 'layout_bbox_order':
       return {
         ...base,
-        textBlocks: context.textBlocks.map(toPromptGeometryTextBlock),
+        textBlocks: reviewableTextBlocks.map(toPromptGeometryTextBlock),
         tables: context.tables.map(toPromptTableCaptionTarget),
         pictures: context.pictures.map(toPromptPictureCaptionTarget),
         layout: context.layout,

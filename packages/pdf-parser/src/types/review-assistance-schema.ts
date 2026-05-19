@@ -50,9 +50,27 @@ const imageRegionSchema = z.object({
   caption: z.string().nullable(),
 });
 
+// Docling text-item labels that review-assistance is allowed to assign or
+// re-assign. Web's TEXT_LABEL_TO_ROLE adapter maps every value here to a
+// concrete ReviewTextRole; enum-locking prevents the LLM from inventing
+// labels (e.g. "toc_entry") that the web side cannot apply.
+export const reviewAssistanceTextLabelSchema = z.enum([
+  'text',
+  'caption',
+  'footnote',
+  'section_header',
+  'list_item',
+  'page_header',
+  'page_footer',
+]);
+
+export type ReviewAssistanceTextLabel = z.infer<
+  typeof reviewAssistanceTextLabelSchema
+>;
+
 const textPartSchema = z.object({
   text: z.string(),
-  label: z.string().nullable(),
+  label: reviewAssistanceTextLabelSchema.nullable(),
 });
 
 // Common metadata fields shared by every command. Kept inline (instead of a
@@ -75,7 +93,7 @@ export const addTextCommandSchema = z.object({
   op: z.literal('addText'),
   bbox: bboxSchema,
   text: z.string(),
-  label: z.string(),
+  label: reviewAssistanceTextLabelSchema,
   pageNo: z.number().int().positive().nullable(),
   afterRef: z.string().nullable(),
   ...baseFields,
@@ -84,7 +102,7 @@ export const addTextCommandSchema = z.object({
 export const updateTextRoleCommandSchema = z.object({
   op: z.literal('updateTextRole'),
   textRef: z.string().min(1),
-  label: z.string().min(1),
+  label: reviewAssistanceTextLabelSchema,
   ...baseFields,
 });
 
