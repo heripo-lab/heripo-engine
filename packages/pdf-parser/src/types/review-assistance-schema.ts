@@ -260,6 +260,33 @@ export const reviewAssistancePageSchema = z.object({
     .max(10),
 });
 
+/**
+ * Conflict-merge response schema. When multiple task work-items propose
+ * different commands against the same Docling ref the runner asks the model
+ * to either pick exactly one candidate by index or drop all of them. Keeping
+ * the response shape narrow (a single pick/drop decision per group) avoids
+ * the LLM inventing new edits during the merge phase.
+ */
+export const reviewAssistanceMergeChoiceSchema = z.discriminatedUnion(
+  'decision',
+  [
+    z.object({
+      decision: z.literal('pick'),
+      chosenIndex: z.number().int().nonnegative(),
+      confidence: z.number().min(0).max(1),
+      rationale: z.string().max(REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH),
+    }),
+    z.object({
+      decision: z.literal('drop'),
+      rationale: z.string().max(REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH),
+    }),
+  ],
+);
+
+export type ReviewAssistanceMergeChoice = z.infer<
+  typeof reviewAssistanceMergeChoiceSchema
+>;
+
 export type ReviewAssistanceRawCommand = z.infer<
   typeof reviewAssistanceRawCommandSchema
 >;
@@ -269,11 +296,199 @@ export type ReviewAssistancePageOutput = z.infer<
 >;
 
 /**
- * Build a page schema restricted to one task's allowed ops. When `allowedOps`
- * is empty (or omitted) the full union is returned. Used at the LLM call site
- * so that, for a `text_role_footnote` task, the model can only emit
- * `updateTextRole` or `linkFootnote` — `task_op_not_allowed` issues become
- * structurally impossible.
+ * Sentinel written into a required enum field when the model omits it under
+ * the flat schema. It is intentionally outside every command enum so the
+ * deterministic validator rejects the command (`missing_required_field:*`)
+ * instead of the engine silently inventing a plausible-but-wrong value. See
+ * `flatCommandToRawCommand` and the validator's enum guards.
+ */
+export const REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL = '__missing__';
+
+const FALLBACK_BBOX = { l: 0, t: 0, r: 0, b: 0 } as const;
+
+/**
+ * Flat command shape used for multi-op tasks. Instead of a discriminated
+ * union (which emits an `anyOf` the smaller Gemini models reviewing these
+ * pages frequently fail to satisfy — every observed `No object generated`
+ * failure came from a multi-op union task, never from the single-op
+ * `text_ocr_hanja`), every possible payload field is hoisted to one flat
+ * object and made nullable. The model fills the fields its chosen `op` needs
+ * and nulls the rest — no branch selection. `flatCommandToRawCommand`
+ * (applied via `.transform`) folds the flat object back into the typed
+ * discriminated-union command so the validator and runner are unchanged.
+ */
+// Op-specific fields are `.nullish()` (optional + nullable) so the model only
+// emits the fields its chosen `op` needs and may omit the rest — emitting all
+// ~25 fields with explicit nulls on every command would be its own source of
+// schema-mismatch. `op` and `baseFields` stay required: the zero-failure
+// single-op `text_ocr_hanja` proves the review model handles a required
+// op + confidence/rationale/evidence object reliably.
+const flatCommandFields = {
+  op: reviewAssistanceCommandOpSchema,
+  textRef: z.string().nullish(),
+  text: z.string().nullish(),
+  label: reviewAssistanceTextLabelSchema.nullish(),
+  bbox: bboxSchema.nullish(),
+  afterRef: z.string().nullish(),
+  pageNo: z.number().int().nullish(),
+  textRefs: z.array(z.string()).nullish(),
+  keepRef: z.string().nullish(),
+  parts: z.array(textPartSchema).nullish(),
+  tableRef: z.string().nullish(),
+  row: z.number().int().nullish(),
+  col: z.number().int().nullish(),
+  grid: z.array(z.array(tableCellSchema)).nullish(),
+  caption: z.string().nullish(),
+  sourceTableRef: z.string().nullish(),
+  continuedTableRef: z.string().nullish(),
+  relation: z
+    .enum(['continues_on_next_page', 'continued_from_previous_page'])
+    .nullish(),
+  pictureRef: z.string().nullish(),
+  imageUri: z.string().nullish(),
+  regions: z.array(imageRegionSchema).nullish(),
+  reason: z.string().nullish(),
+  targetRef: z.string().nullish(),
+  markerTextRef: z.string().nullish(),
+  footnoteTextRef: z.string().nullish(),
+  sourceRef: z.string().nullish(),
+  position: z.enum(['before', 'after']).nullish(),
+  ...baseFields,
+} as const;
+
+type FlatReviewAssistanceCommand = z.infer<
+  z.ZodObject<typeof flatCommandFields>
+>;
+
+/**
+ * Fold a flat command back into the typed discriminated-union command. Null
+ * refs become `''` (self-rejecting via `target_ref_not_found`); null required
+ * bboxes become a zero box (self-rejecting via the bbox order check); null
+ * required enums become {@link REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL} (the
+ * validator rejects with `missing_required_field:*`). Optional fields keep
+ * their nullable contract. We never invent a plausible value for a field the
+ * model left empty.
+ */
+function flatCommandToRawCommand(
+  flat: FlatReviewAssistanceCommand,
+): ReviewAssistanceRawCommand {
+  const base = {
+    confidence: flat.confidence,
+    rationale: flat.rationale,
+    evidence: flat.evidence,
+  };
+  const sentinelEnum = REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL;
+  switch (flat.op) {
+    case 'replaceText':
+      return { op: 'replaceText', textRef: flat.textRef ?? '', text: flat.text ?? '', ...base };
+    case 'addText':
+      return {
+        op: 'addText',
+        bbox: flat.bbox ?? FALLBACK_BBOX,
+        text: flat.text ?? '',
+        label: flat.label ?? (sentinelEnum as ReviewAssistanceTextLabel),
+        pageNo: flat.pageNo ?? null,
+        afterRef: flat.afterRef ?? null,
+        ...base,
+      };
+    case 'updateTextRole':
+      return {
+        op: 'updateTextRole',
+        textRef: flat.textRef ?? '',
+        label: flat.label ?? (sentinelEnum as ReviewAssistanceTextLabel),
+        ...base,
+      };
+    case 'removeText':
+      return { op: 'removeText', textRef: flat.textRef ?? '', ...base };
+    case 'mergeTexts':
+      return {
+        op: 'mergeTexts',
+        textRefs: flat.textRefs ?? [],
+        text: flat.text ?? '',
+        keepRef: flat.keepRef ?? '',
+        ...base,
+      };
+    case 'splitText':
+      return { op: 'splitText', textRef: flat.textRef ?? '', parts: flat.parts ?? [], ...base };
+    case 'updateTableCell':
+      return {
+        op: 'updateTableCell',
+        tableRef: flat.tableRef ?? '',
+        row: flat.row ?? 0,
+        col: flat.col ?? 0,
+        text: flat.text ?? '',
+        ...base,
+      };
+    case 'replaceTable':
+      return {
+        op: 'replaceTable',
+        tableRef: flat.tableRef ?? '',
+        grid: flat.grid ?? [],
+        caption: flat.caption ?? null,
+        ...base,
+      };
+    case 'linkContinuedTable':
+      return {
+        op: 'linkContinuedTable',
+        sourceTableRef: flat.sourceTableRef ?? '',
+        continuedTableRef: flat.continuedTableRef ?? '',
+        relation:
+          flat.relation ??
+          (sentinelEnum as 'continues_on_next_page'),
+        ...base,
+      };
+    case 'updatePictureCaption':
+      return {
+        op: 'updatePictureCaption',
+        pictureRef: flat.pictureRef ?? '',
+        caption: flat.caption ?? '',
+        ...base,
+      };
+    case 'addPicture':
+      return {
+        op: 'addPicture',
+        bbox: flat.bbox ?? FALLBACK_BBOX,
+        imageUri: flat.imageUri ?? '',
+        caption: flat.caption ?? null,
+        pageNo: flat.pageNo ?? null,
+        ...base,
+      };
+    case 'splitPicture':
+      return { op: 'splitPicture', pictureRef: flat.pictureRef ?? '', regions: flat.regions ?? [], ...base };
+    case 'hidePicture':
+      return { op: 'hidePicture', pictureRef: flat.pictureRef ?? '', reason: flat.reason ?? '', ...base };
+    case 'updateBbox':
+      return { op: 'updateBbox', targetRef: flat.targetRef ?? '', bbox: flat.bbox ?? FALLBACK_BBOX, ...base };
+    case 'linkFootnote':
+      return {
+        op: 'linkFootnote',
+        markerTextRef: flat.markerTextRef ?? '',
+        footnoteTextRef: flat.footnoteTextRef ?? '',
+        ...base,
+      };
+    case 'moveNode':
+      return {
+        op: 'moveNode',
+        sourceRef: flat.sourceRef ?? '',
+        targetRef: flat.targetRef ?? '',
+        position: flat.position ?? (sentinelEnum as 'before'),
+        ...base,
+      };
+  }
+}
+
+/**
+ * Build a page schema restricted to one task's allowed ops.
+ *
+ * - No/empty `allowedOps` → the full discriminated union (table-correction
+ *   and tests still rely on this).
+ * - Exactly one op → the strict single-object command schema. `text_ocr_hanja`
+ *   is the only single-op task and is the control group with zero observed
+ *   schema-mismatch failures, so it is deliberately left on the strict shape.
+ * - Multiple ops → the {@link flatCommandFields} flat object. `op` stays an
+ *   enum locked to `allowedOps`, so `task_op_not_allowed` remains structurally
+ *   impossible while the `anyOf`-free shape is far easier for the review model
+ *   to satisfy.
  */
 export function buildReviewAssistancePageSchemaForOps(
   allowedOps: readonly ReviewAssistanceCommandOp[] | undefined,
@@ -281,21 +496,23 @@ export function buildReviewAssistancePageSchemaForOps(
   if (!allowedOps || allowedOps.length === 0) {
     return reviewAssistancePageSchema;
   }
-  const subset = allowedOps
-    .map((op) => COMMAND_SCHEMA_BY_OP[op])
-    .filter((schema): schema is AnyCommandSchema => Boolean(schema));
-  if (subset.length === 0) return reviewAssistancePageSchema;
+  const validOps = allowedOps.filter((op) => Boolean(COMMAND_SCHEMA_BY_OP[op]));
+  if (validOps.length === 0) return reviewAssistancePageSchema;
 
   const commandSchema =
-    subset.length === 1
-      ? subset[0]
-      : z.discriminatedUnion(
-          'op',
-          subset as unknown as readonly [
-            AnyCommandSchema,
-            ...AnyCommandSchema[],
-          ],
-        );
+    validOps.length === 1
+      ? COMMAND_SCHEMA_BY_OP[validOps[0]]
+      : z
+          .object({
+            ...flatCommandFields,
+            op: z.enum(
+              validOps as unknown as [
+                ReviewAssistanceCommandOp,
+                ...ReviewAssistanceCommandOp[],
+              ],
+            ),
+          })
+          .transform(flatCommandToRawCommand);
 
   return z.object({
     pageNo: z.number().int().positive(),

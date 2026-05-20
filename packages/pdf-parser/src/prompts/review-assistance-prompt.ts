@@ -136,6 +136,69 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
     },
   ];
 
+/**
+ * Build the conflict-merge prompt. Used when multiple task work-items propose
+ * different commands against the same Docling ref(s) on the same page; we ask
+ * the model to pick the single best candidate (or drop all of them) instead
+ * of letting all candidates fall back to `proposal` with
+ * `task_conflict_same_target_ref`. The candidate list is rendered with stable
+ * 0-based indices so the structured response (`chosenIndex`) is unambiguous.
+ */
+export const REVIEW_ASSISTANCE_MERGE_SYSTEM_PROMPT = [
+  'You are an arbiter resolving conflicting review commands proposed by different review tasks against the same Docling target.',
+  'You will receive the page image and a numbered candidate list. Each candidate is the full JSON of a previously validated command with its task, confidence, rationale, and evidence.',
+  'Pick the single candidate that best matches what the image and surrounding context show. Return its 0-based chosenIndex.',
+  'If no candidate is correct, or applying any of them would degrade the document compared to leaving the target untouched, return decision="drop".',
+  'You must NOT invent a new command, merge fields, or change candidate text. Only choose an existing candidate or drop.',
+  'Pick the candidate that is most faithful to the page image. Higher prior confidence is informative but not decisive — if a lower-confidence candidate is clearly correct, pick it.',
+].join('\n');
+
+export interface ReviewAssistanceMergeCandidateForPrompt {
+  /** 0-based index used by the structured-output response. */
+  index: number;
+  /** Source review task that produced the command. */
+  taskId: string;
+  /** Decision-level confidence carried into the merge phase. */
+  confidence: number;
+  /** Decision rationale (may be empty). */
+  rationale?: string;
+  /** Decision evidence excerpt (may be empty). */
+  evidence?: string;
+  /** Raw command JSON — kept verbatim so the arbiter sees the exact edit. */
+  command: unknown;
+}
+
+export interface ReviewAssistanceMergePromptInput {
+  pageNo: number;
+  /** Shared Docling refs that triggered the conflict. */
+  conflictRefs: string[];
+  candidates: ReviewAssistanceMergeCandidateForPrompt[];
+  outputLanguage?: string;
+}
+
+export function buildReviewAssistanceMergePrompt(
+  input: ReviewAssistanceMergePromptInput,
+): string {
+  const outputLanguage = input.outputLanguage?.trim();
+  const languagePrompt = outputLanguage
+    ? [
+        `OUTPUT LANGUAGE: ${outputLanguage}`,
+        `Write rationale in ${outputLanguage}. Keep JSON keys and enum values unchanged.`,
+      ].join('\n')
+    : undefined;
+  const candidatesJson = JSON.stringify(input.candidates);
+  return [
+    REVIEW_ASSISTANCE_MERGE_SYSTEM_PROMPT,
+    languagePrompt,
+    `PAGE: ${input.pageNo}`,
+    `CONFLICTING REFS: ${input.conflictRefs.join(', ')}`,
+    'CANDIDATES JSON (0-based index; pick exactly one or drop all):',
+    candidatesJson,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 export function buildReviewAssistancePrompt(
   context: PageReviewContext,
   task?: ReviewAssistanceTaskDefinition,

@@ -930,7 +930,7 @@ describe('ReviewAssistanceRunner', () => {
     expect(mockExtractText).toHaveBeenCalledWith('/tmp/input.pdf', 1);
   });
 
-  test('같은 ref를 건드리는 task 충돌은 자동 반영하지 않고 proposal로 낮춘다', async () => {
+  test('같은 ref 충돌은 LLM 머지 호출로 단일 winner 로 수렴된다', async () => {
     const doc = makeDoc();
     doc.texts[0].prov[0].bbox = {
       l: 10,
@@ -941,9 +941,23 @@ describe('ReviewAssistanceRunner', () => {
     };
     writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
 
+    let mergeCalls = 0;
     vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
       if (input.component === 'ReviewAssistancePageGate') {
         return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        mergeCalls += 1;
+        return {
+          output: {
+            decision: 'pick' as const,
+            chosenIndex: 0,
+            confidence: 0.9,
+            rationale: 'OCR replacement aligns with image text',
+          },
+          usage,
+          usedFallback: false,
+        };
       }
       const task = input.metadata.task;
       if (task === 'text_ocr_hanja') {
@@ -953,8 +967,8 @@ describe('ReviewAssistanceRunner', () => {
             commands: [
               {
                 op: 'replaceText',
-                targetRef: '#/texts/0',
-                payload: { text: 'Test' },
+                textRef: '#/texts/0',
+                text: 'Test',
                 confidence: 0.95,
                 rationale: 'Correct OCR spacing',
                 evidence: 'Test',
@@ -974,16 +988,8 @@ describe('ReviewAssistanceRunner', () => {
               {
                 op: 'updateBbox',
                 targetRef: '#/texts/0',
-                payload: {
-                  bbox: {
-                    l: 12,
-                    t: 12,
-                    r: 82,
-                    b: 42,
-                    coord_origin: 'TOPLEFT',
-                  },
-                },
-                confidence: 0.95,
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.94,
                 rationale: 'Bbox aligns better with visual text',
                 evidence: 'Text box shifted',
               },
@@ -1010,24 +1016,211 @@ describe('ReviewAssistanceRunner', () => {
       ...makeOptions(),
     });
 
-    expect(report.summary.autoAppliedCount).toBe(0);
-    expect(report.summary.proposalCount).toBe(2);
-    expect(report.pages[0].decisions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          disposition: 'proposal',
-          reasons: expect.arrayContaining(['task_conflict_same_target_ref']),
-          metadata: expect.objectContaining({ reviewTask: 'text_ocr_hanja' }),
-        }),
-        expect.objectContaining({
-          disposition: 'proposal',
-          reasons: expect.arrayContaining(['task_conflict_same_target_ref']),
-          metadata: expect.objectContaining({
-            reviewTask: 'layout_bbox_order',
-          }),
-        }),
-      ]),
+    expect(mergeCalls).toBe(1);
+    expect(report.pages[0].decisions).toHaveLength(1);
+    const winner = report.pages[0].decisions[0];
+    expect(winner.metadata).toMatchObject({
+      mergeChosen: expect.objectContaining({
+        method: 'llm',
+        groupSize: 2,
+        droppedDecisionIds: expect.any(Array),
+      }),
+    });
+    expect(winner.reasons).toEqual(
+      expect.arrayContaining(['merge_chosen_by:llm']),
     );
+    expect(winner.reasons).not.toEqual(
+      expect.arrayContaining(['task_conflict_same_target_ref']),
+    );
+  });
+
+  test('confidence gap > 0.3 면 LLM 호출 없이 결정론적으로 winner 를 선택한다', async () => {
+    const doc = makeDoc();
+    doc.texts[0].prov[0].bbox = {
+      l: 10,
+      t: 10,
+      r: 150,
+      b: 40,
+      coord_origin: 'TOPLEFT',
+    };
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
+
+    let mergeCalls = 0;
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        mergeCalls += 1;
+        return {
+          output: {
+            decision: 'pick' as const,
+            chosenIndex: 0,
+            confidence: 0.5,
+            rationale: 'unused',
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      const task = input.metadata.task;
+      if (task === 'text_ocr_hanja') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'replaceText',
+                textRef: '#/texts/0',
+                text: 'Test',
+                confidence: 0.95,
+                rationale: 'High confidence OCR',
+                evidence: 'Test',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      if (task === 'layout_bbox_order') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'updateBbox',
+                targetRef: '#/texts/0',
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.5,
+                rationale: 'Low confidence bbox shift',
+                evidence: 'Text box shifted',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return {
+        output: { pageNo: 1, commands: [], pageNotes: [] },
+        usage,
+        usedFallback: false,
+      };
+    });
+
+    const report = await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
+    });
+
+    expect(mergeCalls).toBe(0);
+    expect(report.pages[0].decisions).toHaveLength(1);
+    expect(report.pages[0].decisions[0].metadata).toMatchObject({
+      mergeChosen: expect.objectContaining({ method: 'deterministic_gap' }),
+    });
+  });
+
+  test('머지 LLM 이 drop 을 반환하면 그룹 전체가 결정에서 제거된다', async () => {
+    const doc = makeDoc();
+    doc.texts[0].prov[0].bbox = {
+      l: 10,
+      t: 10,
+      r: 150,
+      b: 40,
+      coord_origin: 'TOPLEFT',
+    };
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
+
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        return {
+          output: {
+            decision: 'drop' as const,
+            rationale: 'Both candidates would degrade the page',
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      const task = input.metadata.task;
+      if (task === 'text_ocr_hanja') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'replaceText',
+                textRef: '#/texts/0',
+                text: 'Test',
+                confidence: 0.7,
+                rationale: 'Mid confidence OCR',
+                evidence: 'Test',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      if (task === 'layout_bbox_order') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'updateBbox',
+                targetRef: '#/texts/0',
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.7,
+                rationale: 'Mid confidence bbox shift',
+                evidence: 'Text box shifted',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return {
+        output: { pageNo: 1, commands: [], pageNotes: [] },
+        usage,
+        usedFallback: false,
+      };
+    });
+
+    const report = await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
+    });
+
+    expect(report.pages[0].decisions).toHaveLength(1);
+    const audited = report.pages[0].decisions[0];
+    expect(audited.disposition).toBe('skipped');
+    expect(audited.reasons).toEqual(
+      expect.arrayContaining(['merge_dropped_all']),
+    );
+    expect(audited.metadata).toMatchObject({
+      mergeDropped: expect.objectContaining({
+        method: 'llm',
+        groupSize: 2,
+      }),
+    });
   });
 
   test('keeps existing origin snapshots when rerun in the same output directory', async () => {
@@ -1207,10 +1400,13 @@ describe('ReviewAssistanceRunner', () => {
     );
   });
 
-  test('treats no structured output as no-op review result with issue hint', async () => {
-    vi.mocked(LLMCaller.callVision).mockRejectedValue(
-      new Error('No output generated.'),
-    );
+  test('treats no structured output as no-op review result with info hint', async () => {
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      throw new Error('No object generated: response did not match schema.');
+    });
     const logger = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -1237,7 +1433,7 @@ describe('ReviewAssistanceRunner', () => {
         expect.objectContaining({
           category: 'review_execution',
           type: 'empty_model_output',
-          severity: 'warning',
+          severity: 'info',
           reasons: expect.arrayContaining(['no_output_generated']),
         }),
       ]),
@@ -1249,7 +1445,7 @@ describe('ReviewAssistanceRunner', () => {
       {
         err: expect.objectContaining({
           type: 'Error',
-          message: 'No output generated.',
+          message: 'No object generated: response did not match schema.',
         }),
       },
     );
@@ -2140,10 +2336,27 @@ describe('ReviewAssistanceRunner', () => {
     expect(runner.buildNoOutputIssue(context).reasons).toEqual([
       'no_output_generated',
     ]);
+    expect(runner.buildNoOutputIssue(context).severity).toBe('warning');
+    expect(runner.buildNoOutputIssue(context, undefined, 'info').severity).toBe(
+      'info',
+    );
     expect(
       runner.isNoOutputGeneratedError({
         name: 'NoOutputGeneratedError',
       }),
+    ).toBe(true);
+    expect(
+      runner.isNoOutputGeneratedError({
+        name: 'AI_NoObjectGeneratedError',
+      }),
+    ).toBe(true);
+    expect(
+      runner.isNoOutputGeneratedError(
+        new Error('No object generated: response did not match schema.'),
+      ),
+    ).toBe(true);
+    expect(
+      runner.isNoOutputGeneratedError(new Error('No output generated.')),
     ).toBe(true);
     expect(runner.isNoOutputGeneratedError({ name: undefined })).toBe(false);
 

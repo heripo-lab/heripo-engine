@@ -16,6 +16,7 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { createHash } from 'node:crypto';
 
+import { REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL } from '../../types/review-assistance-schema';
 import {
   bboxContainmentRatio,
   bboxGeometryOptionsForPage,
@@ -320,6 +321,7 @@ export class ReviewAssistanceValidator {
       case 'addText':
         this.validatePageNumber(context, command.pageNo, reasons);
         this.validateBbox(context, command.bbox, reasons);
+        this.validateRequiredEnum(command.label, 'label', reasons);
         break;
       case 'removeText':
         this.validateRemoveText(context, command.textRef, reasons);
@@ -358,6 +360,7 @@ export class ReviewAssistanceValidator {
         this.validateTableRef(command.continuedTableRef, refs, reasons, {
           allowAdjacent: true,
         });
+        this.validateRequiredEnum(command.relation, 'relation', reasons);
         break;
       case 'updatePictureCaption':
         this.validateCaptionText(command.caption, reasons);
@@ -398,10 +401,31 @@ export class ReviewAssistanceValidator {
         if (command.sourceRef === command.targetRef) {
           reasons.push('move_self_reference');
         }
+        this.validateRequiredEnum(command.position, 'position', reasons);
         break;
       case 'updateTextRole':
+        this.validateRequiredEnum(command.label, 'label', reasons);
+        break;
       case 'hidePicture':
         break;
+    }
+  }
+
+  /**
+   * Reject commands whose required enum was omitted by the model under the
+   * flat multi-op schema. `flatCommandToRawCommand` writes
+   * {@link REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL} for a null required enum
+   * rather than inventing a value, so an omitted `label`/`relation`/`position`
+   * surfaces here as `missing_required_field:*` and the command is skipped —
+   * never silently applied with a guessed value.
+   */
+  private validateRequiredEnum(
+    value: string,
+    field: string,
+    reasons: string[],
+  ): void {
+    if (value === REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL) {
+      reasons.push(`missing_required_field:${field}`);
     }
   }
 
