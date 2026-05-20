@@ -509,11 +509,16 @@ export class ReviewAssistanceValidator {
     switch (command.op) {
       case 'replaceText':
       case 'updateTextRole':
-      case 'updateTableCell':
       case 'updatePictureCaption':
-        // Localized text/cell mutations: validation already guards against
+        // Localized text/caption mutations: validation already guards against
         // invalid refs and excessive deletion, so no extra block reason.
         return undefined;
+      case 'updateTableCell':
+        // Table cells carry structured archaeological data where a wrong value
+        // is easy to miss. Mirror the backoffice AI table-correction feature
+        // and always route table edits through human review (proposal) rather
+        // than auto-applying them.
+        return 'table_correction_requires_manual_review';
       case 'removeText':
         // validateRemoveText enforces deterministic suspect reasons before
         // a removal is considered valid; no further block needed here.

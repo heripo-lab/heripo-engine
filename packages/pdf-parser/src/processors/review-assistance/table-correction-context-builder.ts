@@ -4,6 +4,7 @@ import type {
   PageReviewContext,
   PageReviewOrphanCaption,
   PageReviewTable,
+  PageReviewTableCell,
   PageReviewTextBlock,
 } from './page-review-context-builder';
 import type { ReviewAssistanceWorkItem } from './review-assistance-work-scheduler';
@@ -15,6 +16,7 @@ export interface TableCorrectionTableIdentity {
   caption?: string;
   bbox?: DoclingBBox;
   gridPreview: string[][];
+  fullGrid?: PageReviewTableCell[][];
   rowCount?: number;
   colCount?: number;
   hasSpans?: boolean;
@@ -137,6 +139,7 @@ export class TableCorrectionContextBuilder {
       caption: table.caption,
       bbox: table.bbox,
       gridPreview: table.gridPreview,
+      fullGrid: table.fullGrid,
       rowCount: table.rowCount,
       colCount: table.colCount,
       hasSpans: table.hasSpans,

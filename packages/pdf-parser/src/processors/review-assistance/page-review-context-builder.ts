@@ -33,11 +33,32 @@ export interface PageReviewTextBlock {
   suspectReasons: string[];
 }
 
+/**
+ * Logical-form table cell mirroring the backoffice AI table-correction cell
+ * shape (`text` + camelCase span/header flags). Spanned cells are normalized so
+ * the master cell carries the span and every covered position becomes an empty
+ * `span=1` placeholder (a "shadow" cell). This is what `fullGrid` sends to the
+ * table-correction LLM so it can echo structure back losslessly.
+ */
+export interface PageReviewTableCell {
+  text: string;
+  rowSpan: number;
+  colSpan: number;
+  columnHeader: boolean;
+  rowHeader: boolean;
+}
+
 export interface PageReviewTable {
   ref: string;
   caption?: string;
   bbox?: DoclingBBox;
   gridPreview: string[][];
+  /**
+   * Full per-cell grid in logical form (see {@link PageReviewTableCell}).
+   * Present only when the table fits within {@link MAX_FULL_GRID_CELLS};
+   * larger tables fall back to the truncated `gridPreview` for token safety.
+   */
+  fullGrid?: PageReviewTableCell[][];
   rowCount?: number;
   colCount?: number;
   hasSpans?: boolean;
@@ -151,6 +172,11 @@ const HEADING_MAX_LENGTH = 80;
 const EMPTY_CELL_RATIO_THRESHOLD = 0.5;
 const MAX_GRID_PREVIEW_ROWS = 8;
 const MAX_GRID_PREVIEW_COLS = 8;
+// Upper bound on cells (rows × cols) for which we ship the full per-cell grid
+// to the table-correction LLM. ~50 rows × 12 cols. Beyond this we omit
+// `fullGrid` and fall back to the truncated `gridPreview` to bound prompt size
+// and latency; oversized tables simply don't get whole-grid AI correction.
+const MAX_FULL_GRID_CELLS = 600;
 
 export class PageReviewContextBuilder {
   build(
@@ -543,6 +569,7 @@ export class PageReviewContextBuilder {
   ): PageReviewTable {
     const ref = `#/tables/${index}`;
     const gridPreview = this.buildGridPreview(item.data.grid);
+    const fullGrid = this.buildFullGrid(item.data.grid);
     const emptyCellRatio = this.getEmptyCellRatio(item.data.grid);
     const tableCells = this.getTableCells(item);
     const headerRows = this.getHeaderRows(tableCells);
@@ -570,6 +597,7 @@ export class PageReviewContextBuilder {
       caption: this.getCaptionText(item.captions, facts),
       bbox: this.getProvForPage(item.prov, pageNo)?.bbox,
       gridPreview,
+      fullGrid,
       rowCount: item.data.num_rows,
       colCount: item.data.num_cols,
       hasSpans: tableCells.some(
@@ -789,6 +817,48 @@ export class PageReviewContextBuilder {
           .slice(0, MAX_GRID_PREVIEW_COLS)
           .map((cell) => cell.text?.trim() ?? ''),
       );
+  }
+
+  /**
+   * Normalize Docling's dense `grid` (where a spanned cell is the same cell
+   * object repeated across every covered position) into logical form: the
+   * master position keeps its span/header flags and each covered shadow
+   * position collapses to an empty `span=1` placeholder. A position is the
+   * master iff its cell's start offsets equal the grid coordinates; otherwise
+   * the cell belongs to an earlier master and is treated as a shadow. Returns
+   * `undefined` for empty or oversized grids (caller falls back to gridPreview).
+   */
+  private buildFullGrid(
+    grid: DoclingTableCell[][],
+  ): PageReviewTableCell[][] | undefined {
+    const rowCount = grid.length;
+    const colCount = grid[0]?.length ?? 0;
+    if (rowCount === 0 || colCount === 0) return undefined;
+    if (rowCount * colCount > MAX_FULL_GRID_CELLS) return undefined;
+
+    return grid.map((row, rowIndex) =>
+      row.map((cell, colIndex) => {
+        const isMaster =
+          cell.start_row_offset_idx === rowIndex &&
+          cell.start_col_offset_idx === colIndex;
+        if (!isMaster) {
+          return {
+            text: '',
+            rowSpan: 1,
+            colSpan: 1,
+            columnHeader: false,
+            rowHeader: false,
+          };
+        }
+        return {
+          text: cell.text?.trim() ?? '',
+          rowSpan: cell.row_span >= 1 ? cell.row_span : 1,
+          colSpan: cell.col_span >= 1 ? cell.col_span : 1,
+          columnHeader: cell.column_header === true,
+          rowHeader: cell.row_header === true,
+        };
+      }),
+    );
   }
 
   private getTableCells(item: DoclingTableItem): DoclingTableCell[] {

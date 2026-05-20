@@ -104,7 +104,11 @@ describe('TableCorrectionRunner', () => {
 
     expect(tableContext.targetTable.ref).toBe('#/tables/0');
     expect(prompt).toContain('table_correction_unit_hint_dropped');
-    expect(decision.disposition).toBe('auto_applied');
+    // Table cell edits mirror the backoffice AI table-correction feature:
+    // they are always routed to human review (proposal), never auto-applied,
+    // even at high confidence.
+    expect(decision.disposition).toBe('proposal');
+    expect(decision.reasons).toContain('table_correction_requires_manual_review');
     expect(decision.command).toMatchObject({
       op: 'updateTableCell',
       tableRef: '#/tables/0',

@@ -1093,6 +1093,13 @@ export class ReviewAssistanceRunner {
   }
 
   private isDeterministicValidationFailureReason(reason: string): boolean {
+    // Block reasons that merely gate a valid command to human review
+    // (e.g. structural_command_requires_manual_review,
+    // table_correction_requires_manual_review) are not re-askable failures:
+    // re-asking returns the same valid command. They must survive as
+    // proposals instead of being re-asked to death and demoted to a
+    // work_item_validation_failed issue.
+    if (reason.includes('requires_manual_review')) return false;
     return (
       reason.startsWith('invalid_') ||
       reason.endsWith('_not_found') ||
