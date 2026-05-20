@@ -1738,7 +1738,10 @@ export class ReviewAssistanceRunner {
           mergeRationale: choice.rationale,
         };
       }
-      const winner = capped[choice.chosenIndex];
+      // Flat schema: chosenIndex is nullish and only meaningful for a pick. A
+      // missing index on a pick is treated as out-of-range → top-1 fallback.
+      const chosenIndex = choice.chosenIndex ?? -1;
+      const winner = capped[chosenIndex];
       if (!winner) {
         this.logger.warn(
           `[ReviewAssistanceRunner] Page ${context.pageNo}: merge arbiter returned out-of-range chosenIndex=${choice.chosenIndex} (group size ${capped.length}); falling back to top-1`,
@@ -1756,7 +1759,7 @@ export class ReviewAssistanceRunner {
         winner,
         method: 'llm',
         mergeRationale: choice.rationale,
-        mergeConfidence: choice.confidence,
+        mergeConfidence: choice.confidence ?? winner.confidence,
       };
     } catch (error) {
       if (options.abortSignal?.aborted) {

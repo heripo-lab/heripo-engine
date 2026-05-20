@@ -179,12 +179,30 @@ describe('buildReviewAssistancePageSchemaForOps', () => {
     });
   });
 
-  test('빈/미지원 op 목록은 전체 union 스키마로 폴백한다', () => {
-    expect(buildReviewAssistancePageSchemaForOps([])).toBe(
-      reviewAssistancePageSchema,
-    );
-    expect(
-      buildReviewAssistancePageSchemaForOps(undefined),
-    ).toBe(reviewAssistancePageSchema);
+  test('빈/미지원 op 목록은 전체 op flat 스키마로 폴백한다 (LLM-facing union 없음)', () => {
+    const schema = buildReviewAssistancePageSchemaForOps(undefined);
+    // fallback is no longer the discriminated union — it is a flat object that
+    // still parses a flat command from any op and transforms it to typed.
+    expect(schema).not.toBe(reviewAssistancePageSchema);
+    const parsed = schema.safeParse({
+      pageNo: 1,
+      commands: [
+        {
+          op: 'replaceText',
+          textRef: '#/texts/0',
+          text: '교정',
+          confidence: 0.9,
+          rationale: 'OCR',
+          evidence: null,
+        },
+      ],
+      pageNotes: [],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success ? parsed.data.commands[0] : undefined).toMatchObject({
+      op: 'replaceText',
+      textRef: '#/texts/0',
+      text: '교정',
+    });
   });
 });

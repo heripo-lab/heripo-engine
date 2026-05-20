@@ -1223,6 +1223,92 @@ describe('ReviewAssistanceRunner', () => {
     });
   });
 
+  test('머지 pick 인데 chosenIndex 가 누락되면 top-1 로 폴백한다', async () => {
+    const doc = makeDoc();
+    doc.texts[0].prov[0].bbox = {
+      l: 10,
+      t: 10,
+      r: 150,
+      b: 40,
+      coord_origin: 'TOPLEFT',
+    };
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
+
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        // flat schema: pick with no chosenIndex (model omitted it)
+        return {
+          output: { decision: 'pick', rationale: '인덱스 누락' },
+          usage,
+          usedFallback: false,
+        };
+      }
+      const task = input.metadata.task;
+      if (task === 'text_ocr_hanja') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'replaceText',
+                textRef: '#/texts/0',
+                text: 'Test',
+                confidence: 0.8,
+                rationale: 'OCR',
+                evidence: 'Test',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      if (task === 'layout_bbox_order') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'updateBbox',
+                targetRef: '#/texts/0',
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.75,
+                rationale: 'bbox',
+                evidence: 'shift',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return {
+        output: { pageNo: 1, commands: [], pageNotes: [] },
+        usage,
+        usedFallback: false,
+      };
+    });
+
+    const report = await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
+    });
+
+    expect(report.pages[0].decisions).toHaveLength(1);
+    expect(report.pages[0].decisions[0].metadata).toMatchObject({
+      mergeChosen: expect.objectContaining({ method: 'llm_fallback' }),
+    });
+  });
+
   test('keeps existing origin snapshots when rerun in the same output directory', async () => {
     const reviewOrigin = makeDoc();
     reviewOrigin.texts[0].text = 'Existing review origin';

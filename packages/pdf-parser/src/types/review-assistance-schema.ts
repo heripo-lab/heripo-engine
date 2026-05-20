@@ -263,25 +263,21 @@ export const reviewAssistancePageSchema = z.object({
 /**
  * Conflict-merge response schema. When multiple task work-items propose
  * different commands against the same Docling ref the runner asks the model
- * to either pick exactly one candidate by index or drop all of them. Keeping
- * the response shape narrow (a single pick/drop decision per group) avoids
- * the LLM inventing new edits during the merge phase.
+ * to either pick exactly one candidate by index or drop all of them.
+ *
+ * Kept as a single flat object (not a `decision`-discriminated union) for the
+ * same reason the command schema is flat: the small review models fail the
+ * `anyOf` a discriminated union emits. `chosenIndex`/`confidence` are nullish
+ * because they only apply to `decision: 'pick'`; the runner treats a missing
+ * `chosenIndex` on a pick as out-of-range and falls back to the top-1
+ * candidate.
  */
-export const reviewAssistanceMergeChoiceSchema = z.discriminatedUnion(
-  'decision',
-  [
-    z.object({
-      decision: z.literal('pick'),
-      chosenIndex: z.number().int().nonnegative(),
-      confidence: z.number().min(0).max(1),
-      rationale: z.string().max(REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH),
-    }),
-    z.object({
-      decision: z.literal('drop'),
-      rationale: z.string().max(REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH),
-    }),
-  ],
-);
+export const reviewAssistanceMergeChoiceSchema = z.object({
+  decision: z.enum(['pick', 'drop']),
+  chosenIndex: z.number().int().nonnegative().nullish(),
+  confidence: z.number().min(0).max(1).nullish(),
+  rationale: z.string().max(REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH),
+});
 
 export type ReviewAssistanceMergeChoice = z.infer<
   typeof reviewAssistanceMergeChoiceSchema
@@ -480,33 +476,35 @@ function flatCommandToRawCommand(
 /**
  * Build a page schema restricted to one task's allowed ops.
  *
- * - No/empty `allowedOps` → the full discriminated union (table-correction
- *   and tests still rely on this).
+ * - No/empty `allowedOps` → a flat object over **all** ops. The full
+ *   discriminated union is never used as an LLM schema (the `anyOf` it emits
+ *   is what the smaller review models fail); `reviewAssistancePageSchema`
+ *   remains only as the inferred type source and for tests.
  * - Exactly one op → the strict single-object command schema. `text_ocr_hanja`
  *   is the only single-op task and is the control group with zero observed
  *   schema-mismatch failures, so it is deliberately left on the strict shape.
  * - Multiple ops → the {@link flatCommandFields} flat object. `op` stays an
- *   enum locked to `allowedOps`, so `task_op_not_allowed` remains structurally
- *   impossible while the `anyOf`-free shape is far easier for the review model
- *   to satisfy.
+ *   enum locked to the requested ops, so `task_op_not_allowed` remains
+ *   structurally impossible while the `anyOf`-free shape is far easier for the
+ *   review model to satisfy.
  */
 export function buildReviewAssistancePageSchemaForOps(
   allowedOps: readonly ReviewAssistanceCommandOp[] | undefined,
 ) {
-  if (!allowedOps || allowedOps.length === 0) {
-    return reviewAssistancePageSchema;
-  }
-  const validOps = allowedOps.filter((op) => Boolean(COMMAND_SCHEMA_BY_OP[op]));
-  if (validOps.length === 0) return reviewAssistancePageSchema;
+  const requested = (allowedOps ?? []).filter((op) =>
+    Boolean(COMMAND_SCHEMA_BY_OP[op]),
+  );
+  const ops: readonly ReviewAssistanceCommandOp[] =
+    requested.length > 0 ? requested : reviewAssistanceCommandOpSchema.options;
 
   const commandSchema =
-    validOps.length === 1
-      ? COMMAND_SCHEMA_BY_OP[validOps[0]]
+    ops.length === 1
+      ? COMMAND_SCHEMA_BY_OP[ops[0]]
       : z
           .object({
             ...flatCommandFields,
             op: z.enum(
-              validOps as unknown as [
+              ops as unknown as [
                 ReviewAssistanceCommandOp,
                 ...ReviewAssistanceCommandOp[],
               ],
