@@ -1,3 +1,4 @@
+import type { PageReviewTableCell } from '../processors/review-assistance/page-review-context-builder';
 import type { TableCorrectionContext } from '../processors/review-assistance/table-correction-context-builder';
 
 import {
@@ -21,30 +22,18 @@ Output shape:
 
 Each command in commands[] is one of the op-specific shapes below. There is NO top-level "targetRef" wrapper and NO "payload" wrapper — write every op-specific field directly on the command object. Every command also includes the shared metadata fields "confidence" (number 0..1), "rationale" (string), and "evidence" (string or null).
 
-- { "op": "replaceTable", "tableRef": <targetTable.ref>, "grid": [[{ "text": <cell text>, "rowSpan": <int or null>, "colSpan": <int or null>, "columnHeader": <bool or null>, "rowHeader": <bool or null>, "bbox": <or null> }, ...], ...], "caption": <or null>, confidence, rationale, evidence }
 - { "op": "updateTableCell", "tableRef": <targetTable.ref>, "row": <int>, "col": <int>, "text": <corrected cell text>, confidence, rationale, evidence }
+- { "op": "replaceTable", "tableRef": <targetTable.ref>, "grid": [[{ "text": <cell text>, "rowSpan": <int or null>, "colSpan": <int or null>, "columnHeader": <bool or null>, "rowHeader": <bool or null>, "bbox": <or null> }, ...], ...], "caption": <or null>, confidence, rationale, evidence }
 - { "op": "linkContinuedTable", "sourceTableRef": <targetTable.ref>, "continuedTableRef": <adjacent-page table ref>, "relation": "continues_on_next_page" | "continued_from_previous_page", confidence, rationale, evidence }
-
-Current table grid:
-- targetTable.fullGrid, when present, is the COMPLETE current grid of the target table in logical form: a rectangular row-major 2D array with one entry per grid position. A spanned cell appears once at its master (top-left) position carrying its rowSpan/colSpan; every other position it covers is an empty placeholder with rowSpan=1 and colSpan=1. Header cells set columnHeader=true (a header row) or rowHeader=true (a header column).
-- When targetTable.fullGrid is absent (the table is too large to send in full), use targetTable.gridPreview, a truncated text-only preview, instead.
-
-How to correct (preferred path — use whenever targetTable.fullGrid is present):
-- Begin from a verbatim copy of targetTable.fullGrid and change ONLY the cells whose text is wrong in the page image. Keep every other cell exactly as given — its text, rowSpan, colSpan, columnHeader, rowHeader, and every empty placeholder.
-- Emit the entire corrected grid with replaceTable, keeping the same number of rows and columns and re-declaring all span/header metadata. This is the primary path and mirrors how a human reviewer corrects the whole table at once.
-- Use updateTableCell only when you want a single isolated text fix without restating the whole grid; it edits one cell and cannot change structure.
-- If the entire table already matches the page image, return {"pageNo": <current pageNo>, "commands": [], "pageNotes": []}. Do NOT emit a replaceTable that merely echoes targetTable.fullGrid unchanged.
 
 Rules:
 - The only editable table is targetTable.ref. Do not modify otherTablesOnPage; use them only as boundaries so content does not leak between tables.
 - Always set tableRef (sourceTableRef for linkContinuedTable) to targetTable.ref exactly as given. Never wrap fields in a "payload" object and never invent a different ref.
-- Keep the target table identity and bbox fixed. Do not move the target bbox, merge it with another same-page table, or borrow rows/cells from another table.
-- Inspect structure, cell text, caption evidence, spans, headers, units, footnotes, empty cells, and adjacent-page continuation hints.
-- For replaceTable, return a rectangular grid and re-declare every rowSpan, colSpan, columnHeader, and rowHeader the target table has — a corrected grid that drops span/header metadata, units, or footnote markers is rejected.
-- Preserve units and footnote markers that are visible in the target table. Do not normalize blank cells into invented values.
-- Suggest linkContinuedTable only when an adjacent-page table ref is provided and the image/context supports matching columns, headers, or caption continuation.
+- Keep the target table identity and bbox fixed. Do not move the target bbox, merge it with another same-page table, or borrow rows or cells from another table.
+- Compare each cell against the page image and correct only the cells whose text is clearly wrong. Do not normalize blank cells into invented values, and preserve every unit and footnote marker that is visible in the table.
+- Suggest linkContinuedTable only when an adjacent-page table ref is provided and the image or context supports matching columns, headers, or caption continuation.
 - If no grounded table correction is needed, return {"pageNo": <current pageNo>, "commands": [], "pageNotes": []}.
-- Set confidence to how clearly the page image supports the change. replaceTable and linkContinuedTable always require human review regardless of confidence, so do not suppress a grounded correction with an artificially low score.
+- Set confidence to how clearly the page image supports the change. Table corrections always require human review regardless of confidence, so do not suppress a grounded correction with an artificially low score.
 - Keep rationale <= ${REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH} characters, evidence <= ${REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH} characters, and each page note <= ${REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH} characters.`;
 
 export function buildTableCorrectionPrompt(
@@ -59,7 +48,7 @@ export function buildTableCorrectionPrompt(
   const languagePrompt = outputLanguage
     ? [
         `OUTPUT LANGUAGE: ${outputLanguage}`,
-        `Write rationale and pageNotes in ${outputLanguage}. Keep evidence as a short verbatim source snippet when possible. Keep JSON keys, op names, refs, and payload text unchanged.`,
+        `Write rationale and pageNotes in ${outputLanguage}. Keep evidence as a short verbatim source snippet when possible. Keep JSON keys, op names, refs, and cell text unchanged.`,
       ].join('\n')
     : undefined;
   const feedbackPrompt =
@@ -76,11 +65,96 @@ export function buildTableCorrectionPrompt(
     TABLE_CORRECTION_SYSTEM_PROMPT,
     languagePrompt,
     feedbackPrompt,
+    buildCorrectionInstructions(context.targetTable),
     'TABLE CORRECTION CONTEXT JSON:',
     JSON.stringify(toPromptContext(context)),
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+/**
+ * The correction strategy depends on table size. Small tables (fullGrid
+ * present) are corrected cell by cell: the model is shown a coordinate-labeled
+ * list and asked for sparse updateTableCell edits, which the runner folds onto
+ * the authoritative grid (see TableCorrectionRunner.foldSparseCellEdits). This
+ * is far more reliable for weak review models than regenerating a whole grid,
+ * which drops spans/headers or returns the wrong dimensions. Oversized tables
+ * (no fullGrid) keep the whole-grid replaceTable path against the truncated
+ * gridPreview, since there are no per-cell coordinates to anchor sparse edits.
+ */
+function buildCorrectionInstructions(
+  targetTable: TableCorrectionContext['targetTable'],
+): string {
+  if (!targetTable.fullGrid) {
+    return [
+      'HOW TO CORRECT — whole-grid mode (this table is too large to list cell by cell):',
+      '- targetTable.gridPreview is a truncated text-only preview of the current grid.',
+      '- Emit a single replaceTable with the full corrected grid. Keep the same number of rows and columns and re-declare every rowSpan, colSpan, columnHeader, and rowHeader. A grid that drops span or header metadata, units, or footnote markers is rejected.',
+      '- Change ONLY the cells whose text is wrong in the page image; copy every other cell exactly as given.',
+    ].join('\n');
+  }
+  return [
+    'HOW TO CORRECT — cell-by-cell mode (preferred for this table):',
+    '- TARGET TABLE CELLS below lists every editable cell as `[r=<row>, c=<col>] "<current text>"`, one per line, with columnHeader/rowHeader/rowSpan/colSpan tags in parentheses. The r and c numbers are the exact coordinates to edit.',
+    '- For EACH cell whose text is wrong in the page image, emit exactly one updateTableCell command. Copy that cell\'s r into "row" and its c into "col" verbatim, and put the corrected text in "text".',
+    '- Do NOT emit a replaceTable and do NOT restate the grid. Do NOT emit a command for any cell that already matches the image. Edit only listed coordinates — positions covered by a span are omitted on purpose.',
+    "- Emit a replaceTable ONLY if the table's row or column COUNT itself is wrong (cells structurally merged, split, or missing) — never for plain text fixes.",
+    '',
+    'TARGET TABLE CELLS:',
+    renderCellList(targetTable.fullGrid),
+  ].join('\n');
+}
+
+/**
+ * Render fullGrid as a coordinate-labeled list — `[r=R, c=C] "text"` with
+ * header/span tags — that mirrors the { row, col, text } shape the model
+ * emits. The explicit per-line coordinates make miscounting far less likely
+ * than a raw 2D JSON dump. Positions covered by another cell's span (shadows)
+ * are omitted so the model never targets a placeholder slot.
+ */
+function renderCellList(grid: PageReviewTableCell[][]): string {
+  const shadows = buildShadowSet(grid);
+  const lines: string[] = [];
+  grid.forEach((row, rowIndex) => {
+    row.forEach((cell, colIndex) => {
+      if (shadows.has(`${rowIndex}:${colIndex}`)) return;
+      const tags: string[] = [];
+      if (cell.columnHeader) tags.push('columnHeader');
+      if (cell.rowHeader) tags.push('rowHeader');
+      if (cell.rowSpan > 1) tags.push(`rowSpan=${cell.rowSpan}`);
+      if (cell.colSpan > 1) tags.push(`colSpan=${cell.colSpan}`);
+      const tagSuffix = tags.length > 0 ? ` (${tags.join(', ')})` : '';
+      lines.push(
+        `[r=${rowIndex}, c=${colIndex}]${tagSuffix} ${JSON.stringify(cell.text)}`,
+      );
+    });
+  });
+  return lines.join('\n');
+}
+
+/**
+ * Positions covered by an earlier cell's row/col span (excluding each span's
+ * own master/top-left position). Mirrors
+ * TableCorrectionRunner.buildShadowPositions; kept local so the labeled cell
+ * list omits the placeholder slots a spanned cell already covers.
+ */
+function buildShadowSet(grid: PageReviewTableCell[][]): Set<string> {
+  const shadows = new Set<string>();
+  grid.forEach((row, rowIndex) => {
+    row.forEach((cell, colIndex) => {
+      const rowSpan = cell.rowSpan > 1 ? cell.rowSpan : 1;
+      const colSpan = cell.colSpan > 1 ? cell.colSpan : 1;
+      if (rowSpan === 1 && colSpan === 1) return;
+      for (let dr = 0; dr < rowSpan; dr += 1) {
+        for (let dc = 0; dc < colSpan; dc += 1) {
+          if (dr === 0 && dc === 0) continue;
+          shadows.add(`${rowIndex + dr}:${colIndex + dc}`);
+        }
+      }
+    });
+  });
+  return shadows;
 }
 
 function toPromptContext(context: TableCorrectionContext): unknown {
@@ -110,15 +184,22 @@ function toPromptContext(context: TableCorrectionContext): unknown {
 }
 
 /**
- * When the full per-cell grid is available, drop the truncated `gridPreview`
- * from the prompt so the model has a single authoritative grid to copy from.
- * The validator keeps `gridPreview` on the identity for content-leak checks;
- * only the prompt projection omits it.
+ * Project the target table for the prompt JSON. When fullGrid is present it is
+ * rendered separately as the coordinate-labeled TARGET TABLE CELLS list, so
+ * both fullGrid and the now-redundant gridPreview are dropped here — the model
+ * copies coordinates from the authoritative list, not from a second grid view.
+ * Oversized tables keep gridPreview as their only grid view. The validator
+ * keeps both fields on the identity for its own checks; only this prompt
+ * projection omits them.
  */
 function toPromptTargetTable(
   targetTable: TableCorrectionContext['targetTable'],
 ): unknown {
   if (!targetTable.fullGrid) return targetTable;
-  const { gridPreview: _gridPreview, ...rest } = targetTable;
+  const {
+    fullGrid: _fullGrid,
+    gridPreview: _gridPreview,
+    ...rest
+  } = targetTable;
   return rest;
 }

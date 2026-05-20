@@ -622,7 +622,16 @@ describe('ReviewAssistanceRunner', () => {
       (decision) => decision.metadata?.tableCorrection,
     );
     expect(tableDecisions).toHaveLength(1);
-    expect(tableDecisions[0].command?.op).toBe('updateTableCell');
+    // The accepted cell edit targets a table with a fullGrid, so the runner
+    // folds it onto the authoritative grid and emits a single replaceTable
+    // carrying the corrected cell text.
+    const foldedCommand = tableDecisions[0].command;
+    expect(foldedCommand?.op).toBe('replaceTable');
+    const foldedGrid =
+      foldedCommand?.op === 'replaceTable' ? foldedCommand.grid : [];
+    expect(foldedGrid.flat().some((cell) => cell.text.includes('유물'))).toBe(
+      true,
+    );
     expect(tableDecisions[0].metadata?.tableCorrection).toMatchObject({
       targetRef: '#/tables/0',
     });
