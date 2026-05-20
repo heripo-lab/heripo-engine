@@ -2064,8 +2064,10 @@ describe('ReviewAssistanceRunner', () => {
       makeReviewResult([
         {
           op: 'replaceText',
-          targetRef: '#/texts/missing',
-          payload: { text: 'Missing' },
+          // Non-empty but non-existent ref: a genuine mismatch the
+          // single-target bind leaves alone, so it still fails validation.
+          textRef: '#/texts/missing',
+          text: 'Missing',
           confidence: 0.95,
           rationale: 'Invalid target',
           evidence: 'Missing',
@@ -2126,6 +2128,45 @@ describe('ReviewAssistanceRunner', () => {
         'structural_command_requires_manual_review',
       ]).severity,
     ).toBe('warning');
+  });
+
+  test('binds an omitted primary ref for single-target work items only', () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const makeOutput = () => ({
+      pageNo: 1,
+      commands: [
+        {
+          op: 'updatePictureCaption',
+          pictureRef: '',
+          caption: '도면 1',
+          confidence: 0.9,
+          rationale: 'caption link',
+          evidence: null,
+        },
+      ],
+      pageNotes: [],
+    });
+
+    // Single-target picture work item: the omitted pictureRef is filled.
+    expect(
+      runner.bindSingleTargetRefs(makeOutput(), {
+        targetRefs: ['#/pictures/3'],
+      }).commands[0],
+    ).toMatchObject({ op: 'updatePictureCaption', pictureRef: '#/pictures/3' });
+
+    // Multi-target work item: ambiguous, so left untouched.
+    expect(
+      runner.bindSingleTargetRefs(makeOutput(), {
+        targetRefs: ['#/pictures/3', '#/pictures/4'],
+      }).commands[0].pictureRef,
+    ).toBe('');
+
+    // Node-type guard: a text target never lands on a picture op.
+    expect(
+      runner.bindSingleTargetRefs(makeOutput(), {
+        targetRefs: ['#/texts/0'],
+      }).commands[0].pictureRef,
+    ).toBe('');
   });
 
   test('records reasked validation when a later work item attempt passes', async () => {

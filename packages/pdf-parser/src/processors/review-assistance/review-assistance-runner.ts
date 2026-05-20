@@ -981,13 +981,70 @@ export class ReviewAssistanceRunner {
   ): ReviewAssistanceDecision[] {
     const validator = new ReviewAssistanceValidator();
     return this.decorateWorkItemDecisions(
-      validator.validatePageOutput(context, output, {
-        autoApplyThreshold: options.autoApplyThreshold,
-        proposalThreshold: options.proposalThreshold,
-        allowAutoApply: true,
-      }),
+      validator.validatePageOutput(
+        context,
+        this.bindSingleTargetRefs(output, workItem),
+        {
+          autoApplyThreshold: options.autoApplyThreshold,
+          proposalThreshold: options.proposalThreshold,
+          allowAutoApply: true,
+        },
+      ),
       workItem,
     );
+  }
+
+  /**
+   * Deterministic counterpart to the prompt's "ref fields are mandatory" rule.
+   * The flat LLM schema makes every ref optional, so the model often drops the
+   * op's primary ref (→ `''` after the flat→typed transform), which the
+   * validator then rejects as `target_ref_not_found`. When a work item targets
+   * exactly one node, that ref is known, so fill an omitted primary ref with it
+   * — mirroring the table-correction path, but for picture/text/bbox work
+   * items. Multi-target work items are left untouched (the right ref is
+   * ambiguous), as are non-empty refs (a genuine mismatch is still surfaced)
+   * and the node-type must match so a picture ref never lands on a text op.
+   */
+  private bindSingleTargetRefs(
+    output: ReviewAssistancePageOutput,
+    workItem: ReviewAssistanceWorkItem,
+  ): ReviewAssistancePageOutput {
+    if (workItem.targetRefs.length !== 1) return output;
+    const target = workItem.targetRefs[0];
+    const isText = target.startsWith('#/texts/');
+    const isPicture = target.startsWith('#/pictures/');
+    const isTable = target.startsWith('#/tables/');
+    return {
+      ...output,
+      commands: output.commands.map((command) => {
+        switch (command.op) {
+          case 'replaceText':
+          case 'updateTextRole':
+          case 'removeText':
+          case 'splitText':
+            return isText && !command.textRef
+              ? { ...command, textRef: target }
+              : command;
+          case 'updatePictureCaption':
+          case 'splitPicture':
+          case 'hidePicture':
+            return isPicture && !command.pictureRef
+              ? { ...command, pictureRef: target }
+              : command;
+          case 'updateTableCell':
+          case 'replaceTable':
+            return isTable && !command.tableRef
+              ? { ...command, tableRef: target }
+              : command;
+          case 'updateBbox':
+            return !command.targetRef
+              ? { ...command, targetRef: target }
+              : command;
+          default:
+            return command;
+        }
+      }),
+    };
   }
 
   private decorateWorkItemDecisions(
