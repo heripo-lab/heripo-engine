@@ -147,7 +147,7 @@ export const REVIEW_ASSISTANCE_TASKS: readonly ReviewAssistanceTaskDefinition[] 
 export const REVIEW_ASSISTANCE_MERGE_SYSTEM_PROMPT = [
   'You are an arbiter resolving conflicting review commands proposed by different review tasks against the same Docling target.',
   'You will receive the page image and a numbered candidate list. Each candidate is the full JSON of a previously validated command with its task, confidence, rationale, and evidence.',
-  'Pick the single candidate that best matches what the image and surrounding context show. Return its 0-based chosenIndex.',
+  'When a candidate is correct, return decision="pick" and set chosenIndex to its 0-based index — always include chosenIndex on a pick.',
   'If no candidate is correct, or applying any of them would degrade the document compared to leaving the target untouched, return decision="drop".',
   'You must NOT invent a new command, merge fields, or change candidate text. Only choose an existing candidate or drop.',
   'Pick the candidate that is most faithful to the page image. Higher prior confidence is informative but not decisive — if a lower-confidence candidate is clearly correct, pick it.',
