@@ -27,6 +27,10 @@ if (!TABLES_TASK) {
 /* v8 ignore stop */
 const TABLE_CORRECTION_ALLOWED_OPS = new Set<string>(TABLES_TASK.allowedOps);
 
+// Bare unit token extracted from a unit hint like "10cm" → "cm". Longer units
+// precede their prefixes (mm before m) so the leftmost match wins correctly.
+const UNIT_TOKEN_RE = /(?:mm|cm|m²|m|㎝|㎜|㎡|kg|g|점|개)/iu;
+
 export class TableCorrectionValidator {
   validatePageOutput(
     context: TableCorrectionContext,
@@ -163,8 +167,15 @@ export class TableCorrectionValidator {
       .flat()
       .map((cell) => cell.text)
       .join('\n');
+    // Check the unit TOKEN (cm, mm, 점…), not the full number+unit hint. A
+    // legitimate OCR correction changes the number ("10cm" → "12cm"), so
+    // requiring the literal original hint would reject valid corrections; the
+    // real invariant is that the unit itself is not dropped. carryOverTable
+    // Structure re-attaches dropped tokens, so this passes by construction for
+    // same-dimension grids and still guards the oversized-table fallback path.
     for (const unit of context.targetTable.unitHints ?? []) {
-      if (!this.includesNormalized(replacementText, unit)) {
+      const token = unit.match(UNIT_TOKEN_RE)?.[0];
+      if (token && !this.includesNormalized(replacementText, token)) {
         reasons.push('table_correction_unit_hint_dropped');
         break;
       }
