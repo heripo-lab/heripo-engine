@@ -1315,12 +1315,22 @@ export class ReviewAssistanceRunner {
     workItem: ReviewAssistanceWorkItem,
     reasons: string[],
   ): ReviewAssistanceIssue {
+    // A work item that failed deterministic validation is only worth a
+    // reviewer's attention when the model produced a *valid* command we refuse
+    // to auto-apply (structural edits need human judgement). Every other
+    // failure — a missing/mismatched ref, dropped table metadata, a picture
+    // split without a boundary candidate — means the model produced incomplete
+    // or unusable output; there is nothing actionable for a human, so surface
+    // it as advisory `info` to keep it out of the 필수 확인 queue.
+    const requiresManualReview = reasons.some((reason) =>
+      reason.includes('requires_manual_review'),
+    );
     return {
       id: `review-execution-${context.pageNo}-${workItem.id}-validation-failed`,
       pageNo: context.pageNo,
       category: 'review_execution',
       type: 'work_item_validation_failed',
-      severity: 'warning',
+      severity: requiresManualReview ? 'warning' : 'info',
       description:
         'Work item output failed deterministic validation after re-asking.',
       refs: workItem.targetRefs,
@@ -1504,6 +1514,18 @@ export class ReviewAssistanceRunner {
     decision: ReviewAssistanceDecision,
     conflictIds: string[],
   ): ReviewAssistanceDecision {
+    const priorConflict = decision.metadata?.taskConflict as
+      | { conflictDecisionIds?: string[]; autoAppliedBeforeConflict?: boolean }
+      | undefined;
+    // markTaskConflict can run more than once on the same decision (it is
+    // applied to both sides of every conflicting pair). The disposition is
+    // already 'proposal' after the first downgrade, so OR with the prior flag
+    // to remember that the merge winner was auto-apply-eligible before the
+    // conflict — `applyMergeWinnerMetadata` restores it once the conflict is
+    // resolved.
+    const autoAppliedBeforeConflict =
+      decision.disposition === 'auto_applied' ||
+      priorConflict?.autoAppliedBeforeConflict === true;
     return {
       ...decision,
       disposition:
@@ -1523,14 +1545,13 @@ export class ReviewAssistanceRunner {
           sameTargetRef: true,
           conflictDecisionIds: [
             ...new Set([
-              ...((
-                decision.metadata?.taskConflict as
-                  | { conflictDecisionIds?: string[] }
-                  | undefined
-              )?.conflictDecisionIds ?? []),
+              ...(priorConflict?.conflictDecisionIds ?? []),
               ...conflictIds,
             ]),
           ],
+          ...(autoAppliedBeforeConflict
+            ? { autoAppliedBeforeConflict: true }
+            : {}),
         },
       },
     };
@@ -1905,10 +1926,22 @@ export class ReviewAssistanceRunner {
         reason !== 'task_conflict_same_target_ref' &&
         !reason.startsWith('conflicts_with_decision:'),
     );
+    const priorConflict = winner.metadata?.taskConflict as
+      | { autoAppliedBeforeConflict?: boolean }
+      | undefined;
+    // The conflict that demoted this winner from auto_applied to proposal is
+    // now resolved in its favour. Restore auto-apply when the arbiter actively
+    // picked it (method 'llm'); fallback picks stay a proposal for safety.
+    const restoredDisposition =
+      priorConflict?.autoAppliedBeforeConflict === true &&
+      outcome.method === 'llm'
+        ? 'auto_applied'
+        : winner.disposition;
     const { taskConflict: _taskConflict, ...restMetadata } =
       winner.metadata ?? {};
     return {
       ...winner,
+      disposition: restoredDisposition,
       reasons: [
         ...new Set([...cleanedReasons, `merge_chosen_by:${outcome.method}`]),
       ],

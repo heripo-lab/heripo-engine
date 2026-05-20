@@ -88,9 +88,16 @@ describe('table correction prompt', () => {
     expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain(
       'The only editable table is targetTable.ref',
     );
+  });
+
+  test('teaches the flat command shape without a payload wrapper', () => {
+    // The flat LLM schema has no "payload"/"targetRef" wrapper; the prompt must
+    // describe op-specific fields directly or the model emits unusable commands.
+    expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain('NO "payload" wrapper');
     expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain(
-      '"op": "updateTableCell" | "replaceTable" | "linkContinuedTable"',
+      '{ "op": "updateTableCell", "tableRef": <targetTable.ref>, "row": <int>, "col": <int>, "text": <corrected cell text>',
     );
+    expect(TABLE_CORRECTION_SYSTEM_PROMPT).not.toContain('"payload": object');
   });
 
   test('builds prompt with table correction context and feedback', () => {

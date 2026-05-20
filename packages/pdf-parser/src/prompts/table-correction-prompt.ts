@@ -15,28 +15,25 @@ You MUST respond with valid JSON only. No markdown, no code fences, no explanati
 Output shape:
 {
   "pageNo": number,
-  "commands": [
-    {
-      "op": "updateTableCell" | "replaceTable" | "linkContinuedTable",
-      "targetRef": string | null,
-      "payload": object,
-      "confidence": number,
-      "rationale": string,
-      "evidence": string | null
-    }
-  ],
+  "commands": [Command, ...],
   "pageNotes": string[]
 }
 
+Each command in commands[] is one of the op-specific shapes below. There is NO top-level "targetRef" wrapper and NO "payload" wrapper — write every op-specific field directly on the command object. Every command also includes the shared metadata fields "confidence" (number 0..1), "rationale" (string), and "evidence" (string or null).
+
+- { "op": "updateTableCell", "tableRef": <targetTable.ref>, "row": <int>, "col": <int>, "text": <corrected cell text>, confidence, rationale, evidence }
+- { "op": "replaceTable", "tableRef": <targetTable.ref>, "grid": [[{ "text": <cell text>, "rowSpan": <int or null>, "colSpan": <int or null>, "columnHeader": <bool or null>, "rowHeader": <bool or null>, "bbox": <or null> }, ...], ...], "caption": <or null>, confidence, rationale, evidence }
+- { "op": "linkContinuedTable", "sourceTableRef": <targetTable.ref>, "continuedTableRef": <adjacent-page table ref>, "relation": "continues_on_next_page" | "continued_from_previous_page", confidence, rationale, evidence }
+
 Rules:
 - The only editable table is targetTable.ref. Do not modify otherTablesOnPage; use them only as boundaries so content does not leak between tables.
+- Always set tableRef (sourceTableRef for linkContinuedTable) to targetTable.ref exactly as given. Never wrap fields in a "payload" object and never invent a different ref.
 - Keep the target table identity and bbox fixed. Do not move the target bbox, merge it with another same-page table, or borrow rows/cells from another table.
 - Inspect structure, cell text, caption evidence, spans, headers, units, footnotes, empty cells, and adjacent-page continuation hints.
-- Prefer updateTableCell for localized OCR errors. Use replaceTable only when the visible grid structure is clearly wrong or span/header metadata cannot be fixed cell-by-cell.
-- For replaceTable, return a rectangular grid. Preserve supported rowSpan, colSpan, columnHeader, and rowHeader metadata.
+- Prefer updateTableCell for localized OCR errors — it edits one cell and cannot drop structure. Use replaceTable only when the visible grid structure is clearly wrong or span/header metadata cannot be fixed cell-by-cell.
+- For replaceTable, return a rectangular grid and re-declare every rowSpan, colSpan, columnHeader, and rowHeader the target table has — a corrected grid that drops span/header metadata, units, or footnote markers is rejected.
 - Preserve units and footnote markers that are visible in the target table. Do not normalize blank cells into invented values.
 - Suggest linkContinuedTable only when an adjacent-page table ref is provided and the image/context supports matching columns, headers, or caption continuation.
-- If there are multiple tables on the page, verify the command targetRef and payload refs are still the target table before returning JSON.
 - If no grounded table correction is needed, return {"pageNo": <current pageNo>, "commands": [], "pageNotes": []}.
 - Keep confidence conservative for replaceTable and linkContinuedTable.
 - Keep rationale <= ${REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH} characters, evidence <= ${REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH} characters, and each page note <= ${REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH} characters.`;

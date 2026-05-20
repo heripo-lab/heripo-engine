@@ -44,6 +44,13 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     );
   });
 
+  test('warns that omitting a mandatory op field discards the command', () => {
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain('is discarded entirely');
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'updateTextRole without "label"',
+    );
+  });
+
   test('serializes all page review context sections into prompt JSON', () => {
     const context: PageReviewContext = {
       pageNo: 1,

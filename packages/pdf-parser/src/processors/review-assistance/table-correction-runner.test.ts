@@ -69,7 +69,7 @@ function makeWorkItem(): ReviewAssistanceWorkItem {
 }
 
 describe('TableCorrectionRunner', () => {
-  test('builds context, prompt, and validates table output', () => {
+  test('builds context, prompt, and validates flat table output', () => {
     const runner = new TableCorrectionRunner();
     const tableContext = runner.buildContext(makeContext(), makeWorkItem());
     const prompt = runner.buildPrompt(tableContext, {
@@ -84,8 +84,10 @@ describe('TableCorrectionRunner', () => {
         commands: [
           {
             op: 'updateTableCell',
-            targetRef: '#/tables/0',
-            payload: { row: 0, col: 1, text: 'Depth 12cm' },
+            tableRef: '#/tables/0',
+            row: 0,
+            col: 1,
+            text: 'Depth 12cm',
             confidence: 0.95,
             rationale: 'Cell OCR correction',
             evidence: '12cm',
@@ -103,8 +105,51 @@ describe('TableCorrectionRunner', () => {
     expect(tableContext.targetTable.ref).toBe('#/tables/0');
     expect(prompt).toContain('table_correction_unit_hint_dropped');
     expect(decision.disposition).toBe('auto_applied');
-    expect(decision.metadata?.tableCorrection).toMatchObject({
-      targetRef: '#/tables/0',
+    expect(decision.command).toMatchObject({
+      op: 'updateTableCell',
+      tableRef: '#/tables/0',
+      row: 0,
+      col: 1,
+      text: 'Depth 12cm',
+    });
+  });
+
+  test('binds an omitted tableRef back to the target table', () => {
+    const runner = new TableCorrectionRunner();
+    const tableContext = runner.buildContext(makeContext(), makeWorkItem());
+    // The flat schema makes tableRef optional; the model frequently omits it
+    // (→ '' after the transform). The single-target work item must still
+    // resolve to context.targetTable.ref instead of failing on an empty ref.
+    const [decision] = runner.validateOutput(
+      tableContext,
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'updateTableCell',
+            tableRef: '',
+            row: 0,
+            col: 1,
+            text: 'Depth 12cm',
+            confidence: 0.95,
+            rationale: 'Cell OCR correction',
+            evidence: '12cm',
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+      },
+    );
+
+    expect(decision.reasons).not.toContain('table_correction_target_ref_mismatch');
+    expect(decision.reasons).not.toContain('target_ref_not_found');
+    expect(decision.command).toMatchObject({
+      op: 'updateTableCell',
+      tableRef: '#/tables/0',
     });
   });
 });

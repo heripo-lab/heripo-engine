@@ -126,8 +126,8 @@ function mockDefaultCallVision(): void {
       return makeReviewResult([
         {
           op: 'replaceText',
-          targetRef: '#/texts/0',
-          payload: { text: 'Test' },
+          textRef: '#/texts/0',
+          text: 'Test',
           confidence: 0.95,
           rationale: 'Spacing OCR noise',
           evidence: 'Image reads Test',
@@ -562,14 +562,18 @@ describe('ReviewAssistanceRunner', () => {
         return makeReviewResult();
       }
       tableAttempts += 1;
-      // First attempt targets a non-existent table so the table-specific
-      // validator rejects it and forces a re-ask with validation feedback.
+      // First attempt echoes a non-empty wrong table ref. A non-empty ref is
+      // left as-is (only omitted refs are bound to the target), so the
+      // table-specific validator rejects the mismatch and forces a re-ask with
+      // validation feedback.
       if (tableAttempts === 1) {
         return makeReviewResult([
           {
             op: 'updateTableCell',
-            targetRef: '#/tables/9',
-            payload: { tableRef: '#/tables/9', row: 0, col: 0, text: 'X' },
+            tableRef: '#/tables/9',
+            row: 0,
+            col: 0,
+            text: 'X',
             confidence: 0.95,
             rationale: 'Wrong target table',
             evidence: 'X',
@@ -579,8 +583,10 @@ describe('ReviewAssistanceRunner', () => {
       return makeReviewResult([
         {
           op: 'updateTableCell',
-          targetRef: '#/tables/0',
-          payload: { tableRef: '#/tables/0', row: 0, col: 0, text: '유물' },
+          tableRef: '#/tables/0',
+          row: 0,
+          col: 0,
+          text: '유물',
           confidence: 0.95,
           rationale: 'Cell OCR correction',
           evidence: '유물',
@@ -1032,6 +1038,12 @@ describe('ReviewAssistanceRunner', () => {
     expect(winner.reasons).not.toEqual(
       expect.arrayContaining(['task_conflict_same_target_ref']),
     );
+    // Fix F: the winning replaceText was auto-apply-eligible (0.95 ≥ 0.85)
+    // before the conflict demoted it to proposal. Resolving the conflict in its
+    // favour via the LLM arbiter restores auto_applied so a high-confidence OCR
+    // fix is not stranded in the 대기 queue.
+    expect(winner.command?.op).toBe('replaceText');
+    expect(winner.disposition).toBe('auto_applied');
   });
 
   test('confidence gap > 0.3 면 LLM 호출 없이 결정론적으로 winner 를 선택한다', async () => {
@@ -2078,6 +2090,9 @@ describe('ReviewAssistanceRunner', () => {
     expect(result.status).toBe('failed');
     expect(result.issue).toMatchObject({
       type: 'work_item_validation_failed',
+      // Fix G2: a missing-ref failure is the model producing unusable output,
+      // not a human task — advisory info keeps it out of the 필수 확인 queue.
+      severity: 'info',
       reasons: expect.arrayContaining(['target_ref_not_found']),
     });
     expect(result.callTrace).toMatchObject({
@@ -2086,6 +2101,31 @@ describe('ReviewAssistanceRunner', () => {
       failureReasons: expect.arrayContaining(['target_ref_not_found']),
     });
     expect(LLMCaller.callVision).toHaveBeenCalledTimes(2);
+  });
+
+  test('validation-failed issue is info for soft failures, warning only for manual review', () => {
+    const pagePath = join(outputDir, 'pages', 'page_0.png');
+    const context = makePageContext(pagePath);
+    const workItem = new ReviewAssistanceWorkScheduler()
+      .build(context)
+      .find((item) => item.kind === 'text_ocr_hanja')!;
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+
+    // Soft failures (the model produced unusable output) → advisory info.
+    expect(
+      runner.buildWorkItemValidationIssue(context, workItem, [
+        'target_ref_not_found',
+        'table_correction_target_ref_mismatch',
+        'table_correction_span_metadata_dropped',
+      ]).severity,
+    ).toBe('info');
+
+    // A valid command we refuse to auto-apply needs human judgement → warning.
+    expect(
+      runner.buildWorkItemValidationIssue(context, workItem, [
+        'structural_command_requires_manual_review',
+      ]).severity,
+    ).toBe('warning');
   });
 
   test('records reasked validation when a later work item attempt passes', async () => {
@@ -2099,8 +2139,8 @@ describe('ReviewAssistanceRunner', () => {
         makeReviewResult([
           {
             op: 'replaceText',
-            targetRef: '#/texts/missing',
-            payload: { text: 'Missing' },
+            textRef: '#/texts/missing',
+            text: 'Missing',
             confidence: 0.95,
             rationale: 'Invalid target',
             evidence: 'Missing',
@@ -2111,8 +2151,8 @@ describe('ReviewAssistanceRunner', () => {
         makeReviewResult([
           {
             op: 'replaceText',
-            targetRef: '#/texts/0',
-            payload: { text: 'Test' },
+            textRef: '#/texts/0',
+            text: 'Test',
             confidence: 0.95,
             rationale: 'Valid target after re-ask',
             evidence: 'Test',
