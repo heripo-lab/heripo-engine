@@ -117,6 +117,16 @@ function makeReviewResult(commands: unknown[] = []) {
   };
 }
 
+// The `tables` task uses the dedicated { grid, caption } structured-output
+// schema, so its mocked reply is a grid — not a page/command object.
+function makeTableGridResult(grid: unknown, caption: unknown = null) {
+  return {
+    output: { grid, caption },
+    usage,
+    usedFallback: false,
+  };
+}
+
 function mockDefaultCallVision(): void {
   vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
     if (input.component === 'ReviewAssistancePageGate') {
@@ -552,8 +562,7 @@ describe('ReviewAssistanceRunner', () => {
     expect(textCall).toEqual(expect.objectContaining({ maxRetries: 4 }));
   });
 
-  test('routes table work items through TableCorrectionRunner with re-ask feedback', async () => {
-    let tableAttempts = 0;
+  test('routes table work items through TableCorrectionRunner as a replaceTable proposal', async () => {
     vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
       if (input.component === 'ReviewAssistancePageGate') {
         return makeGateResult();
@@ -561,36 +570,19 @@ describe('ReviewAssistanceRunner', () => {
       if (input.metadata?.task !== 'tables') {
         return makeReviewResult();
       }
-      tableAttempts += 1;
-      // First attempt echoes a non-empty wrong table ref. A non-empty ref is
-      // left as-is (only omitted refs are bound to the target), so the
-      // table-specific validator rejects the mismatch and forces a re-ask with
-      // validation feedback.
-      if (tableAttempts === 1) {
-        return makeReviewResult([
+      // The table task uses the dedicated { grid, caption } structured-output
+      // schema (mirroring the backoffice AI table-correction feature), so the
+      // model regenerates the full grid rather than emitting commands.
+      return makeTableGridResult([
+        [
           {
-            op: 'updateTableCell',
-            tableRef: '#/tables/9',
-            row: 0,
-            col: 0,
-            text: 'X',
-            confidence: 0.95,
-            rationale: 'Wrong target table',
-            evidence: 'X',
+            text: '유물',
+            rowSpan: 1,
+            colSpan: 1,
+            columnHeader: false,
+            rowHeader: false,
           },
-        ]);
-      }
-      return makeReviewResult([
-        {
-          op: 'updateTableCell',
-          tableRef: '#/tables/0',
-          row: 0,
-          col: 0,
-          text: '유물',
-          confidence: 0.95,
-          rationale: 'Cell OCR correction',
-          evidence: '유물',
-        },
+        ],
       ]);
     });
 
@@ -610,28 +602,23 @@ describe('ReviewAssistanceRunner', () => {
           input.metadata?.task === 'tables',
       );
 
-    expect(tableCalls).toHaveLength(2);
-    const firstPrompt = tableCalls[0].messages[0].content[0].text as string;
-    const secondPrompt = tableCalls[1].messages[0].content[0].text as string;
-    expect(firstPrompt).toContain('TABLE CORRECTION CONTEXT JSON');
-    expect(firstPrompt).toContain('"targetTable"');
-    expect(secondPrompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
-    expect(secondPrompt).toContain('table_correction_target_ref_mismatch');
+    expect(tableCalls).toHaveLength(1);
+    const tablePrompt = tableCalls[0].messages[0].content[0].text as string;
+    expect(tablePrompt).toContain('Current table data');
 
     const tableDecisions = report.pages[0].decisions.filter(
       (decision) => decision.metadata?.tableCorrection,
     );
     expect(tableDecisions).toHaveLength(1);
-    // The accepted cell edit targets a table with a fullGrid, so the runner
-    // folds it onto the authoritative grid and emits a single replaceTable
-    // carrying the corrected cell text.
-    const foldedCommand = tableDecisions[0].command;
-    expect(foldedCommand?.op).toBe('replaceTable');
-    const foldedGrid =
-      foldedCommand?.op === 'replaceTable' ? foldedCommand.grid : [];
-    expect(foldedGrid.flat().some((cell) => cell.text.includes('유물'))).toBe(
-      true,
-    );
+    // The { grid, caption } reply is wrapped into one replaceTable and
+    // reconciled against the source grid, carrying the corrected cell text.
+    const command = tableDecisions[0].command;
+    expect(command?.op).toBe('replaceTable');
+    const grid = command?.op === 'replaceTable' ? command.grid : [];
+    const tableRef = command?.op === 'replaceTable' ? command.tableRef : '';
+    expect(tableRef).toBe('#/tables/0');
+    expect(grid.flat().some((cell) => cell.text.includes('유물'))).toBe(true);
+    expect(tableDecisions[0].disposition).toBe('proposal');
     expect(tableDecisions[0].metadata?.tableCorrection).toMatchObject({
       targetRef: '#/tables/0',
     });
@@ -644,8 +631,8 @@ describe('ReviewAssistanceRunner', () => {
     );
     expect(tableTrace).toMatchObject({
       kind: 'table',
-      attempts: 2,
-      validation: 'reasked',
+      attempts: 1,
+      validation: 'passed',
     });
   });
 

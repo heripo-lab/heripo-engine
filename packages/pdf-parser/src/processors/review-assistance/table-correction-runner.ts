@@ -3,6 +3,7 @@ import type { ReviewAssistanceDecision } from '@heripo/model';
 import type {
   ReviewAssistancePageOutput,
   ReviewAssistanceRawCommand,
+  TableCorrectionGridOutput,
 } from '../../types/review-assistance-schema';
 import type {
   PageReviewContext,
@@ -13,10 +14,6 @@ import type { ReviewAssistanceWorkItem } from './review-assistance-work-schedule
 import type { TableCorrectionContext } from './table-correction-context-builder';
 
 import { buildTableCorrectionPrompt } from '../../prompts/table-correction-prompt';
-import {
-  REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH,
-  REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH,
-} from '../../types/review-assistance-schema';
 import { TableCorrectionContextBuilder } from './table-correction-context-builder';
 import { TableCorrectionValidator } from './table-correction-validator';
 
@@ -26,10 +23,13 @@ import { TableCorrectionValidator } from './table-correction-validator';
 const FOOTNOTE_MARKER_RE = /(?:※|\*|[¹²³⁴⁵⁶⁷⁸⁹]|\[[0-9]+\]|\([0-9]+\))/gu;
 const UNIT_BEARING_RE = /\d+(?:\.\d+)?\s?(mm|cm|m²|m|㎝|㎜|㎡|kg|g|점|개)/giu;
 
-type SparseCellEdit = Extract<
-  ReviewAssistanceRawCommand,
-  { op: 'updateTableCell' }
->;
+// Table edits are always routed to human review (proposal); they never
+// auto-apply (replaceTable is structural → manual review). The tight
+// { grid, caption } schema carries no confidence, so this is purely the
+// headline number the reviewer sees. Fixed high (0.95) so that even after the
+// validator's replaceTable risk penalty (0.08 → 0.87) it stays well above the
+// proposal threshold — a grounded correction is never silently skipped.
+const TABLE_CORRECTION_PROPOSAL_CONFIDENCE = 0.95;
 
 export class TableCorrectionRunner {
   private readonly contextBuilder = new TableCorrectionContextBuilder();
@@ -53,76 +53,39 @@ export class TableCorrectionRunner {
     return buildTableCorrectionPrompt(context, options);
   }
 
-  validateOutput(
+  /**
+   * Validate the model's `{ grid, caption }` table reply (the dedicated
+   * structured-output shape that mirrors the backoffice AI table-correction
+   * feature). The reply is wrapped into a single `replaceTable` command,
+   * structure is reconciled against the source grid, and the result runs
+   * through the shared validator → one table-correction proposal.
+   */
+  validateGridOutput(
     context: TableCorrectionContext,
-    output: ReviewAssistancePageOutput,
+    output: TableCorrectionGridOutput,
     options: ReviewAssistanceValidatorOptions,
   ): ReviewAssistanceDecision[] {
     return this.validator.validatePageOutput(
       context,
-      this.bindOutputToTargetPage(
-        context,
-        this.carryOverTableStructure(
-          context,
-          this.foldSparseCellEdits(
-            context,
-            this.bindCommandsToTargetTable(context, output),
-          ),
-        ),
-      ),
+      this.carryOverTableStructure(context, this.toPageOutput(context, output)),
       options,
     );
   }
 
   /**
-   * Weak review models reliably emit sparse per-cell edits
-   * (`updateTableCell { row, col, text }`) but fail to regenerate a whole grid —
-   * they drop spans/headers or return the wrong dimensions, which
-   * carryOverTableStructure cannot rescue once dimensions diverge. So when the
-   * target table has a fullGrid, deterministically fold those cell edits onto a
-   * verbatim copy of the original grid and emit a SINGLE replaceTable: the
-   * structure stays authoritative from the source and only the edited cells'
-   * text changes. This mirrors the backoffice table-correction proposal (one
-   * atomic table) while letting a weak model do only the easy part — the
-   * deterministic post-processing the user asked for.
-   *
-   * In-bounds, non-shadow edits are applied with per-cell unit/footnote marker
-   * restoration; out-of-bounds or shadow-targeting edits (a miscounting model)
-   * are dropped and counted in a pageNote rather than silently clamped onto the
-   * wrong cell. If no edit survives, the cell edits are removed entirely.
-   * Oversized tables (no fullGrid, prompted in whole-grid mode) and responses
-   * that already contain a replaceTable are left for the replaceTable /
-   * carry-over path.
+   * Wrap a `{ grid, caption }` reply into a single-`replaceTable` page output
+   * for the shared validation pipeline. `tableRef` is the unambiguous work-item
+   * target (so the base validator's ref check passes); `pageNo` is the target
+   * page; cells are lifted to the engine cell shape. confidence/rationale/
+   * evidence are synthesized — the tight schema (like the backoffice) carries
+   * none, and table edits are always manual-review proposals, so they are
+   * display-only.
    */
-  private foldSparseCellEdits(
+  private toPageOutput(
     context: TableCorrectionContext,
-    output: ReviewAssistancePageOutput,
+    output: TableCorrectionGridOutput,
   ): ReviewAssistancePageOutput {
-    const original = context.targetTable.fullGrid;
-    if (!original) return output;
-    // Only fold edits that target this work item's table. A non-empty wrong
-    // ref is left as a passthrough updateTableCell so the validator still
-    // surfaces the mismatch and forces a re-ask — bindCommandsToTargetTable
-    // binds only omitted refs, it never overrides a wrong one.
-    const isFoldable = (
-      command: ReviewAssistanceRawCommand,
-    ): command is SparseCellEdit =>
-      command.op === 'updateTableCell' &&
-      command.tableRef === context.targetTable.ref;
-    // A replaceTable for THIS table means the model chose the whole-grid path;
-    // defer to it (carryOverTableStructure) instead of folding. A replaceTable
-    // aimed at another ref does not block the fold — it falls through to
-    // passthrough and the validator rejects it on its own.
-    const hasTargetReplaceTable = output.commands.some(
-      (command) =>
-        command.op === 'replaceTable' &&
-        command.tableRef === context.targetTable.ref,
-    );
-    const cellEdits = output.commands.filter(isFoldable);
-    if (hasTargetReplaceTable || cellEdits.length === 0) return output;
-
-    const shadows = this.buildShadowPositions(original);
-    const grid = original.map((row) =>
+    const grid = output.grid.map((row) =>
       row.map((cell) => ({
         text: cell.text,
         bbox: null,
@@ -132,86 +95,16 @@ export class TableCorrectionRunner {
         rowHeader: cell.rowHeader,
       })),
     );
-    const applied: SparseCellEdit[] = [];
-    let dropped = 0;
-    for (const edit of cellEdits) {
-      const rowCells = original[edit.row];
-      const within =
-        edit.row >= 0 &&
-        edit.col >= 0 &&
-        rowCells !== undefined &&
-        edit.col < rowCells.length;
-      if (!within || shadows.has(`${edit.row}:${edit.col}`)) {
-        dropped += 1;
-        continue;
-      }
-      grid[edit.row][edit.col].text = this.restoreCellMarkers(
-        edit.text,
-        rowCells[edit.col].text,
-      );
-      applied.push(edit);
-    }
-
-    const passthrough = output.commands.filter(
-      (command) => !isFoldable(command),
-    );
-    if (applied.length === 0) {
-      return { ...output, commands: passthrough };
-    }
-
-    // Surface dropped (out-of-range) edits on the synthetic command's
-    // rationale — the only channel that reaches the decision and thus the run
-    // sidecar / UI. validateOutput discards the output object (it returns
-    // decisions), so pageNotes set here would never surface.
-    const rationale = this.joinWithLimit(
-      [
-        ...applied.map((edit) => `[${edit.row},${edit.col}] ${edit.rationale}`),
-        ...(dropped > 0 ? [`(dropped ${dropped} out-of-range edit(s))`] : []),
-      ],
-      REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH,
-    );
-    const synthetic: ReviewAssistanceRawCommand = {
+    const command: ReviewAssistanceRawCommand = {
       op: 'replaceTable',
       tableRef: context.targetTable.ref,
       grid,
-      caption: null,
-      confidence: Math.min(...applied.map((edit) => edit.confidence)),
-      rationale,
-      evidence: this.foldedEvidence(applied),
+      caption: output.caption,
+      confidence: TABLE_CORRECTION_PROPOSAL_CONFIDENCE,
+      rationale: '',
+      evidence: null,
     };
-    return { ...output, commands: [synthetic, ...passthrough] };
-  }
-
-  /**
-   * Each table-correction work item targets exactly one page (`context.pageNo`,
-   * the same value the base validator compares against). When the model returns
-   * a different top-level pageNo the base validator rejects every command on
-   * the page as `page_number_mismatch`. Since the target page is unambiguous,
-   * clamp it — the deterministic complement to bindCommandsToTargetTable.
-   */
-  private bindOutputToTargetPage(
-    context: TableCorrectionContext,
-    output: ReviewAssistancePageOutput,
-  ): ReviewAssistancePageOutput {
-    return output.pageNo === context.pageNo
-      ? output
-      : { ...output, pageNo: context.pageNo };
-  }
-
-  /** Concatenate the folded edits' evidence snippets, dropping empty ones. */
-  private foldedEvidence(edits: SparseCellEdit[]): string | null {
-    const snippets = edits
-      .map((edit) => edit.evidence)
-      .filter((value): value is string => Boolean(value));
-    return snippets.length === 0
-      ? null
-      : this.joinWithLimit(snippets, REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH);
-  }
-
-  /** Join with "; " and hard-truncate to the schema's max length. */
-  private joinWithLimit(parts: string[], limit: number): string {
-    const joined = parts.join('; ');
-    return joined.length > limit ? joined.slice(0, limit) : joined;
+    return { pageNo: context.pageNo, commands: [command], pageNotes: [] };
   }
 
   /**
@@ -224,7 +117,7 @@ export class TableCorrectionRunner {
    * spans/headers verbatim, force shadow positions (covered by a master cell's
    * span) empty, and re-attach any unit/footnote markers the model dropped per
    * cell, keeping only the model's corrected text. This is the deterministic
-   * complement to the prompt's "copy the grid, change only wrong cells".
+   * complement to the prompt's "keep the structure, fix only wrong cell text".
    *
    * Same-dimension grids are assumed positionally aligned with the original; a
    * row-shifted but same-dimension grid would misalign here — the reviewer
@@ -311,41 +204,5 @@ export class TableCorrectionRunner {
       if (token && !result.includes(token)) result += token;
     }
     return result;
-  }
-
-  /**
-   * Each table-correction work item targets exactly one table
-   * (`context.targetTable.ref`), but the flat LLM schema makes `tableRef`
-   * optional — the model frequently omits it, which the flat→typed transform
-   * turns into `''` and the validator then rejects as
-   * `table_correction_target_ref_mismatch` / `target_ref_not_found`. Since the
-   * target is unambiguous, fill an omitted ref with it so a dropped ref no
-   * longer discards an otherwise valid correction. A non-empty ref is left as
-   * given so a genuine mismatch is still surfaced; `continuedTableRef` is never
-   * touched because it legitimately points at a different table.
-   */
-  private bindCommandsToTargetTable(
-    context: TableCorrectionContext,
-    output: ReviewAssistancePageOutput,
-  ): ReviewAssistancePageOutput {
-    const targetRef = context.targetTable.ref;
-    return {
-      ...output,
-      commands: output.commands.map((command) => {
-        switch (command.op) {
-          case 'updateTableCell':
-          case 'replaceTable':
-            return command.tableRef
-              ? command
-              : { ...command, tableRef: targetRef };
-          case 'linkContinuedTable':
-            return command.sourceTableRef
-              ? command
-              : { ...command, sourceTableRef: targetRef };
-          default:
-            return command;
-        }
-      }),
-    };
   }
 }

@@ -292,6 +292,37 @@ export type ReviewAssistancePageOutput = z.infer<
 >;
 
 /**
+ * Dedicated structured-output schema for the `tables` task — a direct
+ * `{ grid, caption }` shape that mirrors the backoffice "AI 표 보정" feature
+ * (`apps/backoffice/.../suggest-table-correction.server.ts`). The flat
+ * page/command schema turned out to be too convoluted for the table task: the
+ * same capable model (e.g. gemini-3-flash) regenerates a clean full grid when
+ * asked for this bare shape, but underperforms when it has to wrap the grid in
+ * a command union. The runner injects this for table work items instead of the
+ * flat page schema; `TableCorrectionRunner` wraps the response into a single
+ * `replaceTable` and reconciles structure deterministically. Span/header flags
+ * are advisory only — `carryOverTableStructure` re-derives them from the
+ * source grid — but kept here so the model echoes structure like the
+ * backoffice prompt expects (shadow cells included, rectangular rows).
+ */
+export const tableCorrectionGridCellSchema = z.object({
+  text: z.string(),
+  rowSpan: z.number().int().positive().nullable(),
+  colSpan: z.number().int().positive().nullable(),
+  columnHeader: z.boolean().nullable(),
+  rowHeader: z.boolean().nullable(),
+});
+
+export const tableCorrectionGridSchema = z.object({
+  grid: z.array(z.array(tableCorrectionGridCellSchema)),
+  caption: z.string().nullable(),
+});
+
+export type TableCorrectionGridOutput = z.infer<
+  typeof tableCorrectionGridSchema
+>;
+
+/**
  * Sentinel written into a required enum field when the model omits it under
  * the flat schema. It is intentionally outside every command enum so the
  * deterministic validator rejects the command (`missing_required_field:*`)
@@ -376,7 +407,12 @@ function flatCommandToRawCommand(
   const sentinelEnum = REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL;
   switch (flat.op) {
     case 'replaceText':
-      return { op: 'replaceText', textRef: flat.textRef ?? '', text: flat.text ?? '', ...base };
+      return {
+        op: 'replaceText',
+        textRef: flat.textRef ?? '',
+        text: flat.text ?? '',
+        ...base,
+      };
     case 'addText':
       return {
         op: 'addText',
@@ -405,7 +441,12 @@ function flatCommandToRawCommand(
         ...base,
       };
     case 'splitText':
-      return { op: 'splitText', textRef: flat.textRef ?? '', parts: flat.parts ?? [], ...base };
+      return {
+        op: 'splitText',
+        textRef: flat.textRef ?? '',
+        parts: flat.parts ?? [],
+        ...base,
+      };
     case 'updateTableCell':
       return {
         op: 'updateTableCell',
@@ -428,9 +469,7 @@ function flatCommandToRawCommand(
         op: 'linkContinuedTable',
         sourceTableRef: flat.sourceTableRef ?? '',
         continuedTableRef: flat.continuedTableRef ?? '',
-        relation:
-          flat.relation ??
-          (sentinelEnum as 'continues_on_next_page'),
+        relation: flat.relation ?? (sentinelEnum as 'continues_on_next_page'),
         ...base,
       };
     case 'updatePictureCaption':
@@ -450,11 +489,26 @@ function flatCommandToRawCommand(
         ...base,
       };
     case 'splitPicture':
-      return { op: 'splitPicture', pictureRef: flat.pictureRef ?? '', regions: flat.regions ?? [], ...base };
+      return {
+        op: 'splitPicture',
+        pictureRef: flat.pictureRef ?? '',
+        regions: flat.regions ?? [],
+        ...base,
+      };
     case 'hidePicture':
-      return { op: 'hidePicture', pictureRef: flat.pictureRef ?? '', reason: flat.reason ?? '', ...base };
+      return {
+        op: 'hidePicture',
+        pictureRef: flat.pictureRef ?? '',
+        reason: flat.reason ?? '',
+        ...base,
+      };
     case 'updateBbox':
-      return { op: 'updateBbox', targetRef: flat.targetRef ?? '', bbox: flat.bbox ?? FALLBACK_BBOX, ...base };
+      return {
+        op: 'updateBbox',
+        targetRef: flat.targetRef ?? '',
+        bbox: flat.bbox ?? FALLBACK_BBOX,
+        ...base,
+      };
     case 'linkFootnote':
       return {
         op: 'linkFootnote',

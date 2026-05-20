@@ -22,16 +22,18 @@ import { join } from 'node:path';
 
 import {
   REVIEW_ASSISTANCE_TASKS,
-  type ReviewAssistanceTaskDefinition,
   type ReviewAssistanceMergeCandidateForPrompt,
+  type ReviewAssistanceTaskDefinition,
   buildReviewAssistanceMergePrompt,
   buildReviewAssistancePrompt,
 } from '../../prompts/review-assistance-prompt';
 import {
   type ReviewAssistanceMergeChoice,
   type ReviewAssistancePageOutput,
+  type TableCorrectionGridOutput,
   buildReviewAssistancePageSchemaForOps,
   reviewAssistanceMergeChoiceSchema,
+  tableCorrectionGridSchema,
 } from '../../types/review-assistance-schema';
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
@@ -790,17 +792,19 @@ export class ReviewAssistanceRunner {
               validationFeedback,
               attempt,
             });
-        // Both paths use the task-scoped flat schema. The table-correction
-        // runner validates through the same ReviewAssistanceValidator, so the
-        // flat→typed transform output is consumed identically — and the table
-        // task's multi-op union was itself a source of `No object generated`
-        // failures, so it benefits from flattening too.
-        const pageSchema = buildReviewAssistancePageSchemaForOps(
-          workItem.task.allowedOps,
-        );
+        // The table task uses the dedicated { grid, caption } structured-output
+        // schema (mirroring the backoffice AI table-correction feature); every
+        // other task uses the task-scoped flat command schema. The flat multi-op
+        // union was a source of `No object generated` failures so non-table
+        // tasks benefit from flattening, while the same capable model does far
+        // better on tables with the bare grid shape than wrapping a grid inside
+        // a command union.
+        const responseSchema = tableCorrection
+          ? tableCorrectionGridSchema
+          : buildReviewAssistancePageSchemaForOps(workItem.task.allowedOps);
         const result = await this.withWorkItemTimeout(
           LLMCaller.callVision({
-            schema: pageSchema as any,
+            schema: responseSchema as any,
             messages: [
               {
                 role: 'user' as const,
@@ -836,12 +840,11 @@ export class ReviewAssistanceRunner {
 
         options.aggregator?.track(result.usage);
 
-        const output = result.output as ReviewAssistancePageOutput;
         const decisions = tableCorrection
           ? this.decorateWorkItemDecisions(
-              tableCorrection.runner.validateOutput(
+              tableCorrection.runner.validateGridOutput(
                 tableCorrection.context,
-                output,
+                result.output as TableCorrectionGridOutput,
                 {
                   autoApplyThreshold: options.autoApplyThreshold,
                   proposalThreshold: options.proposalThreshold,
@@ -852,7 +855,7 @@ export class ReviewAssistanceRunner {
             )
           : this.validateWorkItemOutput(
               packedContext,
-              output,
+              result.output as ReviewAssistancePageOutput,
               workItem,
               options,
             );
@@ -1671,7 +1674,8 @@ export class ReviewAssistanceRunner {
            * only emits groups of >=2, so capped has at least one entry. */
           if (!representative) return;
           for (const candidate of group) {
-            if (candidate.id !== representative.id) droppedIds.add(candidate.id);
+            if (candidate.id !== representative.id)
+              droppedIds.add(candidate.id);
           }
           decisionPatches.set(
             representative.id,
@@ -1797,7 +1801,8 @@ export class ReviewAssistanceRunner {
     const runnerUp = capped[1];
     if (
       runnerUp !== undefined &&
-      top.confidence - runnerUp.confidence > REVIEW_ASSISTANCE_MERGE_DETERMINISTIC_GAP
+      top.confidence - runnerUp.confidence >
+        REVIEW_ASSISTANCE_MERGE_DETERMINISTIC_GAP
     ) {
       return {
         kind: 'pick',
@@ -1948,14 +1953,10 @@ export class ReviewAssistanceRunner {
   private resolveMergeTaskDefinition(
     candidates: ReviewAssistanceDecision[],
   ): ReviewAssistanceTaskDefinition {
-    const sorted = [...candidates].sort(
-      (a, b) => b.confidence - a.confidence,
-    );
+    const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
     for (const decision of sorted) {
       const taskId = decision.metadata?.reviewTask;
-      const match = REVIEW_ASSISTANCE_TASKS.find(
-        (task) => task.id === taskId,
-      );
+      const match = REVIEW_ASSISTANCE_TASKS.find((task) => task.id === taskId);
       if (match) return match;
     }
     /* v8 ignore next 3 -- every decision is tagged with reviewTask via
@@ -2083,9 +2084,8 @@ export class ReviewAssistanceRunner {
   private extractCommandRationale(
     decision: ReviewAssistanceDecision,
   ): string | undefined {
-    const rationale = (
-      decision.command as { rationale?: unknown } | undefined
-    )?.rationale;
+    const rationale = (decision.command as { rationale?: unknown } | undefined)
+      ?.rationale;
     return typeof rationale === 'string' && rationale.length > 0
       ? rationale
       : undefined;
