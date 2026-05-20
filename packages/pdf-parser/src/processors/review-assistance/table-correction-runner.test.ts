@@ -327,4 +327,23 @@ describe('TableCorrectionRunner', () => {
 
     expect(decisions).toHaveLength(0);
   });
+
+  test('cell-by-cell prompt lists coordinates with tags and omits span shadows', () => {
+    const runner = new TableCorrectionRunner();
+    const tableContext = runner.buildContext(
+      makeFullGridContext(),
+      makeWorkItem(),
+    );
+    const prompt = runner.buildPrompt(tableContext, {
+      outputLanguage: 'Korean',
+    });
+    expect(prompt).toContain('HOW TO CORRECT — cell-by-cell mode');
+    expect(prompt).toContain('TARGET TABLE CELLS:');
+    expect(prompt).toContain('[r=0, c=0] (columnHeader) "구분"');
+    expect(prompt).toContain('[r=0, c=1] (columnHeader, colSpan=2) "제원(cm)"');
+    expect(prompt).toContain('[r=1, c=1] "10"');
+    // The (0,2) placeholder covered by the colSpan=2 master is omitted so the
+    // model never targets a shadow position.
+    expect(prompt).not.toContain('[r=0, c=2]');
+  });
 });
