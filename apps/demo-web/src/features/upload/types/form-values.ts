@@ -35,8 +35,15 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
       textCorrection: 'google/gemini-3.1-flash-lite',
       pageGate: 'google/gemini-3.1-flash-lite',
       reviewAssistance: 'google/gemini-3.1-flash-lite',
-      tableCorrection: undefined,
-      reviewAssistanceTasks: {},
+      tableCorrection: 'openai/gpt-5-mini',
+      reviewAssistanceTasks: {
+        textOcrHanja: 'google/gemini-3.1-flash-lite',
+        textIntegrity: 'google/gemini-3.1-flash-lite',
+        textRoleFootnote: 'google/gemini-3.1-flash-lite',
+        tables: 'openai/gpt-5-mini',
+        picturesCaptions: 'google/gemini-3.1-flash-lite',
+        layoutBboxOrder: 'google/gemini-3.1-flash-lite',
+      },
     },
     concurrency: {
       pages: 10,
@@ -45,7 +52,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
     },
     outputLanguage: 'ko-KR',
     maxRetries: undefined,
-    modelConcurrency: 1,
+    modelConcurrency: 5,
     workItemTimeoutMs: 1_800_000,
   },
   // LLM Models
