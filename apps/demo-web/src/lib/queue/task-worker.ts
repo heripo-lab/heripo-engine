@@ -254,6 +254,10 @@ function buildPDFCorrectionOptions(
       tableCorrection: stageRetries?.tableCorrection ?? options.maxRetries,
     },
     outputLanguage: options.correction.outputLanguage,
+    // Demo runs have no human reviewer, so auto-apply every valid correction
+    // (tables, low-confidence proposals, structural edits) into the output
+    // instead of routing them to the backoffice "대기 / proposal" queue.
+    forceAutoApply: true,
   };
   return correction;
 }

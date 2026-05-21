@@ -75,6 +75,12 @@ export interface ReviewAssistanceRunnerOptions {
   autoApplyThreshold: number;
   proposalThreshold: number;
   /**
+   * Forwarded to the validator: when true, every valid command auto-applies
+   * regardless of confidence threshold or structural block reason. The engine
+   * demo sets this so nothing routes to manual review; defaults to off.
+   */
+  forceAutoApply?: boolean;
+  /**
    * Total work-item attempts (including the initial call) for the re-ask
    * loop. The same value is also forwarded to `LLMCaller.callVision` as the
    * SDK-level transient retry budget; the two budgets are independent and
@@ -849,6 +855,7 @@ export class ReviewAssistanceRunner {
                   autoApplyThreshold: options.autoApplyThreshold,
                   proposalThreshold: options.proposalThreshold,
                   allowAutoApply: true,
+                  forceAutoApply: options.forceAutoApply,
                 },
               ),
               workItem,
@@ -991,6 +998,7 @@ export class ReviewAssistanceRunner {
           autoApplyThreshold: options.autoApplyThreshold,
           proposalThreshold: options.proposalThreshold,
           allowAutoApply: true,
+          forceAutoApply: options.forceAutoApply,
         },
       ),
       workItem,

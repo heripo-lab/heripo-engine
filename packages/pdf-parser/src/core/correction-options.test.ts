@@ -73,6 +73,7 @@ describe('normalizePDFCorrectionOptions', () => {
         pageGate: { structuralNoiseThreshold: 2 },
         proposalThreshold: 0.7,
         autoApplyThreshold: 0.2,
+        forceAutoApply: true,
         temperature: 1.5,
       }),
     );
@@ -91,6 +92,7 @@ describe('normalizePDFCorrectionOptions', () => {
       pageGate: { structuralNoiseThreshold: 1 },
       proposalThreshold: 0.7,
       autoApplyThreshold: 0.7,
+      forceAutoApply: true,
       temperature: 1.5,
     });
   });

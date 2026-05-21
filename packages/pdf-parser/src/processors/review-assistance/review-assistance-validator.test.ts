@@ -320,6 +320,90 @@ describe('ReviewAssistanceValidator', () => {
     );
   });
 
+  test('forceAutoApply overrides structural block reasons and the confidence threshold', () => {
+    const blockedHighConfidence = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'replaceTable',
+            tableRef: '#/tables/0',
+            grid: [[cell('A')]],
+            caption: null,
+            confidence: 0.95,
+            rationale: 'Visible table differs',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+        forceAutoApply: true,
+      },
+    );
+    // A structural command that is always routed to manual review is now
+    // auto-applied because the demo opted into force-apply.
+    expect(blockedHighConfidence[0].disposition).toBe('auto_applied');
+
+    const lowConfidence = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'updateTextRole',
+            textRef: '#/texts/0',
+            label: 'caption',
+            confidence: 0.6,
+            rationale: 'Below the auto-apply threshold',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+        forceAutoApply: true,
+      },
+    );
+    // A confidence (0.6) below the auto-apply threshold (0.85) but above the
+    // proposal floor (0.5) also auto-applies under force-apply.
+    expect(lowConfidence[0].disposition).toBe('auto_applied');
+
+    const belowFloor = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'updateTextRole',
+            textRef: '#/texts/0',
+            label: 'caption',
+            confidence: 0.3,
+            rationale: 'Below the proposal floor',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+        forceAutoApply: true,
+      },
+    );
+    // Force-apply never resurrects sub-proposal-threshold commands; they stay
+    // skipped because the model effectively rejected them.
+    expect(belowFloor[0].disposition).toBe('skipped');
+  });
+
   test('auto-applies addText, updateBbox, linkFootnote, and moveNode only with deterministic gates', () => {
     const context = makeContext();
     context.missingTextCandidates = [

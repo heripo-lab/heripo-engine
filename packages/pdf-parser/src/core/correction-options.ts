@@ -41,6 +41,12 @@ export interface PDFCorrectionOptions {
   pageGate?: PDFCorrectionPageGateOptions;
   autoApplyThreshold?: number;
   proposalThreshold?: number;
+  /**
+   * When true, every valid review-assistance command auto-applies regardless of
+   * confidence threshold or structural block reason (no manual-review routing).
+   * Enabled by the engine demo; defaults to false everywhere else.
+   */
+  forceAutoApply?: boolean;
   temperature?: number;
 }
 
@@ -54,6 +60,7 @@ export interface NormalizedPDFCorrectionOptions {
   pageGate: Required<PDFCorrectionPageGateOptions>;
   autoApplyThreshold: number;
   proposalThreshold: number;
+  forceAutoApply: boolean;
   temperature: number;
 }
 
@@ -80,6 +87,7 @@ export const PDF_CORRECTION_DEFAULTS: Omit<
   },
   autoApplyThreshold: 0.85,
   proposalThreshold: 0.5,
+  forceAutoApply: false,
   temperature: 0,
 };
 
@@ -214,6 +222,8 @@ export function normalizePDFCorrectionOptions(
     },
     autoApplyThreshold,
     proposalThreshold,
+    forceAutoApply:
+      value.forceAutoApply ?? PDF_CORRECTION_DEFAULTS.forceAutoApply,
     temperature: normalizeTemperature(
       value.temperature,
       PDF_CORRECTION_DEFAULTS.temperature,

@@ -29,6 +29,14 @@ export interface ReviewAssistanceValidatorOptions {
   autoApplyThreshold: number;
   proposalThreshold: number;
   allowAutoApply?: boolean;
+  /**
+   * When true, every valid command (confidence ≥ proposalThreshold) is
+   * auto-applied regardless of the confidence threshold or any structural
+   * auto-apply block reason. Used by the engine demo so table edits and
+   * low-confidence proposals land in the output without manual approval;
+   * the backoffice leaves this unset so proposals still route to review.
+   */
+  forceAutoApply?: boolean;
 }
 
 export class ReviewAssistanceValidator {
@@ -463,8 +471,8 @@ export class ReviewAssistanceValidator {
     }
     if (
       options.allowAutoApply &&
-      confidence >= options.autoApplyThreshold &&
-      !autoApplyBlockReason
+      (options.forceAutoApply ||
+        (confidence >= options.autoApplyThreshold && !autoApplyBlockReason))
     ) {
       return 'auto_applied';
     }

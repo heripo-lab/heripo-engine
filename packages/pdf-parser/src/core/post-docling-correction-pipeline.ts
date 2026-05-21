@@ -78,6 +78,7 @@ export class PostDoclingCorrectionPipeline {
           workItemTimeoutMs: correction.workItemTimeoutMs,
           autoApplyThreshold: correction.autoApplyThreshold,
           proposalThreshold: correction.proposalThreshold,
+          forceAutoApply: correction.forceAutoApply,
           maxRetries: correction.maxRetries.reviewAssistance,
           tableMaxRetries: correction.maxRetries.tableCorrection,
           temperature: correction.temperature,
