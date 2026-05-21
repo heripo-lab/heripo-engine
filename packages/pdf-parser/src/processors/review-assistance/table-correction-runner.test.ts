@@ -112,6 +112,53 @@ function makeFullGridContext(): PageReviewContext {
   };
 }
 
+// fullGrid with a rowSpan=2 master (so (1,0) is a shadow), a footnote marker,
+// and a unit-bearing cell — exercises shadow detection + marker/unit restore.
+function makeMarkerGridContext(): PageReviewContext {
+  const context = makeContext();
+  return {
+    ...context,
+    tables: [
+      {
+        ref: '#/tables/0',
+        bbox,
+        gridPreview: [
+          ['헤더※', '10cm'],
+          ['', '값'],
+        ],
+        fullGrid: [
+          [
+            {
+              text: '헤더※',
+              rowSpan: 2,
+              colSpan: 1,
+              columnHeader: true,
+              rowHeader: false,
+            },
+            {
+              text: '10cm',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: true,
+              rowHeader: false,
+            },
+          ],
+          [
+            { text: '', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
+            { text: '값', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
+          ],
+        ],
+        rowCount: 2,
+        colCount: 2,
+        hasSpans: true,
+        headerRows: [0],
+        emptyCellRatio: 0,
+        suspectReasons: [],
+      },
+    ],
+  };
+}
+
 describe('TableCorrectionRunner', () => {
   test('wraps a { grid, caption } reply into one replaceTable proposal with carried-over structure', () => {
     const runner = new TableCorrectionRunner();
@@ -185,5 +232,115 @@ describe('TableCorrectionRunner', () => {
     expect(prompt).toContain('제원(cm)');
     expect(prompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
     expect(prompt).toContain('table_correction_unit_hint_dropped');
+  });
+
+  test('carryOverTableStructure reconciles structure, restores markers, and guards edge cases', () => {
+    const runner = new TableCorrectionRunner();
+    const meta = { confidence: 0.95, rationale: '', evidence: null };
+    const cell = (text) => ({
+      text,
+      bbox: null,
+      rowSpan: null,
+      colSpan: null,
+      columnHeader: null,
+      rowHeader: null,
+    });
+
+    // No fullGrid (oversized/unknown table) → output returned unchanged.
+    const noGridContext = runner.buildContext(makeContext(), makeWorkItem());
+    const passthrough = {
+      pageNo: 1,
+      commands: [
+        {
+          op: 'replaceTable',
+          tableRef: '#/tables/0',
+          grid: [[cell('x')]],
+          caption: null,
+          ...meta,
+        },
+      ],
+      pageNotes: [],
+    };
+    expect(runner.carryOverTableStructure(noGridContext, passthrough)).toBe(
+      passthrough,
+    );
+
+    const context = runner.buildContext(makeMarkerGridContext(), makeWorkItem());
+
+    // Non-replaceTable commands pass through untouched (defensive op guard).
+    const nonTable = {
+      pageNo: 1,
+      commands: [{ op: 'removeText', textRef: '#/texts/0', ...meta }],
+      pageNotes: [],
+    };
+    expect(
+      runner.carryOverTableStructure(context, nonTable).commands[0].op,
+    ).toBe('removeText');
+
+    // A different-dimension grid is left as-is for the reviewer.
+    const diffDims = {
+      pageNo: 1,
+      commands: [
+        {
+          op: 'replaceTable',
+          tableRef: '#/tables/0',
+          grid: [[cell('only')]],
+          caption: null,
+          ...meta,
+        },
+      ],
+      pageNotes: [],
+    };
+    expect(
+      runner.carryOverTableStructure(context, diffDims).commands[0].grid,
+    ).toHaveLength(1);
+
+    // Same-dimension grid: spans/headers re-derived, shadow forced empty,
+    // dropped markers/units re-attached, a missing cell text coerced to ''.
+    const sameDims = {
+      pageNo: 1,
+      commands: [
+        {
+          op: 'replaceTable',
+          tableRef: '#/tables/0',
+          grid: [
+            [{ text: '헤더' }, { text: '10' }],
+            [{}, { text: '값' }],
+          ],
+          caption: null,
+          ...meta,
+        },
+      ],
+      pageNotes: [],
+    };
+    const grid = runner.carryOverTableStructure(context, sameDims).commands[0]
+      .grid;
+    expect(grid[0][0].text).toBe('헤더※'); // footnote marker re-attached
+    expect(grid[0][0].rowSpan).toBe(2); // span carried over from source
+    expect(grid[0][1].text).toContain('cm'); // unit token re-attached
+    expect(grid[1][0].text).toBe(''); // shadow position forced empty
+    expect(grid[1][1].text).toBe('값');
+
+    // When the model already kept the marker/unit, nothing is re-attached.
+    const kept = {
+      pageNo: 1,
+      commands: [
+        {
+          op: 'replaceTable',
+          tableRef: '#/tables/0',
+          grid: [
+            [{ text: '헤더※' }, { text: '10cm' }],
+            [{}, { text: '값' }],
+          ],
+          caption: null,
+          ...meta,
+        },
+      ],
+      pageNotes: [],
+    };
+    const keptGrid = runner.carryOverTableStructure(context, kept).commands[0]
+      .grid;
+    expect(keptGrid[0][0].text).toBe('헤더※');
+    expect(keptGrid[0][1].text).toBe('10cm');
   });
 });

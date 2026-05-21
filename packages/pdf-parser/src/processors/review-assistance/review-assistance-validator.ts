@@ -582,6 +582,10 @@ export class ReviewAssistanceValidator {
   private getRawTargetRef(
     rawCommand: ReviewAssistanceRawCommand,
   ): string | undefined {
+    /* v8 ignore start -- only reached when `toCommand` returns undefined (an
+     * unhandled op); under the structured-output schema every known op yields
+     * a command, so these per-op cases are unreachable. Kept as defensive
+     * evidence-building (see the method doc above). */
     switch (rawCommand.op) {
       case 'replaceText':
       case 'updateTextRole':
@@ -609,6 +613,7 @@ export class ReviewAssistanceValidator {
       case 'addPicture':
         return undefined;
     }
+    /* v8 ignore stop */
   }
 
   private buildRefSet(context: PageReviewContext): RefSet {

@@ -703,4 +703,84 @@ describe('PageReviewContextBuilder', () => {
     );
     expect(builder.isLikelyHanjaOcrNoiseToken('조사기관(재)', '3a')).toBe(true);
   });
+
+  test('buildFullGrid carries spans, blanks shadow cells, and skips oversized grids', () => {
+    const dcell = (
+      overrides: Partial<{
+        text: string;
+        row_span: number;
+        col_span: number;
+        start_row_offset_idx: number;
+        start_col_offset_idx: number;
+        column_header: boolean;
+        row_header: boolean;
+      }> = {},
+    ) => ({
+      text: '',
+      row_span: 1,
+      col_span: 1,
+      start_row_offset_idx: 0,
+      start_col_offset_idx: 0,
+      column_header: false,
+      row_header: false,
+      ...overrides,
+    });
+    const builder = new PageReviewContextBuilder() as unknown as {
+      buildFullGrid: (
+        grid: ReturnType<typeof dcell>[][],
+      ) =>
+        | Array<
+            Array<{
+              text: string;
+              rowSpan: number;
+              colSpan: number;
+              columnHeader: boolean;
+              rowHeader: boolean;
+            }>
+          >
+        | undefined;
+    };
+
+    // (0,0) is a col_span=2 master with a non-positive row_span; (0,1) points
+    // back to it (shadow placeholder); (1,1) carries a non-positive col_span.
+    const grid = builder.buildFullGrid([
+      [
+        dcell({ text: 'master', col_span: 2, row_span: 0, column_header: true }),
+        dcell({ text: 'master', col_span: 2, start_col_offset_idx: 0 }),
+      ],
+      [
+        dcell({ text: 'a', start_row_offset_idx: 1, start_col_offset_idx: 0 }),
+        dcell({
+          text: 'b',
+          start_row_offset_idx: 1,
+          start_col_offset_idx: 1,
+          col_span: 0,
+        }),
+      ],
+    ]);
+
+    expect(grid).toBeDefined();
+    // Master cell: non-positive spans clamp to 1, col_span carried.
+    expect(grid?.[0][0]).toEqual({
+      text: 'master',
+      rowSpan: 1,
+      colSpan: 2,
+      columnHeader: true,
+      rowHeader: false,
+    });
+    // Shadow placeholder for the spanned position.
+    expect(grid?.[0][1]).toEqual({
+      text: '',
+      rowSpan: 1,
+      colSpan: 1,
+      columnHeader: false,
+      rowHeader: false,
+    });
+    // Non-positive col_span clamps to 1.
+    expect(grid?.[1][1].colSpan).toBe(1);
+
+    // Oversized grids (> MAX_FULL_GRID_CELLS = 600) get no full grid.
+    const oversized = [Array.from({ length: 601 }, () => dcell())];
+    expect(builder.buildFullGrid(oversized)).toBeUndefined();
+  });
 });

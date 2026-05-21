@@ -1704,6 +1704,10 @@ export class ReviewAssistanceRunner {
       },
     );
 
+    /* v8 ignore next 3 -- defensive: groups is non-empty here (we early-return
+     * at the groups.length === 0 guard above), and decideMergeOutcome always
+     * patches either a winner or a drop-all representative, so decisionPatches
+     * can never be empty once a group is processed. */
     if (droppedIds.size === 0 && decisionPatches.size === 0) {
       return decisions;
     }
@@ -1733,10 +1737,15 @@ export class ReviewAssistanceRunner {
     const byId = new Map(conflicted.map((decision) => [decision.id, decision]));
     const parent = new Map<string, string>();
     const find = (id: string): string => {
+      // The `?? id`/`?? p` fallbacks are defensive: every id reaching find() is
+      // pre-seeded into `parent` by the initialization loop below, so Map.get
+      // never misses and the nullish branches are unreachable.
+      /* v8 ignore start */
       let p = parent.get(id) ?? id;
       while (p !== (parent.get(p) ?? p)) {
         p = parent.get(p) ?? p;
       }
+      /* v8 ignore stop */
       parent.set(id, p);
       return p;
     };
