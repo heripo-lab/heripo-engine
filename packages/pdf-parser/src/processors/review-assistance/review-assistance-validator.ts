@@ -161,7 +161,12 @@ export class ReviewAssistanceValidator {
     rawCommand: ReviewAssistanceRawCommand,
     _reasons: string[],
   ): ReviewAssistanceCommand | undefined {
-    const liftBbox = (bbox: { l: number; t: number; r: number; b: number }) => ({
+    const liftBbox = (bbox: {
+      l: number;
+      t: number;
+      r: number;
+      b: number;
+    }) => ({
       ...bbox,
       coord_origin: 'TOPLEFT' as const,
     });

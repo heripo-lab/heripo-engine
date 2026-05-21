@@ -2718,7 +2718,11 @@ describe('ReviewAssistanceRunner', () => {
     // `decisionPatches.get(id) ?? decision` fallback in the final map.
     const standalone = makeDecision(
       'standalone',
-      { op: 'updatePictureCaption', pictureRef: '#/pictures/0', caption: 'Fig' },
+      {
+        op: 'updatePictureCaption',
+        pictureRef: '#/pictures/0',
+        caption: 'Fig',
+      },
       { confidence: 0.9, reasons: ['standalone'] },
     );
 
@@ -2931,9 +2935,11 @@ describe('ReviewAssistanceRunner', () => {
       conflicted('d4', undefined),
     ]) as ReviewAssistanceDecision[][];
     expect(groups).toHaveLength(1);
-    expect(
-      groups[0].map((decision) => decision.id).sort(),
-    ).toEqual(['d1', 'd2', 'd3']);
+    expect(groups[0].map((decision) => decision.id).sort()).toEqual([
+      'd1',
+      'd2',
+      'd3',
+    ]);
 
     // applyMergeWinnerMetadata: winner without metadata (`?? {}`) and a dropped
     // candidate whose reviewTask is not a string (→ task undefined).

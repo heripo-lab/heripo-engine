@@ -726,9 +726,7 @@ describe('PageReviewContextBuilder', () => {
       ...overrides,
     });
     const builder = new PageReviewContextBuilder() as unknown as {
-      buildFullGrid: (
-        grid: ReturnType<typeof dcell>[][],
-      ) =>
+      buildFullGrid: (grid: ReturnType<typeof dcell>[][]) =>
         | Array<
             Array<{
               text: string;
@@ -745,7 +743,12 @@ describe('PageReviewContextBuilder', () => {
     // back to it (shadow placeholder); (1,1) carries a non-positive col_span.
     const grid = builder.buildFullGrid([
       [
-        dcell({ text: 'master', col_span: 2, row_span: 0, column_header: true }),
+        dcell({
+          text: 'master',
+          col_span: 2,
+          row_span: 0,
+          column_header: true,
+        }),
         dcell({ text: 'master', col_span: 2, start_col_offset_idx: 0 }),
       ],
       [

@@ -91,14 +91,50 @@ function makeFullGridContext(): PageReviewContext {
         ],
         fullGrid: [
           [
-            { text: '구분', rowSpan: 1, colSpan: 1, columnHeader: true, rowHeader: false },
-            { text: '제원(cm)', rowSpan: 1, colSpan: 2, columnHeader: true, rowHeader: false },
-            { text: '', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
+            {
+              text: '구분',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: true,
+              rowHeader: false,
+            },
+            {
+              text: '제원(cm)',
+              rowSpan: 1,
+              colSpan: 2,
+              columnHeader: true,
+              rowHeader: false,
+            },
+            {
+              text: '',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: false,
+              rowHeader: false,
+            },
           ],
           [
-            { text: '토기', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
-            { text: '10', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
-            { text: '20', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
+            {
+              text: '토기',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: false,
+              rowHeader: false,
+            },
+            {
+              text: '10',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: false,
+              rowHeader: false,
+            },
+            {
+              text: '20',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: false,
+              rowHeader: false,
+            },
           ],
         ],
         rowCount: 2,
@@ -144,8 +180,20 @@ function makeMarkerGridContext(): PageReviewContext {
             },
           ],
           [
-            { text: '', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
-            { text: '값', rowSpan: 1, colSpan: 1, columnHeader: false, rowHeader: false },
+            {
+              text: '',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: false,
+              rowHeader: false,
+            },
+            {
+              text: '값',
+              rowSpan: 1,
+              colSpan: 1,
+              columnHeader: false,
+              rowHeader: false,
+            },
           ],
         ],
         rowCount: 2,
@@ -293,7 +341,10 @@ describe('TableCorrectionRunner', () => {
       passthrough,
     );
 
-    const context = runner.buildContext(makeMarkerGridContext(), makeWorkItem());
+    const context = runner.buildContext(
+      makeMarkerGridContext(),
+      makeWorkItem(),
+    );
 
     // Non-replaceTable commands pass through untouched (defensive op guard).
     const nonTable = {

@@ -4,8 +4,8 @@ import type {
   ReviewAssistanceTableCell,
 } from '@heripo/model';
 
-import type { PageReviewTableCell } from './page-review-context-builder';
 import type { ReviewAssistancePageOutput } from '../../types/review-assistance-schema';
+import type { PageReviewTableCell } from './page-review-context-builder';
 import type { ReviewAssistanceValidatorOptions } from './review-assistance-validator';
 import type { TableCorrectionContext } from './table-correction-context-builder';
 

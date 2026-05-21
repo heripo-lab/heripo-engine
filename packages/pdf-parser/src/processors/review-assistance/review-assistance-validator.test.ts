@@ -321,30 +321,31 @@ describe('ReviewAssistanceValidator', () => {
   });
 
   test('forceAutoApply overrides structural block reasons and the confidence threshold', () => {
-    const blockedHighConfidence = new ReviewAssistanceValidator().validatePageOutput(
-      makeContext(),
-      {
-        pageNo: 1,
-        commands: [
-          {
-            op: 'replaceTable',
-            tableRef: '#/tables/0',
-            grid: [[cell('A')]],
-            caption: null,
-            confidence: 0.95,
-            rationale: 'Visible table differs',
-            evidence: null,
-          },
-        ],
-        pageNotes: [],
-      },
-      {
-        autoApplyThreshold: 0.85,
-        proposalThreshold: 0.5,
-        allowAutoApply: true,
-        forceAutoApply: true,
-      },
-    );
+    const blockedHighConfidence =
+      new ReviewAssistanceValidator().validatePageOutput(
+        makeContext(),
+        {
+          pageNo: 1,
+          commands: [
+            {
+              op: 'replaceTable',
+              tableRef: '#/tables/0',
+              grid: [[cell('A')]],
+              caption: null,
+              confidence: 0.95,
+              rationale: 'Visible table differs',
+              evidence: null,
+            },
+          ],
+          pageNotes: [],
+        },
+        {
+          autoApplyThreshold: 0.85,
+          proposalThreshold: 0.5,
+          allowAutoApply: true,
+          forceAutoApply: true,
+        },
+      );
     // A structural command that is always routed to manual review is now
     // auto-applied because the demo opted into force-apply.
     expect(blockedHighConfidence[0].disposition).toBe('auto_applied');

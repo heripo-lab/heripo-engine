@@ -85,7 +85,9 @@ function makeContext(): TableCorrectionContext {
 
 describe('table correction prompt', () => {
   test('describes target-table-only correction rules', () => {
-    expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain('Use only the target table');
+    expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain(
+      'Use only the target table',
+    );
     expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain(
       'Preserve the table structure',
     );

@@ -67,7 +67,12 @@ describe('flatCommandToRawCommand', () => {
       ...flatBase,
     });
     expect(
-      fold({ op: 'updateTextRole', textRef: 't', label: 'caption', ...flatBase }),
+      fold({
+        op: 'updateTextRole',
+        textRef: 't',
+        label: 'caption',
+        ...flatBase,
+      }),
     ).toEqual({
       op: 'updateTextRole',
       textRef: 't',
@@ -199,10 +204,20 @@ describe('flatCommandToRawCommand', () => {
     });
     expect(
       fold({ op: 'hidePicture', pictureRef: 'p', reason: 'dup', ...flatBase }),
-    ).toEqual({ op: 'hidePicture', pictureRef: 'p', reason: 'dup', ...flatBase });
+    ).toEqual({
+      op: 'hidePicture',
+      pictureRef: 'p',
+      reason: 'dup',
+      ...flatBase,
+    });
     expect(
       fold({ op: 'updateBbox', targetRef: 't', bbox: flatBbox, ...flatBase }),
-    ).toEqual({ op: 'updateBbox', targetRef: 't', bbox: flatBbox, ...flatBase });
+    ).toEqual({
+      op: 'updateBbox',
+      targetRef: 't',
+      bbox: flatBbox,
+      ...flatBase,
+    });
     expect(
       fold({
         op: 'linkFootnote',
