@@ -86,33 +86,38 @@ function makeContext(): TableCorrectionContext {
 describe('table correction prompt', () => {
   test('describes target-table-only correction rules', () => {
     expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain(
-      'The only editable table is targetTable.ref',
+      'Use only the target table',
     );
     expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain(
-      '"op": "updateTableCell" | "replaceTable" | "linkContinuedTable"',
+      'Preserve the table structure',
     );
   });
 
-  test('builds prompt with table correction context and feedback', () => {
+  test('teaches the { grid, caption } structured-output shape', () => {
+    // The table task uses the dedicated grid schema (mirroring the backoffice
+    // AI table-correction feature), so the prompt describes a bare
+    // { grid, caption } reply — no command/payload wrapper.
+    expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain('"grid"');
+    expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain('"caption"');
+    expect(TABLE_CORRECTION_SYSTEM_PROMPT).toContain('rowSpan');
+    expect(TABLE_CORRECTION_SYSTEM_PROMPT).not.toContain('payload');
+  });
+
+  test('builds prompt with the current grid, caption, language, and feedback', () => {
     const prompt = buildTableCorrectionPrompt(makeContext(), {
       outputLanguage: 'Korean',
       validationFeedback: ['table_correction_target_ref_mismatch'],
       attempt: 2,
     });
 
-    expect(prompt).toContain('OUTPUT LANGUAGE: Korean');
+    expect(prompt).toContain('OUTPUT LANGUAGE');
+    expect(prompt).toContain('Korean');
     expect(prompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
     expect(prompt).toContain('table_correction_target_ref_mismatch');
-    expect(prompt).toContain('TABLE CORRECTION CONTEXT JSON');
-    expect(prompt).toContain('"targetTable"');
-    expect(prompt).toContain('"otherTablesOnPage"');
-    expect(prompt).toContain(
-      '"previousPageTableSummary":"Previous page table keeps Layer and Depth columns"',
-    );
-    expect(prompt).toContain(
-      '"nextPageTableSummary":"Next page table continues Layer and Depth columns"',
-    );
-    expect(prompt).toContain('"multiple_tables_on_page"');
+    // The fixture has only a gridPreview (no fullGrid) → the preview branch.
+    expect(prompt).toContain('Current table preview');
+    expect(prompt).toContain('Depth 10cm');
+    expect(prompt).toContain('Current caption: Table 1');
   });
 
   test('omits optional language and feedback sections', () => {

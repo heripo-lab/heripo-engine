@@ -68,11 +68,12 @@ describe('normalizePDFCorrectionOptions', () => {
           tableCorrection: 5,
         },
         outputLanguage: ' ko-KR ',
-        localModelConcurrency: 2.9,
+        modelConcurrency: 2.9,
         workItemTimeoutMs: 599_999.9,
         pageGate: { structuralNoiseThreshold: 2 },
         proposalThreshold: 0.7,
         autoApplyThreshold: 0.2,
+        forceAutoApply: true,
         temperature: 1.5,
       }),
     );
@@ -86,11 +87,12 @@ describe('normalizePDFCorrectionOptions', () => {
         tableCorrection: 5,
       },
       outputLanguage: 'ko-KR',
-      localModelConcurrency: 2,
+      modelConcurrency: 2,
       workItemTimeoutMs: 599_999,
       pageGate: { structuralNoiseThreshold: 1 },
       proposalThreshold: 0.7,
       autoApplyThreshold: 0.7,
+      forceAutoApply: true,
       temperature: 1.5,
     });
   });

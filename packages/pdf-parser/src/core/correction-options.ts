@@ -35,12 +35,18 @@ export interface PDFCorrectionOptions {
   models: PDFCorrectionModelOptions;
   concurrency?: PDFCorrectionConcurrencyOptions;
   maxRetries?: PDFCorrectionMaxRetriesOptions;
-  localModelConcurrency?: number;
+  modelConcurrency?: number;
   workItemTimeoutMs?: number;
   outputLanguage?: string;
   pageGate?: PDFCorrectionPageGateOptions;
   autoApplyThreshold?: number;
   proposalThreshold?: number;
+  /**
+   * When true, every valid review-assistance command auto-applies regardless of
+   * confidence threshold or structural block reason (no manual-review routing).
+   * Enabled by the engine demo; defaults to false everywhere else.
+   */
+  forceAutoApply?: boolean;
   temperature?: number;
 }
 
@@ -48,12 +54,13 @@ export interface NormalizedPDFCorrectionOptions {
   models: PDFCorrectionModelOptions;
   concurrency: Required<PDFCorrectionConcurrencyOptions>;
   maxRetries: Required<PDFCorrectionMaxRetriesOptions>;
-  localModelConcurrency: number;
+  modelConcurrency: number;
   workItemTimeoutMs: number;
   outputLanguage: string;
   pageGate: Required<PDFCorrectionPageGateOptions>;
   autoApplyThreshold: number;
   proposalThreshold: number;
+  forceAutoApply: boolean;
   temperature: number;
 }
 
@@ -72,7 +79,7 @@ export const PDF_CORRECTION_DEFAULTS: Omit<
     reviewAssistance: 3,
     tableCorrection: 3,
   },
-  localModelConcurrency: 1,
+  modelConcurrency: 1,
   workItemTimeoutMs: PDF_CONVERTER.DEFAULT_TIMEOUT_MS,
   outputLanguage: 'en-US',
   pageGate: {
@@ -80,6 +87,7 @@ export const PDF_CORRECTION_DEFAULTS: Omit<
   },
   autoApplyThreshold: 0.85,
   proposalThreshold: 0.5,
+  forceAutoApply: false,
   temperature: 0,
 };
 
@@ -197,9 +205,9 @@ export function normalizePDFCorrectionOptions(
         PDF_CORRECTION_DEFAULTS.maxRetries.tableCorrection,
       ),
     },
-    localModelConcurrency: normalizePositiveInt(
-      value.localModelConcurrency,
-      PDF_CORRECTION_DEFAULTS.localModelConcurrency,
+    modelConcurrency: normalizePositiveInt(
+      value.modelConcurrency,
+      PDF_CORRECTION_DEFAULTS.modelConcurrency,
     ),
     workItemTimeoutMs: normalizePositiveInt(
       value.workItemTimeoutMs,
@@ -214,6 +222,8 @@ export function normalizePDFCorrectionOptions(
     },
     autoApplyThreshold,
     proposalThreshold,
+    forceAutoApply:
+      value.forceAutoApply ?? PDF_CORRECTION_DEFAULTS.forceAutoApply,
     temperature: normalizeTemperature(
       value.temperature,
       PDF_CORRECTION_DEFAULTS.temperature,

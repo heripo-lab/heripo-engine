@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import {
   REVIEW_ASSISTANCE_SYSTEM_PROMPT,
   REVIEW_ASSISTANCE_TASKS,
+  buildReviewAssistanceMergePrompt,
   buildReviewAssistancePrompt,
 } from './review-assistance-prompt';
 
@@ -17,8 +18,9 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
       'archaeological and cultural heritage report PDFs',
     );
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain('Hanja correction');
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain('NO "payload" wrapper');
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
-      'payload must be {"text"',
+      '"op": "replaceText", "textRef"',
     );
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain('This is not a Q&A task');
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
@@ -28,10 +30,10 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
       'Treat each picture bbox as an opaque image',
     );
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
-      'Only external captions outside or directly adjacent to a picture',
+      'Only text outside the picture bbox can be linked as an external caption',
     );
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
-      'emit a high-confidence removeText command',
+      'they are filtered out of the page context you receive',
     );
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       'Do not leave them as generic review notes',
@@ -41,6 +43,13 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     );
     expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
       'Do not split a single large photo',
+    );
+  });
+
+  test('warns that omitting a mandatory op field discards the command', () => {
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain('is discarded entirely');
+    expect(REVIEW_ASSISTANCE_SYSTEM_PROMPT).toContain(
+      'updateTextRole without "label"',
     );
   });
 
@@ -308,7 +317,11 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
     expect(prompt).toContain('Allowed ops for this task');
     expect(prompt).toContain('"splitCandidate"');
     expect(prompt).toContain('picture_split_boundary_candidate');
-    expect(prompt).toContain('picture_internal_text');
+    // picture-internal text overlays are deterministically dropped from the
+    // picture task context (dropPictureInternalText), so the model never sees
+    // them and cannot emit commands against them.
+    expect(prompt).not.toContain('picture_internal_text');
+    expect(prompt).not.toContain('Inside picture');
     expect(prompt).toContain('caption_like_body_text');
     expect(prompt).toContain('Caption label');
   });
@@ -382,5 +395,35 @@ describe('REVIEW_ASSISTANCE_SYSTEM_PROMPT', () => {
 
     expect(prompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
     expect(prompt).toContain('- target_ref_not_found');
+  });
+});
+
+describe('buildReviewAssistanceMergePrompt', () => {
+  const input = {
+    pageNo: 4,
+    conflictRefs: ['#/texts/0'],
+    candidates: [
+      {
+        index: 0,
+        taskId: 'text_ocr_hanja',
+        confidence: 0.9,
+        command: { op: 'replaceText' },
+      },
+    ],
+  };
+
+  test('omits the language directive when no output language is set', () => {
+    const prompt = buildReviewAssistanceMergePrompt(input);
+    expect(prompt).not.toContain('OUTPUT LANGUAGE');
+    expect(prompt).toContain('PAGE: 4');
+    expect(prompt).toContain('CONFLICTING REFS: #/texts/0');
+  });
+
+  test('includes the language directive when an output language is set', () => {
+    const prompt = buildReviewAssistanceMergePrompt({
+      ...input,
+      outputLanguage: 'ko-KR',
+    });
+    expect(prompt).toContain('OUTPUT LANGUAGE: ko-KR');
   });
 });

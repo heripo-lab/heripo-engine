@@ -5,6 +5,7 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { describe, expect, test } from 'vitest';
 
+import { REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL } from '../../types/review-assistance-schema';
 import { ReviewAssistanceValidator } from './review-assistance-validator';
 
 const bbox: DoclingBBox = {
@@ -14,6 +15,46 @@ const bbox: DoclingBBox = {
   b: 40,
   coord_origin: 'TOPLEFT',
 };
+
+type RawCell = Extract<
+  ReviewAssistanceRawCommand,
+  { op: 'replaceTable' }
+>['grid'][number][number];
+
+// Schema-correct table cell with every nullable field present. The validator's
+// `toCommand` drops null span/header/bbox fields, so omitted extras vanish from
+// the resulting command — keeping fixtures terse while satisfying the strict
+// discriminated-union type.
+function cell(text: string, extra: Partial<RawCell> = {}): RawCell {
+  return {
+    text,
+    bbox: null,
+    rowSpan: null,
+    colSpan: null,
+    columnHeader: null,
+    rowHeader: null,
+    ...extra,
+  };
+}
+
+type RawRegion = Extract<
+  ReviewAssistanceRawCommand,
+  { op: 'splitPicture' }
+>['regions'][number];
+
+// Schema-correct split-picture region with every nullable field present.
+function region(
+  regionBbox: RawRegion['bbox'],
+  extra: Partial<RawRegion> = {},
+): RawRegion {
+  return {
+    id: null,
+    bbox: regionBbox,
+    imageUri: null,
+    caption: null,
+    ...extra,
+  };
+}
 
 function makeContext(
   textSuspectReasons: string[] = ['ocr_noise'],
@@ -129,8 +170,8 @@ describe('ReviewAssistanceValidator', () => {
   test('maps valid raw commands to parser commands as proposals by default', () => {
     const decision = validate({
       op: 'replaceText',
-      targetRef: '#/texts/0',
-      payload: { text: 'Test' },
+      textRef: '#/texts/0',
+      text: 'Test',
       confidence: 0.92,
       rationale: 'OCR spacing noise',
       evidence: 'Image reads Test',
@@ -146,31 +187,14 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.evidence?.suspectReasons).toContain('ocr_noise');
   });
 
-  test('replaceText payload가 비어도 evidence가 교정문이면 복구한다', () => {
-    const decision = validate({
-      op: 'replaceText',
-      targetRef: '#/texts/0',
-      payload: {},
-      confidence: 0.95,
-      rationale: '한자 OCR 후보',
-      evidence: '분지상(盆地床)에는 구릉지와 범람원이 발달해 있다.',
-    });
-
-    expect(decision.command).toEqual({
-      op: 'replaceText',
-      textRef: '#/texts/0',
-      text: '분지상(盆地床)에는 구릉지와 범람원이 발달해 있다.',
-    });
-    expect(decision.reasons).toContain(
-      'replace_text_payload_recovered_from_evidence',
-    );
-  });
-
   test('includes image-only evidence when a command has no target suspect reasons', () => {
     const decision = validate({
       op: 'addText',
-      targetRef: null,
-      payload: { bbox, text: 'Visible text', label: 'text' },
+      bbox,
+      text: 'Visible text',
+      label: 'text',
+      pageNo: null,
+      afterRef: null,
       confidence: 0.92,
       rationale: 'Missing text',
       evidence: 'Visible on page image',
@@ -190,8 +214,8 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'updateTextRole',
-            targetRef: '#/texts/0',
-            payload: { label: 'caption' },
+            textRef: '#/texts/0',
+            label: 'caption',
             confidence: 0.9,
             rationale: 'Caption position',
             evidence: null,
@@ -217,8 +241,8 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'replaceText',
-            targetRef: '#/texts/0',
-            payload: { text: '분지상(盆地床)' },
+            textRef: '#/texts/0',
+            text: '분지상(盆地床)',
             confidence: 0.72,
             rationale: '이미지에서 한자 표기가 확인됩니다.',
             evidence: '분지상(盆地床)',
@@ -245,8 +269,7 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'removeText',
-            targetRef: '#/texts/0',
-            payload: {},
+            textRef: '#/texts/0',
             confidence: 0.72,
             rationale: '이미지 내부 라벨이라 본문 텍스트에서 제외합니다.',
             evidence: null,
@@ -274,8 +297,9 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'replaceTable',
-            targetRef: '#/tables/0',
-            payload: { grid: [[{ text: 'A' }]] },
+            tableRef: '#/tables/0',
+            grid: [[cell('A')]],
+            caption: null,
             confidence: 0.95,
             rationale: 'Visible table differs',
             evidence: null,
@@ -294,6 +318,91 @@ describe('ReviewAssistanceValidator', () => {
     expect(decision.reasons).toContain(
       'structural_command_requires_manual_review',
     );
+  });
+
+  test('forceAutoApply overrides structural block reasons and the confidence threshold', () => {
+    const blockedHighConfidence =
+      new ReviewAssistanceValidator().validatePageOutput(
+        makeContext(),
+        {
+          pageNo: 1,
+          commands: [
+            {
+              op: 'replaceTable',
+              tableRef: '#/tables/0',
+              grid: [[cell('A')]],
+              caption: null,
+              confidence: 0.95,
+              rationale: 'Visible table differs',
+              evidence: null,
+            },
+          ],
+          pageNotes: [],
+        },
+        {
+          autoApplyThreshold: 0.85,
+          proposalThreshold: 0.5,
+          allowAutoApply: true,
+          forceAutoApply: true,
+        },
+      );
+    // A structural command that is always routed to manual review is now
+    // auto-applied because the demo opted into force-apply.
+    expect(blockedHighConfidence[0].disposition).toBe('auto_applied');
+
+    const lowConfidence = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'updateTextRole',
+            textRef: '#/texts/0',
+            label: 'caption',
+            confidence: 0.6,
+            rationale: 'Below the auto-apply threshold',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+        forceAutoApply: true,
+      },
+    );
+    // A confidence (0.6) below the auto-apply threshold (0.85) but above the
+    // proposal floor (0.5) also auto-applies under force-apply.
+    expect(lowConfidence[0].disposition).toBe('auto_applied');
+
+    const belowFloor = new ReviewAssistanceValidator().validatePageOutput(
+      makeContext(),
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'updateTextRole',
+            textRef: '#/texts/0',
+            label: 'caption',
+            confidence: 0.3,
+            rationale: 'Below the proposal floor',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      {
+        autoApplyThreshold: 0.85,
+        proposalThreshold: 0.5,
+        allowAutoApply: true,
+        forceAutoApply: true,
+      },
+    );
+    // Force-apply never resurrects sub-proposal-threshold commands; they stay
+    // skipped because the model effectively rejected them.
+    expect(belowFloor[0].disposition).toBe('skipped');
   });
 
   test('auto-applies addText, updateBbox, linkFootnote, and moveNode only with deterministic gates', () => {
@@ -320,8 +429,11 @@ describe('ReviewAssistanceValidator', () => {
     const commands: ReviewAssistanceRawCommand[] = [
       {
         op: 'addText',
-        targetRef: null,
-        payload: { bbox, text: 'Missing line', label: 'text' },
+        bbox,
+        text: 'Missing line',
+        label: 'text',
+        pageNo: null,
+        afterRef: null,
         confidence: 0.95,
         rationale: 'Missing text is present in text layer',
         evidence: null,
@@ -329,23 +441,24 @@ describe('ReviewAssistanceValidator', () => {
       {
         op: 'updateBbox',
         targetRef: '#/texts/0',
-        payload: { bbox },
+        bbox,
         confidence: 0.95,
         rationale: 'Bbox warning matches',
         evidence: null,
       },
       {
         op: 'linkFootnote',
-        targetRef: null,
-        payload: { markerTextRef: '#/texts/0', footnoteTextRef: '#/texts/1' },
+        markerTextRef: '#/texts/0',
+        footnoteTextRef: '#/texts/1',
         confidence: 0.95,
         rationale: 'Footnote candidate',
         evidence: null,
       },
       {
         op: 'moveNode',
-        targetRef: '#/texts/0',
-        payload: { targetRef: '#/tables/0', position: 'after' },
+        sourceRef: '#/texts/0',
+        targetRef: '#/tables/0',
+        position: 'after',
         confidence: 0.95,
         rationale: 'Reading order mismatch',
         evidence: null,
@@ -377,12 +490,11 @@ describe('ReviewAssistanceValidator', () => {
     const commands: ReviewAssistanceRawCommand[] = [
       {
         op: 'addText',
-        targetRef: null,
-        payload: {
-          bbox,
-          text: 'Unmatched by deterministic text layer',
-          label: 'text',
-        },
+        bbox,
+        text: 'Unmatched by deterministic text layer',
+        label: 'text',
+        pageNo: null,
+        afterRef: null,
         confidence: 0.95,
         rationale: 'Visible text',
         evidence: null,
@@ -390,23 +502,24 @@ describe('ReviewAssistanceValidator', () => {
       {
         op: 'updateBbox',
         targetRef: '#/texts/0',
-        payload: { bbox },
+        bbox,
         confidence: 0.95,
         rationale: 'Bbox update',
         evidence: null,
       },
       {
         op: 'linkFootnote',
-        targetRef: null,
-        payload: { markerTextRef: '#/texts/0', footnoteTextRef: '#/texts/1' },
+        markerTextRef: '#/texts/0',
+        footnoteTextRef: '#/texts/1',
         confidence: 0.95,
         rationale: 'Footnote link',
         evidence: null,
       },
       {
         op: 'moveNode',
-        targetRef: '#/texts/0',
-        payload: { targetRef: '#/tables/0', position: 'after' },
+        sourceRef: '#/texts/0',
+        targetRef: '#/tables/0',
+        position: 'after',
         confidence: 0.95,
         rationale: 'Reading order',
         evidence: null,
@@ -456,8 +569,9 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'moveNode',
-            targetRef: '#/pictures/0',
-            payload: { targetRef: '#/texts/0', position: 'before' },
+            sourceRef: '#/pictures/0',
+            targetRef: '#/texts/0',
+            position: 'before',
             confidence: 0.95,
             rationale: 'Wrong move',
             evidence: null,
@@ -481,8 +595,8 @@ describe('ReviewAssistanceValidator', () => {
   test('skips commands that target unknown refs', () => {
     const decision = validate({
       op: 'replaceText',
-      targetRef: '#/texts/99',
-      payload: { text: 'replacement' },
+      textRef: '#/texts/99',
+      text: 'replacement',
       confidence: 0.9,
       rationale: 'Bad ref',
       evidence: null,
@@ -500,8 +614,8 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'replaceText',
-            targetRef: '#/texts/0',
-            payload: { text: 'Test' },
+            textRef: '#/texts/0',
+            text: 'Test',
             confidence: 0.95,
             rationale: 'OCR spacing noise',
             evidence: null,
@@ -528,8 +642,7 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'removeText',
-            targetRef: '#/texts/0',
-            payload: {},
+            textRef: '#/texts/0',
             confidence: 0.99,
             rationale: 'Looks duplicated',
             evidence: null,
@@ -558,8 +671,7 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'removeText',
-            targetRef: '#/texts/0',
-            payload: {},
+            textRef: '#/texts/0',
             confidence: 0.99,
             rationale: '이미지 내부 라벨은 본문 텍스트가 아니다.',
             evidence: null,
@@ -586,10 +698,9 @@ describe('ReviewAssistanceValidator', () => {
   test('skips malformed replacement tables', () => {
     const decision = validate({
       op: 'replaceTable',
-      targetRef: '#/tables/0',
-      payload: {
-        grid: [[{ text: 'A' }], [{ text: 'B' }, { text: 'C' }]],
-      },
+      tableRef: '#/tables/0',
+      grid: [[cell('A')], [cell('B'), cell('C')]],
+      caption: null,
       confidence: 0.95,
       rationale: 'Visible table differs',
       evidence: null,
@@ -609,22 +720,20 @@ describe('ReviewAssistanceValidator', () => {
     };
     const decision = validate({
       op: 'replaceTable',
-      targetRef: '#/tables/0',
-      payload: {
-        grid: [
-          [
-            {
-              text: 'A',
-              bbox: cellBbox,
-              rowSpan: 1,
-              colSpan: 2,
-              columnHeader: true,
-            },
-            { text: 'B' },
-          ],
-          [{ text: 'C' }, { text: 'D' }],
+      tableRef: '#/tables/0',
+      grid: [
+        [
+          cell('A', {
+            bbox: cellBbox,
+            rowSpan: 1,
+            colSpan: 2,
+            columnHeader: true,
+          }),
+          cell('B'),
         ],
-      },
+        [cell('C'), cell('D')],
+      ],
+      caption: null,
       confidence: 0.9,
       rationale: 'Replace grid with cell-level metadata',
       evidence: null,
@@ -649,8 +758,10 @@ describe('ReviewAssistanceValidator', () => {
 
     const decision = validateWithContext(context, {
       op: 'updateTableCell',
-      targetRef: '#/tables/0',
-      payload: { row: 0, col: 0, text: 'Filled' },
+      tableRef: '#/tables/0',
+      row: 0,
+      col: 0,
+      text: 'Filled',
       confidence: 0.9,
       rationale: 'Visible cell text',
       evidence: null,
@@ -666,11 +777,9 @@ describe('ReviewAssistanceValidator', () => {
 
     const decision = validateWithContext(context, {
       op: 'linkContinuedTable',
-      targetRef: '#/tables/0',
-      payload: {
-        continuedTableRef: '#/tables/99',
-        relation: 'continues_on_next_page',
-      },
+      sourceTableRef: '#/tables/0',
+      continuedTableRef: '#/tables/99',
+      relation: 'continues_on_next_page',
       confidence: 0.95,
       rationale: 'Compatible adjacent table',
       evidence: null,
@@ -685,13 +794,11 @@ describe('ReviewAssistanceValidator', () => {
 
     const decision = validateWithContext(context, {
       op: 'splitPicture',
-      targetRef: '#/pictures/0',
-      payload: {
-        regions: [
-          { bbox: { ...bbox, r: 35 }, caption: 'A' },
-          { bbox: { ...bbox, l: 45 }, caption: 'B' },
-        ],
-      },
+      pictureRef: '#/pictures/0',
+      regions: [
+        region({ ...bbox, r: 35 }, { caption: 'A' }),
+        region({ ...bbox, l: 45 }, { caption: 'B' }),
+      ],
       confidence: 0.95,
       rationale: 'Visible gutter separates two panels',
       evidence: null,
@@ -713,13 +820,11 @@ describe('ReviewAssistanceValidator', () => {
 
     const decision = validateWithContext(context, {
       op: 'splitPicture',
-      targetRef: '#/pictures/0',
-      payload: {
-        regions: [
-          { bbox: { ...bbox, r: 35 }, caption: 'A' },
-          { bbox: { ...bbox, l: 45 }, caption: 'B' },
-        ],
-      },
+      pictureRef: '#/pictures/0',
+      regions: [
+        region({ ...bbox, r: 35 }, { caption: 'A' }),
+        region({ ...bbox, l: 45 }, { caption: 'B' }),
+      ],
       confidence: 0.95,
       rationale: 'Model wants to split a large image',
       evidence: null,
@@ -736,17 +841,12 @@ describe('ReviewAssistanceValidator', () => {
 
     const decision = validateWithContext(context, {
       op: 'splitPicture',
-      targetRef: '#/pictures/0',
-      payload: {
-        regions: [
-          { bbox: { ...bbox, b: 20 }, caption: 'Top' },
-          { bbox: { ...bbox, t: 25 }, caption: 'Bottom' },
-          {
-            bbox: { ...bbox, t: 41, b: 55 },
-            caption: 'Outside source',
-          },
-        ],
-      },
+      pictureRef: '#/pictures/0',
+      regions: [
+        region({ ...bbox, b: 20 }, { caption: 'Top' }),
+        region({ ...bbox, t: 25 }, { caption: 'Bottom' }),
+        region({ ...bbox, t: 41, b: 55 }, { caption: 'Outside source' }),
+      ],
       confidence: 0.95,
       rationale: 'Unsupported split geometry',
       evidence: null,
@@ -761,13 +861,11 @@ describe('ReviewAssistanceValidator', () => {
   test('skips splitPicture when the source picture is missing or lacks geometry', () => {
     const missingPicture = validateWithContext(makeContext(), {
       op: 'splitPicture',
-      targetRef: '#/pictures/404',
-      payload: {
-        regions: [
-          { bbox: { ...bbox, r: 35 }, caption: 'A' },
-          { bbox: { ...bbox, l: 45 }, caption: 'B' },
-        ],
-      },
+      pictureRef: '#/pictures/404',
+      regions: [
+        region({ ...bbox, r: 35 }, { caption: 'A' }),
+        region({ ...bbox, l: 45 }, { caption: 'B' }),
+      ],
       confidence: 0.95,
       rationale: 'Unknown source picture',
       evidence: null,
@@ -776,13 +874,11 @@ describe('ReviewAssistanceValidator', () => {
     missingBboxContext.pictures[0].bbox = undefined;
     const missingBbox = validateWithContext(missingBboxContext, {
       op: 'splitPicture',
-      targetRef: '#/pictures/0',
-      payload: {
-        regions: [
-          { bbox: { ...bbox, r: 35 }, caption: 'A' },
-          { bbox: { ...bbox, l: 45 }, caption: 'B' },
-        ],
-      },
+      pictureRef: '#/pictures/0',
+      regions: [
+        region({ ...bbox, r: 35 }, { caption: 'A' }),
+        region({ ...bbox, l: 45 }, { caption: 'B' }),
+      ],
       confidence: 0.95,
       rationale: 'Source picture has candidate but no bbox',
       evidence: null,
@@ -809,13 +905,11 @@ describe('ReviewAssistanceValidator', () => {
     };
     const horizontal = validateWithContext(horizontalContext, {
       op: 'splitPicture',
-      targetRef: '#/pictures/0',
-      payload: {
-        regions: [
-          { bbox: { ...bbox, b: 20 }, caption: 'Top' },
-          { bbox: { ...bbox, t: 25 }, caption: 'Bottom' },
-        ],
-      },
+      pictureRef: '#/pictures/0',
+      regions: [
+        region({ ...bbox, b: 20 }, { caption: 'Top' }),
+        region({ ...bbox, t: 25 }, { caption: 'Bottom' }),
+      ],
       confidence: 0.95,
       rationale: 'Horizontal gutter separates panels',
       evidence: null,
@@ -835,15 +929,13 @@ describe('ReviewAssistanceValidator', () => {
     };
     const grid = validateWithContext(gridContext, {
       op: 'splitPicture',
-      targetRef: '#/pictures/0',
-      payload: {
-        regions: [
-          { bbox: { ...bbox, r: 35, b: 20 }, caption: 'Top left' },
-          { bbox: { ...bbox, l: 45, b: 20 }, caption: 'Top right' },
-          { bbox: { ...bbox, r: 35, t: 25 }, caption: 'Bottom left' },
-          { bbox: { ...bbox, l: 45, t: 25 }, caption: 'Bottom right' },
-        ],
-      },
+      pictureRef: '#/pictures/0',
+      regions: [
+        region({ ...bbox, r: 35, b: 20 }, { caption: 'Top left' }),
+        region({ ...bbox, l: 45, b: 20 }, { caption: 'Top right' }),
+        region({ ...bbox, r: 35, t: 25 }, { caption: 'Bottom left' }),
+        region({ ...bbox, l: 45, t: 25 }, { caption: 'Bottom right' }),
+      ],
       confidence: 0.95,
       rationale: 'Grid gutters separate panels',
       evidence: null,
@@ -872,11 +964,9 @@ describe('ReviewAssistanceValidator', () => {
 
     const decision = validateWithContext(context, {
       op: 'linkContinuedTable',
-      targetRef: '#/tables/99',
-      payload: {
-        continuedTableRef: '#/tables/0',
-        relation: 'continued_from_previous_page',
-      },
+      sourceTableRef: '#/tables/99',
+      continuedTableRef: '#/tables/0',
+      relation: 'continued_from_previous_page',
       confidence: 0.95,
       rationale: 'Wrong source ref',
       evidence: null,
@@ -891,115 +981,111 @@ describe('ReviewAssistanceValidator', () => {
     const commands: ReviewAssistanceRawCommand[] = [
       {
         op: 'addText',
-        targetRef: null,
-        payload: {
-          bbox,
-          text: 'Missing text',
-          label: 'text',
-          afterRef: '#/texts/0',
-        },
+        bbox,
+        text: 'Missing text',
+        label: 'text',
+        pageNo: null,
+        afterRef: '#/texts/0',
         confidence: 0.9,
         rationale: 'Visible missing text',
         evidence: null,
       },
       {
         op: 'updateTextRole',
-        targetRef: '#/texts/0',
-        payload: { label: 'caption' },
+        textRef: '#/texts/0',
+        label: 'caption',
         confidence: 0.9,
         rationale: 'Role mismatch',
         evidence: null,
       },
       {
         op: 'removeText',
-        targetRef: '#/texts/0',
-        payload: {},
+        textRef: '#/texts/0',
         confidence: 0.99,
         rationale: 'Deterministic noise',
         evidence: null,
       },
       {
         op: 'mergeTexts',
-        targetRef: '#/texts/0',
-        payload: {
-          textRefs: ['#/texts/0', '#/texts/1'],
-          text: 'Merged',
-          keepRef: '#/texts/0',
-        },
+        textRefs: ['#/texts/0', '#/texts/1'],
+        text: 'Merged',
+        keepRef: '#/texts/0',
         confidence: 0.95,
         rationale: 'Adjacent fragments',
         evidence: null,
       },
       {
         op: 'splitText',
-        targetRef: '#/texts/0',
-        payload: {
-          parts: [{ text: 'T e' }, { text: 's t', label: 'text' }],
-        },
+        textRef: '#/texts/0',
+        parts: [
+          { text: 'T e', label: null },
+          { text: 's t', label: 'text' },
+        ],
         confidence: 0.95,
         rationale: 'Merged fragments',
         evidence: null,
       },
       {
         op: 'updateTableCell',
-        targetRef: '#/tables/0',
-        payload: { row: 0, col: 0, text: 'AA' },
+        tableRef: '#/tables/0',
+        row: 0,
+        col: 0,
+        text: 'AA',
         confidence: 0.9,
         rationale: 'Cell OCR',
         evidence: null,
       },
       {
         op: 'replaceTable',
-        targetRef: '#/tables/0',
-        payload: { grid: [[{ text: 'A' }]], caption: 'Table 1' },
+        tableRef: '#/tables/0',
+        grid: [[cell('A')]],
+        caption: 'Table 1',
         confidence: 0.95,
         rationale: 'Table OCR',
         evidence: null,
       },
       {
         op: 'linkContinuedTable',
-        targetRef: '#/tables/0',
-        payload: {
-          continuedTableRef: '#/tables/1',
-          relation: 'continues_on_next_page',
-        },
+        sourceTableRef: '#/tables/0',
+        continuedTableRef: '#/tables/1',
+        relation: 'continues_on_next_page',
         confidence: 0.95,
         rationale: 'Continued table',
         evidence: null,
       },
       {
         op: 'updatePictureCaption',
-        targetRef: '#/pictures/0',
-        payload: { caption: 'Figure 1' },
+        pictureRef: '#/pictures/0',
+        caption: 'Figure 1',
         confidence: 0.9,
         rationale: 'Nearby caption',
         evidence: null,
       },
       {
         op: 'addPicture',
-        targetRef: null,
-        payload: { bbox, imageUri: 'images/new.png', caption: 'Figure 2' },
+        bbox,
+        imageUri: 'images/new.png',
+        caption: 'Figure 2',
+        pageNo: null,
         confidence: 0.9,
         rationale: 'Missing picture',
         evidence: null,
       },
       {
         op: 'splitPicture',
-        targetRef: '#/pictures/0',
-        payload: {
-          regions: [
-            { bbox: { ...bbox, r: 30 }, caption: 'A' },
-            { bbox: { ...bbox, l: 40, r: 80 }, imageUri: 'b.png' },
-          ],
-        },
+        pictureRef: '#/pictures/0',
+        regions: [
+          region({ ...bbox, r: 30 }, { id: 'region-a', caption: 'A' }),
+          region({ ...bbox, l: 40, r: 80 }, { imageUri: 'b.png' }),
+        ],
         confidence: 0.95,
         rationale: 'Combined picture',
         evidence: null,
       },
       {
         op: 'hidePicture',
-        targetRef: '#/pictures/0',
-        payload: { reason: 'duplicate' },
+        pictureRef: '#/pictures/0',
+        reason: 'duplicate',
         confidence: 0.99,
         rationale: 'Duplicate image',
         evidence: null,
@@ -1007,23 +1093,24 @@ describe('ReviewAssistanceValidator', () => {
       {
         op: 'updateBbox',
         targetRef: '#/texts/0',
-        payload: { bbox },
+        bbox,
         confidence: 0.95,
         rationale: 'Bbox mismatch',
         evidence: null,
       },
       {
         op: 'linkFootnote',
-        targetRef: null,
-        payload: { markerTextRef: '#/texts/0', footnoteTextRef: '#/texts/1' },
+        markerTextRef: '#/texts/0',
+        footnoteTextRef: '#/texts/1',
         confidence: 0.9,
         rationale: 'Footnote marker',
         evidence: null,
       },
       {
         op: 'moveNode',
-        targetRef: '#/texts/0',
-        payload: { targetRef: '#/tables/0', position: 'after' },
+        sourceRef: '#/texts/0',
+        targetRef: '#/tables/0',
+        position: 'after',
         confidence: 0.9,
         rationale: 'Reading order',
         evidence: null,
@@ -1051,137 +1138,60 @@ describe('ReviewAssistanceValidator', () => {
     ).toBe(true);
   });
 
-  test('skips malformed payloads for each command operation', () => {
-    const commands: ReviewAssistanceRawCommand[] = [
+  test('skips unhandled command ops and omitted required enums', () => {
+    // Malformed/missing-field payloads are now rejected by the structured
+    // -output Zod schema before reaching the validator, so the validator no
+    // longer re-checks command shapes. What it still guards: an unhandled op
+    // (defensive — the schema enum makes this unreachable in production) yields
+    // no command, and a required enum the flat schema left empty arrives as the
+    // sentinel and is rejected with `missing_required_field:*` rather than the
+    // engine guessing a value.
+    const sentinel = REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL;
+    const commands = [
       {
-        op: 'replaceText',
-        targetRef: null,
-        payload: {},
+        op: 'bogusOp',
         confidence: 0.9,
-        rationale: 'bad',
+        rationale: 'unhandled op',
         evidence: null,
       },
       {
         op: 'addText',
-        targetRef: null,
-        payload: { text: 'x' },
+        bbox,
+        text: 'x',
+        label: sentinel,
+        pageNo: null,
+        afterRef: null,
         confidence: 0.9,
-        rationale: 'bad',
+        rationale: 'omitted label',
         evidence: null,
       },
       {
         op: 'updateTextRole',
-        targetRef: '#/texts/0',
-        payload: {},
+        textRef: '#/texts/0',
+        label: sentinel,
         confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'removeText',
-        targetRef: null,
-        payload: {},
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'mergeTexts',
-        targetRef: '#/texts/0',
-        payload: { textRefs: ['#/texts/0'], text: 'x' },
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'splitText',
-        targetRef: '#/texts/0',
-        payload: { parts: [{ text: 'x' }] },
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'updateTableCell',
-        targetRef: '#/tables/0',
-        payload: { row: 0, col: 0 },
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'replaceTable',
-        targetRef: '#/tables/0',
-        payload: { grid: [] },
-        confidence: 0.9,
-        rationale: 'bad',
+        rationale: 'omitted label',
         evidence: null,
       },
       {
         op: 'linkContinuedTable',
-        targetRef: '#/tables/0',
-        payload: { continuedTableRef: '#/tables/1', relation: 'bad' },
+        sourceTableRef: '#/tables/0',
+        continuedTableRef: '#/tables/1',
+        relation: sentinel,
         confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'updatePictureCaption',
-        targetRef: '#/pictures/0',
-        payload: {},
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'addPicture',
-        targetRef: null,
-        payload: { bbox: null },
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'splitPicture',
-        targetRef: '#/pictures/0',
-        payload: { regions: [{ bbox }] },
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'hidePicture',
-        targetRef: '#/pictures/0',
-        payload: {},
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'updateBbox',
-        targetRef: '#/texts/0',
-        payload: {},
-        confidence: 0.9,
-        rationale: 'bad',
-        evidence: null,
-      },
-      {
-        op: 'linkFootnote',
-        targetRef: null,
-        payload: { markerTextRef: '#/texts/0' },
-        confidence: 0.9,
-        rationale: 'bad',
+        rationale: 'omitted relation',
         evidence: null,
       },
       {
         op: 'moveNode',
-        targetRef: '#/texts/0',
-        payload: { targetRef: '#/tables/0', position: 'inside' },
+        sourceRef: '#/texts/0',
+        targetRef: '#/tables/0',
+        position: sentinel,
         confidence: 0.9,
-        rationale: 'bad',
+        rationale: 'omitted position',
         evidence: null,
       },
-    ];
+    ] as unknown as ReviewAssistanceRawCommand[];
 
     const decisions = new ReviewAssistanceValidator().validatePageOutput(
       makeContext(),
@@ -1196,12 +1206,12 @@ describe('ReviewAssistanceValidator', () => {
     expect(
       decisions.every((decision) => decision.disposition === 'skipped'),
     ).toBe(true);
-    expect(decisions.every((decision) => decision.command === undefined)).toBe(
-      true,
-    );
-    expect(decisions.map((decision) => decision.invalidOp)).toEqual(
-      commands.map((command) => command.op),
-    );
+    expect(decisions[0].command).toBeUndefined();
+    expect(decisions[0].invalidOp).toBe('bogusOp');
+    const reasons = decisions.flatMap((decision) => decision.reasons);
+    expect(reasons).toContain('missing_required_field:label');
+    expect(reasons).toContain('missing_required_field:relation');
+    expect(reasons).toContain('missing_required_field:position');
   });
 
   test('reports validation failures for risky command shapes', () => {
@@ -1218,86 +1228,93 @@ describe('ReviewAssistanceValidator', () => {
     const commands: ReviewAssistanceRawCommand[] = [
       {
         op: 'replaceText',
-        targetRef: '#/texts/0',
-        payload: { text: 'x' },
+        textRef: '#/texts/0',
+        text: 'x',
         confidence: 0.99,
         rationale: 'too short',
         evidence: null,
       },
       {
         op: 'addText',
-        targetRef: null,
-        payload: { pageNo: 2, bbox: invalidBbox, text: 'x', label: 'text' },
+        bbox: invalidBbox,
+        text: 'x',
+        label: 'text',
+        pageNo: 2,
+        afterRef: null,
         confidence: 0.99,
         rationale: 'bad bbox',
         evidence: null,
       },
       {
         op: 'splitText',
-        targetRef: '#/texts/0',
-        payload: { parts: [{ text: 'x' }, { text: 'y' }] },
+        textRef: '#/texts/0',
+        parts: [
+          { text: 'x', label: null },
+          { text: 'y', label: null },
+        ],
         confidence: 0.99,
         rationale: 'bad split',
         evidence: null,
       },
       {
         op: 'mergeTexts',
-        targetRef: '#/texts/0',
-        payload: {
-          textRefs: ['#/texts/0', '#/texts/1'],
-          text: 'Merged',
-          keepRef: '#/texts/99',
-        },
+        textRefs: ['#/texts/0', '#/texts/1'],
+        text: 'Merged',
+        keepRef: '#/texts/99',
         confidence: 0.99,
         rationale: 'bad keep ref',
         evidence: null,
       },
       {
         op: 'addPicture',
-        targetRef: null,
-        payload: {
-          bbox: { l: -1, t: 0, r: 20, b: 20, coord_origin: 'TOPLEFT' },
-        },
+        bbox: { l: -1, t: 0, r: 20, b: 20 },
+        imageUri: 'images/new.png',
+        caption: null,
+        pageNo: null,
         confidence: 0.99,
         rationale: 'outside bbox',
         evidence: null,
       },
       {
         op: 'updateTableCell',
-        targetRef: '#/tables/0',
-        payload: { row: -1, col: 0, text: 'x' },
+        tableRef: '#/tables/0',
+        row: -1,
+        col: 0,
+        text: 'x',
         confidence: 0.99,
         rationale: 'bad cell',
         evidence: null,
       },
       {
         op: 'updateTableCell',
-        targetRef: '#/tables/0',
-        payload: { row: 9, col: 9, text: 'x' },
+        tableRef: '#/tables/0',
+        row: 9,
+        col: 9,
+        text: 'x',
         confidence: 0.99,
         rationale: 'bad cell',
         evidence: null,
       },
       {
         op: 'updatePictureCaption',
-        targetRef: '#/pictures/0',
-        payload: { caption: '' },
+        pictureRef: '#/pictures/0',
+        caption: '',
         confidence: 0.99,
         rationale: 'empty caption',
         evidence: null,
       },
       {
         op: 'updatePictureCaption',
-        targetRef: '#/pictures/0',
-        payload: { caption: 'x'.repeat(241) },
+        pictureRef: '#/pictures/0',
+        caption: 'x'.repeat(241),
         confidence: 0.99,
         rationale: 'long caption',
         evidence: null,
       },
       {
         op: 'splitPicture',
-        targetRef: '#/pictures/0',
-        payload: { regions: [{ bbox }, { bbox }] },
+        pictureRef: '#/pictures/0',
+        regions: [region(bbox), region(bbox)],
         confidence: 0.99,
         rationale: 'overlap',
         evidence: null,
@@ -1305,23 +1322,24 @@ describe('ReviewAssistanceValidator', () => {
       {
         op: 'updateBbox',
         targetRef: '#/missing/0',
-        payload: { bbox },
+        bbox,
         confidence: 0.99,
         rationale: 'bad target',
         evidence: null,
       },
       {
         op: 'linkFootnote',
-        targetRef: null,
-        payload: { markerTextRef: '#/texts/99', footnoteTextRef: '#/texts/98' },
+        markerTextRef: '#/texts/99',
+        footnoteTextRef: '#/texts/98',
         confidence: 0.99,
         rationale: 'bad refs',
         evidence: null,
       },
       {
         op: 'moveNode',
+        sourceRef: '#/texts/99',
         targetRef: '#/texts/99',
-        payload: { targetRef: '#/texts/99', position: 'before' },
+        position: 'before',
         confidence: 0.99,
         rationale: 'bad move',
         evidence: null,
@@ -1359,8 +1377,8 @@ describe('ReviewAssistanceValidator', () => {
   test('skips low confidence commands even when valid', () => {
     const decision = validate({
       op: 'updateTextRole',
-      targetRef: '#/texts/0',
-      payload: { label: 'caption' },
+      textRef: '#/texts/0',
+      label: 'caption',
       confidence: 0.1,
       rationale: 'Weak evidence',
       evidence: null,
@@ -1377,8 +1395,8 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'updateTextRole',
-            targetRef: '#/texts/0',
-            payload: { label: 'caption' },
+            textRef: '#/texts/0',
+            label: 'caption',
             confidence: 0.7,
             rationale: 'Plausible caption',
             evidence: null,
@@ -1408,8 +1426,9 @@ describe('ReviewAssistanceValidator', () => {
         commands: [
           {
             op: 'moveNode',
-            targetRef: '#/texts/0',
-            payload: { targetRef: '#/tables/0', position: 'after' },
+            sourceRef: '#/texts/0',
+            targetRef: '#/tables/0',
+            position: 'after',
             confidence: 0.95,
             rationale: 'Reading order mismatch',
             evidence: null,
@@ -1433,72 +1452,67 @@ describe('ReviewAssistanceValidator', () => {
     const commands: ReviewAssistanceRawCommand[] = [
       {
         op: 'updateTextRole',
-        targetRef: '#/texts/0',
-        payload: { label: 'caption' },
+        textRef: '#/texts/0',
+        label: 'caption',
         confidence: 0.9,
         rationale: 'first',
         evidence: null,
       },
       {
         op: 'replaceText',
-        targetRef: '#/texts/0',
-        payload: { text: 'Test' },
+        textRef: '#/texts/0',
+        text: 'Test',
         confidence: 0.9,
         rationale: 'second',
         evidence: null,
       },
       {
         op: 'linkContinuedTable',
-        targetRef: '#/tables/0',
-        payload: {
-          continuedTableRef: '#/tables/99',
-          relation: 'continued_from_previous_page',
-        },
+        sourceTableRef: '#/tables/0',
+        continuedTableRef: '#/tables/99',
+        relation: 'continued_from_previous_page',
         confidence: 0.9,
         rationale: 'bad table',
         evidence: null,
       },
       {
         op: 'addText',
-        targetRef: null,
-        payload: {
-          bbox: { l: 90, t: 90, r: 10, b: 10, coord_origin: 'TOPLEFT' },
-          text: 'bad bbox',
-          label: 'text',
-        },
+        bbox: { l: 90, t: 90, r: 10, b: 10 },
+        text: 'bad bbox',
+        label: 'text',
+        pageNo: null,
+        afterRef: null,
         confidence: 0.9,
         rationale: 'bad bbox',
         evidence: null,
       },
       {
         op: 'addText',
-        targetRef: null,
-        payload: {
-          bbox: { l: 0, t: 10, r: 20, b: 30, coord_origin: 'BOTTOMLEFT' },
-          text: 'bottom left',
-          label: 'text',
-        },
+        bbox: { l: 0, t: 10, r: 20, b: 30 },
+        text: 'bottom left',
+        label: 'text',
+        pageNo: null,
+        afterRef: null,
         confidence: 0.9,
         rationale: 'bottom left',
         evidence: null,
       },
       {
         op: 'replaceTable',
-        targetRef: '#/tables/0',
-        payload: { grid: [[]] },
+        tableRef: '#/tables/0',
+        grid: [[]],
+        caption: null,
         confidence: 0.9,
         rationale: 'empty row',
         evidence: null,
       },
       {
         op: 'splitPicture',
-        targetRef: '#/pictures/0',
-        payload: {
-          regions: [
-            { bbox: { l: 10, t: 10, r: 10, b: 10, coord_origin: 'TOPLEFT' } },
-            { bbox: { l: 10, t: 10, r: 10, b: 10, coord_origin: 'TOPLEFT' } },
-          ],
-        },
+        pictureRef: '#/pictures/0',
+        regions: [
+          region({ l: 10, t: 10, r: 10, b: 10 }),
+          region({ l: 10, t: 10, r: 10, b: 10 }),
+        ],
         confidence: 0.9,
         rationale: 'zero area',
         evidence: null,
@@ -1529,18 +1543,6 @@ describe('ReviewAssistanceValidator', () => {
         regions: Array<{ bbox: DoclingBBox }>,
         reasons: string[],
       ) => void;
-      bboxValue: (value: unknown) => DoclingBBox | undefined;
-      stringArrayValue: (value: unknown) => string[];
-      tableGridValue: (value: unknown) => Array<Array<{ text: string }>>;
-      imageRegionsValue: (value: unknown) => Array<{
-        id?: string;
-        bbox: DoclingBBox;
-        imageUri?: string;
-        caption?: string;
-      }>;
-      textPartsValue: (
-        value: unknown,
-      ) => Array<{ text: string; label?: string }>;
       validateSplitText: (
         context: PageReviewContext,
         textRef: string,
@@ -1631,41 +1633,6 @@ describe('ReviewAssistanceValidator', () => {
     );
     validator.validateRemoveText(makeContext(), '#/texts/0', reasons);
 
-    expect(validator.bboxValue({ l: 1, t: 2, r: 3 })).toBeUndefined();
-    expect(validator.bboxValue({ l: 1, t: 2, r: 3, b: 4 })).toEqual({
-      l: 1,
-      t: 2,
-      r: 3,
-      b: 4,
-      coord_origin: 'TOPLEFT',
-    });
-    expect(validator.stringArrayValue('bad')).toEqual([]);
-    expect(validator.stringArrayValue(['a', 1, 'b'])).toEqual(['a', 'b']);
-    expect(validator.tableGridValue('bad')).toEqual([]);
-    expect(
-      validator.tableGridValue([[{ text: 'A' }, { text: 1 }, null], 'bad']),
-    ).toEqual([[{ text: 'A' }, { text: '' }, { text: '' }], []]);
-    expect(validator.imageRegionsValue('bad')).toEqual([]);
-    expect(
-      validator.imageRegionsValue([
-        null,
-        { bbox: null },
-        { bbox, id: 1, imageUri: 2, caption: 3 },
-        { bbox, id: 'a', imageUri: 'image.png', caption: 'Figure' },
-      ]),
-    ).toEqual([
-      { bbox },
-      { bbox, id: 'a', imageUri: 'image.png', caption: 'Figure' },
-    ]);
-    expect(validator.textPartsValue('bad')).toEqual([]);
-    expect(
-      validator.textPartsValue([
-        null,
-        {},
-        { text: 'A', label: 1 },
-        { text: 'B', label: 'body' },
-      ]),
-    ).toEqual([{ text: 'A' }, { text: 'B', label: 'body' }]);
     const gridRegions = [
       { bbox: { ...bbox, r: 35, b: 20 } },
       { bbox: { ...bbox, l: 45, b: 20 } },
@@ -1759,8 +1726,8 @@ describe('ReviewAssistanceValidator', () => {
         makeContext(),
         {
           op: 'replaceText',
-          targetRef: '#/texts/0',
-          payload: { text: 'A' },
+          textRef: '#/texts/0',
+          text: 'A',
           confidence: 0.42,
           rationale: 'raw',
           evidence: null,
@@ -1772,8 +1739,8 @@ describe('ReviewAssistanceValidator', () => {
       validator.buildReasons(
         {
           op: 'replaceText',
-          targetRef: '#/texts/0',
-          payload: { text: 'A' },
+          textRef: '#/texts/0',
+          text: 'A',
           confidence: 0.9,
           rationale: 'manual proposal',
           evidence: null,
@@ -1839,13 +1806,8 @@ describe('ReviewAssistanceValidator', () => {
     ).toEqual([]);
   });
 
-  test('rejects invalid evidence-derived replacements and detects domain patterns', () => {
+  test('detects domain patterns for a target ref', () => {
     const validator = new ReviewAssistanceValidator() as unknown as {
-      replacementTextFromEvidence: (
-        context: PageReviewContext,
-        textRef: string | undefined,
-        evidence: string | null,
-      ) => string | undefined;
       hasDomainPattern: (
         context: PageReviewContext,
         targetRef: string,
@@ -1853,36 +1815,6 @@ describe('ReviewAssistanceValidator', () => {
       ) => boolean;
     };
     const context = makeContext();
-
-    expect(
-      validator.replacementTextFromEvidence(context, undefined, 'Test'),
-    ).toBeUndefined();
-    expect(
-      validator.replacementTextFromEvidence(context, '#/texts/0', null),
-    ).toBeUndefined();
-    expect(
-      validator.replacementTextFromEvidence(context, '#/texts/99', 'Test'),
-    ).toBeUndefined();
-    expect(
-      validator.replacementTextFromEvidence(context, '#/texts/0', ' A '),
-    ).toBeUndefined();
-    expect(
-      validator.replacementTextFromEvidence(context, '#/texts/0', '---'),
-    ).toBeUndefined();
-    expect(
-      validator.replacementTextFromEvidence(
-        context,
-        '#/texts/0',
-        'Image reads Test',
-      ),
-    ).toBeUndefined();
-    expect(
-      validator.replacementTextFromEvidence(
-        context,
-        '#/texts/0',
-        'x'.repeat(401),
-      ),
-    ).toBeUndefined();
 
     context.domainPatterns = [
       { targetRef: '#/texts/99', pattern: 'hanja_term', value: '山' },

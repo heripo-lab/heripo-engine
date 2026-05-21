@@ -21,12 +21,19 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
+  REVIEW_ASSISTANCE_TASKS,
+  type ReviewAssistanceMergeCandidateForPrompt,
   type ReviewAssistanceTaskDefinition,
+  buildReviewAssistanceMergePrompt,
   buildReviewAssistancePrompt,
 } from '../../prompts/review-assistance-prompt';
 import {
+  type ReviewAssistanceMergeChoice,
   type ReviewAssistancePageOutput,
-  reviewAssistancePageSchema,
+  type TableCorrectionGridOutput,
+  buildReviewAssistancePageSchemaForOps,
+  reviewAssistanceMergeChoiceSchema,
+  tableCorrectionGridSchema,
 } from '../../types/review-assistance-schema';
 import { PdfTextExtractor } from '../pdf-text-extractor';
 import { PageReviewContextBuilder } from './page-review-context-builder';
@@ -63,10 +70,16 @@ export interface ReviewAssistanceRunnerOptions {
   pageGateTemperature: number;
   pageConcurrency: number;
   taskConcurrency: number;
-  localModelConcurrency: number;
+  modelConcurrency: number;
   workItemTimeoutMs: number;
   autoApplyThreshold: number;
   proposalThreshold: number;
+  /**
+   * Forwarded to the validator: when true, every valid command auto-applies
+   * regardless of confidence threshold or structural block reason. The engine
+   * demo sets this so nothing routes to manual review; defaults to off.
+   */
+  forceAutoApply?: boolean;
   /**
    * Total work-item attempts (including the initial call) for the re-ask
    * loop. The same value is also forwarded to `LLMCaller.callVision` as the
@@ -97,6 +110,47 @@ interface ReviewAssistanceWorkItemResult {
   errorMessage?: string;
   callTrace: ReviewAssistanceCallTrace;
 }
+
+/**
+ * Cap on the number of candidates sent to the merge arbiter LLM. Anything
+ * beyond the top-5 by confidence is dropped before the call so the prompt
+ * stays compact and the model isn't asked to compare a long tail of
+ * near-zero-confidence proposals.
+ */
+const REVIEW_ASSISTANCE_MERGE_GROUP_CAP = 5;
+
+/**
+ * Confidence delta above which we skip the LLM merge call entirely and
+ * accept the highest-confidence candidate deterministically. Keeps token
+ * cost down on obviously-unbalanced groups; advisor-recommended 0.3.
+ */
+const REVIEW_ASSISTANCE_MERGE_DETERMINISTIC_GAP = 0.3;
+
+/**
+ * Per-merge attempt budget forwarded to `LLMCaller.callVision`. Lower than
+ * the work-item retries because the merge schema is tiny (one pick/drop)
+ * and a transient SDK retry is enough; we want to fall back to the
+ * deterministic top-1 quickly rather than burn budget on a flaky arbiter.
+ */
+const REVIEW_ASSISTANCE_MERGE_MAX_RETRIES = 1;
+
+type MergeOutcomeMethod = 'llm' | 'deterministic_gap' | 'llm_fallback';
+
+interface MergePickOutcome {
+  kind: 'pick';
+  winner: ReviewAssistanceDecision;
+  method: MergeOutcomeMethod;
+  mergeRationale: string;
+  mergeConfidence: number;
+}
+
+interface MergeDropAllOutcome {
+  kind: 'drop_all';
+  method: 'llm';
+  mergeRationale: string;
+}
+
+type MergeOutcome = MergePickOutcome | MergeDropAllOutcome;
 
 export class ReviewAssistanceRunner {
   constructor(private readonly logger: LoggerMethods) {}
@@ -170,7 +224,7 @@ export class ReviewAssistanceRunner {
       `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${options.pageConcurrency}, task concurrency: ${options.taskConcurrency})...`,
     );
     this.logger.info(
-      `[ReviewAssistanceRunner] Local work item scheduler: concurrency ${options.localModelConcurrency}, timeout ${options.workItemTimeoutMs}ms`,
+      `[ReviewAssistanceRunner] Local work item scheduler: concurrency ${options.modelConcurrency}, timeout ${options.workItemTimeoutMs}ms`,
     );
     this.logger.info(
       `[ReviewAssistanceRunner] Gate summary: ${pagesEligibleForStructuralReview} eligible, ${pagesSkippedByGate} skipped by gate, ${pagesSkippedByUnavailableImage} skipped for unavailable page image`,
@@ -559,7 +613,7 @@ export class ReviewAssistanceRunner {
       const workItemResults: ReviewAssistanceWorkItemResult[] = [];
       await ConcurrentPool.run(
         pendingWorkItems,
-        options.localModelConcurrency,
+        options.modelConcurrency,
         (workItem) =>
           this.reviewWorkItem(
             context,
@@ -640,11 +694,23 @@ export class ReviewAssistanceRunner {
         };
       }
 
-      const pageResult = this.buildPageResultFromWorkItems(
+      const pageResultBeforeMerge = this.buildPageResultFromWorkItems(
         context,
         checkpointPage,
         workItemResults,
       );
+
+      const resolvedDecisions = await this.resolveCrossOpConflictsWithLlm(
+        pageResultBeforeMerge.decisions,
+        context,
+        image,
+        modelResolver,
+        options,
+      );
+      const pageResult: ReviewAssistancePageResult = {
+        ...pageResultBeforeMerge,
+        decisions: resolvedDecisions,
+      };
 
       this.logger.info(
         `[ReviewAssistanceRunner] Page ${context.pageNo}/${pageCount}: review completed (${pageResult.decisions.length} decisions from ${succeededWorkItemCount}/${workItems.length} work items)`,
@@ -732,9 +798,19 @@ export class ReviewAssistanceRunner {
               validationFeedback,
               attempt,
             });
+        // The table task uses the dedicated { grid, caption } structured-output
+        // schema (mirroring the backoffice AI table-correction feature); every
+        // other task uses the task-scoped flat command schema. The flat multi-op
+        // union was a source of `No object generated` failures so non-table
+        // tasks benefit from flattening, while the same capable model does far
+        // better on tables with the bare grid shape than wrapping a grid inside
+        // a command union.
+        const responseSchema = tableCorrection
+          ? tableCorrectionGridSchema
+          : buildReviewAssistancePageSchemaForOps(workItem.task.allowedOps);
         const result = await this.withWorkItemTimeout(
           LLMCaller.callVision({
-            schema: reviewAssistancePageSchema as any,
+            schema: responseSchema as any,
             messages: [
               {
                 role: 'user' as const,
@@ -770,23 +846,23 @@ export class ReviewAssistanceRunner {
 
         options.aggregator?.track(result.usage);
 
-        const output = result.output as ReviewAssistancePageOutput;
         const decisions = tableCorrection
           ? this.decorateWorkItemDecisions(
-              tableCorrection.runner.validateOutput(
+              tableCorrection.runner.validateGridOutput(
                 tableCorrection.context,
-                output,
+                result.output as TableCorrectionGridOutput,
                 {
                   autoApplyThreshold: options.autoApplyThreshold,
                   proposalThreshold: options.proposalThreshold,
                   allowAutoApply: true,
+                  forceAutoApply: options.forceAutoApply,
                 },
               ),
               workItem,
             )
           : this.validateWorkItemOutput(
               packedContext,
-              output,
+              result.output as ReviewAssistancePageOutput,
               workItem,
               options,
             );
@@ -872,7 +948,7 @@ export class ReviewAssistanceRunner {
           workItem,
           status: 'empty',
           decisions: [],
-          issue: this.buildNoOutputIssue(context, workItem.task),
+          issue: this.buildNoOutputIssue(context, workItem.task, 'info'),
           errorMessage: this.safeErrorMessage(error),
           callTrace,
         };
@@ -915,13 +991,71 @@ export class ReviewAssistanceRunner {
   ): ReviewAssistanceDecision[] {
     const validator = new ReviewAssistanceValidator();
     return this.decorateWorkItemDecisions(
-      validator.validatePageOutput(context, output, {
-        autoApplyThreshold: options.autoApplyThreshold,
-        proposalThreshold: options.proposalThreshold,
-        allowAutoApply: true,
-      }),
+      validator.validatePageOutput(
+        context,
+        this.bindSingleTargetRefs(output, workItem),
+        {
+          autoApplyThreshold: options.autoApplyThreshold,
+          proposalThreshold: options.proposalThreshold,
+          allowAutoApply: true,
+          forceAutoApply: options.forceAutoApply,
+        },
+      ),
       workItem,
     );
+  }
+
+  /**
+   * Deterministic counterpart to the prompt's "ref fields are mandatory" rule.
+   * The flat LLM schema makes every ref optional, so the model often drops the
+   * op's primary ref (→ `''` after the flat→typed transform), which the
+   * validator then rejects as `target_ref_not_found`. When a work item targets
+   * exactly one node, that ref is known, so fill an omitted primary ref with it
+   * — mirroring the table-correction path, but for picture/text/bbox work
+   * items. Multi-target work items are left untouched (the right ref is
+   * ambiguous), as are non-empty refs (a genuine mismatch is still surfaced)
+   * and the node-type must match so a picture ref never lands on a text op.
+   */
+  private bindSingleTargetRefs(
+    output: ReviewAssistancePageOutput,
+    workItem: ReviewAssistanceWorkItem,
+  ): ReviewAssistancePageOutput {
+    if (workItem.targetRefs.length !== 1) return output;
+    const target = workItem.targetRefs[0];
+    const isText = target.startsWith('#/texts/');
+    const isPicture = target.startsWith('#/pictures/');
+    const isTable = target.startsWith('#/tables/');
+    return {
+      ...output,
+      commands: output.commands.map((command) => {
+        switch (command.op) {
+          case 'replaceText':
+          case 'updateTextRole':
+          case 'removeText':
+          case 'splitText':
+            return isText && !command.textRef
+              ? { ...command, textRef: target }
+              : command;
+          case 'updatePictureCaption':
+          case 'splitPicture':
+          case 'hidePicture':
+            return isPicture && !command.pictureRef
+              ? { ...command, pictureRef: target }
+              : command;
+          case 'updateTableCell':
+          case 'replaceTable':
+            return isTable && !command.tableRef
+              ? { ...command, tableRef: target }
+              : command;
+          case 'updateBbox':
+            return !command.targetRef
+              ? { ...command, targetRef: target }
+              : command;
+          default:
+            return command;
+        }
+      }),
+    };
   }
 
   private decorateWorkItemDecisions(
@@ -970,6 +1104,13 @@ export class ReviewAssistanceRunner {
   }
 
   private isDeterministicValidationFailureReason(reason: string): boolean {
+    // Block reasons that merely gate a valid command to human review
+    // (e.g. structural_command_requires_manual_review,
+    // table_correction_requires_manual_review) are not re-askable failures:
+    // re-asking returns the same valid command. They must survive as
+    // proposals instead of being re-asked to death and demoted to a
+    // work_item_validation_failed issue.
+    if (reason.includes('requires_manual_review')) return false;
     return (
       reason.startsWith('invalid_') ||
       reason.endsWith('_not_found') ||
@@ -995,17 +1136,31 @@ export class ReviewAssistanceRunner {
     timeoutMs: number,
     workItem: ReviewAssistanceWorkItem,
   ): Promise<T> {
+    return this.withTimeout(
+      promise,
+      timeoutMs,
+      `Review assistance work item timeout after ${timeoutMs}ms: ${workItem.id}`,
+    );
+  }
+
+  /**
+   * Generic timeout helper for non-work-item LLM calls (e.g. the merge
+   * arbiter). Mirrors `withWorkItemTimeout` but takes a free-form label
+   * instead of a work item so it can fail loudly with context-specific
+   * messages.
+   */
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutMessage: string,
+  ): Promise<T> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         promise,
         new Promise<T>((_resolve, reject) => {
           timeoutId = setTimeout(() => {
-            reject(
-              new Error(
-                `Review assistance work item timeout after ${timeoutMs}ms: ${workItem.id}`,
-              ),
-            );
+            reject(new Error(timeoutMessage));
           }, timeoutMs);
         }),
       ]);
@@ -1124,6 +1279,13 @@ export class ReviewAssistanceRunner {
     callTraces[index] = trace;
   }
 
+  /**
+   * Detect the AI SDK's empty-structured-output errors. `generateObject`
+   * throws `AI_NoObjectGeneratedError` ("No object generated: ...") while the
+   * older text path threw "No output generated"; we match both spellings so
+   * the Phase-1 structured-output migration doesn't reclassify these as hard
+   * work-item failures.
+   */
   private isNoOutputGeneratedError(error: unknown): boolean {
     const message = this.safeErrorMessage(error);
     const name =
@@ -1131,7 +1293,8 @@ export class ReviewAssistanceRunner {
         ? String((error as { name?: unknown }).name ?? '')
         : '';
     return (
-      /No output generated/i.test(message) || /NoOutputGenerated/i.test(name)
+      /No (object|output) generated/i.test(message) ||
+      /No(Object|Output)Generated/i.test(name)
     );
   }
 
@@ -1168,20 +1331,31 @@ export class ReviewAssistanceRunner {
     return value.replace(/[A-Za-z0-9+/]{240,}={0,2}/g, '[redacted-large-data]');
   }
 
+  /**
+   * Build the empty-structured-output issue. Defaults to `warning` for the
+   * page-level path (the whole page review produced nothing — worth a
+   * required check). The work-item path passes `info`: a single task failing
+   * to return parseable JSON is not actionable for a human reviewer, so the
+   * web side keeps it out of the 필수확인 bucket. This is not a "nothing to
+   * correct" signal — a clean no-op returns `{commands: []}` and parses
+   * fine — but the reviewer can't act on a malformed response, so it is
+   * surfaced as an informational note rather than a required check.
+   */
   private buildNoOutputIssue(
     context: PageReviewContext,
     task?: ReviewAssistanceTaskDefinition,
+    severity: ReviewAssistanceIssue['severity'] = 'warning',
   ): ReviewAssistanceIssue {
     return {
       id: `review-execution-${context.pageNo}${task ? `-${task.id}` : ''}-empty-output`,
       pageNo: context.pageNo,
       category: 'review_execution',
       type: 'empty_model_output',
-      severity: 'warning',
+      severity,
       description:
         task === undefined
           ? 'AI가 빈 구조화 응답을 반환해 자동 제안이 없습니다. 페이지를 직접 확인하세요.'
-          : `AI가 ${task.label} 작업에서 빈 구조화 응답을 반환했습니다. 해당 영역을 직접 확인하세요.`,
+          : `AI가 ${task.label} 작업에서 구조화 응답을 생성하지 못했습니다(스키마 불일치). 자동 제안은 없으며 별도 조치는 필요하지 않습니다.`,
       reasons: [
         'no_output_generated',
         ...(task ? [`review_task:${task.id}`] : []),
@@ -1216,12 +1390,22 @@ export class ReviewAssistanceRunner {
     workItem: ReviewAssistanceWorkItem,
     reasons: string[],
   ): ReviewAssistanceIssue {
+    // A work item that failed deterministic validation is only worth a
+    // reviewer's attention when the model produced a *valid* command we refuse
+    // to auto-apply (structural edits need human judgement). Every other
+    // failure — a missing/mismatched ref, dropped table metadata, a picture
+    // split without a boundary candidate — means the model produced incomplete
+    // or unusable output; there is nothing actionable for a human, so surface
+    // it as advisory `info` to keep it out of the 필수 확인 queue.
+    const requiresManualReview = reasons.some((reason) =>
+      reason.includes('requires_manual_review'),
+    );
     return {
       id: `review-execution-${context.pageNo}-${workItem.id}-validation-failed`,
       pageNo: context.pageNo,
       category: 'review_execution',
       type: 'work_item_validation_failed',
-      severity: 'warning',
+      severity: requiresManualReview ? 'warning' : 'info',
       description:
         'Work item output failed deterministic validation after re-asking.',
       refs: workItem.targetRefs,
@@ -1405,6 +1589,18 @@ export class ReviewAssistanceRunner {
     decision: ReviewAssistanceDecision,
     conflictIds: string[],
   ): ReviewAssistanceDecision {
+    const priorConflict = decision.metadata?.taskConflict as
+      | { conflictDecisionIds?: string[]; autoAppliedBeforeConflict?: boolean }
+      | undefined;
+    // markTaskConflict can run more than once on the same decision (it is
+    // applied to both sides of every conflicting pair). The disposition is
+    // already 'proposal' after the first downgrade, so OR with the prior flag
+    // to remember that the merge winner was auto-apply-eligible before the
+    // conflict — `applyMergeWinnerMetadata` restores it once the conflict is
+    // resolved.
+    const autoAppliedBeforeConflict =
+      decision.disposition === 'auto_applied' ||
+      priorConflict?.autoAppliedBeforeConflict === true;
     return {
       ...decision,
       disposition:
@@ -1424,17 +1620,513 @@ export class ReviewAssistanceRunner {
           sameTargetRef: true,
           conflictDecisionIds: [
             ...new Set([
-              ...((
-                decision.metadata?.taskConflict as
-                  | { conflictDecisionIds?: string[] }
-                  | undefined
-              )?.conflictDecisionIds ?? []),
+              ...(priorConflict?.conflictDecisionIds ?? []),
               ...conflictIds,
             ]),
           ],
+          ...(autoAppliedBeforeConflict
+            ? { autoAppliedBeforeConflict: true }
+            : {}),
         },
       },
     };
+  }
+
+  /**
+   * Resolve cross-op conflicts the deterministic `mergeTaskDecisions` left
+   * marked with `task_conflict_same_target_ref`. For each connected group of
+   * conflicting decisions we either:
+   *   1) pick a single winner deterministically when the top-1 confidence
+   *      beats top-2 by more than `MERGE_DETERMINISTIC_GAP`, or
+   *   2) ask the page model to pick exactly one candidate by index, or to
+   *      drop all of them, with the page image attached for grounding.
+   * Losers are removed from the decisions array — the audit trail lives on
+   * the winner under `metadata.mergeChosen`. When the model returns
+   * `drop`, every candidate in the group is removed; the page-level call
+   * trace still captures the merge call.
+   *
+   * Errors on the LLM call fall back to the top-1 deterministic pick so a
+   * page never fails review because the merge phase failed.
+   */
+  private async resolveCrossOpConflictsWithLlm(
+    decisions: ReviewAssistanceDecision[],
+    context: PageReviewContext,
+    image: Uint8Array,
+    modelResolver: ReviewAssistanceModelResolver,
+    options: ReviewAssistanceRunnerOptions,
+  ): Promise<ReviewAssistanceDecision[]> {
+    const groups = this.groupConflictingDecisions(decisions);
+    if (groups.length === 0) return decisions;
+
+    const droppedIds = new Set<string>();
+    const decisionPatches = new Map<string, ReviewAssistanceDecision>();
+
+    await ConcurrentPool.run(
+      groups,
+      Math.max(1, options.taskConcurrency),
+      async (group) => {
+        const capped = [...group]
+          .sort((a, b) => b.confidence - a.confidence)
+          .slice(0, REVIEW_ASSISTANCE_MERGE_GROUP_CAP);
+        const outcome = await this.decideMergeOutcome(
+          capped,
+          context,
+          image,
+          modelResolver,
+          options,
+        );
+
+        if (outcome.kind === 'drop_all') {
+          const representative = capped[0];
+          /* v8 ignore next 3 -- guarded upstream; groupConflictingDecisions
+           * only emits groups of >=2, so capped has at least one entry. */
+          if (!representative) return;
+          for (const candidate of group) {
+            if (candidate.id !== representative.id)
+              droppedIds.add(candidate.id);
+          }
+          decisionPatches.set(
+            representative.id,
+            this.applyMergeDropAllMetadata(representative, group, outcome),
+          );
+          this.logger.info(
+            `[ReviewAssistanceRunner] Page ${context.pageNo}: merge resolved by ${outcome.method} — drop all (group size ${group.length}, audit-kept ${representative.id})`,
+          );
+          return;
+        }
+
+        const winner = outcome.winner;
+        for (const candidate of group) {
+          if (candidate.id !== winner.id) droppedIds.add(candidate.id);
+        }
+        decisionPatches.set(
+          winner.id,
+          this.applyMergeWinnerMetadata(winner, group, outcome),
+        );
+        this.logger.info(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}: merge resolved by ${outcome.method} — pick ${winner.id} (group size ${group.length}, dropped ${group.length - 1})`,
+        );
+      },
+      () => {
+        /* no per-completion side effects */
+      },
+    );
+
+    /* v8 ignore next 3 -- defensive: groups is non-empty here (we early-return
+     * at the groups.length === 0 guard above), and decideMergeOutcome always
+     * patches either a winner or a drop-all representative, so decisionPatches
+     * can never be empty once a group is processed. */
+    if (droppedIds.size === 0 && decisionPatches.size === 0) {
+      return decisions;
+    }
+
+    return decisions
+      .filter((decision) => !droppedIds.has(decision.id))
+      .map((decision) => decisionPatches.get(decision.id) ?? decision);
+  }
+
+  /**
+   * Build connected components of decisions that share a Docling target ref.
+   * Uses the `task_conflict_same_target_ref` marker plus the
+   * `metadata.taskConflict.conflictDecisionIds` adjacency that
+   * `markTaskConflict` already maintains. Returns only groups with ≥2
+   * members.
+   */
+  private groupConflictingDecisions(
+    decisions: ReviewAssistanceDecision[],
+  ): ReviewAssistanceDecision[][] {
+    const conflicted = decisions.filter(
+      (decision) =>
+        decision.reasons.includes('task_conflict_same_target_ref') &&
+        Boolean(decision.command),
+    );
+    if (conflicted.length === 0) return [];
+
+    const byId = new Map(conflicted.map((decision) => [decision.id, decision]));
+    const parent = new Map<string, string>();
+    const find = (id: string): string => {
+      // The `?? id`/`?? p` fallbacks are defensive: every id reaching find() is
+      // pre-seeded into `parent` by the initialization loop below, so Map.get
+      // never misses and the nullish branches are unreachable.
+      /* v8 ignore start */
+      let p = parent.get(id) ?? id;
+      while (p !== (parent.get(p) ?? p)) {
+        p = parent.get(p) ?? p;
+      }
+      /* v8 ignore stop */
+      parent.set(id, p);
+      return p;
+    };
+    const union = (a: string, b: string): void => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent.set(ra, rb);
+    };
+
+    for (const decision of conflicted) parent.set(decision.id, decision.id);
+    for (const decision of conflicted) {
+      const adjacency = (
+        decision.metadata?.taskConflict as
+          | { conflictDecisionIds?: string[] }
+          | undefined
+      )?.conflictDecisionIds;
+      if (!adjacency) continue;
+      for (const other of adjacency) {
+        if (byId.has(other)) union(decision.id, other);
+      }
+    }
+
+    const groups = new Map<string, ReviewAssistanceDecision[]>();
+    for (const decision of conflicted) {
+      const root = find(decision.id);
+      const bucket = groups.get(root) ?? [];
+      bucket.push(decision);
+      groups.set(root, bucket);
+    }
+    return [...groups.values()].filter((group) => group.length >= 2);
+  }
+
+  /**
+   * Pick a winner (or drop the whole group) for a single conflict group.
+   * Applies the deterministic confidence-gap heuristic first, only falling
+   * back to the LLM call when the gap is narrow. On any LLM error or
+   * out-of-range `chosenIndex`, returns the top-1 candidate so the page
+   * always converges to a deterministic outcome.
+   */
+  private async decideMergeOutcome(
+    capped: ReviewAssistanceDecision[],
+    context: PageReviewContext,
+    image: Uint8Array,
+    modelResolver: ReviewAssistanceModelResolver,
+    options: ReviewAssistanceRunnerOptions,
+  ): Promise<MergeOutcome> {
+    const top = capped[0];
+    /* v8 ignore next 3 -- guarded upstream; groupConflictingDecisions only
+     * emits groups of >=2, so capped has at least one entry. */
+    if (!top) {
+      throw new Error('decideMergeOutcome called with empty group');
+    }
+    if (capped.length === 1) {
+      return {
+        kind: 'pick',
+        winner: top,
+        method: 'deterministic_gap',
+        mergeRationale: 'group_size_1',
+        mergeConfidence: top.confidence,
+      };
+    }
+    const runnerUp = capped[1];
+    if (
+      runnerUp !== undefined &&
+      top.confidence - runnerUp.confidence >
+        REVIEW_ASSISTANCE_MERGE_DETERMINISTIC_GAP
+    ) {
+      return {
+        kind: 'pick',
+        winner: top,
+        method: 'deterministic_gap',
+        mergeRationale: `confidence_gap ${top.confidence.toFixed(3)}>${runnerUp.confidence.toFixed(3)}`,
+        mergeConfidence: top.confidence,
+      };
+    }
+
+    try {
+      const choice = await this.callMergeArbiter(
+        capped,
+        context,
+        image,
+        modelResolver,
+        options,
+      );
+      if (choice.decision === 'drop') {
+        return {
+          kind: 'drop_all',
+          method: 'llm',
+          mergeRationale: choice.rationale,
+        };
+      }
+      // Flat schema: chosenIndex is nullish and only meaningful for a pick. A
+      // missing index on a pick is treated as out-of-range → top-1 fallback.
+      const chosenIndex = choice.chosenIndex ?? -1;
+      const winner = capped[chosenIndex];
+      if (!winner) {
+        this.logger.warn(
+          `[ReviewAssistanceRunner] Page ${context.pageNo}: merge arbiter returned out-of-range chosenIndex=${choice.chosenIndex} (group size ${capped.length}); falling back to top-1`,
+        );
+        return {
+          kind: 'pick',
+          winner: top,
+          method: 'llm_fallback',
+          mergeRationale: `llm_chosen_index_out_of_range:${choice.chosenIndex}`,
+          mergeConfidence: top.confidence,
+        };
+      }
+      return {
+        kind: 'pick',
+        winner,
+        method: 'llm',
+        mergeRationale: choice.rationale,
+        mergeConfidence: choice.confidence ?? winner.confidence,
+      };
+    } catch (error) {
+      if (options.abortSignal?.aborted) {
+        throw error;
+      }
+      this.logger.warn(
+        `[ReviewAssistanceRunner] Page ${context.pageNo}: merge arbiter failed; falling back to top-1`,
+        this.errorLogBinding(error),
+      );
+      return {
+        kind: 'pick',
+        winner: top,
+        method: 'llm_fallback',
+        mergeRationale: `llm_error:${this.safeErrorMessage(error)}`,
+        mergeConfidence: top.confidence,
+      };
+    }
+  }
+
+  /**
+   * Single LLM call for a conflict group. Schema-locked to pick-by-index or
+   * drop; the arbiter cannot invent a new command. Aggregates token usage
+   * into the same per-job aggregator as work-item calls, tagged with
+   * phase=`merge-conflicts` so reports can isolate merge cost.
+   */
+  private async callMergeArbiter(
+    candidates: ReviewAssistanceDecision[],
+    context: PageReviewContext,
+    image: Uint8Array,
+    modelResolver: ReviewAssistanceModelResolver,
+    options: ReviewAssistanceRunnerOptions,
+  ): Promise<ReviewAssistanceMergeChoice> {
+    const arbiterTask = this.resolveMergeTaskDefinition(candidates);
+    const model = modelResolver(arbiterTask);
+    const conflictRefs = [
+      ...new Set(
+        candidates.flatMap((decision) =>
+          decision.command ? this.getTouchedRefs(decision.command) : [],
+        ),
+      ),
+    ];
+    const promptCandidates: ReviewAssistanceMergeCandidateForPrompt[] =
+      candidates.map((decision, index) => ({
+        index,
+        taskId: String(decision.metadata?.reviewTask ?? 'unknown'),
+        confidence: decision.confidence,
+        rationale: this.extractCommandRationale(decision),
+        evidence: this.summarizeDecisionEvidence(decision.evidence),
+        command: decision.command,
+      }));
+    const prompt = buildReviewAssistanceMergePrompt({
+      pageNo: context.pageNo,
+      conflictRefs,
+      candidates: promptCandidates,
+      outputLanguage: options.outputLanguage,
+    });
+
+    const result = await this.withTimeout(
+      LLMCaller.callVision({
+        schema: reviewAssistanceMergeChoiceSchema as any,
+        messages: [
+          {
+            role: 'user' as const,
+            content: [
+              { type: 'text' as const, text: prompt },
+              {
+                type: 'image' as const,
+                image,
+                mediaType: 'image/png' as const,
+              },
+            ],
+          },
+        ],
+        primaryModel: model,
+        maxRetries: REVIEW_ASSISTANCE_MERGE_MAX_RETRIES,
+        temperature: options.temperature,
+        abortSignal: options.abortSignal,
+        component: 'ReviewAssistance',
+        phase: 'merge-conflicts',
+        metadata: {
+          pageNo: context.pageNo,
+          groupSize: candidates.length,
+          conflictRefs: conflictRefs.join(','),
+          arbiterTask: arbiterTask.id,
+        },
+      }),
+      options.workItemTimeoutMs,
+      `merge arbiter timeout after ${options.workItemTimeoutMs}ms (page ${context.pageNo}, group size ${candidates.length})`,
+    );
+    options.aggregator?.track(result.usage);
+    return result.output as ReviewAssistanceMergeChoice;
+  }
+
+  /**
+   * Pick the model used for the merge call. Defaults to the task that
+   * produced the highest-confidence candidate so the arbiter runs on the
+   * same model family already chosen for that review domain. Falls back to
+   * the first task definition (text_ocr_hanja) when the metadata is
+   * missing, which keeps the call resolvable for unit-test fixtures.
+   */
+  private resolveMergeTaskDefinition(
+    candidates: ReviewAssistanceDecision[],
+  ): ReviewAssistanceTaskDefinition {
+    const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
+    for (const decision of sorted) {
+      const taskId = decision.metadata?.reviewTask;
+      const match = REVIEW_ASSISTANCE_TASKS.find((task) => task.id === taskId);
+      if (match) return match;
+    }
+    /* v8 ignore next 3 -- every decision is tagged with reviewTask via
+     * withTaskMetadata before reaching the merge phase. */
+    return REVIEW_ASSISTANCE_TASKS[0];
+  }
+
+  /**
+   * Apply the merge winner metadata: drop the conflict marker so the
+   * winner is no longer classified as `task_conflict_same_target_ref`, and
+   * stash the dropped candidates' ids + commands under
+   * `metadata.mergeChosen` for the persisted audit trail.
+   */
+  private applyMergeWinnerMetadata(
+    winner: ReviewAssistanceDecision,
+    group: readonly ReviewAssistanceDecision[],
+    outcome: MergePickOutcome,
+  ): ReviewAssistanceDecision {
+    const droppedSummaries = group
+      .filter((candidate) => candidate.id !== winner.id)
+      .map((candidate) => ({
+        decisionId: candidate.id,
+        task:
+          typeof candidate.metadata?.reviewTask === 'string'
+            ? (candidate.metadata.reviewTask as string)
+            : undefined,
+        confidence: candidate.confidence,
+        command: candidate.command,
+      }));
+    const cleanedReasons = winner.reasons.filter(
+      (reason) =>
+        reason !== 'task_conflict_same_target_ref' &&
+        !reason.startsWith('conflicts_with_decision:'),
+    );
+    const priorConflict = winner.metadata?.taskConflict as
+      | { autoAppliedBeforeConflict?: boolean }
+      | undefined;
+    // The conflict that demoted this winner from auto_applied to proposal is
+    // now resolved in its favour. Restore auto-apply when the arbiter actively
+    // picked it (method 'llm'); fallback picks stay a proposal for safety.
+    const restoredDisposition =
+      priorConflict?.autoAppliedBeforeConflict === true &&
+      outcome.method === 'llm'
+        ? 'auto_applied'
+        : winner.disposition;
+    const { taskConflict: _taskConflict, ...restMetadata } =
+      winner.metadata ?? {};
+    return {
+      ...winner,
+      disposition: restoredDisposition,
+      reasons: [
+        ...new Set([...cleanedReasons, `merge_chosen_by:${outcome.method}`]),
+      ],
+      metadata: {
+        ...restMetadata,
+        mergeChosen: {
+          method: outcome.method,
+          mergeRationale: outcome.mergeRationale,
+          mergeConfidence: outcome.mergeConfidence,
+          groupSize: group.length,
+          droppedDecisionIds: droppedSummaries.map(
+            (summary) => summary.decisionId,
+          ),
+          dropped: droppedSummaries,
+        },
+      },
+    };
+  }
+
+  /**
+   * Mark the representative decision of a drop-all group as `skipped` with
+   * a dedicated `merge_dropped_all` reason. The full group payload is
+   * stashed under `metadata.mergeDropped` so the persisted
+   * `review_assistance.json` keeps a reproducible audit trail of the
+   * arbiter's decision even though every command was dropped.
+   *
+   * We keep only one representative (top-1 by confidence) instead of
+   * leaving every candidate as `skipped`; that prevents the drop-all path
+   * from re-introducing the 확인 noise the merge phase was designed to
+   * remove.
+   */
+  private applyMergeDropAllMetadata(
+    representative: ReviewAssistanceDecision,
+    group: readonly ReviewAssistanceDecision[],
+    outcome: MergeDropAllOutcome,
+  ): ReviewAssistanceDecision {
+    const droppedSummaries = group.map((candidate) => ({
+      decisionId: candidate.id,
+      task:
+        typeof candidate.metadata?.reviewTask === 'string'
+          ? (candidate.metadata.reviewTask as string)
+          : undefined,
+      confidence: candidate.confidence,
+      command: candidate.command,
+    }));
+    const cleanedReasons = representative.reasons.filter(
+      (reason) =>
+        reason !== 'task_conflict_same_target_ref' &&
+        !reason.startsWith('conflicts_with_decision:'),
+    );
+    const { taskConflict: _taskConflict, ...restMetadata } =
+      representative.metadata ?? {};
+    return {
+      ...representative,
+      disposition: 'skipped',
+      reasons: [...new Set([...cleanedReasons, 'merge_dropped_all'])],
+      metadata: {
+        ...restMetadata,
+        mergeDropped: {
+          method: outcome.method,
+          mergeRationale: outcome.mergeRationale,
+          groupSize: group.length,
+          dropped: droppedSummaries,
+        },
+      },
+    };
+  }
+
+  /**
+   * Pull the per-command rationale produced by the work-item LLM call. Every
+   * structured-output command carries its own `rationale` via the shared
+   * `baseFields` block in the schema, so it lives on `decision.command`
+   * rather than on the decision itself.
+   */
+  private extractCommandRationale(
+    decision: ReviewAssistanceDecision,
+  ): string | undefined {
+    const rationale = (decision.command as { rationale?: unknown } | undefined)
+      ?.rationale;
+    return typeof rationale === 'string' && rationale.length > 0
+      ? rationale
+      : undefined;
+  }
+
+  /**
+   * Collapse a decision's structured evidence object into a short string the
+   * arbiter prompt can render inline. We keep the image/text snippets and
+   * suspect reasons because those describe what the page actually shows;
+   * geometry-only fields (`previousBbox`/`snappedBbox`/`generatedRefs`)
+   * carry no extra signal for the pick-vs-drop choice.
+   */
+  private summarizeDecisionEvidence(
+    evidence: ReviewAssistanceDecision['evidence'],
+  ): string | undefined {
+    if (!evidence) return undefined;
+    const parts: string[] = [];
+    if (evidence.imageEvidence) parts.push(`image: ${evidence.imageEvidence}`);
+    if (evidence.textLayerEvidence)
+      parts.push(`text: ${evidence.textLayerEvidence}`);
+    if (evidence.suspectReasons && evidence.suspectReasons.length > 0) {
+      parts.push(`suspects: ${evidence.suspectReasons.join(',')}`);
+    }
+    return parts.length > 0 ? parts.join(' | ') : undefined;
   }
 
   private commandSignature(command: ReviewAssistanceCommand): string {
@@ -1546,7 +2238,7 @@ export class ReviewAssistanceRunner {
         proposalThreshold: options.proposalThreshold,
         maxRetries: options.maxRetries,
         tableMaxRetries: options.tableMaxRetries,
-        localModelConcurrency: options.localModelConcurrency,
+        modelConcurrency: options.modelConcurrency,
         workItemTimeoutMs: options.workItemTimeoutMs,
         temperature: options.temperature,
         outputLanguage: options.outputLanguage,

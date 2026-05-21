@@ -230,7 +230,7 @@ const tokenUsageReport = await pdfParser.parse(
         reviewTasks: 4,
         tables: 1,
       },
-      localModelConcurrency: 1,
+      modelConcurrency: 1,
       workItemTimeoutMs: 900000,
       maxRetries: {
         textCorrection: 3,
@@ -299,7 +299,7 @@ await pdfParser.dispose();
 
 ### 로컬 모델 권장 실행 방식
 
-보정 파이프라인은 로컬 VLM 기준으로 설계되었습니다. 큰 context 하나보다 작은 context를 자주 호출하고, deterministic validator와 retry, timeout, checkpoint/resume으로 안정성을 확보합니다. 처음에는 `concurrency.pages: 1`, `concurrency.tables: 1`, `localModelConcurrency: 1`, `temperature: 0`, 충분한 `workItemTimeoutMs`로 시작하고, 모델이 안정화된 뒤 동시성을 높이는 것을 권장합니다.
+보정 파이프라인은 로컬 VLM 기준으로 설계되었습니다. 큰 context 하나보다 작은 context를 자주 호출하고, deterministic validator와 retry, timeout, checkpoint/resume으로 안정성을 확보합니다. 처음에는 `concurrency.pages: 1`, `concurrency.tables: 1`, `modelConcurrency: 1`, `temperature: 0`, 충분한 `workItemTimeoutMs`로 시작하고, 모델이 안정화된 뒤 동시성을 높이는 것을 권장합니다.
 
 ### 롤아웃 smoke test
 
@@ -679,7 +679,7 @@ interface PDFCorrectionOptions {
     reviewAssistance?: number;
     tableCorrection?: number;
   };
-  localModelConcurrency?: number; // 로컬 모델 요청 동시성 상한
+  modelConcurrency?: number; // 로컬 모델 요청 동시성 상한
   workItemTimeoutMs?: number; // work item별 timeout
   outputLanguage?: string; // 사람이 읽는 review reason 언어 (기본값: en-US)
   pageGate?: {

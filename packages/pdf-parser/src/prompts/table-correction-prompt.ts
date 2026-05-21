@@ -1,45 +1,32 @@
 import type { TableCorrectionContext } from '../processors/review-assistance/table-correction-context-builder';
 
-import {
-  REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH,
-  REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH,
-  REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH,
-} from '../types/review-assistance-schema';
-
+/**
+ * System prompt for the `tables` task. Mirrors the backoffice "AI 표 보정"
+ * feature (`apps/backoffice/.../suggest-table-correction.server.ts`): the model
+ * is handed the page image plus the full current grid and asked to return a
+ * single corrected `{ grid, caption }`. The engine previously used the flat
+ * command schema + sparse per-cell edits, which the same capable model handled
+ * far worse than this direct grid shape. Structure is reconciled
+ * deterministically afterwards (TableCorrectionRunner.carryOverTableStructure),
+ * so the model's job is essentially "fix the cell text from the image".
+ */
 export const TABLE_CORRECTION_SYSTEM_PROMPT = `You are a table correction engine for Docling JSON produced from archaeological and cultural heritage report PDFs.
 
-Analyze exactly one target table using the page image and the provided table-specific context. Return only table correction commands that are grounded in the visible page image, table bbox, nearby caption text, or deterministic table hints.
+Analyze exactly one target table using the page image and the current table data below, then return the corrected table. Ground every change in what is visible in the page image.
 
-You MUST respond with valid JSON only. No markdown, no code fences, no explanation.
-
-Output shape:
+You MUST respond with valid JSON only — no markdown, no code fences, no explanation — in exactly this shape:
 {
-  "pageNo": number,
-  "commands": [
-    {
-      "op": "updateTableCell" | "replaceTable" | "linkContinuedTable",
-      "targetRef": string | null,
-      "payload": object,
-      "confidence": number,
-      "rationale": string,
-      "evidence": string | null
-    }
-  ],
-  "pageNotes": string[]
+  "grid": [[{ "text": <string>, "rowSpan": <int or null>, "colSpan": <int or null>, "columnHeader": <bool or null>, "rowHeader": <bool or null> }, ...], ...],
+  "caption": <string or null>
 }
 
-Rules:
-- The only editable table is targetTable.ref. Do not modify otherTablesOnPage; use them only as boundaries so content does not leak between tables.
-- Keep the target table identity and bbox fixed. Do not move the target bbox, merge it with another same-page table, or borrow rows/cells from another table.
-- Inspect structure, cell text, caption evidence, spans, headers, units, footnotes, empty cells, and adjacent-page continuation hints.
-- Prefer updateTableCell for localized OCR errors. Use replaceTable only when the visible grid structure is clearly wrong or span/header metadata cannot be fixed cell-by-cell.
-- For replaceTable, return a rectangular grid. Preserve supported rowSpan, colSpan, columnHeader, and rowHeader metadata.
-- Preserve units and footnote markers that are visible in the target table. Do not normalize blank cells into invented values.
-- Suggest linkContinuedTable only when an adjacent-page table ref is provided and the image/context supports matching columns, headers, or caption continuation.
-- If there are multiple tables on the page, verify the command targetRef and payload refs are still the target table before returning JSON.
-- If no grounded table correction is needed, return {"pageNo": <current pageNo>, "commands": [], "pageNotes": []}.
-- Keep confidence conservative for replaceTable and linkContinuedTable.
-- Keep rationale <= ${REVIEW_ASSISTANCE_RATIONALE_MAX_LENGTH} characters, evidence <= ${REVIEW_ASSISTANCE_EVIDENCE_MAX_LENGTH} characters, and each page note <= ${REVIEW_ASSISTANCE_PAGE_NOTE_MAX_LENGTH} characters.`;
+Correction rules:
+- Fix only the cell text that is wrong in the page image. Keep correct cells exactly as given, and do not invent values for genuinely blank cells.
+- Preserve the table structure. Every row must have the same number of columns. For a merged cell, set rowSpan/colSpan on its master (top-left) cell AND keep every position it covers as a repeated placeholder ("shadow") cell with empty text, so the grid stays rectangular with the same dimensions as the current data.
+- Mark header rows with columnHeader: true and header columns with rowHeader: true, matching the current data.
+- Preserve the units (cm, mm, 점, …) and footnote markers (※, *, ¹, (1), …) that appear in the table.
+- Use only the target table. Do not borrow rows or cells from other tables visible on the page.
+- If the table already matches the page image, return the current grid unchanged.`;
 
 export function buildTableCorrectionPrompt(
   context: TableCorrectionContext,
@@ -51,54 +38,36 @@ export function buildTableCorrectionPrompt(
 ): string {
   const outputLanguage = options.outputLanguage?.trim();
   const languagePrompt = outputLanguage
-    ? [
-        `OUTPUT LANGUAGE: ${outputLanguage}`,
-        `Write rationale and pageNotes in ${outputLanguage}. Keep evidence as a short verbatim source snippet when possible. Keep JSON keys, op names, refs, and payload text unchanged.`,
-      ].join('\n')
+    ? `OUTPUT LANGUAGE: write corrected cell text and the caption in ${outputLanguage} when the source is in that language. Keep numbers, units, and footnote markers verbatim.`
     : undefined;
   const feedbackPrompt =
     options.validationFeedback && options.validationFeedback.length > 0
       ? [
           `VALIDATION FEEDBACK FOR ATTEMPT ${options.attempt ?? 2}:`,
-          'Your previous JSON response failed deterministic table validation. Fix only the listed failures.',
-          'If the correction cannot be grounded to the target table, return no commands.',
+          'Your previous response failed deterministic table validation. Fix only the listed issues and keep the grid rectangular with its structure preserved.',
           ...options.validationFeedback.map((reason) => `- ${reason}`),
         ].join('\n')
       : undefined;
+
+  const target = context.targetTable;
+  const captionLine = `Current caption: ${target.caption ?? '(none)'}`;
+  const gridSection = target.fullGrid
+    ? [
+        'Current table data (JSON — one cell object per grid position, shadow cells included):',
+        JSON.stringify(target.fullGrid),
+      ].join('\n')
+    : [
+        'Current table preview (JSON — text only and possibly truncated; return a full corrected grid):',
+        JSON.stringify(target.gridPreview),
+      ].join('\n');
 
   return [
     TABLE_CORRECTION_SYSTEM_PROMPT,
     languagePrompt,
     feedbackPrompt,
-    'TABLE CORRECTION CONTEXT JSON:',
-    JSON.stringify(toPromptContext(context)),
+    captionLine,
+    gridSection,
   ]
     .filter(Boolean)
     .join('\n\n');
-}
-
-function toPromptContext(context: TableCorrectionContext): unknown {
-  return {
-    pageNo: context.pageNo,
-    pageSize: context.pageSize,
-    pageImagePath: context.pageImagePath,
-    targetTable: context.targetTable,
-    tableCountOnPage: context.tableCountOnPage,
-    otherTablesOnPage: context.otherTablesOnPage.map((table) => ({
-      ref: table.ref,
-      caption: table.caption,
-      bbox: table.bbox,
-      rowCount: table.rowCount,
-      colCount: table.colCount,
-    })),
-    nearbyTextBlocks: context.nearbyTextBlocks.map((block) => ({
-      ref: block.ref,
-      label: block.label,
-      text: block.text,
-      bbox: block.bbox,
-      suspectReasons: block.suspectReasons,
-    })),
-    orphanCaptions: context.orphanCaptions,
-    validationHints: context.validationHints,
-  };
 }

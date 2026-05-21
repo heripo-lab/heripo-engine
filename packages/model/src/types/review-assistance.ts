@@ -213,7 +213,7 @@ export interface ReviewAssistanceReport {
     proposalThreshold: number;
     maxRetries: number;
     tableMaxRetries?: number;
-    localModelConcurrency?: number;
+    modelConcurrency?: number;
     workItemTimeoutMs?: number;
     temperature: number;
     outputLanguage: string;

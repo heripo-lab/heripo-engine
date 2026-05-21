@@ -16,6 +16,7 @@ import type { PageReviewContext } from './page-review-context-builder';
 
 import { createHash } from 'node:crypto';
 
+import { REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL } from '../../types/review-assistance-schema';
 import {
   bboxContainmentRatio,
   bboxGeometryOptionsForPage,
@@ -28,6 +29,14 @@ export interface ReviewAssistanceValidatorOptions {
   autoApplyThreshold: number;
   proposalThreshold: number;
   allowAutoApply?: boolean;
+  /**
+   * When true, every valid command (confidence ≥ proposalThreshold) is
+   * auto-applied regardless of the confidence threshold or any structural
+   * auto-apply block reason. Used by the engine demo so table edits and
+   * low-confidence proposals land in the output without manual approval;
+   * the backoffice leaves this unset so proposals still route to review.
+   */
+  forceAutoApply?: boolean;
 }
 
 export class ReviewAssistanceValidator {
@@ -133,213 +142,175 @@ export class ReviewAssistanceValidator {
     };
   }
 
+  /**
+   * Convert a schema-validated raw command into the runtime
+   * {@link ReviewAssistanceCommand}. Since `rawCommand` is now a discriminated
+   * union produced by the LLM structured-output Zod schema, every field is
+   * already typed — this is largely an identity transform plus bbox
+   * coord_origin lifting and context-derived defaults. The previous 19 ×
+   * `invalid_*_payload` reason push paths are no longer needed: anything the
+   * old `stringValue`/`numberValue`/`bboxValue` helpers would have rejected is
+   * now rejected one layer earlier by the LLM call's Zod schema (and retried
+   * by the AI SDK before reaching here).
+   *
+   * The `reasons` parameter is kept for caller compatibility but is no longer
+   * written to from this function.
+   */
   private toCommand(
     context: PageReviewContext,
     rawCommand: ReviewAssistanceRawCommand,
-    reasons: string[],
+    _reasons: string[],
   ): ReviewAssistanceCommand | undefined {
-    const payload = rawCommand.payload;
-    const targetRef = rawCommand.targetRef ?? undefined;
+    const liftBbox = (bbox: {
+      l: number;
+      t: number;
+      r: number;
+      b: number;
+    }) => ({
+      ...bbox,
+      coord_origin: 'TOPLEFT' as const,
+    });
 
     switch (rawCommand.op) {
       case 'replaceText': {
-        const textRef = this.stringValue(payload.textRef) ?? targetRef;
-        const text =
-          this.stringValue(payload.text) ??
-          this.replacementTextFromEvidence(
-            context,
-            textRef,
-            rawCommand.evidence,
-          );
-        if (text !== undefined && !this.stringValue(payload.text)) {
-          reasons.push('replace_text_payload_recovered_from_evidence');
-        }
-        if (!textRef || text === undefined) {
-          reasons.push('invalid_replace_text_payload');
-          return undefined;
-        }
-        return { op: 'replaceText', textRef, text };
+        return {
+          op: 'replaceText',
+          textRef: rawCommand.textRef,
+          text: rawCommand.text,
+        };
       }
       case 'addText': {
-        const bbox = this.bboxValue(payload.bbox);
-        const text = this.stringValue(payload.text);
-        const label = this.stringValue(payload.label) ?? 'text';
-        if (!bbox || text === undefined) {
-          reasons.push('invalid_add_text_payload');
-          return undefined;
-        }
         return {
           op: 'addText',
-          pageNo: this.numberValue(payload.pageNo) ?? context.pageNo,
-          bbox,
-          text,
-          label,
-          afterRef: this.stringValue(payload.afterRef),
+          pageNo: rawCommand.pageNo ?? context.pageNo,
+          bbox: liftBbox(rawCommand.bbox),
+          text: rawCommand.text,
+          label: rawCommand.label,
+          afterRef: rawCommand.afterRef ?? undefined,
         };
       }
       case 'updateTextRole': {
-        const textRef = this.stringValue(payload.textRef) ?? targetRef;
-        const label = this.stringValue(payload.label);
-        if (!textRef || !label) {
-          reasons.push('invalid_update_text_role_payload');
-          return undefined;
-        }
-        return { op: 'updateTextRole', textRef, label };
+        return {
+          op: 'updateTextRole',
+          textRef: rawCommand.textRef,
+          label: rawCommand.label,
+        };
       }
       case 'removeText': {
-        const textRef = this.stringValue(payload.textRef) ?? targetRef;
-        if (!textRef) {
-          reasons.push('invalid_remove_text_payload');
-          return undefined;
-        }
-        return { op: 'removeText', textRef };
+        return {
+          op: 'removeText',
+          textRef: rawCommand.textRef,
+        };
       }
       case 'mergeTexts': {
-        const textRefs = this.stringArrayValue(payload.textRefs);
-        const text = this.stringValue(payload.text);
-        const keepRef = this.stringValue(payload.keepRef);
-        if (textRefs.length < 2 || text === undefined || !keepRef) {
-          reasons.push('invalid_merge_texts_payload');
-          return undefined;
-        }
-        return { op: 'mergeTexts', textRefs, text, keepRef };
+        return {
+          op: 'mergeTexts',
+          textRefs: rawCommand.textRefs,
+          text: rawCommand.text,
+          keepRef: rawCommand.keepRef,
+        };
       }
       case 'splitText': {
-        const textRef = this.stringValue(payload.textRef) ?? targetRef;
-        const parts = this.textPartsValue(payload.parts);
-        if (!textRef || parts.length < 2) {
-          reasons.push('invalid_split_text_payload');
-          return undefined;
-        }
-        return { op: 'splitText', textRef, parts };
+        return {
+          op: 'splitText',
+          textRef: rawCommand.textRef,
+          parts: rawCommand.parts.map((part) => ({
+            text: part.text,
+            ...(part.label ? { label: part.label } : {}),
+          })),
+        };
       }
       case 'updateTableCell': {
-        const tableRef = this.stringValue(payload.tableRef) ?? targetRef;
-        const row = this.numberValue(payload.row);
-        const col = this.numberValue(payload.col);
-        const text = this.stringValue(payload.text);
-        if (
-          !tableRef ||
-          row === undefined ||
-          col === undefined ||
-          text === undefined
-        ) {
-          reasons.push('invalid_update_table_cell_payload');
-          return undefined;
-        }
-        return { op: 'updateTableCell', tableRef, row, col, text };
+        return {
+          op: 'updateTableCell',
+          tableRef: rawCommand.tableRef,
+          row: rawCommand.row,
+          col: rawCommand.col,
+          text: rawCommand.text,
+        };
       }
       case 'replaceTable': {
-        const tableRef = this.stringValue(payload.tableRef) ?? targetRef;
-        const grid = this.tableGridValue(payload.grid);
-        if (!tableRef || grid.length === 0) {
-          reasons.push('invalid_replace_table_payload');
-          return undefined;
-        }
         return {
           op: 'replaceTable',
-          tableRef,
-          grid,
-          caption: this.stringValue(payload.caption),
+          tableRef: rawCommand.tableRef,
+          grid: rawCommand.grid.map((row) =>
+            row.map((cell) => ({
+              text: cell.text,
+              ...(cell.bbox ? { bbox: liftBbox(cell.bbox) } : {}),
+              ...(cell.rowSpan != null ? { rowSpan: cell.rowSpan } : {}),
+              ...(cell.colSpan != null ? { colSpan: cell.colSpan } : {}),
+              ...(cell.columnHeader != null
+                ? { columnHeader: cell.columnHeader }
+                : {}),
+              ...(cell.rowHeader != null ? { rowHeader: cell.rowHeader } : {}),
+            })),
+          ),
+          ...(rawCommand.caption ? { caption: rawCommand.caption } : {}),
         };
       }
       case 'linkContinuedTable': {
-        const sourceTableRef =
-          this.stringValue(payload.sourceTableRef) ?? targetRef;
-        const continuedTableRef = this.stringValue(payload.continuedTableRef);
-        const relation = this.stringValue(payload.relation);
-        if (
-          !sourceTableRef ||
-          !continuedTableRef ||
-          (relation !== 'continues_on_next_page' &&
-            relation !== 'continued_from_previous_page')
-        ) {
-          reasons.push('invalid_link_continued_table_payload');
-          return undefined;
-        }
         return {
           op: 'linkContinuedTable',
-          sourceTableRef,
-          continuedTableRef,
-          relation,
+          sourceTableRef: rawCommand.sourceTableRef,
+          continuedTableRef: rawCommand.continuedTableRef,
+          relation: rawCommand.relation,
         };
       }
       case 'updatePictureCaption': {
-        const pictureRef = this.stringValue(payload.pictureRef) ?? targetRef;
-        const caption = this.stringValue(payload.caption);
-        if (!pictureRef || caption === undefined) {
-          reasons.push('invalid_update_picture_caption_payload');
-          return undefined;
-        }
-        return { op: 'updatePictureCaption', pictureRef, caption };
+        return {
+          op: 'updatePictureCaption',
+          pictureRef: rawCommand.pictureRef,
+          caption: rawCommand.caption,
+        };
       }
       case 'addPicture': {
-        const bbox = this.bboxValue(payload.bbox);
-        if (!bbox) {
-          reasons.push('invalid_add_picture_payload');
-          return undefined;
-        }
         return {
           op: 'addPicture',
-          pageNo: this.numberValue(payload.pageNo) ?? context.pageNo,
-          bbox,
-          imageUri: this.stringValue(payload.imageUri) ?? '',
-          caption: this.stringValue(payload.caption),
+          pageNo: rawCommand.pageNo ?? context.pageNo,
+          bbox: liftBbox(rawCommand.bbox),
+          imageUri: rawCommand.imageUri,
+          ...(rawCommand.caption ? { caption: rawCommand.caption } : {}),
         };
       }
       case 'splitPicture': {
-        const pictureRef = this.stringValue(payload.pictureRef) ?? targetRef;
-        const regions = this.imageRegionsValue(payload.regions);
-        if (!pictureRef || regions.length < 2) {
-          reasons.push('invalid_split_picture_payload');
-          return undefined;
-        }
-        return { op: 'splitPicture', pictureRef, regions };
+        return {
+          op: 'splitPicture',
+          pictureRef: rawCommand.pictureRef,
+          regions: rawCommand.regions.map((region) => ({
+            ...(region.id ? { id: region.id } : {}),
+            bbox: liftBbox(region.bbox),
+            ...(region.imageUri ? { imageUri: region.imageUri } : {}),
+            ...(region.caption ? { caption: region.caption } : {}),
+          })),
+        };
       }
       case 'hidePicture': {
-        const pictureRef = this.stringValue(payload.pictureRef) ?? targetRef;
-        const reason = this.stringValue(payload.reason);
-        if (!pictureRef || !reason) {
-          reasons.push('invalid_hide_picture_payload');
-          return undefined;
-        }
-        return { op: 'hidePicture', pictureRef, reason };
+        return {
+          op: 'hidePicture',
+          pictureRef: rawCommand.pictureRef,
+          reason: rawCommand.reason,
+        };
       }
       case 'updateBbox': {
-        const target = this.stringValue(payload.targetRef) ?? targetRef;
-        const bbox = this.bboxValue(payload.bbox);
-        if (!target || !bbox) {
-          reasons.push('invalid_update_bbox_payload');
-          return undefined;
-        }
-        return { op: 'updateBbox', targetRef: target, bbox };
+        return {
+          op: 'updateBbox',
+          targetRef: rawCommand.targetRef,
+          bbox: liftBbox(rawCommand.bbox),
+        };
       }
       case 'linkFootnote': {
-        const markerTextRef = this.stringValue(payload.markerTextRef);
-        const footnoteTextRef = this.stringValue(payload.footnoteTextRef);
-        if (!markerTextRef || !footnoteTextRef) {
-          reasons.push('invalid_link_footnote_payload');
-          return undefined;
-        }
-        return { op: 'linkFootnote', markerTextRef, footnoteTextRef };
+        return {
+          op: 'linkFootnote',
+          markerTextRef: rawCommand.markerTextRef,
+          footnoteTextRef: rawCommand.footnoteTextRef,
+        };
       }
       case 'moveNode': {
-        const sourceRef = this.stringValue(payload.sourceRef) ?? targetRef;
-        const moveTargetRef = this.stringValue(payload.targetRef);
-        const position = this.stringValue(payload.position);
-        if (
-          !sourceRef ||
-          !moveTargetRef ||
-          (position !== 'before' && position !== 'after')
-        ) {
-          reasons.push('invalid_move_node_payload');
-          return undefined;
-        }
         return {
           op: 'moveNode',
-          sourceRef,
-          targetRef: moveTargetRef,
-          position,
+          sourceRef: rawCommand.sourceRef,
+          targetRef: rawCommand.targetRef,
+          position: rawCommand.position,
         };
       }
     }
@@ -363,6 +334,7 @@ export class ReviewAssistanceValidator {
       case 'addText':
         this.validatePageNumber(context, command.pageNo, reasons);
         this.validateBbox(context, command.bbox, reasons);
+        this.validateRequiredEnum(command.label, 'label', reasons);
         break;
       case 'removeText':
         this.validateRemoveText(context, command.textRef, reasons);
@@ -401,6 +373,7 @@ export class ReviewAssistanceValidator {
         this.validateTableRef(command.continuedTableRef, refs, reasons, {
           allowAdjacent: true,
         });
+        this.validateRequiredEnum(command.relation, 'relation', reasons);
         break;
       case 'updatePictureCaption':
         this.validateCaptionText(command.caption, reasons);
@@ -441,10 +414,31 @@ export class ReviewAssistanceValidator {
         if (command.sourceRef === command.targetRef) {
           reasons.push('move_self_reference');
         }
+        this.validateRequiredEnum(command.position, 'position', reasons);
         break;
       case 'updateTextRole':
+        this.validateRequiredEnum(command.label, 'label', reasons);
+        break;
       case 'hidePicture':
         break;
+    }
+  }
+
+  /**
+   * Reject commands whose required enum was omitted by the model under the
+   * flat multi-op schema. `flatCommandToRawCommand` writes
+   * {@link REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL} for a null required enum
+   * rather than inventing a value, so an omitted `label`/`relation`/`position`
+   * surfaces here as `missing_required_field:*` and the command is skipped —
+   * never silently applied with a guessed value.
+   */
+  private validateRequiredEnum(
+    value: string,
+    field: string,
+    reasons: string[],
+  ): void {
+    if (value === REVIEW_ASSISTANCE_MISSING_ENUM_SENTINEL) {
+      reasons.push(`missing_required_field:${field}`);
     }
   }
 
@@ -482,8 +476,8 @@ export class ReviewAssistanceValidator {
     }
     if (
       options.allowAutoApply &&
-      confidence >= options.autoApplyThreshold &&
-      !autoApplyBlockReason
+      (options.forceAutoApply ||
+        (confidence >= options.autoApplyThreshold && !autoApplyBlockReason))
     ) {
       return 'auto_applied';
     }
@@ -528,11 +522,16 @@ export class ReviewAssistanceValidator {
     switch (command.op) {
       case 'replaceText':
       case 'updateTextRole':
-      case 'updateTableCell':
       case 'updatePictureCaption':
-        // Localized text/cell mutations: validation already guards against
+        // Localized text/caption mutations: validation already guards against
         // invalid refs and excessive deletion, so no extra block reason.
         return undefined;
+      case 'updateTableCell':
+        // Table cells carry structured archaeological data where a wrong value
+        // is easy to miss. Mirror the backoffice AI table-correction feature
+        // and always route table edits through human review (proposal) rather
+        // than auto-applying them.
+        return 'table_correction_requires_manual_review';
       case 'removeText':
         // validateRemoveText enforces deterministic suspect reasons before
         // a removal is considered valid; no further block needed here.
@@ -573,7 +572,7 @@ export class ReviewAssistanceValidator {
   ): ReviewAssistanceDecisionEvidence | undefined {
     const targetRef = command
       ? this.getPrimaryTargetRef(command)
-      : rawCommand.targetRef;
+      : this.getRawTargetRef(rawCommand);
     const suspectReasons = targetRef
       ? this.getSuspectReasons(context, targetRef)
       : [];
@@ -586,6 +585,48 @@ export class ReviewAssistanceValidator {
       imageEvidence: rawCommand.evidence ?? undefined,
       suspectReasons: suspectReasons.length > 0 ? suspectReasons : undefined,
     };
+  }
+
+  /**
+   * Extract the most relevant ref from a raw (pre-normalization) command. Used
+   * only when `toCommand` returns undefined, which under the structured-output
+   * schema should be unreachable — but kept as defensive evidence-building.
+   */
+  private getRawTargetRef(
+    rawCommand: ReviewAssistanceRawCommand,
+  ): string | undefined {
+    /* v8 ignore start -- only reached when `toCommand` returns undefined (an
+     * unhandled op); under the structured-output schema every known op yields
+     * a command, so these per-op cases are unreachable. Kept as defensive
+     * evidence-building (see the method doc above). */
+    switch (rawCommand.op) {
+      case 'replaceText':
+      case 'updateTextRole':
+      case 'removeText':
+      case 'splitText':
+        return rawCommand.textRef;
+      case 'updateTableCell':
+      case 'replaceTable':
+        return rawCommand.tableRef;
+      case 'linkContinuedTable':
+        return rawCommand.sourceTableRef;
+      case 'updatePictureCaption':
+      case 'splitPicture':
+      case 'hidePicture':
+        return rawCommand.pictureRef;
+      case 'updateBbox':
+        return rawCommand.targetRef;
+      case 'moveNode':
+        return rawCommand.sourceRef;
+      case 'mergeTexts':
+        return rawCommand.keepRef;
+      case 'linkFootnote':
+        return rawCommand.markerTextRef;
+      case 'addText':
+      case 'addPicture':
+        return undefined;
+    }
+    /* v8 ignore stop */
   }
 
   private buildRefSet(context: PageReviewContext): RefSet {
@@ -776,32 +817,11 @@ export class ReviewAssistanceValidator {
     }
   }
 
-  private replacementTextFromEvidence(
-    context: PageReviewContext,
-    textRef: string | undefined,
-    evidence: string | null,
-  ): string | undefined {
-    if (!textRef || !evidence) return undefined;
-    const original = context.textBlocks.find(
-      (block) => block.ref === textRef,
-    )?.text;
-    if (!original) return undefined;
-
-    const candidate = evidence.trim();
-    if (candidate.length < 2) return undefined;
-    if (!/[0-9A-Za-z가-힣一-龯]/u.test(candidate)) return undefined;
-    if (
-      /^(?:image reads|visible text|correct(?:ed)? ocr|add missing|fix|the image|이미지|보이는|수정|교정|근거)[:\s]/iu.test(
-        candidate,
-      )
-    ) {
-      return undefined;
-    }
-    if (candidate.length > Math.max(original.length * 4, 400)) {
-      return undefined;
-    }
-    return candidate;
-  }
+  // `replacementTextFromEvidence` was used by the old `toCommand` to recover a
+  // missing `payload.text` from the `evidence` field when the LLM omitted it.
+  // The discriminated-union schema now requires `text` upfront, so this
+  // recovery path is unreachable. Restore from git history if a future prompt
+  // change re-introduces the missing-text case.
 
   private validateRemoveText(
     context: PageReviewContext,
@@ -1171,124 +1191,26 @@ export class ReviewAssistanceValidator {
     return text.replace(/\s+/g, '');
   }
 
-  private stringValue(value: unknown): string | undefined {
-    return typeof value === 'string' ? value : undefined;
-  }
-
-  private numberValue(value: unknown): number | undefined {
-    return typeof value === 'number' && Number.isInteger(value)
-      ? value
-      : undefined;
-  }
-
-  private stringArrayValue(value: unknown): string[] {
-    return Array.isArray(value)
-      ? value.filter((entry): entry is string => typeof entry === 'string')
-      : [];
-  }
-
-  private bboxValue(value: unknown): DoclingBBox | undefined {
-    if (!value || typeof value !== 'object') return undefined;
-    const record = value as Record<string, unknown>;
-    if (
-      typeof record.l !== 'number' ||
-      typeof record.t !== 'number' ||
-      typeof record.r !== 'number' ||
-      typeof record.b !== 'number'
-    ) {
-      return undefined;
-    }
-    return {
-      l: record.l,
-      t: record.t,
-      r: record.r,
-      b: record.b,
-      coord_origin:
-        typeof record.coord_origin === 'string'
-          ? record.coord_origin
-          : 'TOPLEFT',
-    };
-  }
-
-  private tableGridValue(value: unknown): ReviewAssistanceTableCell[][] {
-    /* v8 ignore next -- structured schema should provide arrays; kept for untrusted LLM payload defense */
-    if (!Array.isArray(value)) return [];
-    return value.map((row) =>
-      Array.isArray(row) ? row.map((cell) => this.tableCellValue(cell)) : [],
-    );
-  }
-
-  private tableCellValue(value: unknown): ReviewAssistanceTableCell {
-    if (!value || typeof value !== 'object') {
-      return { text: '' };
-    }
-    const record = value as Record<string, unknown>;
-    const cell: ReviewAssistanceTableCell = {
-      text: typeof record.text === 'string' ? record.text : '',
-    };
-    if (typeof record.rowSpan === 'number') cell.rowSpan = record.rowSpan;
-    if (typeof record.colSpan === 'number') cell.colSpan = record.colSpan;
-    if (typeof record.columnHeader === 'boolean') {
-      cell.columnHeader = record.columnHeader;
-    }
-    if (typeof record.rowHeader === 'boolean')
-      cell.rowHeader = record.rowHeader;
-    // Preserve bbox so ReviewAssistancePatcher.buildTableData can place each
-    // cell precisely instead of falling back to the table-level prov bbox.
-    const bbox = this.bboxValue(record.bbox);
-    if (bbox) cell.bbox = bbox;
-    return cell;
-  }
-
-  private imageRegionsValue(value: unknown): ReviewAssistanceImageRegion[] {
-    /* v8 ignore next -- structured schema should provide arrays; kept for untrusted LLM payload defense */
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((entry) => {
-      /* v8 ignore next -- structured schema should provide objects; kept for untrusted LLM payload defense */
-      if (!entry || typeof entry !== 'object') return [];
-      const record = entry as Record<string, unknown>;
-      const bbox = this.bboxValue(record.bbox);
-      /* v8 ignore next -- structured schema should provide bboxes; kept for untrusted LLM payload defense */
-      if (!bbox) return [];
-      return [
-        {
-          id: this.stringValue(record.id),
-          bbox,
-          imageUri: this.stringValue(record.imageUri),
-          caption: this.stringValue(record.caption),
-        },
-      ];
-    });
-  }
-
-  private textPartsValue(
-    value: unknown,
-  ): Array<{ text: string; label?: string }> {
-    /* v8 ignore next -- structured schema should provide arrays; kept for untrusted LLM payload defense */
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((entry) => {
-      /* v8 ignore next -- structured schema should provide objects; kept for untrusted LLM payload defense */
-      if (!entry || typeof entry !== 'object') return [];
-      const record = entry as Record<string, unknown>;
-      const text = this.stringValue(record.text);
-      /* v8 ignore next -- structured schema should provide text; kept for untrusted LLM payload defense */
-      if (text === undefined) return [];
-      return [{ text, label: this.stringValue(record.label) }];
-    });
-  }
+  // Raw-payload coercion helpers (stringValue / numberValue / bboxValue /
+  // stringArrayValue / textPartsValue / tableGridValue / tableCellValue /
+  // imageRegionsValue) were removed when the LLM call moved to a discriminated
+  // -union Zod schema (review-assistance-schema.ts). Anything those helpers
+  // would have rejected is now rejected at the structured-output boundary,
+  // and `toCommand` consumes already-typed fields directly. If a future
+  // change relaxes the schema, restore these helpers from git history.
 
   private buildDecisionId(
     pageNo: number,
     rawCommand: ReviewAssistanceRawCommand,
     command?: ReviewAssistanceCommand,
   ): string {
+    // rawCommand is now a discriminated-union variant with op-specific
+    // first-class fields — hash the whole variant for stability.
     const hash = createHash('sha1')
       .update(
         this.stableStringify({
           pageNo,
-          op: rawCommand.op,
-          targetRef: rawCommand.targetRef,
-          payload: rawCommand.payload,
+          rawCommand,
           command,
         }),
       )

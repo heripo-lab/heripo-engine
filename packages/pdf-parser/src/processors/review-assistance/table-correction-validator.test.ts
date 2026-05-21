@@ -1,4 +1,7 @@
-import type { ReviewAssistancePageOutput } from '../../types/review-assistance-schema';
+import type {
+  ReviewAssistancePageOutput,
+  ReviewAssistanceRawCommand,
+} from '../../types/review-assistance-schema';
 import type { TableCorrectionContext } from './table-correction-context-builder';
 
 import { describe, expect, test } from 'vitest';
@@ -7,6 +10,25 @@ import { ReviewAssistanceValidator } from './review-assistance-validator';
 import { TableCorrectionValidator } from './table-correction-validator';
 
 const bbox = { l: 0, t: 0, r: 10, b: 10, coord_origin: 'TOPLEFT' as const };
+
+type RawCell = Extract<
+  ReviewAssistanceRawCommand,
+  { op: 'replaceTable' }
+>['grid'][number][number];
+
+// Schema-correct replaceTable cell with every nullable field present. Extras
+// (spans/header flags) are spread in by the caller; omitted fields stay null.
+function cell(text: string, extra: Partial<RawCell> = {}): RawCell {
+  return {
+    text,
+    bbox: null,
+    rowSpan: null,
+    colSpan: null,
+    columnHeader: null,
+    rowHeader: null,
+    ...extra,
+  };
+}
 
 function makeContext(
   overrides: Partial<TableCorrectionContext> = {},
@@ -95,8 +117,10 @@ describe('TableCorrectionValidator', () => {
       commands: [
         {
           op: 'updateTableCell',
-          targetRef: '#/tables/0',
-          payload: { row: 9, col: 1, text: '12cm' },
+          tableRef: '#/tables/0',
+          row: 9,
+          col: 1,
+          text: '12cm',
           confidence: 0.95,
           rationale: 'Cell OCR correction',
           evidence: '12cm',
@@ -105,7 +129,11 @@ describe('TableCorrectionValidator', () => {
       pageNotes: [],
     });
 
-    expect(decision.disposition).toBe('auto_applied');
+    // Table cell edits always route to manual review (proposal) — the
+    // `table_correction_requires_manual_review` auto-apply block in the base
+    // validator (commit d78c2aa). The row/col bound check is what this test
+    // guards; the disposition is proposal, not auto_applied.
+    expect(decision.disposition).toBe('proposal');
     expect(decision.reasons).not.toContain('table_cell_out_of_preview_range');
     expect(decision.metadata?.tableCorrection).toMatchObject({
       targetRef: '#/tables/0',
@@ -119,13 +147,10 @@ describe('TableCorrectionValidator', () => {
       commands: [
         {
           op: 'updateTableCell',
-          targetRef: '#/tables/1',
-          payload: {
-            tableRef: '#/tables/1',
-            row: 0,
-            col: 0,
-            text: 'OtherLongCell',
-          },
+          tableRef: '#/tables/1',
+          row: 0,
+          col: 0,
+          text: 'OtherLongCell',
           confidence: 0.95,
           rationale: 'Wrong table',
           evidence: 'OtherLongCell',
@@ -150,13 +175,12 @@ describe('TableCorrectionValidator', () => {
       commands: [
         {
           op: 'replaceTable',
-          targetRef: '#/tables/0',
-          payload: {
-            grid: [
-              [{ text: '' }, { text: '' }],
-              [{ text: '' }, { text: '' }],
-            ],
-          },
+          tableRef: '#/tables/0',
+          grid: [
+            [cell(''), cell('')],
+            [cell(''), cell('')],
+          ],
+          caption: null,
           confidence: 0.9,
           rationale: 'Replace broken grid',
           evidence: 'empty',
@@ -183,22 +207,20 @@ describe('TableCorrectionValidator', () => {
       commands: [
         {
           op: 'replaceTable',
-          targetRef: '#/tables/0',
-          payload: {
-            grid: [
-              [
-                { text: 'Depth 10cm ※', rowSpan: 1.5, colSpan: 1 },
-                {
-                  text: 'A',
-                  rowSpan: 2,
-                  colSpan: 2,
-                  columnHeader: true,
-                  rowHeader: true,
-                },
-                { text: 'B', rowSpan: 0, colSpan: 1 },
-              ],
+          tableRef: '#/tables/0',
+          grid: [
+            [
+              cell('Depth 10cm ※', { rowSpan: 1.5, colSpan: 1 }),
+              cell('A', {
+                rowSpan: 2,
+                colSpan: 2,
+                columnHeader: true,
+                rowHeader: true,
+              }),
+              cell('B', { rowSpan: 0, colSpan: 1 }),
             ],
-          },
+          ],
+          caption: null,
           confidence: 0.9,
           rationale: 'Span grid',
           evidence: 'span',
@@ -221,24 +243,18 @@ describe('TableCorrectionValidator', () => {
       commands: [
         {
           op: 'linkContinuedTable',
-          targetRef: '#/tables/0',
-          payload: {
-            sourceTableRef: '#/tables/0',
-            continuedTableRef: '#/tables/prev',
-            relation: 'continues_on_next_page',
-          },
+          sourceTableRef: '#/tables/0',
+          continuedTableRef: '#/tables/prev',
+          relation: 'continues_on_next_page',
           confidence: 0.9,
           rationale: 'Wrong direction',
           evidence: 'previous',
         },
         {
           op: 'linkContinuedTable',
-          targetRef: '#/tables/0',
-          payload: {
-            sourceTableRef: '#/tables/0',
-            continuedTableRef: '#/tables/next',
-            relation: 'continued_from_previous_page',
-          },
+          sourceTableRef: '#/tables/0',
+          continuedTableRef: '#/tables/next',
+          relation: 'continued_from_previous_page',
           confidence: 0.9,
           rationale: 'Wrong direction',
           evidence: 'next',
@@ -275,16 +291,18 @@ describe('TableCorrectionValidator', () => {
         commands: [
           {
             op: 'replaceText',
-            targetRef: '#/texts/0',
-            payload: { text: 'A' },
+            textRef: '#/texts/0',
+            text: 'A',
             confidence: 0.9,
             rationale: 'Not a table op',
             evidence: 'A',
           },
           {
             op: 'updateTableCell',
-            targetRef: '#/tables/0',
-            payload: { row: 0, col: 0, text: '10cm ※' },
+            tableRef: '#/tables/0',
+            row: 0,
+            col: 0,
+            text: '10cm ※',
             confidence: 0.9,
             rationale: 'Cell correction',
             evidence: '10cm',
@@ -307,37 +325,49 @@ describe('TableCorrectionValidator', () => {
     );
   });
 
-  test('keeps allowed invalid table ops as base validation failures only', () => {
-    const [decision, nonTableDecision] = validate({
+  test('flags disallowed ops but lets allowed table ops through the op gate', () => {
+    // Under the discriminated-union schema the validator no longer emits
+    // `invalid_*_payload` reasons (Zod rejects malformed payloads upstream).
+    // This now exercises the live op-gate branches: an unhandled op yields no
+    // command (flagged via invalidOp), a non-table op is rejected, and an
+    // allowed table op passes the gate.
+    const [bogus, nonTable, tableOp] = validate({
       pageNo: 1,
       commands: [
         {
-          op: 'updateTableCell',
-          targetRef: '#/tables/0',
-          payload: { row: 0 },
+          op: 'bogusOp',
           confidence: 0.9,
-          rationale: 'Missing payload',
-          evidence: 'missing',
+          rationale: 'unhandled op',
+          evidence: null,
         },
         {
           op: 'removeText',
-          targetRef: null,
-          payload: {},
+          textRef: '#/texts/0',
           confidence: 0.9,
-          rationale: 'Missing text ref',
-          evidence: 'missing',
+          rationale: 'non-table op',
+          evidence: null,
         },
-      ],
+        {
+          op: 'updateTableCell',
+          tableRef: '#/tables/0',
+          row: 0,
+          col: 0,
+          text: '10cm ※',
+          confidence: 0.9,
+          rationale: 'allowed table op',
+          evidence: null,
+        },
+      ] as unknown as ReviewAssistanceRawCommand[],
       pageNotes: [],
     });
 
-    expect(decision.invalidOp).toBe('updateTableCell');
-    expect(decision.reasons).toContain('invalid_update_table_cell_payload');
-    expect(decision.reasons).not.toContain(
-      'table_correction_op_not_allowed:updateTableCell',
-    );
-    expect(nonTableDecision.reasons).toContain(
+    expect(bogus.invalidOp).toBe('bogusOp');
+    expect(bogus.reasons).toContain('table_correction_op_not_allowed:bogusOp');
+    expect(nonTable.reasons).toContain(
       'table_correction_op_not_allowed:removeText',
+    );
+    expect(tableOp.reasons).not.toContain(
+      'table_correction_op_not_allowed:updateTableCell',
     );
   });
 
@@ -347,20 +377,18 @@ describe('TableCorrectionValidator', () => {
       commands: [
         {
           op: 'replaceTable',
-          targetRef: '#/tables/0',
-          payload: {
-            grid: [
-              [
-                {
-                  text: 'OtherLongCell 10cm ※',
-                  rowSpan: 1,
-                  colSpan: 1,
-                  columnHeader: true,
-                },
-                { text: 'A', rowSpan: 1, colSpan: 1 },
-              ],
+          tableRef: '#/tables/0',
+          grid: [
+            [
+              cell('OtherLongCell 10cm ※', {
+                rowSpan: 1,
+                colSpan: 1,
+                columnHeader: true,
+              }),
+              cell('A', { rowSpan: 1, colSpan: 1 }),
             ],
-          },
+          ],
+          caption: null,
           confidence: 0.9,
           rationale: 'Mixed table',
           evidence: 'OtherLongCell',
@@ -408,16 +436,20 @@ describe('TableCorrectionValidator', () => {
         commands: [
           {
             op: 'updateTableCell',
-            targetRef: '#/tables/0',
-            payload: { row: 0, col: 1, text: 'Depth' },
+            tableRef: '#/tables/0',
+            row: 0,
+            col: 1,
+            text: 'Depth',
             confidence: 0.95,
             rationale: 'Preview width',
             evidence: 'Depth',
           },
           {
             op: 'updateTableCell',
-            targetRef: '#/tables/0',
-            payload: { row: 1, col: 1, text: 'Depth' },
+            tableRef: '#/tables/0',
+            row: 1,
+            col: 1,
+            text: 'Depth',
             confidence: 0.95,
             rationale: 'Preview width',
             evidence: 'Depth',
@@ -469,20 +501,18 @@ describe('TableCorrectionValidator', () => {
         commands: [
           {
             op: 'replaceTable',
-            targetRef: '#/tables/0',
-            payload: { grid: [[]] },
+            tableRef: '#/tables/0',
+            grid: [[]],
+            caption: null,
             confidence: 0.9,
             rationale: 'Empty row',
             evidence: 'empty',
           },
           {
             op: 'linkContinuedTable',
-            targetRef: '#/tables/0',
-            payload: {
-              sourceTableRef: '#/tables/0',
-              continuedTableRef: '#/tables/missing',
-              relation: 'continues_on_next_page',
-            },
+            sourceTableRef: '#/tables/0',
+            continuedTableRef: '#/tables/missing',
+            relation: 'continues_on_next_page',
             confidence: 0.9,
             rationale: 'Missing neighbor',
             evidence: 'missing',
@@ -506,11 +536,113 @@ describe('TableCorrectionValidator', () => {
     );
   });
 
+  test('treats an exact echo as a no-op and re-checks structurally divergent grids', () => {
+    const baseContext = makeContext();
+    const fullGrid = [
+      [
+        {
+          text: 'A',
+          rowSpan: 1,
+          colSpan: 1,
+          columnHeader: false,
+          rowHeader: false,
+        },
+        {
+          text: 'B',
+          rowSpan: 1,
+          colSpan: 1,
+          columnHeader: false,
+          rowHeader: false,
+        },
+      ],
+    ];
+    const context = makeContext({
+      targetTable: {
+        ...baseContext.targetTable,
+        fullGrid,
+        hasSpans: false,
+        headerRows: [],
+        unitHints: [],
+        footnoteMarkers: [],
+      },
+    });
+    const validatorOptions = {
+      autoApplyThreshold: 0.85,
+      proposalThreshold: 0.5,
+      allowAutoApply: true,
+    };
+
+    // Exact echo — replacement cells omit span/header flags, so
+    // isNoopReplacement exercises the `?? 1`/`?? false` fallbacks before
+    // reporting a no-op.
+    const [echo] = new TableCorrectionValidator().validatePageOutput(
+      context,
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'replaceTable',
+            tableRef: '#/tables/0',
+            grid: [[cell('A'), cell('B')]],
+            caption: null,
+            confidence: 0.9,
+            rationale: 'echo',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      validatorOptions,
+    );
+    expect(echo.reasons).toContain('table_correction_noop');
+
+    // Same row count but a shorter row — the row-length guard rejects the
+    // no-op shortcut and the regular checks run.
+    const [divergent] = new TableCorrectionValidator().validatePageOutput(
+      context,
+      {
+        pageNo: 1,
+        commands: [
+          {
+            op: 'replaceTable',
+            tableRef: '#/tables/0',
+            grid: [[cell('A')]],
+            caption: null,
+            confidence: 0.9,
+            rationale: 'shrunk',
+            evidence: null,
+          },
+        ],
+        pageNotes: [],
+      },
+      validatorOptions,
+    );
+    expect(divergent.reasons).not.toContain('table_correction_noop');
+  });
+
   test('covers defensive validator fallbacks that are unreachable through valid schema payloads', () => {
     const tableValidator = new TableCorrectionValidator() as any;
     const spanReasons: string[] = [];
     tableValidator.validateSpans([], spanReasons);
     expect(spanReasons).toEqual([]);
+
+    // validateDecision with a command-undefined decision: an allowed op (in the
+    // allowed set) and a missing invalidOp both yield no op-not-allowed reason.
+    // Both are unreachable through valid schema payloads — allowed ops always
+    // produce a command, and invalidOp is always set when command is undefined —
+    // so they are exercised directly to keep the defensive branches covered.
+    expect(
+      tableValidator.validateDecision(makeContext(), {
+        command: undefined,
+        invalidOp: 'updateTableCell',
+      }),
+    ).toEqual([]);
+    expect(
+      tableValidator.validateDecision(makeContext(), {
+        command: undefined,
+        invalidOp: undefined,
+      }),
+    ).toEqual([]);
 
     const pageContext = makeContext().scopedPageContext;
     pageContext.tables[0] = {

@@ -117,6 +117,16 @@ function makeReviewResult(commands: unknown[] = []) {
   };
 }
 
+// The `tables` task uses the dedicated { grid, caption } structured-output
+// schema, so its mocked reply is a grid — not a page/command object.
+function makeTableGridResult(grid: unknown, caption: unknown = null) {
+  return {
+    output: { grid, caption },
+    usage,
+    usedFallback: false,
+  };
+}
+
 function mockDefaultCallVision(): void {
   vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
     if (input.component === 'ReviewAssistancePageGate') {
@@ -126,8 +136,8 @@ function mockDefaultCallVision(): void {
       return makeReviewResult([
         {
           op: 'replaceText',
-          targetRef: '#/texts/0',
-          payload: { text: 'Test' },
+          textRef: '#/texts/0',
+          text: 'Test',
           confidence: 0.95,
           rationale: 'Spacing OCR noise',
           evidence: 'Image reads Test',
@@ -349,7 +359,7 @@ function makeOptions() {
     pageGateTemperature: 0,
     pageConcurrency: 1,
     taskConcurrency: 6,
-    localModelConcurrency: 1,
+    modelConcurrency: 1,
     workItemTimeoutMs: 1_800_000,
     autoApplyThreshold: 0.85,
     proposalThreshold: 0.5,
@@ -552,8 +562,7 @@ describe('ReviewAssistanceRunner', () => {
     expect(textCall).toEqual(expect.objectContaining({ maxRetries: 4 }));
   });
 
-  test('routes table work items through TableCorrectionRunner with re-ask feedback', async () => {
-    let tableAttempts = 0;
+  test('routes table work items through TableCorrectionRunner as a replaceTable proposal', async () => {
     vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
       if (input.component === 'ReviewAssistancePageGate') {
         return makeGateResult();
@@ -561,30 +570,19 @@ describe('ReviewAssistanceRunner', () => {
       if (input.metadata?.task !== 'tables') {
         return makeReviewResult();
       }
-      tableAttempts += 1;
-      // First attempt targets a non-existent table so the table-specific
-      // validator rejects it and forces a re-ask with validation feedback.
-      if (tableAttempts === 1) {
-        return makeReviewResult([
+      // The table task uses the dedicated { grid, caption } structured-output
+      // schema (mirroring the backoffice AI table-correction feature), so the
+      // model regenerates the full grid rather than emitting commands.
+      return makeTableGridResult([
+        [
           {
-            op: 'updateTableCell',
-            targetRef: '#/tables/9',
-            payload: { tableRef: '#/tables/9', row: 0, col: 0, text: 'X' },
-            confidence: 0.95,
-            rationale: 'Wrong target table',
-            evidence: 'X',
+            text: '유물',
+            rowSpan: 1,
+            colSpan: 1,
+            columnHeader: false,
+            rowHeader: false,
           },
-        ]);
-      }
-      return makeReviewResult([
-        {
-          op: 'updateTableCell',
-          targetRef: '#/tables/0',
-          payload: { tableRef: '#/tables/0', row: 0, col: 0, text: '유물' },
-          confidence: 0.95,
-          rationale: 'Cell OCR correction',
-          evidence: '유물',
-        },
+        ],
       ]);
     });
 
@@ -604,19 +602,23 @@ describe('ReviewAssistanceRunner', () => {
           input.metadata?.task === 'tables',
       );
 
-    expect(tableCalls).toHaveLength(2);
-    const firstPrompt = tableCalls[0].messages[0].content[0].text as string;
-    const secondPrompt = tableCalls[1].messages[0].content[0].text as string;
-    expect(firstPrompt).toContain('TABLE CORRECTION CONTEXT JSON');
-    expect(firstPrompt).toContain('"targetTable"');
-    expect(secondPrompt).toContain('VALIDATION FEEDBACK FOR ATTEMPT 2');
-    expect(secondPrompt).toContain('table_correction_target_ref_mismatch');
+    expect(tableCalls).toHaveLength(1);
+    const tablePrompt = tableCalls[0].messages[0].content[0].text as string;
+    expect(tablePrompt).toContain('Current table data');
 
     const tableDecisions = report.pages[0].decisions.filter(
       (decision) => decision.metadata?.tableCorrection,
     );
     expect(tableDecisions).toHaveLength(1);
-    expect(tableDecisions[0].command?.op).toBe('updateTableCell');
+    // The { grid, caption } reply is wrapped into one replaceTable and
+    // reconciled against the source grid, carrying the corrected cell text.
+    const command = tableDecisions[0].command;
+    expect(command?.op).toBe('replaceTable');
+    const grid = command?.op === 'replaceTable' ? command.grid : [];
+    const tableRef = command?.op === 'replaceTable' ? command.tableRef : '';
+    expect(tableRef).toBe('#/tables/0');
+    expect(grid.flat().some((cell) => cell.text.includes('유물'))).toBe(true);
+    expect(tableDecisions[0].disposition).toBe('proposal');
     expect(tableDecisions[0].metadata?.tableCorrection).toMatchObject({
       targetRef: '#/tables/0',
     });
@@ -629,8 +631,8 @@ describe('ReviewAssistanceRunner', () => {
     );
     expect(tableTrace).toMatchObject({
       kind: 'table',
-      attempts: 2,
-      validation: 'reasked',
+      attempts: 1,
+      validation: 'passed',
     });
   });
 
@@ -930,7 +932,7 @@ describe('ReviewAssistanceRunner', () => {
     expect(mockExtractText).toHaveBeenCalledWith('/tmp/input.pdf', 1);
   });
 
-  test('같은 ref를 건드리는 task 충돌은 자동 반영하지 않고 proposal로 낮춘다', async () => {
+  test('같은 ref 충돌은 LLM 머지 호출로 단일 winner 로 수렴된다', async () => {
     const doc = makeDoc();
     doc.texts[0].prov[0].bbox = {
       l: 10,
@@ -941,9 +943,23 @@ describe('ReviewAssistanceRunner', () => {
     };
     writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
 
+    let mergeCalls = 0;
     vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
       if (input.component === 'ReviewAssistancePageGate') {
         return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        mergeCalls += 1;
+        return {
+          output: {
+            decision: 'pick' as const,
+            chosenIndex: 0,
+            confidence: 0.9,
+            rationale: 'OCR replacement aligns with image text',
+          },
+          usage,
+          usedFallback: false,
+        };
       }
       const task = input.metadata.task;
       if (task === 'text_ocr_hanja') {
@@ -953,8 +969,8 @@ describe('ReviewAssistanceRunner', () => {
             commands: [
               {
                 op: 'replaceText',
-                targetRef: '#/texts/0',
-                payload: { text: 'Test' },
+                textRef: '#/texts/0',
+                text: 'Test',
                 confidence: 0.95,
                 rationale: 'Correct OCR spacing',
                 evidence: 'Test',
@@ -974,16 +990,8 @@ describe('ReviewAssistanceRunner', () => {
               {
                 op: 'updateBbox',
                 targetRef: '#/texts/0',
-                payload: {
-                  bbox: {
-                    l: 12,
-                    t: 12,
-                    r: 82,
-                    b: 42,
-                    coord_origin: 'TOPLEFT',
-                  },
-                },
-                confidence: 0.95,
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.94,
                 rationale: 'Bbox aligns better with visual text',
                 evidence: 'Text box shifted',
               },
@@ -1010,24 +1018,303 @@ describe('ReviewAssistanceRunner', () => {
       ...makeOptions(),
     });
 
-    expect(report.summary.autoAppliedCount).toBe(0);
-    expect(report.summary.proposalCount).toBe(2);
-    expect(report.pages[0].decisions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          disposition: 'proposal',
-          reasons: expect.arrayContaining(['task_conflict_same_target_ref']),
-          metadata: expect.objectContaining({ reviewTask: 'text_ocr_hanja' }),
-        }),
-        expect.objectContaining({
-          disposition: 'proposal',
-          reasons: expect.arrayContaining(['task_conflict_same_target_ref']),
-          metadata: expect.objectContaining({
-            reviewTask: 'layout_bbox_order',
-          }),
-        }),
-      ]),
+    expect(mergeCalls).toBe(1);
+    expect(report.pages[0].decisions).toHaveLength(1);
+    const winner = report.pages[0].decisions[0];
+    expect(winner.metadata).toMatchObject({
+      mergeChosen: expect.objectContaining({
+        method: 'llm',
+        groupSize: 2,
+        droppedDecisionIds: expect.any(Array),
+      }),
+    });
+    expect(winner.reasons).toEqual(
+      expect.arrayContaining(['merge_chosen_by:llm']),
     );
+    expect(winner.reasons).not.toEqual(
+      expect.arrayContaining(['task_conflict_same_target_ref']),
+    );
+    // Fix F: the winning replaceText was auto-apply-eligible (0.95 ≥ 0.85)
+    // before the conflict demoted it to proposal. Resolving the conflict in its
+    // favour via the LLM arbiter restores auto_applied so a high-confidence OCR
+    // fix is not stranded in the 대기 queue.
+    expect(winner.command?.op).toBe('replaceText');
+    expect(winner.disposition).toBe('auto_applied');
+  });
+
+  test('confidence gap > 0.3 면 LLM 호출 없이 결정론적으로 winner 를 선택한다', async () => {
+    const doc = makeDoc();
+    doc.texts[0].prov[0].bbox = {
+      l: 10,
+      t: 10,
+      r: 150,
+      b: 40,
+      coord_origin: 'TOPLEFT',
+    };
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
+
+    let mergeCalls = 0;
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        mergeCalls += 1;
+        return {
+          output: {
+            decision: 'pick' as const,
+            chosenIndex: 0,
+            confidence: 0.5,
+            rationale: 'unused',
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      const task = input.metadata.task;
+      if (task === 'text_ocr_hanja') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'replaceText',
+                textRef: '#/texts/0',
+                text: 'Test',
+                confidence: 0.95,
+                rationale: 'High confidence OCR',
+                evidence: 'Test',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      if (task === 'layout_bbox_order') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'updateBbox',
+                targetRef: '#/texts/0',
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.5,
+                rationale: 'Low confidence bbox shift',
+                evidence: 'Text box shifted',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return {
+        output: { pageNo: 1, commands: [], pageNotes: [] },
+        usage,
+        usedFallback: false,
+      };
+    });
+
+    const report = await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
+    });
+
+    expect(mergeCalls).toBe(0);
+    expect(report.pages[0].decisions).toHaveLength(1);
+    expect(report.pages[0].decisions[0].metadata).toMatchObject({
+      mergeChosen: expect.objectContaining({ method: 'deterministic_gap' }),
+    });
+  });
+
+  test('머지 LLM 이 drop 을 반환하면 그룹 전체가 결정에서 제거된다', async () => {
+    const doc = makeDoc();
+    doc.texts[0].prov[0].bbox = {
+      l: 10,
+      t: 10,
+      r: 150,
+      b: 40,
+      coord_origin: 'TOPLEFT',
+    };
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
+
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        return {
+          output: {
+            decision: 'drop' as const,
+            rationale: 'Both candidates would degrade the page',
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      const task = input.metadata.task;
+      if (task === 'text_ocr_hanja') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'replaceText',
+                textRef: '#/texts/0',
+                text: 'Test',
+                confidence: 0.7,
+                rationale: 'Mid confidence OCR',
+                evidence: 'Test',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      if (task === 'layout_bbox_order') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'updateBbox',
+                targetRef: '#/texts/0',
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.7,
+                rationale: 'Mid confidence bbox shift',
+                evidence: 'Text box shifted',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return {
+        output: { pageNo: 1, commands: [], pageNotes: [] },
+        usage,
+        usedFallback: false,
+      };
+    });
+
+    const report = await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
+    });
+
+    expect(report.pages[0].decisions).toHaveLength(1);
+    const audited = report.pages[0].decisions[0];
+    expect(audited.disposition).toBe('skipped');
+    expect(audited.reasons).toEqual(
+      expect.arrayContaining(['merge_dropped_all']),
+    );
+    expect(audited.metadata).toMatchObject({
+      mergeDropped: expect.objectContaining({
+        method: 'llm',
+        groupSize: 2,
+      }),
+    });
+  });
+
+  test('머지 pick 인데 chosenIndex 가 누락되면 top-1 로 폴백한다', async () => {
+    const doc = makeDoc();
+    doc.texts[0].prov[0].bbox = {
+      l: 10,
+      t: 10,
+      r: 150,
+      b: 40,
+      coord_origin: 'TOPLEFT',
+    };
+    writeFileSync(join(outputDir, 'result.json'), JSON.stringify(doc));
+
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      if (input.phase === 'merge-conflicts') {
+        // flat schema: pick with no chosenIndex (model omitted it)
+        return {
+          output: { decision: 'pick', rationale: '인덱스 누락' },
+          usage,
+          usedFallback: false,
+        };
+      }
+      const task = input.metadata.task;
+      if (task === 'text_ocr_hanja') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'replaceText',
+                textRef: '#/texts/0',
+                text: 'Test',
+                confidence: 0.8,
+                rationale: 'OCR',
+                evidence: 'Test',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      if (task === 'layout_bbox_order') {
+        return {
+          output: {
+            pageNo: 1,
+            commands: [
+              {
+                op: 'updateBbox',
+                targetRef: '#/texts/0',
+                bbox: { l: 12, t: 12, r: 82, b: 42 },
+                confidence: 0.75,
+                rationale: 'bbox',
+                evidence: 'shift',
+              },
+            ],
+            pageNotes: [],
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return {
+        output: { pageNo: 1, commands: [], pageNotes: [] },
+        usage,
+        usedFallback: false,
+      };
+    });
+
+    const report = await new ReviewAssistanceRunner({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }).analyzeAndSave(outputDir, 'report-1', makeModelResolver(), {
+      ...makeOptions(),
+    });
+
+    expect(report.pages[0].decisions).toHaveLength(1);
+    expect(report.pages[0].decisions[0].metadata).toMatchObject({
+      mergeChosen: expect.objectContaining({ method: 'llm_fallback' }),
+    });
   });
 
   test('keeps existing origin snapshots when rerun in the same output directory', async () => {
@@ -1207,10 +1494,13 @@ describe('ReviewAssistanceRunner', () => {
     );
   });
 
-  test('treats no structured output as no-op review result with issue hint', async () => {
-    vi.mocked(LLMCaller.callVision).mockRejectedValue(
-      new Error('No output generated.'),
-    );
+  test('treats no structured output as no-op review result with info hint', async () => {
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.component === 'ReviewAssistancePageGate') {
+        return makeGateResult();
+      }
+      throw new Error('No object generated: response did not match schema.');
+    });
     const logger = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -1237,7 +1527,7 @@ describe('ReviewAssistanceRunner', () => {
         expect.objectContaining({
           category: 'review_execution',
           type: 'empty_model_output',
-          severity: 'warning',
+          severity: 'info',
           reasons: expect.arrayContaining(['no_output_generated']),
         }),
       ]),
@@ -1249,7 +1539,7 @@ describe('ReviewAssistanceRunner', () => {
       {
         err: expect.objectContaining({
           type: 'Error',
-          message: 'No output generated.',
+          message: 'No object generated: response did not match schema.',
         }),
       },
     );
@@ -1770,8 +2060,10 @@ describe('ReviewAssistanceRunner', () => {
       makeReviewResult([
         {
           op: 'replaceText',
-          targetRef: '#/texts/missing',
-          payload: { text: 'Missing' },
+          // Non-empty but non-existent ref: a genuine mismatch the
+          // single-target bind leaves alone, so it still fails validation.
+          textRef: '#/texts/missing',
+          text: 'Missing',
           confidence: 0.95,
           rationale: 'Invalid target',
           evidence: 'Missing',
@@ -1796,6 +2088,9 @@ describe('ReviewAssistanceRunner', () => {
     expect(result.status).toBe('failed');
     expect(result.issue).toMatchObject({
       type: 'work_item_validation_failed',
+      // Fix G2: a missing-ref failure is the model producing unusable output,
+      // not a human task — advisory info keeps it out of the 필수 확인 queue.
+      severity: 'info',
       reasons: expect.arrayContaining(['target_ref_not_found']),
     });
     expect(result.callTrace).toMatchObject({
@@ -1804,6 +2099,142 @@ describe('ReviewAssistanceRunner', () => {
       failureReasons: expect.arrayContaining(['target_ref_not_found']),
     });
     expect(LLMCaller.callVision).toHaveBeenCalledTimes(2);
+  });
+
+  test('validation-failed issue is info for soft failures, warning only for manual review', () => {
+    const pagePath = join(outputDir, 'pages', 'page_0.png');
+    const context = makePageContext(pagePath);
+    const workItem = new ReviewAssistanceWorkScheduler()
+      .build(context)
+      .find((item) => item.kind === 'text_ocr_hanja')!;
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+
+    // Soft failures (the model produced unusable output) → advisory info.
+    expect(
+      runner.buildWorkItemValidationIssue(context, workItem, [
+        'target_ref_not_found',
+        'table_correction_target_ref_mismatch',
+        'table_correction_span_metadata_dropped',
+      ]).severity,
+    ).toBe('info');
+
+    // A valid command we refuse to auto-apply needs human judgement → warning.
+    expect(
+      runner.buildWorkItemValidationIssue(context, workItem, [
+        'structural_command_requires_manual_review',
+      ]).severity,
+    ).toBe('warning');
+  });
+
+  test('binds an omitted primary ref for single-target work items only', () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const makeOutput = () => ({
+      pageNo: 1,
+      commands: [
+        {
+          op: 'updatePictureCaption',
+          pictureRef: '',
+          caption: '도면 1',
+          confidence: 0.9,
+          rationale: 'caption link',
+          evidence: null,
+        },
+      ],
+      pageNotes: [],
+    });
+
+    // Single-target picture work item: the omitted pictureRef is filled.
+    expect(
+      runner.bindSingleTargetRefs(makeOutput(), {
+        targetRefs: ['#/pictures/3'],
+      }).commands[0],
+    ).toMatchObject({ op: 'updatePictureCaption', pictureRef: '#/pictures/3' });
+
+    // Multi-target work item: ambiguous, so left untouched.
+    expect(
+      runner.bindSingleTargetRefs(makeOutput(), {
+        targetRefs: ['#/pictures/3', '#/pictures/4'],
+      }).commands[0].pictureRef,
+    ).toBe('');
+
+    // Node-type guard: a text target never lands on a picture op.
+    expect(
+      runner.bindSingleTargetRefs(makeOutput(), {
+        targetRefs: ['#/texts/0'],
+      }).commands[0].pictureRef,
+    ).toBe('');
+  });
+
+  test('binds omitted refs for text, table, and bbox ops and skips ref-less ops', () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const bbox = { l: 0, t: 0, r: 1, b: 1, coord_origin: 'TOPLEFT' as const };
+    const meta = { confidence: 0.9, rationale: 'r', evidence: null };
+    const bind = (command: Record<string, unknown>, targetRefs: string[]) =>
+      runner.bindSingleTargetRefs(
+        { pageNo: 1, commands: [command], pageNotes: [] },
+        { targetRefs },
+      ).commands[0];
+
+    // Text ops: a single text target fills an omitted textRef; a non-text
+    // target (node-type guard) and a non-empty ref are left untouched.
+    for (const op of [
+      'replaceText',
+      'updateTextRole',
+      'removeText',
+      'splitText',
+    ]) {
+      expect(bind({ op, textRef: '', ...meta }, ['#/texts/7']).textRef).toBe(
+        '#/texts/7',
+      );
+    }
+    expect(
+      bind({ op: 'replaceText', textRef: '', ...meta }, ['#/pictures/9'])
+        .textRef,
+    ).toBe('');
+    expect(
+      bind({ op: 'replaceText', textRef: '#/texts/1', ...meta }, ['#/texts/7'])
+        .textRef,
+    ).toBe('#/texts/1');
+
+    // Table ops: a single table target fills an omitted tableRef; a non-table
+    // target is left untouched.
+    for (const op of ['updateTableCell', 'replaceTable']) {
+      expect(bind({ op, tableRef: '', ...meta }, ['#/tables/2']).tableRef).toBe(
+        '#/tables/2',
+      );
+    }
+    expect(
+      bind({ op: 'updateTableCell', tableRef: '', ...meta }, ['#/texts/7'])
+        .tableRef,
+    ).toBe('');
+
+    // updateBbox accepts any node type; an empty targetRef is filled, a
+    // non-empty one is kept.
+    expect(
+      bind({ op: 'updateBbox', targetRef: '', bbox, ...meta }, ['#/texts/7'])
+        .targetRef,
+    ).toBe('#/texts/7');
+    expect(
+      bind({ op: 'updateBbox', targetRef: '#/texts/1', bbox, ...meta }, [
+        '#/texts/7',
+      ]).targetRef,
+    ).toBe('#/texts/1');
+
+    // Default arm: an op with no primary ref to bind is returned untouched.
+    expect(
+      bind(
+        {
+          op: 'addText',
+          bbox,
+          text: 'X',
+          label: 'text',
+          pageNo: 1,
+          afterRef: null,
+          ...meta,
+        },
+        ['#/texts/7'],
+      ).op,
+    ).toBe('addText');
   });
 
   test('records reasked validation when a later work item attempt passes', async () => {
@@ -1817,8 +2248,8 @@ describe('ReviewAssistanceRunner', () => {
         makeReviewResult([
           {
             op: 'replaceText',
-            targetRef: '#/texts/missing',
-            payload: { text: 'Missing' },
+            textRef: '#/texts/missing',
+            text: 'Missing',
             confidence: 0.95,
             rationale: 'Invalid target',
             evidence: 'Missing',
@@ -1829,8 +2260,8 @@ describe('ReviewAssistanceRunner', () => {
         makeReviewResult([
           {
             op: 'replaceText',
-            targetRef: '#/texts/0',
-            payload: { text: 'Test' },
+            textRef: '#/texts/0',
+            text: 'Test',
             confidence: 0.95,
             rationale: 'Valid target after re-ask',
             evidence: 'Test',
@@ -2140,10 +2571,27 @@ describe('ReviewAssistanceRunner', () => {
     expect(runner.buildNoOutputIssue(context).reasons).toEqual([
       'no_output_generated',
     ]);
+    expect(runner.buildNoOutputIssue(context).severity).toBe('warning');
+    expect(runner.buildNoOutputIssue(context, undefined, 'info').severity).toBe(
+      'info',
+    );
     expect(
       runner.isNoOutputGeneratedError({
         name: 'NoOutputGeneratedError',
       }),
+    ).toBe(true);
+    expect(
+      runner.isNoOutputGeneratedError({
+        name: 'AI_NoObjectGeneratedError',
+      }),
+    ).toBe(true);
+    expect(
+      runner.isNoOutputGeneratedError(
+        new Error('No object generated: response did not match schema.'),
+      ),
+    ).toBe(true);
+    expect(
+      runner.isNoOutputGeneratedError(new Error('No output generated.')),
     ).toBe(true);
     expect(runner.isNoOutputGeneratedError({ name: undefined })).toBe(false);
 
@@ -2228,5 +2676,304 @@ describe('ReviewAssistanceRunner', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test('resolveCrossOpConflictsWithLlm patches the winner and leaves non-conflicting decisions intact', async () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const command: ReviewAssistanceCommand = {
+      op: 'replaceText',
+      textRef: '#/texts/0',
+      text: 'A',
+    };
+    // Two decisions over the same ref with a narrow confidence gap (≤ 0.3) so
+    // the deterministic shortcut is skipped and the LLM arbiter is consulted.
+    const conflictA = makeDecision('conflict-a', command, {
+      confidence: 0.6,
+      disposition: 'proposal',
+      reasons: [
+        'task_conflict_same_target_ref',
+        'conflicts_with_decision:conflict-b',
+      ],
+      metadata: {
+        reviewTask: 'text_ocr_hanja',
+        taskConflict: {
+          conflictDecisionIds: ['conflict-b'],
+          autoAppliedBeforeConflict: true,
+        },
+      },
+    });
+    const conflictB = makeDecision('conflict-b', command, {
+      confidence: 0.55,
+      disposition: 'proposal',
+      reasons: [
+        'task_conflict_same_target_ref',
+        'conflicts_with_decision:conflict-a',
+      ],
+      metadata: {
+        reviewTask: 'layout_bbox_order',
+        taskConflict: { conflictDecisionIds: ['conflict-a'] },
+      },
+    });
+    // A decision outside any conflict group — must survive untouched via the
+    // `decisionPatches.get(id) ?? decision` fallback in the final map.
+    const standalone = makeDecision(
+      'standalone',
+      {
+        op: 'updatePictureCaption',
+        pictureRef: '#/pictures/0',
+        caption: 'Fig',
+      },
+      { confidence: 0.9, reasons: ['standalone'] },
+    );
+
+    vi.mocked(LLMCaller.callVision).mockImplementation(async (input: any) => {
+      if (input.phase === 'merge-conflicts') {
+        return {
+          output: {
+            decision: 'pick' as const,
+            chosenIndex: 0,
+            confidence: 0.92,
+            rationale: 'A is grounded in the image',
+          },
+          usage,
+          usedFallback: false,
+        };
+      }
+      return makeReviewResult();
+    });
+
+    const resolved: ReviewAssistanceDecision[] =
+      await runner.resolveCrossOpConflictsWithLlm(
+        [conflictA, conflictB, standalone],
+        makePageContext('/tmp/page_0.png'),
+        new Uint8Array([1, 2, 3]),
+        makeModelResolver(),
+        makeOptions(),
+      );
+
+    const ids = resolved.map((decision) => decision.id);
+    expect(ids).toContain('standalone');
+    expect(ids).not.toContain('conflict-b');
+    expect(resolved.find((decision) => decision.id === 'standalone')).toBe(
+      standalone,
+    );
+    const winner = resolved.find((decision) => decision.id === 'conflict-a');
+    expect(winner?.reasons).toContain('merge_chosen_by:llm');
+    expect(winner?.reasons).not.toContain('task_conflict_same_target_ref');
+  });
+
+  test('decideMergeOutcome covers single group, null-confidence pick, error fallback, and abort rethrow', async () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const context = makePageContext('/tmp/page_0.png');
+    const image = new Uint8Array([1, 2, 3]);
+    const resolver = makeModelResolver();
+    const command: ReviewAssistanceCommand = {
+      op: 'replaceText',
+      textRef: '#/texts/0',
+      text: 'A',
+    };
+    const top = makeDecision('top', command, {
+      confidence: 0.6,
+      metadata: { reviewTask: 'text_ocr_hanja' },
+    });
+    const runnerUp = makeDecision('runner-up', command, {
+      confidence: 0.55,
+      metadata: { reviewTask: 'text_ocr_hanja' },
+    });
+
+    // 1) A capped group of one resolves deterministically without an LLM call.
+    const single = await runner.decideMergeOutcome(
+      [top],
+      context,
+      image,
+      resolver,
+      makeOptions(),
+    );
+    expect(single).toMatchObject({
+      kind: 'pick',
+      method: 'deterministic_gap',
+      mergeRationale: 'group_size_1',
+    });
+    expect(single.winner.id).toBe('top');
+
+    // 2) An LLM pick that omits confidence falls back to the winner's own.
+    vi.mocked(LLMCaller.callVision).mockResolvedValueOnce({
+      output: {
+        decision: 'pick' as const,
+        chosenIndex: 1,
+        confidence: null,
+        rationale: 'pick the runner-up',
+      },
+      usage,
+      usedFallback: false,
+    } as any);
+    const nullConf = await runner.decideMergeOutcome(
+      [top, runnerUp],
+      context,
+      image,
+      resolver,
+      makeOptions(),
+    );
+    expect(nullConf).toMatchObject({ kind: 'pick', method: 'llm' });
+    expect(nullConf.winner.id).toBe('runner-up');
+    expect(nullConf.mergeConfidence).toBe(0.55);
+
+    // 3) A thrown arbiter (not aborted) degrades to the top-1 deterministic pick.
+    vi.mocked(LLMCaller.callVision).mockRejectedValueOnce(new Error('boom'));
+    const fallback = await runner.decideMergeOutcome(
+      [top, runnerUp],
+      context,
+      image,
+      resolver,
+      makeOptions(),
+    );
+    expect(fallback).toMatchObject({ kind: 'pick', method: 'llm_fallback' });
+    expect(fallback.winner.id).toBe('top');
+    expect(fallback.mergeRationale).toContain('llm_error:');
+
+    // 4) When the page was aborted, the arbiter error propagates instead.
+    const controller = new AbortController();
+    controller.abort();
+    vi.mocked(LLMCaller.callVision).mockRejectedValueOnce(new Error('aborted'));
+    await expect(
+      runner.decideMergeOutcome([top, runnerUp], context, image, resolver, {
+        ...makeOptions(),
+        abortSignal: controller.signal,
+      }),
+    ).rejects.toThrow('aborted');
+  });
+
+  test('callMergeArbiter renders varied candidate shapes into the arbiter prompt', async () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const context = makePageContext('/tmp/page_0.png');
+    const command: ReviewAssistanceCommand = {
+      op: 'replaceText',
+      textRef: '#/texts/0',
+      text: 'A',
+    };
+
+    // cand0: no command (touched-ref ternary false), no reviewTask (→ 'unknown'),
+    // and evidence carrying every part so the summary joins them.
+    const cand0 = makeDecision('cand0', undefined, {
+      confidence: 0.6,
+      metadata: {},
+      evidence: {
+        imageEvidence: 'image shows a table',
+        textLayerEvidence: 'text layer has digits',
+        suspectReasons: ['table_many_empty_cells'],
+      },
+    });
+    // cand1: a command carrying a non-empty rationale, with no evidence at all.
+    const cand1 = makeDecision(
+      'cand1',
+      {
+        op: 'replaceText',
+        textRef: '#/texts/0',
+        text: 'A',
+        rationale: 'grounded reason',
+      } as unknown as ReviewAssistanceCommand,
+      {
+        confidence: 0.55,
+        metadata: { reviewTask: 'text_ocr_hanja' },
+        evidence: undefined,
+      },
+    );
+    // cand2: a present-but-empty evidence object → the summary stays undefined.
+    const cand2 = makeDecision('cand2', command, {
+      confidence: 0.5,
+      metadata: { reviewTask: 'text_ocr_hanja' },
+      evidence: {},
+    });
+
+    vi.mocked(LLMCaller.callVision).mockResolvedValueOnce({
+      output: {
+        decision: 'pick' as const,
+        chosenIndex: 0,
+        confidence: 0.8,
+        rationale: 'ok',
+      },
+      usage,
+      usedFallback: false,
+    } as any);
+
+    const choice = await runner.callMergeArbiter(
+      [cand0, cand1, cand2],
+      context,
+      new Uint8Array([1, 2, 3]),
+      makeModelResolver(),
+      makeOptions(),
+    );
+
+    expect(choice).toMatchObject({ decision: 'pick', chosenIndex: 0 });
+    const call = vi.mocked(LLMCaller.callVision).mock.calls.at(-1)?.[0] as any;
+    expect(call.phase).toBe('merge-conflicts');
+    expect(call.metadata.groupSize).toBe(3);
+  });
+
+  test('merge grouping and metadata helpers cover chain compression and missing metadata', () => {
+    const runner = new ReviewAssistanceRunner(makeLogger()) as any;
+    const command: ReviewAssistanceCommand = {
+      op: 'replaceText',
+      textRef: '#/texts/0',
+      text: 'A',
+    };
+    const conflicted = (id: string, ids: string[] | undefined) =>
+      makeDecision(id, command, {
+        reasons: ['task_conflict_same_target_ref'],
+        metadata: ids
+          ? { taskConflict: { conflictDecisionIds: ids } }
+          : { taskConflict: {} },
+      });
+
+    // d1→d2→d3 forms a union-find chain that forces path compression in find();
+    // d1's 'ghost' neighbour is not a conflicted decision (byId miss → skipped);
+    // d4 carries the conflict marker but no adjacency, exercising the continue.
+    const groups = runner.groupConflictingDecisions([
+      conflicted('d1', ['d2', 'ghost']),
+      conflicted('d2', ['d3']),
+      conflicted('d3', ['d2']),
+      conflicted('d4', undefined),
+    ]) as ReviewAssistanceDecision[][];
+    expect(groups).toHaveLength(1);
+    expect(groups[0].map((decision) => decision.id).sort()).toEqual([
+      'd1',
+      'd2',
+      'd3',
+    ]);
+
+    // applyMergeWinnerMetadata: winner without metadata (`?? {}`) and a dropped
+    // candidate whose reviewTask is not a string (→ task undefined).
+    const winner = makeDecision('w', command, {
+      metadata: undefined,
+      reasons: ['task_conflict_same_target_ref'],
+    });
+    const loser = makeDecision('l', command, { metadata: { reviewTask: 123 } });
+    const picked = runner.applyMergeWinnerMetadata(winner, [winner, loser], {
+      kind: 'pick',
+      method: 'llm_fallback',
+      winner,
+      mergeRationale: 'fallback',
+      mergeConfidence: 0.7,
+    });
+    expect(picked.metadata.mergeChosen.dropped[0]).toMatchObject({
+      decisionId: 'l',
+      task: undefined,
+    });
+    expect(picked.reasons).toContain('merge_chosen_by:llm_fallback');
+
+    // applyMergeDropAllMetadata: representative without metadata and a candidate
+    // missing a string reviewTask.
+    const rep = makeDecision('rep', command, { metadata: undefined });
+    const other = makeDecision('other', command, {
+      metadata: { reviewTask: 7 },
+    });
+    const dropped = runner.applyMergeDropAllMetadata(rep, [rep, other], {
+      kind: 'drop_all',
+      method: 'llm',
+      mergeRationale: 'drop them all',
+    });
+    expect(dropped.disposition).toBe('skipped');
+    expect(dropped.reasons).toContain('merge_dropped_all');
+    expect(dropped.metadata.mergeDropped.dropped).toHaveLength(2);
   });
 });

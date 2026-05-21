@@ -321,7 +321,7 @@ describe('PostDoclingCorrectionPipeline', () => {
       {
         ...correctionOptions({
           concurrency: { pages: 3, reviewTasks: 2, tables: 1 },
-          localModelConcurrency: 2,
+          modelConcurrency: 2,
           workItemTimeoutMs: 600_000,
           maxRetries: {
             textCorrection: 4,
@@ -367,7 +367,7 @@ describe('PostDoclingCorrectionPipeline', () => {
       expect.objectContaining({
         pageConcurrency: 3,
         taskConcurrency: 2,
-        localModelConcurrency: 2,
+        modelConcurrency: 2,
         workItemTimeoutMs: 600_000,
         maxRetries: 5,
         tableMaxRetries: 6,

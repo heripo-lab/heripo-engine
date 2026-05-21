@@ -230,7 +230,7 @@ const tokenUsageReport = await pdfParser.parse(
         reviewTasks: 4,
         tables: 1,
       },
-      localModelConcurrency: 1,
+      modelConcurrency: 1,
       workItemTimeoutMs: 900000,
       maxRetries: {
         textCorrection: 3,
@@ -299,7 +299,7 @@ Text correction applies to every page with text or table content. The page gate 
 
 ### Local Model Execution
 
-The correction pipeline is optimized for local VLMs: small contexts, many calls, deterministic validation, retry loops, bounded concurrency, and resumable checkpoints. For local models, start with `concurrency.pages: 1`, `concurrency.tables: 1`, `localModelConcurrency: 1`, `temperature: 0`, and a generous `workItemTimeoutMs`. Increase concurrency only after the model is stable.
+The correction pipeline is optimized for local VLMs: small contexts, many calls, deterministic validation, retry loops, bounded concurrency, and resumable checkpoints. For local models, start with `concurrency.pages: 1`, `concurrency.tables: 1`, `modelConcurrency: 1`, `temperature: 0`, and a generous `workItemTimeoutMs`. Increase concurrency only after the model is stable.
 
 ### Rollout Smoke Test
 
@@ -679,7 +679,7 @@ interface PDFCorrectionOptions {
     reviewAssistance?: number;
     tableCorrection?: number;
   };
-  localModelConcurrency?: number; // Bounded local model request concurrency
+  modelConcurrency?: number; // Bounded local model request concurrency
   workItemTimeoutMs?: number; // Per-work-item timeout
   outputLanguage?: string; // Human-readable review reason language (default: en-US)
   pageGate?: {

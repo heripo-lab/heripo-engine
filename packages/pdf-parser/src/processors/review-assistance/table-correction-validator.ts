@@ -5,6 +5,7 @@ import type {
 } from '@heripo/model';
 
 import type { ReviewAssistancePageOutput } from '../../types/review-assistance-schema';
+import type { PageReviewTableCell } from './page-review-context-builder';
 import type { ReviewAssistanceValidatorOptions } from './review-assistance-validator';
 import type { TableCorrectionContext } from './table-correction-context-builder';
 
@@ -25,6 +26,10 @@ if (!TABLES_TASK) {
 }
 /* v8 ignore stop */
 const TABLE_CORRECTION_ALLOWED_OPS = new Set<string>(TABLES_TASK.allowedOps);
+
+// Bare unit token extracted from a unit hint like "10cm" → "cm". Longer units
+// precede their prefixes (mm before m) so the leftmost match wins correctly.
+const UNIT_TOKEN_RE = /(?:mm|cm|m²|m|㎝|㎜|㎡|kg|g|점|개)/iu;
 
 export class TableCorrectionValidator {
   validatePageOutput(
@@ -131,6 +136,14 @@ export class TableCorrectionValidator {
     grid: ReviewAssistanceTableCell[][],
     reasons: string[],
   ): void {
+    if (this.isNoopReplacement(context.targetTable.fullGrid, grid)) {
+      // The model echoed the current grid unchanged. Skip it so the proposal
+      // queue is not cluttered with whole-table "corrections" that change
+      // nothing — the deterministic complement to the prompt's "return no
+      // commands if the table is already correct" instruction.
+      reasons.push('table_correction_noop');
+      return;
+    }
     this.validateSpans(grid, reasons);
     if (
       context.targetTable.hasSpans &&
@@ -154,8 +167,15 @@ export class TableCorrectionValidator {
       .flat()
       .map((cell) => cell.text)
       .join('\n');
+    // Check the unit TOKEN (cm, mm, 점…), not the full number+unit hint. A
+    // legitimate OCR correction changes the number ("10cm" → "12cm"), so
+    // requiring the literal original hint would reject valid corrections; the
+    // real invariant is that the unit itself is not dropped. carryOverTable
+    // Structure re-attaches dropped tokens, so this passes by construction for
+    // same-dimension grids and still guards the oversized-table fallback path.
     for (const unit of context.targetTable.unitHints ?? []) {
-      if (!this.includesNormalized(replacementText, unit)) {
+      const token = unit.match(UNIT_TOKEN_RE)?.[0];
+      if (token && !this.includesNormalized(replacementText, token)) {
         reasons.push('table_correction_unit_hint_dropped');
         break;
       }
@@ -172,6 +192,33 @@ export class TableCorrectionValidator {
     if (this.containsOtherTableContent(context, replacementText)) {
       reasons.push('table_correction_other_table_content_mixed');
     }
+  }
+
+  /**
+   * True when `replacement` is structurally and textually identical to the
+   * current `fullGrid` (normalized text + span/header flags). Used to drop
+   * echo-only replaceTable commands. Returns false when no `fullGrid` is
+   * available (oversized tables) so the regular checks still run.
+   */
+  private isNoopReplacement(
+    current: PageReviewTableCell[][] | undefined,
+    replacement: ReviewAssistanceTableCell[][],
+  ): boolean {
+    if (!current || current.length !== replacement.length) return false;
+    return current.every((row, rowIndex) => {
+      const replacementRow = replacement[rowIndex];
+      if (!replacementRow || row.length !== replacementRow.length) return false;
+      return row.every((cell, colIndex) => {
+        const candidate = replacementRow[colIndex];
+        return (
+          this.normalize(cell.text) === this.normalize(candidate.text) &&
+          cell.rowSpan === (candidate.rowSpan ?? 1) &&
+          cell.colSpan === (candidate.colSpan ?? 1) &&
+          cell.columnHeader === (candidate.columnHeader ?? false) &&
+          cell.rowHeader === (candidate.rowHeader ?? false)
+        );
+      });
+    });
   }
 
   private validateSpans(
