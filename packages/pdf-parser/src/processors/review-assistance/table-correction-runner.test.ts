@@ -194,6 +194,34 @@ describe('TableCorrectionRunner', () => {
     );
   });
 
+  test('forceAutoApply lands a valid table correction without manual review', () => {
+    const runner = new TableCorrectionRunner();
+    const tableContext = runner.buildContext(
+      makeFullGridContext(),
+      makeWorkItem(),
+    );
+    // Same corrected grid as the proposal case (10 → 12), but the demo opted
+    // into force-apply, so the structural replaceTable auto-applies instead of
+    // routing to manual review.
+    const decisions = runner.validateGridOutput(
+      tableContext,
+      {
+        grid: [
+          [{ text: '구분' }, { text: '제원(cm)' }, { text: '' }],
+          [{ text: '토기' }, { text: '12' }, { text: '20' }],
+        ],
+        caption: '표 1',
+      },
+      { ...VALIDATOR_OPTIONS, forceAutoApply: true },
+    );
+
+    expect(decisions).toHaveLength(1);
+    const [decision] = decisions;
+    expect(decision.command.op).toBe('replaceTable');
+    expect(decision.command.grid[1][1].text).toBe('12');
+    expect(decision.disposition).toBe('auto_applied');
+  });
+
   test('skips a reply that echoes the current grid unchanged', () => {
     const runner = new TableCorrectionRunner();
     const tableContext = runner.buildContext(
