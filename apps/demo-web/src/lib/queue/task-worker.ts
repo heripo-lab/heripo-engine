@@ -245,7 +245,7 @@ function buildPDFCorrectionOptions(
           : undefined,
     },
     concurrency: options.correction.concurrency,
-    localModelConcurrency: options.correction.localModelConcurrency,
+    modelConcurrency: options.correction.modelConcurrency,
     workItemTimeoutMs: options.correction.workItemTimeoutMs,
     maxRetries: {
       textCorrection: stageRetries?.textCorrection ?? options.maxRetries,

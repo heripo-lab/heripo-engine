@@ -35,7 +35,7 @@ export interface PDFCorrectionOptions {
   models: PDFCorrectionModelOptions;
   concurrency?: PDFCorrectionConcurrencyOptions;
   maxRetries?: PDFCorrectionMaxRetriesOptions;
-  localModelConcurrency?: number;
+  modelConcurrency?: number;
   workItemTimeoutMs?: number;
   outputLanguage?: string;
   pageGate?: PDFCorrectionPageGateOptions;
@@ -48,7 +48,7 @@ export interface NormalizedPDFCorrectionOptions {
   models: PDFCorrectionModelOptions;
   concurrency: Required<PDFCorrectionConcurrencyOptions>;
   maxRetries: Required<PDFCorrectionMaxRetriesOptions>;
-  localModelConcurrency: number;
+  modelConcurrency: number;
   workItemTimeoutMs: number;
   outputLanguage: string;
   pageGate: Required<PDFCorrectionPageGateOptions>;
@@ -72,7 +72,7 @@ export const PDF_CORRECTION_DEFAULTS: Omit<
     reviewAssistance: 3,
     tableCorrection: 3,
   },
-  localModelConcurrency: 1,
+  modelConcurrency: 1,
   workItemTimeoutMs: PDF_CONVERTER.DEFAULT_TIMEOUT_MS,
   outputLanguage: 'en-US',
   pageGate: {
@@ -197,9 +197,9 @@ export function normalizePDFCorrectionOptions(
         PDF_CORRECTION_DEFAULTS.maxRetries.tableCorrection,
       ),
     },
-    localModelConcurrency: normalizePositiveInt(
-      value.localModelConcurrency,
-      PDF_CORRECTION_DEFAULTS.localModelConcurrency,
+    modelConcurrency: normalizePositiveInt(
+      value.modelConcurrency,
+      PDF_CORRECTION_DEFAULTS.modelConcurrency,
     ),
     workItemTimeoutMs: normalizePositiveInt(
       value.workItemTimeoutMs,

@@ -359,7 +359,7 @@ function makeOptions() {
     pageGateTemperature: 0,
     pageConcurrency: 1,
     taskConcurrency: 6,
-    localModelConcurrency: 1,
+    modelConcurrency: 1,
     workItemTimeoutMs: 1_800_000,
     autoApplyThreshold: 0.85,
     proposalThreshold: 0.5,

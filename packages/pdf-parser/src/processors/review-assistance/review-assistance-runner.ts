@@ -70,7 +70,7 @@ export interface ReviewAssistanceRunnerOptions {
   pageGateTemperature: number;
   pageConcurrency: number;
   taskConcurrency: number;
-  localModelConcurrency: number;
+  modelConcurrency: number;
   workItemTimeoutMs: number;
   autoApplyThreshold: number;
   proposalThreshold: number;
@@ -218,7 +218,7 @@ export class ReviewAssistanceRunner {
       `[ReviewAssistanceRunner] Processing ${contexts.length} pages (page concurrency: ${options.pageConcurrency}, task concurrency: ${options.taskConcurrency})...`,
     );
     this.logger.info(
-      `[ReviewAssistanceRunner] Local work item scheduler: concurrency ${options.localModelConcurrency}, timeout ${options.workItemTimeoutMs}ms`,
+      `[ReviewAssistanceRunner] Local work item scheduler: concurrency ${options.modelConcurrency}, timeout ${options.workItemTimeoutMs}ms`,
     );
     this.logger.info(
       `[ReviewAssistanceRunner] Gate summary: ${pagesEligibleForStructuralReview} eligible, ${pagesSkippedByGate} skipped by gate, ${pagesSkippedByUnavailableImage} skipped for unavailable page image`,
@@ -607,7 +607,7 @@ export class ReviewAssistanceRunner {
       const workItemResults: ReviewAssistanceWorkItemResult[] = [];
       await ConcurrentPool.run(
         pendingWorkItems,
-        options.localModelConcurrency,
+        options.modelConcurrency,
         (workItem) =>
           this.reviewWorkItem(
             context,
@@ -2221,7 +2221,7 @@ export class ReviewAssistanceRunner {
         proposalThreshold: options.proposalThreshold,
         maxRetries: options.maxRetries,
         tableMaxRetries: options.tableMaxRetries,
-        localModelConcurrency: options.localModelConcurrency,
+        modelConcurrency: options.modelConcurrency,
         workItemTimeoutMs: options.workItemTimeoutMs,
         temperature: options.temperature,
         outputLanguage: options.outputLanguage,

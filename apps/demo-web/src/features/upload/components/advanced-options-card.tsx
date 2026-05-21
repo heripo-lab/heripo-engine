@@ -393,7 +393,7 @@ export function AdvancedOptionsCard({
                 </div>
               )}
             </form.Field>
-            <form.Field name="correction.localModelConcurrency">
+            <form.Field name="correction.modelConcurrency">
               {(field: OptionalNumberFieldApi) => (
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Local Work Items</span>
