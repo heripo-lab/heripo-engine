@@ -6,6 +6,7 @@ export type ProviderType =
   | 'anthropic'
   | 'togetherai'
   | 'ollama'
+  | 'lmstudio'
   | 'unknown';
 
 /**
@@ -23,6 +24,7 @@ export function detectProvider(model: LanguageModel): ProviderType {
   if (providerId.includes('anthropic')) return 'anthropic';
   if (providerId.includes('together')) return 'togetherai';
   if (providerId.includes('ollama')) return 'ollama';
+  if (providerId.includes('lmstudio')) return 'lmstudio';
 
   return 'unknown';
 }
