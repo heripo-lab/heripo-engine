@@ -5,6 +5,7 @@ export type ProviderType =
   | 'google'
   | 'anthropic'
   | 'togetherai'
+  | 'ollama'
   | 'unknown';
 
 /**
@@ -21,6 +22,7 @@ export function detectProvider(model: LanguageModel): ProviderType {
   if (providerId.includes('google')) return 'google';
   if (providerId.includes('anthropic')) return 'anthropic';
   if (providerId.includes('together')) return 'togetherai';
+  if (providerId.includes('ollama')) return 'ollama';
 
   return 'unknown';
 }

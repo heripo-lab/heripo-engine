@@ -11,6 +11,7 @@ catalog:
   "@vitest/coverage-v8": "^4.1.6"
   "@vitest/expect": "^4.1.6"
   "ai": "^6.0.184"
+  "ai-sdk-ollama": "^3.8.4"
   "es-toolkit": "^1.46.1"
   "tsup": "^8.5.1"
   "tsx": "^4.21.0"

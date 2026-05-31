@@ -33,6 +33,12 @@ describe('detectProvider', () => {
     );
   });
 
+  test('detects Ollama provider', () => {
+    expect(detectProvider(createModelWithProvider('ollama.chat'))).toBe(
+      'ollama',
+    );
+  });
+
   test('returns unknown for unrecognized provider string', () => {
     expect(
       detectProvider(createModelWithProvider('some-custom-provider')),

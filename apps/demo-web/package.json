@@ -29,6 +29,7 @@
     "@tanstack/react-form": "^1.32.0",
     "@tanstack/react-query": "^5.100.10",
     "ai": "catalog:",
+    "ai-sdk-ollama": "catalog:",
     "archiver": "^8.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
