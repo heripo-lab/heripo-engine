@@ -83,6 +83,11 @@ jobs:
           GOOGLE_GENERATIVE_AI_API_KEY=${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
           TOGETHER_AI_API_KEY=${{ secrets.TOGETHER_AI_API_KEY }}
 
+          # Local LLM Providers (Ollama / LM Studio) — 미설정 시 코드가 localhost 기본값 사용
+          OLLAMA_BASE_URL=${{ vars.DEMO_WEB_OLLAMA_BASE_URL }}
+          LMSTUDIO_BASE_URL=${{ vars.DEMO_WEB_LMSTUDIO_BASE_URL }}
+          LMSTUDIO_API_KEY=${{ secrets.LMSTUDIO_API_KEY }}
+
           # PDF Parser Settings (optional)
           PDF_PARSER_PORT=${{ vars.DEMO_WEB_PDF_PARSER_PORT }}
           PDF_PARSER_TIMEOUT=${{ vars.DEMO_WEB_PDF_PARSER_TIMEOUT }}
