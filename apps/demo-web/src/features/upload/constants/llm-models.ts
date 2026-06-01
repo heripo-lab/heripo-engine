@@ -206,4 +206,46 @@ export const LLM_MODELS: LLMModel[] = [
     label: 'Llama 3.2 3B',
     provider: 'Together',
   },
+
+  // LM Studio (로컬 모델, 가격 0 — model-pricing 미등록 시 calculateCost 가 0 반환)
+  {
+    id: 'lmstudio/gemma-4-e4b-it-mlx',
+    label: 'Gemma 4 E4B (MLX)',
+    provider: 'LM Studio',
+  },
+  {
+    id: 'lmstudio/gemma-4-e2b-it-mlx',
+    label: 'Gemma 4 E2B (MLX)',
+    provider: 'LM Studio',
+  },
+  {
+    id: 'lmstudio/gemma-4-26b-a4b-it-mlx',
+    label: 'Gemma 4 26B-A4B (MLX)',
+    provider: 'LM Studio',
+  },
+  {
+    id: 'lmstudio/gemma-4-31b-it-mlx',
+    label: 'Gemma 4 31B (MLX)',
+    provider: 'LM Studio',
+  },
+  {
+    id: 'lmstudio/qwen3.6-35b-a3b-mlx',
+    label: 'Qwen 3.6 35B-A3B (MLX)',
+    provider: 'LM Studio',
+  },
+  {
+    id: 'lmstudio/qwen3.6-27b-mlx',
+    label: 'Qwen 3.6 27B (MLX)',
+    provider: 'LM Studio',
+  },
+  {
+    id: 'lmstudio/qwen3.5-27b',
+    label: 'Qwen 3.5 27B',
+    provider: 'LM Studio',
+  },
+  {
+    id: 'lmstudio/qwen3.5-9b-mlx',
+    label: 'Qwen 3.5 9B (MLX)',
+    provider: 'LM Studio',
+  },
 ];
