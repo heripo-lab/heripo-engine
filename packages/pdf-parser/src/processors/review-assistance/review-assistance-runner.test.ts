@@ -372,7 +372,7 @@ function makeOptions() {
 
 function makeModelResolver() {
   const model = { modelId: 'mock-model' } as any;
-  return vi.fn(() => model);
+  return vi.fn(() => ({ model }));
 }
 
 function makeLogger() {

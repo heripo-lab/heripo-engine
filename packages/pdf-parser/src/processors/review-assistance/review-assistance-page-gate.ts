@@ -44,6 +44,8 @@ export interface ReviewAssistancePageGateOptions {
   abortSignal?: AbortSignal;
   aggregator?: LLMTokenUsageAggregator;
   outputLanguage?: string;
+  /** primary(model) 실패 시 fallback. */
+  fallbackModel?: LanguageModel;
 }
 
 interface ReviewAssistancePageGateReport {
@@ -121,6 +123,7 @@ export class ReviewAssistancePageGate {
         },
       ],
       primaryModel: model,
+      fallbackModel: options.fallbackModel,
       maxRetries: options.maxRetries ?? REVIEW_ASSISTANCE_PAGE_GATE_MAX_RETRIES,
       temperature:
         options.temperature ?? REVIEW_ASSISTANCE_PAGE_GATE_TEMPERATURE,

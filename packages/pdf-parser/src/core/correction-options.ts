@@ -6,12 +6,24 @@ import { PDF_CONVERTER } from '../config/constants';
 
 export interface PDFCorrectionModelOptions {
   textCorrection: LanguageModel;
+  /** textCorrection 실패(예: lmstudio 400) 시 LLMCaller fallback. */
+  textCorrectionFallback?: LanguageModel;
   pageGate: LanguageModel;
+  /** pageGate(page-eligibility) 실패 시 fallback. */
+  pageGateFallback?: LanguageModel;
   reviewAssistance: LanguageModel;
+  /** review-assistance 공통 fallback (task별 미지정 시 사용). */
+  reviewAssistanceFallback?: LanguageModel;
   reviewAssistanceTasks?: Partial<
     Record<ReviewAssistanceTaskId, LanguageModel>
   >;
+  /** review-assistance task별 fallback. */
+  reviewAssistanceTasksFallback?: Partial<
+    Record<ReviewAssistanceTaskId, LanguageModel>
+  >;
   tableCorrection?: LanguageModel;
+  /** tableCorrection 실패 시 fallback. */
+  tableCorrectionFallback?: LanguageModel;
 }
 
 export interface PDFCorrectionConcurrencyOptions {

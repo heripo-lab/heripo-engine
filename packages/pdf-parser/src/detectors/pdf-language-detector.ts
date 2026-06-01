@@ -34,6 +34,8 @@ const languageDetectionSchema = z.object({
 
 export interface PdfLanguageDetectionOptions {
   model?: LanguageModel;
+  /** model 실패 시 fallback. */
+  fallbackModel?: LanguageModel;
   maxSamplePages?: number;
   maxRetries?: number;
   temperature?: number;
@@ -288,6 +290,7 @@ export class PdfLanguageDetector {
         },
       ],
       primaryModel: options.model,
+      fallbackModel: options.fallbackModel,
       maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
       temperature: options.temperature ?? 0,
       abortSignal: options.abortSignal,

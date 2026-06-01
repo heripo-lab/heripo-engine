@@ -399,9 +399,9 @@ describe('PostDoclingCorrectionPipeline', () => {
     await wrapped('/test/output');
 
     const modelResolver = mockRunnerInstance.analyzeAndSave.mock.calls[0][2];
-    expect(modelResolver({ id: 'text_ocr_hanja' })).toBe(taskModel);
-    expect(modelResolver({ id: 'tables' })).toBe(tableCorrectionModel);
-    expect(modelResolver({ id: 'layout_bbox_order' })).toBe(
+    expect(modelResolver({ id: 'text_ocr_hanja' }).model).toBe(taskModel);
+    expect(modelResolver({ id: 'tables' }).model).toBe(tableCorrectionModel);
+    expect(modelResolver({ id: 'layout_bbox_order' }).model).toBe(
       reviewAssistanceModel,
     );
   });
@@ -424,7 +424,7 @@ describe('PostDoclingCorrectionPipeline', () => {
 
     const taskModelResolver =
       mockRunnerInstance.analyzeAndSave.mock.calls[0][2];
-    expect(taskModelResolver({ id: 'tables' })).toBe(taskModel);
+    expect(taskModelResolver({ id: 'tables' }).model).toBe(taskModel);
 
     vi.clearAllMocks();
     mockPageProcessorInstance.correctAndSave.mockResolvedValue({
@@ -455,6 +455,8 @@ describe('PostDoclingCorrectionPipeline', () => {
 
     const defaultModelResolver =
       mockRunnerInstance.analyzeAndSave.mock.calls[0][2];
-    expect(defaultModelResolver({ id: 'tables' })).toBe(reviewAssistanceModel);
+    expect(defaultModelResolver({ id: 'tables' }).model).toBe(
+      reviewAssistanceModel,
+    );
   });
 });

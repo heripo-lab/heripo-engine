@@ -62,10 +62,12 @@ import { TableCorrectionRunner } from './table-correction-runner';
 
 export type ReviewAssistanceModelResolver = (
   task: ReviewAssistanceTaskDefinition,
-) => LanguageModel;
+) => { model: LanguageModel; fallback?: LanguageModel };
 
 export interface ReviewAssistanceRunnerOptions {
   pageGateModel: LanguageModel;
+  /** pageGate primary 실패 시 fallback. */
+  pageGateFallback?: LanguageModel;
   pageGateMaxRetries: number;
   pageGateTemperature: number;
   pageConcurrency: number;
@@ -419,6 +421,7 @@ export class ReviewAssistanceRunner {
             image,
             options.pageGateModel,
             {
+              fallbackModel: options.pageGateFallback,
               maxRetries: options.pageGateMaxRetries,
               temperature: options.pageGateTemperature,
               abortSignal: options.abortSignal,
@@ -765,7 +768,7 @@ export class ReviewAssistanceRunner {
   ): Promise<ReviewAssistanceWorkItemResult> {
     const startedAtMs = Date.now();
     const startedAt = new Date(startedAtMs).toISOString();
-    const model = modelResolver(workItem.task);
+    const { model, fallback } = modelResolver(workItem.task);
     const modelId = this.getModelId(model);
     let attempts = 0;
     let validationFeedback: string[] = [];
@@ -825,6 +828,7 @@ export class ReviewAssistanceRunner {
               },
             ],
             primaryModel: model,
+            fallbackModel: fallback,
             maxRetries: this.getTaskMaxRetries(workItem.task, options),
             temperature: options.temperature,
             abortSignal: options.abortSignal,
@@ -1900,7 +1904,7 @@ export class ReviewAssistanceRunner {
     options: ReviewAssistanceRunnerOptions,
   ): Promise<ReviewAssistanceMergeChoice> {
     const arbiterTask = this.resolveMergeTaskDefinition(candidates);
-    const model = modelResolver(arbiterTask);
+    const { model, fallback } = modelResolver(arbiterTask);
     const conflictRefs = [
       ...new Set(
         candidates.flatMap((decision) =>
@@ -1941,6 +1945,7 @@ export class ReviewAssistanceRunner {
           },
         ],
         primaryModel: model,
+        fallbackModel: fallback,
         maxRetries: REVIEW_ASSISTANCE_MERGE_MAX_RETRIES,
         temperature: options.temperature,
         abortSignal: options.abortSignal,
