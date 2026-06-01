@@ -61,6 +61,8 @@ export interface PostDoclingPageProcessorOptions {
   documentLanguages?: string[];
   /** Pre-extracted page texts from pdftotext (1-based pageNo → text) */
   pageTexts?: Map<number, string>;
+  /** text-correction primary 실패 시 fallback. */
+  fallbackModel?: LanguageModel;
   /**
    * Optional separate VLM page eligibility check for Review Assistance.
    * Object presence alone activates the gate — there is no `enabled` flag,
@@ -68,6 +70,8 @@ export interface PostDoclingPageProcessorOptions {
    */
   reviewAssistanceGate?: {
     model: LanguageModel;
+    /** pageGate primary 실패 시 fallback. */
+    fallback?: LanguageModel;
     maxRetries?: number;
     temperature?: number;
     outputLanguage?: string;
@@ -318,6 +322,7 @@ export class PostDoclingPageProcessor {
           },
         ],
         primaryModel: model,
+        fallbackModel: options?.fallbackModel,
         maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
         temperature: options?.temperature ?? DEFAULT_TEMPERATURE,
         abortSignal: options?.abortSignal,
@@ -377,6 +382,7 @@ export class PostDoclingPageProcessor {
         image,
         gateOptions.model,
         {
+          fallbackModel: gateOptions.fallback,
           maxRetries: gateOptions.maxRetries,
           temperature: gateOptions.temperature,
           abortSignal: options?.abortSignal,

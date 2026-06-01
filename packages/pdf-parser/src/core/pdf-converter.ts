@@ -75,6 +75,8 @@ export type PDFConvertOptions = Omit<
   chunkMaxRetries?: number;
   /** Vision model for document language detection when the PDF text layer is insufficient */
   languageDetectionModel?: LanguageModel;
+  /** languageDetectionModel 실패 시 fallback. */
+  languageDetectionFallbackModel?: LanguageModel;
   /** LLM model for document type validation (opt-in: skipped when not set) */
   documentValidationModel?: LanguageModel;
 };
@@ -240,6 +242,7 @@ export class PDFConverter {
     try {
       const result = await detector.detect(pdfPath, languageDetectionDir, {
         model: options.languageDetectionModel,
+        fallbackModel: options.languageDetectionFallbackModel,
         aggregator: options.aggregator,
         abortSignal,
       });

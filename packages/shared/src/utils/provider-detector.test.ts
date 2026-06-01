@@ -33,6 +33,18 @@ describe('detectProvider', () => {
     );
   });
 
+  test('detects Ollama provider', () => {
+    expect(detectProvider(createModelWithProvider('ollama.chat'))).toBe(
+      'ollama',
+    );
+  });
+
+  test('detects LM Studio provider', () => {
+    expect(detectProvider(createModelWithProvider('lmstudio.chat'))).toBe(
+      'lmstudio',
+    );
+  });
+
   test('returns unknown for unrecognized provider string', () => {
     expect(
       detectProvider(createModelWithProvider('some-custom-provider')),

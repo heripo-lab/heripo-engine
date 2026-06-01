@@ -892,6 +892,31 @@ describe('LLMCaller', () => {
       expect(result.output).toEqual({ result: 'unknown-output' });
     });
 
+    test('should use tool call pattern for Ollama', async () => {
+      vi.mocked(detectProvider).mockReturnValue('ollama');
+      const mockResult = createMockToolCallResult({ result: 'ollama-output' });
+      vi.mocked(generateText).mockResolvedValueOnce(mockResult);
+
+      const result = await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 3,
+        component: 'Test',
+        phase: 'test',
+      });
+
+      const callArgs = vi.mocked(generateText).mock.calls[0][0] as any;
+      expect(callArgs.tools.submitResult).toBeDefined();
+      expect(callArgs.toolChoice).toEqual({
+        type: 'tool',
+        toolName: 'submitResult',
+      });
+      expect(callArgs.output).toBeUndefined();
+      expect(result.output).toEqual({ result: 'ollama-output' });
+    });
+
     test('should throw NoObjectGeneratedError after exhausting all tool call retries', async () => {
       vi.mocked(detectProvider).mockReturnValue('togetherai');
       // 11 attempts (1 initial + 10 retries) all return empty tool calls

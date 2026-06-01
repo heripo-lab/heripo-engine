@@ -44,6 +44,7 @@ export class PostDoclingCorrectionPipeline {
         outputDir,
         correction.models.textCorrection,
         {
+          fallbackModel: correction.models.textCorrectionFallback,
           concurrency: correction.concurrency.pages,
           maxRetries: correction.maxRetries.textCorrection,
           temperature: correction.temperature,
@@ -54,6 +55,7 @@ export class PostDoclingCorrectionPipeline {
           pageTexts,
           reviewAssistanceGate: {
             model: correction.models.pageGate,
+            fallback: correction.models.pageGateFallback,
             maxRetries: correction.maxRetries.pageGate,
             temperature: correction.temperature,
             outputLanguage: correction.outputLanguage,
@@ -70,6 +72,7 @@ export class PostDoclingCorrectionPipeline {
           pdfPath,
           pageTexts,
           pageGateModel: correction.models.pageGate,
+          pageGateFallback: correction.models.pageGateFallback,
           pageGateMaxRetries: correction.maxRetries.pageGate,
           pageGateTemperature: correction.temperature,
           pageConcurrency: correction.concurrency.pages,
@@ -99,17 +102,26 @@ export class PostDoclingCorrectionPipeline {
   ): ReviewAssistanceModelResolver {
     return (task: ReviewAssistanceTaskDefinition) => {
       if (task.id === 'tables') {
-        return (
-          correction.models.tableCorrection ??
-          correction.models.reviewAssistanceTasks?.tables ??
-          correction.models.reviewAssistance
-        );
+        return {
+          model:
+            correction.models.tableCorrection ??
+            correction.models.reviewAssistanceTasks?.tables ??
+            correction.models.reviewAssistance,
+          fallback:
+            correction.models.tableCorrectionFallback ??
+            correction.models.reviewAssistanceTasksFallback?.tables ??
+            correction.models.reviewAssistanceFallback,
+        };
       }
 
-      return (
-        correction.models.reviewAssistanceTasks?.[task.id] ??
-        correction.models.reviewAssistance
-      );
+      return {
+        model:
+          correction.models.reviewAssistanceTasks?.[task.id] ??
+          correction.models.reviewAssistance,
+        fallback:
+          correction.models.reviewAssistanceTasksFallback?.[task.id] ??
+          correction.models.reviewAssistanceFallback,
+      };
     };
   }
 

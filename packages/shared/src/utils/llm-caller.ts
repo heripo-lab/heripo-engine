@@ -316,7 +316,11 @@ export class LLMCaller {
    *
    * Strategy per provider:
    * - OpenAI / Anthropic / Google Gemini: `Output.object()` with schema retry
-   * - Together AI / unknown: forced tool call pattern
+   * - Together AI / Ollama / unknown: forced tool call pattern
+   *
+   * Ollama uses tool-call because MLX backends ignore the `format` grammar
+   * that `Output.object()` relies on, and gguf's grammar is unstable once
+   * thinking is disabled. Applies to both text and vision paths.
    *
    * Retries up to MAX_STRUCTURED_OUTPUT_RETRIES times on NoObjectGeneratedError
    * (schema mismatch), re-throwing the last error if all attempts fail.
@@ -335,7 +339,11 @@ export class LLMCaller {
   }> {
     const providerType = detectProvider(model);
 
-    if (providerType === 'togetherai' || providerType === 'unknown') {
+    if (
+      providerType === 'togetherai' ||
+      providerType === 'ollama' ||
+      providerType === 'unknown'
+    ) {
       return this.generateViaToolCall(model, schema, promptParams);
     }
 
