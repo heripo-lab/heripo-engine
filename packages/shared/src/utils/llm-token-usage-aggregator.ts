@@ -21,34 +21,97 @@ function formatTokens(usage: TokenUsage): string {
   return `${usage.inputTokens} input, ${usage.outputTokens} output, ${usage.totalTokens} total`;
 }
 
+interface MutableUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+function emptyUsage(): MutableUsage {
+  return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+}
+
+function addInto(target: MutableUsage, src: TokenUsage): void {
+  target.inputTokens += src.inputTokens;
+  target.outputTokens += src.outputTokens;
+  target.totalTokens += src.totalTokens;
+}
+
+function sumUsage(a?: MutableUsage, b?: MutableUsage): MutableUsage {
+  return {
+    inputTokens: (a?.inputTokens ?? 0) + (b?.inputTokens ?? 0),
+    outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
+    totalTokens: (a?.totalTokens ?? 0) + (b?.totalTokens ?? 0),
+  };
+}
+
+/**
+ * Accumulate a single LLM call's usage into a per-model bucket.
+ *
+ * Buckets are keyed by `modelName` so that a single (phase, tier) that mixes
+ * several models (e.g. review-assistance `work-item-review` where the `tables`
+ * task uses a different model from the text tasks) keeps each model's tokens —
+ * and therefore each model's cost — distinct instead of collapsing onto the
+ * first model seen.
+ */
+function accumulateModel(
+  bucket: Map<string, MutableUsage>,
+  modelName: string,
+  usage: TokenUsage,
+): void {
+  let entry = bucket.get(modelName);
+  if (!entry) {
+    entry = emptyUsage();
+    bucket.set(modelName, entry);
+  }
+  addInto(entry, usage);
+}
+
+/**
+ * Aggregated token usage for a specific phase.
+ *
+ * `primary` / `fallback` map each model used in this (phase, tier) to its own
+ * accumulated usage. JS `Map` preserves insertion order, so the first model
+ * seen stays first — but every model keeps its own totals.
+ */
+interface PhaseAggregate {
+  primary: Map<string, MutableUsage>;
+  fallback: Map<string, MutableUsage>;
+  total: MutableUsage;
+  metadata: TokenUsageMetadata[];
+}
+
 /**
  * Aggregated token usage for a specific component
  */
 interface ComponentAggregate {
   component: string;
-  phases: Record<
-    string,
-    {
-      primary?: {
-        modelName: string;
-        inputTokens: number;
-        outputTokens: number;
-        totalTokens: number;
-      };
-      fallback?: {
-        modelName: string;
-        inputTokens: number;
-        outputTokens: number;
-        totalTokens: number;
-      };
-      total: {
-        inputTokens: number;
-        outputTokens: number;
-        totalTokens: number;
-      };
-      metadata: TokenUsageMetadata[];
-    }
-  >;
+  phases: Record<string, PhaseAggregate>;
+  total: MutableUsage;
+}
+
+interface ModelUsageReport {
+  modelName: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+interface PhaseReport {
+  phase: string;
+  primary?: ModelUsageReport;
+  fallback?: ModelUsageReport;
+  total: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+  metadata?: TokenUsageMetadata[];
+}
+
+interface ComponentReport {
+  component: string;
+  phases: PhaseReport[];
   total: {
     inputTokens: number;
     outputTokens: number;
@@ -66,7 +129,12 @@ interface ComponentAggregate {
  * Tracks usage by:
  * - Component (TocExtractor, PageRangeParser, etc.)
  * - Phase (extraction, validation, sampling, etc.)
- * - Model (primary vs fallback)
+ * - Model tier (primary vs fallback) AND model name
+ *
+ * A single (phase, tier) may legitimately span multiple model names — e.g.
+ * review-assistance `work-item-review`, where the `tables` work item runs on a
+ * different model from the text work items. Usage is therefore kept per model
+ * so that token totals and downstream cost attribution stay correct for each.
  *
  * @example
  * ```typescript
@@ -98,12 +166,11 @@ interface ComponentAggregate {
  * // Outputs:
  * // [DocumentProcessor] Token usage summary:
  * // TocExtractor:
- * //   - extraction (primary: gpt-5): 1500 input, 300 output, 1800 total
+ * //   - extraction:
+ * //       primary (gpt-5): 1500 input, 300 output, 1800 total
+ * //       subtotal: 1500 input, 300 output, 1800 total
  * //   TocExtractor total: 1500 input, 300 output, 1800 total
- * // PageRangeParser:
- * //   - sampling (fallback: claude-opus-4-5): 2000 input, 100 output, 2100 total
- * //   PageRangeParser total: 2000 input, 100 output, 2100 total
- * // Grand total: 3500 input, 400 output, 3900 total
+ * // ...
  * ```
  */
 export class LLMTokenUsageAggregator {
@@ -120,11 +187,7 @@ export class LLMTokenUsageAggregator {
       this.usage[usage.component] = {
         component: usage.component,
         phases: {},
-        total: {
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-        },
+        total: emptyUsage(),
       };
     }
 
@@ -133,11 +196,9 @@ export class LLMTokenUsageAggregator {
     // Initialize phase if not seen before
     if (!component.phases[usage.phase]) {
       component.phases[usage.phase] = {
-        total: {
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-        },
+        primary: new Map(),
+        fallback: new Map(),
+        total: emptyUsage(),
         metadata: [],
       };
     }
@@ -147,50 +208,24 @@ export class LLMTokenUsageAggregator {
       phase.metadata.push(usage.metadata);
     }
 
-    // Track by model type
+    // Track by model tier, keyed per model name (set-once misattribution fix)
     if (usage.model === 'primary') {
-      if (!phase.primary) {
-        phase.primary = {
-          modelName: usage.modelName,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-        };
-      }
-
-      phase.primary.inputTokens += usage.inputTokens;
-      phase.primary.outputTokens += usage.outputTokens;
-      phase.primary.totalTokens += usage.totalTokens;
+      accumulateModel(phase.primary, usage.modelName, usage);
     } else if (usage.model === 'fallback') {
-      if (!phase.fallback) {
-        phase.fallback = {
-          modelName: usage.modelName,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-        };
-      }
-
-      phase.fallback.inputTokens += usage.inputTokens;
-      phase.fallback.outputTokens += usage.outputTokens;
-      phase.fallback.totalTokens += usage.totalTokens;
+      accumulateModel(phase.fallback, usage.modelName, usage);
     }
 
     // Update phase total
-    phase.total.inputTokens += usage.inputTokens;
-    phase.total.outputTokens += usage.outputTokens;
-    phase.total.totalTokens += usage.totalTokens;
+    addInto(phase.total, usage);
 
     // Update component total
-    component.total.inputTokens += usage.inputTokens;
-    component.total.outputTokens += usage.outputTokens;
-    component.total.totalTokens += usage.totalTokens;
+    addInto(component.total, usage);
   }
 
   /**
    * Get aggregated usage grouped by component
    *
-   * @returns Array of component aggregates with phase breakdown
+   * @returns Array of component aggregates with per-model phase breakdown
    */
   getByComponent(): ComponentAggregate[] {
     return Object.values(this.usage);
@@ -200,148 +235,73 @@ export class LLMTokenUsageAggregator {
    * Get token usage report in structured JSON format
    *
    * Converts internal usage data to external TokenUsageReport format suitable
-   * for serialization and reporting. The report includes component breakdown,
-   * phase-level details, and both primary and fallback model usage.
+   * for serialization and reporting.
+   *
+   * Each (phase, model) pair becomes its own PhaseUsageReport entry. A phase
+   * that used a single primary (and/or a single fallback) model yields exactly
+   * one entry — identical to the legacy shape — while a phase that mixed models
+   * yields one entry per model, all sharing the same `phase` name. Every
+   * (phase, tier, modelName) combination appears in exactly one entry, so
+   * consumers that key by `${component}|${phase}|${tier}|${modelName}`
+   * (heripo-web's token-usage emitter / ledger recorder) attribute each model's
+   * tokens — and cost — correctly without double counting.
    *
    * @returns Structured token usage report with components and total
    */
   getReport(): {
-    components: Array<{
-      component: string;
-      phases: Array<{
-        phase: string;
-        primary?: {
-          modelName: string;
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        fallback?: {
-          modelName: string;
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        total: {
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        metadata?: TokenUsageMetadata[];
-      }>;
-      total: {
-        inputTokens: number;
-        outputTokens: number;
-        totalTokens: number;
-      };
-    }>;
+    components: ComponentReport[];
     total: TokenUsage;
   } {
-    const components: Array<{
-      component: string;
-      phases: Array<{
-        phase: string;
-        primary?: {
-          modelName: string;
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        fallback?: {
-          modelName: string;
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        total: {
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-      }>;
-      total: {
-        inputTokens: number;
-        outputTokens: number;
-        totalTokens: number;
-      };
-    }> = [];
+    const components: ComponentReport[] = [];
 
     for (const component of Object.values(this.usage)) {
-      const phases: Array<{
-        phase: string;
-        primary?: {
-          modelName: string;
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        fallback?: {
-          modelName: string;
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        total: {
-          inputTokens: number;
-          outputTokens: number;
-          totalTokens: number;
-        };
-        metadata?: TokenUsageMetadata[];
-      }> = [];
+      const phases: PhaseReport[] = [];
 
       for (const [phaseName, phaseData] of Object.entries(component.phases)) {
-        const phaseReport: {
-          phase: string;
-          primary?: {
-            modelName: string;
-            inputTokens: number;
-            outputTokens: number;
-            totalTokens: number;
-          };
-          fallback?: {
-            modelName: string;
-            inputTokens: number;
-            outputTokens: number;
-            totalTokens: number;
-          };
-          total: {
-            inputTokens: number;
-            outputTokens: number;
-            totalTokens: number;
-          };
-          metadata?: TokenUsageMetadata[];
-        } = {
-          phase: phaseName,
-          total: {
-            inputTokens: phaseData.total.inputTokens,
-            outputTokens: phaseData.total.outputTokens,
-            totalTokens: phaseData.total.totalTokens,
-          },
-        };
+        const primaryEntries = [...phaseData.primary.entries()];
+        const fallbackEntries = [...phaseData.fallback.entries()];
+        const entryCount = Math.max(
+          primaryEntries.length,
+          fallbackEntries.length,
+        );
 
-        if (phaseData.metadata.length > 0) {
-          phaseReport.metadata = [...phaseData.metadata];
+        // Phase tracked tokens but no primary/fallback model (e.g. an unknown
+        // tier). Preserve a single total-only entry so the phase still appears.
+        if (entryCount === 0) {
+          const phaseReport: PhaseReport = {
+            phase: phaseName,
+            total: { ...phaseData.total },
+          };
+          if (phaseData.metadata.length > 0) {
+            phaseReport.metadata = [...phaseData.metadata];
+          }
+          phases.push(phaseReport);
+          continue;
         }
 
-        if (phaseData.primary) {
-          phaseReport.primary = {
-            modelName: phaseData.primary.modelName,
-            inputTokens: phaseData.primary.inputTokens,
-            outputTokens: phaseData.primary.outputTokens,
-            totalTokens: phaseData.primary.totalTokens,
-          };
-        }
+        for (let i = 0; i < entryCount; i++) {
+          const primary = primaryEntries[i];
+          const fallback = fallbackEntries[i];
 
-        if (phaseData.fallback) {
-          phaseReport.fallback = {
-            modelName: phaseData.fallback.modelName,
-            inputTokens: phaseData.fallback.inputTokens,
-            outputTokens: phaseData.fallback.outputTokens,
-            totalTokens: phaseData.fallback.totalTokens,
+          const phaseReport: PhaseReport = {
+            phase: phaseName,
+            total: sumUsage(primary?.[1], fallback?.[1]),
           };
-        }
 
-        phases.push(phaseReport);
+          if (primary) {
+            phaseReport.primary = { modelName: primary[0], ...primary[1] };
+          }
+          if (fallback) {
+            phaseReport.fallback = { modelName: fallback[0], ...fallback[1] };
+          }
+          // Phase-level metadata is not model-specific; attach it once to the
+          // first entry to avoid duplicating it across split entries.
+          if (i === 0 && phaseData.metadata.length > 0) {
+            phaseReport.metadata = [...phaseData.metadata];
+          }
+
+          phases.push(phaseReport);
+        }
       }
 
       components.push({
@@ -393,8 +353,8 @@ export class LLMTokenUsageAggregator {
   /**
    * Log comprehensive token usage summary
    *
-   * Outputs usage grouped by component, with phase and model breakdown.
-   * Shows primary and fallback token usage separately for each phase.
+   * Outputs usage grouped by component, with phase and per-model breakdown.
+   * Shows each primary and fallback model on its own line for each phase.
    * Call this once at the end of document processing.
    *
    * @param logger - Logger instance for output
@@ -413,37 +373,29 @@ export class LLMTokenUsageAggregator {
     let grandInputTokens = 0;
     let grandOutputTokens = 0;
     let grandTotalTokens = 0;
-    let grandPrimaryInputTokens = 0;
-    let grandPrimaryOutputTokens = 0;
-    let grandPrimaryTotalTokens = 0;
-    let grandFallbackInputTokens = 0;
-    let grandFallbackOutputTokens = 0;
-    let grandFallbackTotalTokens = 0;
+    const grandPrimary = emptyUsage();
+    const grandFallback = emptyUsage();
 
     for (const component of components) {
       logger.info(`${component.component}:`);
 
-      for (const [phase, phaseData] of Object.entries(component.phases)) {
-        logger.info(`  - ${phase}:`);
+      for (const [phaseName, phaseData] of Object.entries(component.phases)) {
+        logger.info(`  - ${phaseName}:`);
 
-        // Show primary model usage
-        if (phaseData.primary) {
+        // Show primary model usage (one line per model)
+        for (const [modelName, modelUsage] of phaseData.primary) {
           logger.info(
-            `      primary (${phaseData.primary.modelName}): ${formatTokens(phaseData.primary)}`,
+            `      primary (${modelName}): ${formatTokens(modelUsage)}`,
           );
-          grandPrimaryInputTokens += phaseData.primary.inputTokens;
-          grandPrimaryOutputTokens += phaseData.primary.outputTokens;
-          grandPrimaryTotalTokens += phaseData.primary.totalTokens;
+          addInto(grandPrimary, modelUsage);
         }
 
-        // Show fallback model usage
-        if (phaseData.fallback) {
+        // Show fallback model usage (one line per model)
+        for (const [modelName, modelUsage] of phaseData.fallback) {
           logger.info(
-            `      fallback (${phaseData.fallback.modelName}): ${formatTokens(phaseData.fallback)}`,
+            `      fallback (${modelName}): ${formatTokens(modelUsage)}`,
           );
-          grandFallbackInputTokens += phaseData.fallback.inputTokens;
-          grandFallbackOutputTokens += phaseData.fallback.outputTokens;
-          grandFallbackTotalTokens += phaseData.fallback.totalTokens;
+          addInto(grandFallback, modelUsage);
         }
 
         // Show phase subtotal
@@ -462,23 +414,11 @@ export class LLMTokenUsageAggregator {
 
     // Show grand total with primary/fallback breakdown
     logger.info('--- Summary ---');
-    if (grandPrimaryTotalTokens > 0) {
-      logger.info(
-        `Primary total: ${formatTokens({
-          inputTokens: grandPrimaryInputTokens,
-          outputTokens: grandPrimaryOutputTokens,
-          totalTokens: grandPrimaryTotalTokens,
-        })}`,
-      );
+    if (grandPrimary.totalTokens > 0) {
+      logger.info(`Primary total: ${formatTokens(grandPrimary)}`);
     }
-    if (grandFallbackTotalTokens > 0) {
-      logger.info(
-        `Fallback total: ${formatTokens({
-          inputTokens: grandFallbackInputTokens,
-          outputTokens: grandFallbackOutputTokens,
-          totalTokens: grandFallbackTotalTokens,
-        })}`,
-      );
+    if (grandFallback.totalTokens > 0) {
+      logger.info(`Fallback total: ${formatTokens(grandFallback)}`);
     }
     logger.info(
       `Grand total: ${formatTokens({
