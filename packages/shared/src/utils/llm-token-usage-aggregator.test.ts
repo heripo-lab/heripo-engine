@@ -99,10 +99,8 @@ describe('LLMTokenUsageAggregator', () => {
       const byComponent = aggregator.getByComponent();
       const phase = byComponent[0].phases['extraction'];
 
-      expect(phase.primary?.inputTokens).toBe(100);
-      expect(phase.primary?.modelName).toBe('gpt-5');
-      expect(phase.fallback?.inputTokens).toBe(200);
-      expect(phase.fallback?.modelName).toBe('claude-opus-4-5');
+      expect(phase.primary.get('gpt-5')?.inputTokens).toBe(100);
+      expect(phase.fallback.get('claude-opus-4-5')?.inputTokens).toBe(200);
       expect(phase.total.inputTokens).toBe(300);
     });
 
@@ -184,10 +182,9 @@ describe('LLMTokenUsageAggregator', () => {
       const byComponent = aggregator.getByComponent();
       const phase = byComponent[0].phases['extraction'];
 
-      expect(phase.fallback?.inputTokens).toBe(300);
-      expect(phase.fallback?.outputTokens).toBe(125);
-      expect(phase.fallback?.totalTokens).toBe(425);
-      expect(phase.fallback?.modelName).toBe('claude-opus-4-5');
+      expect(phase.fallback.get('claude-opus-4-5')?.inputTokens).toBe(300);
+      expect(phase.fallback.get('claude-opus-4-5')?.outputTokens).toBe(125);
+      expect(phase.fallback.get('claude-opus-4-5')?.totalTokens).toBe(425);
     });
 
     test('should handle unknown model type gracefully (skip primary/fallback tracking)', () => {
@@ -206,9 +203,9 @@ describe('LLMTokenUsageAggregator', () => {
       const byComponent = aggregator.getByComponent();
       const phase = byComponent[0].phases['extraction'];
 
-      // Neither primary nor fallback should be set
-      expect(phase.primary).toBeUndefined();
-      expect(phase.fallback).toBeUndefined();
+      // Neither primary nor fallback should hold a model
+      expect(phase.primary.size).toBe(0);
+      expect(phase.fallback.size).toBe(0);
       // But total should still be updated
       expect(phase.total.inputTokens).toBe(100);
       expect(phase.total.outputTokens).toBe(50);
@@ -241,6 +238,54 @@ describe('LLMTokenUsageAggregator', () => {
           proposalCount: 1,
         },
       ]);
+    });
+
+    test('should keep distinct primary models separate within one phase', () => {
+      // Regression: review-assistance `work-item-review` mixes models — the
+      // `tables` task runs on a different model from the text tasks. They must
+      // not collapse onto the first model seen.
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'primary',
+        modelName: 'lmstudio/gemma',
+        inputTokens: 100,
+        outputTokens: 40,
+        totalTokens: 140,
+      });
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'primary',
+        modelName: 'openai/gpt-5-mini',
+        inputTokens: 200,
+        outputTokens: 80,
+        totalTokens: 280,
+      });
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'primary',
+        modelName: 'lmstudio/gemma',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+      });
+
+      const phase = aggregator.getByComponent()[0].phases['work-item-review'];
+
+      expect(phase.primary.size).toBe(2);
+      expect(phase.primary.get('lmstudio/gemma')).toEqual({
+        inputTokens: 110,
+        outputTokens: 45,
+        totalTokens: 155,
+      });
+      expect(phase.primary.get('openai/gpt-5-mini')).toEqual({
+        inputTokens: 200,
+        outputTokens: 80,
+        totalTokens: 280,
+      });
+      expect(phase.total.totalTokens).toBe(435);
     });
   });
 
@@ -445,11 +490,11 @@ describe('LLMTokenUsageAggregator', () => {
         totalTokens: 150,
       });
 
-      // Get the internal component and remove primary/fallback to create edge case
+      // Clear the per-model buckets to create the no-model phase edge case
       const components = aggregator.getByComponent();
       const phaseData = components[0].phases['testPhase'];
-      delete (phaseData as any).primary;
-      delete (phaseData as any).fallback;
+      phaseData.primary.clear();
+      phaseData.fallback.clear();
 
       aggregator.logSummary(mockLogger);
 
@@ -482,6 +527,46 @@ describe('LLMTokenUsageAggregator', () => {
       // Should contain Fallback total
       expect(calls).toContainEqual(
         'Fallback total: 200 input, 80 output, 280 total',
+      );
+    });
+
+    test('should log each model on its own line for a multi-model phase', () => {
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'primary',
+        modelName: 'lmstudio/gemma',
+        inputTokens: 100,
+        outputTokens: 40,
+        totalTokens: 140,
+      });
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'primary',
+        modelName: 'openai/gpt-5-mini',
+        inputTokens: 200,
+        outputTokens: 80,
+        totalTokens: 280,
+      });
+
+      aggregator.logSummary(mockLogger);
+
+      const calls = vi.mocked(mockLogger.info).mock.calls.map((c) => c[0]);
+
+      // Each model is reported on its own primary line.
+      expect(calls).toContainEqual(
+        '      primary (lmstudio/gemma): 100 input, 40 output, 140 total',
+      );
+      expect(calls).toContainEqual(
+        '      primary (openai/gpt-5-mini): 200 input, 80 output, 280 total',
+      );
+      // Phase subtotal still reflects the combined total.
+      expect(calls).toContainEqual(
+        '      subtotal: 300 input, 120 output, 420 total',
+      );
+      expect(calls).toContainEqual(
+        'Primary total: 300 input, 120 output, 420 total',
       );
     });
   });
@@ -669,6 +754,118 @@ describe('LLMTokenUsageAggregator', () => {
       expect(report.components[0].phases[0].metadata).toEqual([
         { pageNo: 1, commandCount: 3 },
       ]);
+    });
+
+    test('should split a multi-model phase into one entry per model', () => {
+      // Invariant relied upon by heripo-web's token-usage emitter, which keys
+      // ledger rows by `${component}|${phase}|${tier}|${modelName}`: a phase
+      // that mixed models must emit multiple entries sharing the phase name,
+      // each carrying a single model, with every (tier, model) appearing
+      // exactly once (no collision, no double count).
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'primary',
+        modelName: 'lmstudio/gemma',
+        inputTokens: 100,
+        outputTokens: 40,
+        totalTokens: 140,
+      });
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'primary',
+        modelName: 'openai/gpt-5-mini',
+        inputTokens: 200,
+        outputTokens: 80,
+        totalTokens: 280,
+      });
+      aggregator.track({
+        component: 'ReviewAssistance',
+        phase: 'work-item-review',
+        model: 'fallback',
+        modelName: 'openai/gpt-5',
+        inputTokens: 30,
+        outputTokens: 10,
+        totalTokens: 40,
+      });
+
+      const report = aggregator.getReport();
+      const entries = report.components[0].phases;
+
+      // All entries share the same phase name.
+      expect(entries.every((p) => p.phase === 'work-item-review')).toBe(true);
+
+      // Flatten to the 4-tuple keyset the consumer derives.
+      const leaves: Array<{ key: string; totalTokens: number }> = [];
+      for (const entry of entries) {
+        if (entry.primary) {
+          leaves.push({
+            key: `primary|${entry.primary.modelName}`,
+            totalTokens: entry.primary.totalTokens,
+          });
+        }
+        if (entry.fallback) {
+          leaves.push({
+            key: `fallback|${entry.fallback.modelName}`,
+            totalTokens: entry.fallback.totalTokens,
+          });
+        }
+      }
+
+      // No key collision — each (tier, model) appears exactly once.
+      const keys = leaves.map((l) => l.key);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(new Set(keys)).toEqual(
+        new Set([
+          'primary|lmstudio/gemma',
+          'primary|openai/gpt-5-mini',
+          'fallback|openai/gpt-5',
+        ]),
+      );
+
+      // Summed leaf tokens equal the phase total (no double count, no miss).
+      const summed = leaves.reduce((acc, l) => acc + l.totalTokens, 0);
+      expect(summed).toBe(140 + 280 + 40);
+      expect(report.total.totalTokens).toBe(460);
+    });
+
+    test('should emit a total-only entry for a phase with an unknown tier', () => {
+      // Unknown tier: tokens are tracked but land in neither primary nor
+      // fallback. The phase must still surface as a single total-only entry.
+      aggregator.track({
+        component: 'TestComponent',
+        phase: 'noModelPhase',
+        model: 'unknown' as 'primary' | 'fallback',
+        modelName: 'whatever',
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+      });
+      // Same edge, but carrying metadata, to cover the metadata branch.
+      aggregator.track({
+        component: 'TestComponent',
+        phase: 'noModelPhaseWithMeta',
+        model: 'unknown' as 'primary' | 'fallback',
+        modelName: 'whatever',
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        metadata: { note: 'x' },
+      });
+
+      const report = aggregator.getReport();
+      const phases = report.components[0].phases;
+
+      const noModel = phases.find((p) => p.phase === 'noModelPhase');
+      expect(noModel?.primary).toBeUndefined();
+      expect(noModel?.fallback).toBeUndefined();
+      expect(noModel?.total.totalTokens).toBe(150);
+      expect(noModel?.metadata).toBeUndefined();
+
+      const withMeta = phases.find((p) => p.phase === 'noModelPhaseWithMeta');
+      expect(withMeta?.metadata).toEqual([{ note: 'x' }]);
+      expect(withMeta?.total.totalTokens).toBe(15);
     });
   });
 
