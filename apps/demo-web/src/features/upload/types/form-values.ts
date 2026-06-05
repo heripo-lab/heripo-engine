@@ -49,7 +49,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
       },
     },
     concurrency: {
-      pages: 2,
+      pages: 10,
       reviewTasks: 6,
       tables: 1,
     },
