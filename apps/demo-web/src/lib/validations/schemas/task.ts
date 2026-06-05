@@ -41,12 +41,21 @@ const correctionMaxRetriesSchema = z
   .optional();
 
 const correctionOptionsSchema = z.object({
+  // Each correction slot can take a local primary model with a cloud fallback
+  // (mirrors heripo-web's backoffice config). The `*Fallback` ids are carried
+  // as defaults in DEFAULT_FORM_VALUES; the UI does not expose them, so they
+  // round-trip through `JSON.stringify(options)` without a dedicated selector.
   models: z.object({
     textCorrection: llmModelSchema,
+    textCorrectionFallback: llmModelSchema.optional(),
     pageGate: llmModelSchema,
+    pageGateFallback: llmModelSchema.optional(),
     reviewAssistance: llmModelSchema,
+    reviewAssistanceFallback: llmModelSchema.optional(),
     tableCorrection: llmModelSchema.optional(),
+    tableCorrectionFallback: llmModelSchema.optional(),
     reviewAssistanceTasks: correctionTaskModelSchema,
+    reviewAssistanceTasksFallback: correctionTaskModelSchema,
   }),
   concurrency: z
     .object({
@@ -76,8 +85,9 @@ export const processingOptionsSchema = z.object({
   // Document type validation
   documentValidationModel: llmModelSchema.optional(),
 
-  // PDF language detection for OCR language hints
+  // PDF language detection for OCR language hints (local primary + cloud fallback)
   languageDetectionModel: llmModelSchema.optional(),
+  languageDetectionFallbackModel: llmModelSchema.optional(),
 
   // Force image PDF pre-conversion
   forceImagePdf: z.boolean().default(false),

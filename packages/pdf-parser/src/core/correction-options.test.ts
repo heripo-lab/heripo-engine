@@ -106,4 +106,15 @@ describe('normalizePDFCorrectionOptions', () => {
     expect(above.temperature).toBe(2);
     expect(below.temperature).toBe(0);
   });
+
+  test('defaults reviewAssistanceEnabled to true and honors an explicit value', () => {
+    expect(
+      normalizePDFCorrectionOptions(correction()).reviewAssistanceEnabled,
+    ).toBe(true);
+    expect(
+      normalizePDFCorrectionOptions(
+        correction({ reviewAssistanceEnabled: false }),
+      ).reviewAssistanceEnabled,
+    ).toBe(false);
+  });
 });

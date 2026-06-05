@@ -59,6 +59,12 @@ export interface PDFCorrectionOptions {
    * Enabled by the engine demo; defaults to false everywhere else.
    */
   forceAutoApply?: boolean;
+  /**
+   * When false, the review-assistance stage (the per-page eligibility gate plus
+   * the structural review-assistance runner) is skipped entirely and only the
+   * text-correction stage runs. Defaults to true.
+   */
+  reviewAssistanceEnabled?: boolean;
   temperature?: number;
 }
 
@@ -73,6 +79,7 @@ export interface NormalizedPDFCorrectionOptions {
   autoApplyThreshold: number;
   proposalThreshold: number;
   forceAutoApply: boolean;
+  reviewAssistanceEnabled: boolean;
   temperature: number;
 }
 
@@ -100,6 +107,7 @@ export const PDF_CORRECTION_DEFAULTS: Omit<
   autoApplyThreshold: 0.85,
   proposalThreshold: 0.5,
   forceAutoApply: false,
+  reviewAssistanceEnabled: true,
   temperature: 0,
 };
 
@@ -236,6 +244,9 @@ export function normalizePDFCorrectionOptions(
     proposalThreshold,
     forceAutoApply:
       value.forceAutoApply ?? PDF_CORRECTION_DEFAULTS.forceAutoApply,
+    reviewAssistanceEnabled:
+      value.reviewAssistanceEnabled ??
+      PDF_CORRECTION_DEFAULTS.reviewAssistanceEnabled,
     temperature: normalizeTemperature(
       value.temperature,
       PDF_CORRECTION_DEFAULTS.temperature,

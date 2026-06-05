@@ -26,13 +26,16 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   // Force image PDF pre-conversion
   forceImagePdf: false,
   // Mandatory post-Docling correction.
-  // NOTE: demo-web defaults assume cloud VLMs (Gemini, OpenAI) where higher
-  // page concurrency is safe. For local models prefer a smaller value
-  // (the pdf-parser library default is 1) to keep GPU/memory usage bounded —
-  // see Phase D in docs/plans/pdf-parser-correction-gating.md.
+  // NOTE: review assistance (the structural correction logic) is disabled for
+  // the demo — only the text-correction stage runs (see `reviewAssistanceEnabled:
+  // false` in task-worker.ts). Accordingly, only `textCorrection` uses a local
+  // model (LM Studio gemma 26b) with a cloud fallback so it still completes if
+  // the local model fails; every other slot stays on the original cloud models
+  // and is inert while review assistance is off.
   correction: {
     models: {
-      textCorrection: 'google/gemini-3.1-flash-lite',
+      textCorrection: 'lmstudio/gemma-4-26b-a4b-it-mlx',
+      textCorrectionFallback: 'openai/gpt-5.4',
       pageGate: 'google/gemini-3.1-flash-lite',
       reviewAssistance: 'google/gemini-3.1-flash-lite',
       tableCorrection: 'openai/gpt-5-mini',
@@ -46,13 +49,13 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
       },
     },
     concurrency: {
-      pages: 10,
+      pages: 2,
       reviewTasks: 6,
       tables: 1,
     },
     outputLanguage: 'ko-KR',
     maxRetries: undefined,
-    modelConcurrency: 5,
+    modelConcurrency: 3,
     workItemTimeoutMs: 1_800_000,
   },
   // LLM Models
