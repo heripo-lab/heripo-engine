@@ -53,45 +53,52 @@ export class PostDoclingCorrectionPipeline {
           onTokenUsage: options.onTokenUsage,
           documentLanguages: options.ocr_lang,
           pageTexts,
-          reviewAssistanceGate: {
-            model: correction.models.pageGate,
-            fallback: correction.models.pageGateFallback,
-            maxRetries: correction.maxRetries.pageGate,
-            temperature: correction.temperature,
-            outputLanguage: correction.outputLanguage,
-          },
+          // When review assistance is disabled, omit the gate entirely so the
+          // per-page eligibility checks (pageGate LLM calls + sidecar report)
+          // never run — only text correction executes.
+          reviewAssistanceGate: correction.reviewAssistanceEnabled
+            ? {
+                model: correction.models.pageGate,
+                fallback: correction.models.pageGateFallback,
+                maxRetries: correction.maxRetries.pageGate,
+                temperature: correction.temperature,
+                outputLanguage: correction.outputLanguage,
+              }
+            : undefined,
         },
       );
 
-      const runner = new ReviewAssistanceRunner(this.logger);
-      await runner.analyzeAndSave(
-        outputDir,
-        reportId,
-        this.buildReviewAssistanceModelResolver(correction),
-        {
-          pdfPath,
-          pageTexts,
-          pageGateModel: correction.models.pageGate,
-          pageGateFallback: correction.models.pageGateFallback,
-          pageGateMaxRetries: correction.maxRetries.pageGate,
-          pageGateTemperature: correction.temperature,
-          pageConcurrency: correction.concurrency.pages,
-          taskConcurrency: correction.concurrency.reviewTasks,
-          modelConcurrency: correction.modelConcurrency,
-          workItemTimeoutMs: correction.workItemTimeoutMs,
-          autoApplyThreshold: correction.autoApplyThreshold,
-          proposalThreshold: correction.proposalThreshold,
-          forceAutoApply: correction.forceAutoApply,
-          maxRetries: correction.maxRetries.reviewAssistance,
-          tableMaxRetries: correction.maxRetries.tableCorrection,
-          temperature: correction.temperature,
-          outputLanguage: correction.outputLanguage,
-          aggregator: options.aggregator,
-          abortSignal,
-          onTokenUsage: options.onTokenUsage,
-          onProgress: options.onReviewAssistanceProgress,
-        },
-      );
+      if (correction.reviewAssistanceEnabled) {
+        const runner = new ReviewAssistanceRunner(this.logger);
+        await runner.analyzeAndSave(
+          outputDir,
+          reportId,
+          this.buildReviewAssistanceModelResolver(correction),
+          {
+            pdfPath,
+            pageTexts,
+            pageGateModel: correction.models.pageGate,
+            pageGateFallback: correction.models.pageGateFallback,
+            pageGateMaxRetries: correction.maxRetries.pageGate,
+            pageGateTemperature: correction.temperature,
+            pageConcurrency: correction.concurrency.pages,
+            taskConcurrency: correction.concurrency.reviewTasks,
+            modelConcurrency: correction.modelConcurrency,
+            workItemTimeoutMs: correction.workItemTimeoutMs,
+            autoApplyThreshold: correction.autoApplyThreshold,
+            proposalThreshold: correction.proposalThreshold,
+            forceAutoApply: correction.forceAutoApply,
+            maxRetries: correction.maxRetries.reviewAssistance,
+            tableMaxRetries: correction.maxRetries.tableCorrection,
+            temperature: correction.temperature,
+            outputLanguage: correction.outputLanguage,
+            aggregator: options.aggregator,
+            abortSignal,
+            onTokenUsage: options.onTokenUsage,
+            onProgress: options.onReviewAssistanceProgress,
+          },
+        );
+      }
 
       await originalCallback(outputDir);
     };

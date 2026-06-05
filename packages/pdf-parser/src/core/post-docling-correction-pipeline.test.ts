@@ -172,6 +172,28 @@ describe('PostDoclingCorrectionPipeline', () => {
     expect(originalCallback).toHaveBeenCalledWith('/test/output');
   });
 
+  test('skips review assistance and the page gate when reviewAssistanceEnabled is false', async () => {
+    const originalCallback = vi.fn();
+
+    const wrapped = pipeline.wrapCallback(
+      '/tmp/test.pdf',
+      'report-1',
+      correctionOptions({ reviewAssistanceEnabled: false }),
+      originalCallback,
+    );
+
+    await wrapped('/test/output');
+
+    expect(mockPageProcessorInstance.correctAndSave).toHaveBeenCalledWith(
+      '/test/output',
+      textCorrectionModel,
+      expect.objectContaining({ reviewAssistanceGate: undefined }),
+    );
+    expect(ReviewAssistanceRunner).not.toHaveBeenCalled();
+    expect(mockRunnerInstance.analyzeAndSave).not.toHaveBeenCalled();
+    expect(originalCallback).toHaveBeenCalledWith('/test/output');
+  });
+
   test('extracts PDF text references and passes them to both correction stages', async () => {
     const pageTexts = new Map([[1, 'extracted text']]);
     mockTextExtractorInstance.extractText.mockResolvedValue(pageTexts);
