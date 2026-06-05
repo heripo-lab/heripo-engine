@@ -85,6 +85,12 @@ interface AdvancedOptionsCardProps {
 
 const NONE_VALUE = '__none__';
 
+// Review-assistance correction is disabled in the demo — only the text-correction
+// stage runs (see `reviewAssistanceEnabled: false` in task-worker.ts). Its UI
+// controls (review-task models, table correction, review/table concurrency,
+// per-stage retry overrides) are hidden behind this flag; flip to re-expose them.
+const REVIEW_ASSISTANCE_UI: boolean = false;
+
 const MODELS_BY_PROVIDER = LLM_MODELS.reduce(
   (acc, model) => {
     if (!acc[model.provider]) {
@@ -316,124 +322,136 @@ export function AdvancedOptionsCard({
         <CardDescription>Batch processing and retry settings</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-3">
-          <label className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Correction Models
-          </label>
-          <form.Field name="correction.models.tableCorrection">
-            {(field: OptionalStringFieldApi) => (
-              <VisionModelSelect
-                label="Table Correction"
-                description="Overrides the tables task model for table-specific correction"
-                value={field.state.value}
-                onChange={field.handleChange}
-                disabled={disabled}
-              />
-            )}
-          </form.Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {REVIEW_TASK_MODEL_FIELDS.map((config) => (
-              <form.Field key={config.name} name={config.name}>
+        {REVIEW_ASSISTANCE_UI && (
+          <>
+            <div className="space-y-3">
+              <label className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                Correction Models
+              </label>
+              <form.Field name="correction.models.tableCorrection">
                 {(field: OptionalStringFieldApi) => (
                   <VisionModelSelect
-                    label={config.label}
-                    description="Optional model override for this review task"
+                    label="Table Correction"
+                    description="Overrides the tables task model for table-specific correction"
                     value={field.state.value}
                     onChange={field.handleChange}
                     disabled={disabled}
                   />
                 )}
               </form.Field>
-            ))}
-          </div>
-        </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {REVIEW_TASK_MODEL_FIELDS.map((config) => (
+                  <form.Field key={config.name} name={config.name}>
+                    {(field: OptionalStringFieldApi) => (
+                      <VisionModelSelect
+                        label={config.label}
+                        description="Optional model override for this review task"
+                        value={field.state.value}
+                        onChange={field.handleChange}
+                        disabled={disabled}
+                      />
+                    )}
+                  </form.Field>
+                ))}
+              </div>
+            </div>
 
-        <div className="bg-border h-px" />
+            <div className="bg-border h-px" />
 
-        <div className="space-y-3">
-          <label className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Correction Concurrency
-          </label>
-          <div className="grid gap-3">
-            <form.Field name="correction.concurrency.reviewTasks">
-              {(field: NumberFieldApi) => (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Review Tasks</span>
-                  <SelectWithTooltip
-                    value={String(field.state.value)}
-                    onValueChange={(v) => field.handleChange(parseInt(v, 10))}
-                    disabled={disabled}
-                    className="w-20"
-                    options={[
-                      { value: '1', label: '1' },
-                      { value: '2', label: '2' },
-                      { value: '3', label: '3' },
-                      { value: '6', label: '6' },
-                    ]}
-                  />
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="correction.concurrency.tables">
-              {(field: NumberFieldApi) => (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Tables</span>
-                  <SelectWithTooltip
-                    value={String(field.state.value)}
-                    onValueChange={(v) => field.handleChange(parseInt(v, 10))}
-                    disabled={disabled}
-                    className="w-20"
-                    options={[
-                      { value: '1', label: '1' },
-                      { value: '2', label: '2' },
-                      { value: '4', label: '4' },
-                      { value: '8', label: '8' },
-                    ]}
-                  />
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="correction.modelConcurrency">
-              {(field: OptionalNumberFieldApi) => (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Local Work Items</span>
-                  <SelectWithTooltip
-                    value={String(field.state.value ?? 1)}
-                    onValueChange={(v) => field.handleChange(parseInt(v, 10))}
-                    disabled={disabled}
-                    className="w-20"
-                    options={[
-                      { value: '1', label: '1' },
-                      { value: '2', label: '2' },
-                      { value: '3', label: '3' },
-                      { value: '4', label: '4' },
-                    ]}
-                  />
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="correction.workItemTimeoutMs">
-              {(field: OptionalNumberFieldApi) => (
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Work Item Timeout</span>
-                  <SelectWithTooltip
-                    value={String(field.state.value ?? 1_800_000)}
-                    onValueChange={(v) => field.handleChange(parseInt(v, 10))}
-                    disabled={disabled}
-                    className="w-28"
-                    options={[
-                      { value: '600000', label: '10 min' },
-                      { value: '1800000', label: '30 min' },
-                      { value: '3600000', label: '60 min' },
-                    ]}
-                  />
-                </div>
-              )}
-            </form.Field>
-          </div>
-        </div>
+            <div className="space-y-3">
+              <label className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                Correction Concurrency
+              </label>
+              <div className="grid gap-3">
+                <form.Field name="correction.concurrency.reviewTasks">
+                  {(field: NumberFieldApi) => (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Review Tasks</span>
+                      <SelectWithTooltip
+                        value={String(field.state.value)}
+                        onValueChange={(v) =>
+                          field.handleChange(parseInt(v, 10))
+                        }
+                        disabled={disabled}
+                        className="w-20"
+                        options={[
+                          { value: '1', label: '1' },
+                          { value: '2', label: '2' },
+                          { value: '3', label: '3' },
+                          { value: '6', label: '6' },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </form.Field>
+                <form.Field name="correction.concurrency.tables">
+                  {(field: NumberFieldApi) => (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Tables</span>
+                      <SelectWithTooltip
+                        value={String(field.state.value)}
+                        onValueChange={(v) =>
+                          field.handleChange(parseInt(v, 10))
+                        }
+                        disabled={disabled}
+                        className="w-20"
+                        options={[
+                          { value: '1', label: '1' },
+                          { value: '2', label: '2' },
+                          { value: '4', label: '4' },
+                          { value: '8', label: '8' },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </form.Field>
+                <form.Field name="correction.modelConcurrency">
+                  {(field: OptionalNumberFieldApi) => (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Local Work Items</span>
+                      <SelectWithTooltip
+                        value={String(field.state.value ?? 1)}
+                        onValueChange={(v) =>
+                          field.handleChange(parseInt(v, 10))
+                        }
+                        disabled={disabled}
+                        className="w-20"
+                        options={[
+                          { value: '1', label: '1' },
+                          { value: '2', label: '2' },
+                          { value: '3', label: '3' },
+                          { value: '4', label: '4' },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </form.Field>
+                <form.Field name="correction.workItemTimeoutMs">
+                  {(field: OptionalNumberFieldApi) => (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Work Item Timeout</span>
+                      <SelectWithTooltip
+                        value={String(field.state.value ?? 1_800_000)}
+                        onValueChange={(v) =>
+                          field.handleChange(parseInt(v, 10))
+                        }
+                        disabled={disabled}
+                        className="w-28"
+                        options={[
+                          { value: '600000', label: '10 min' },
+                          { value: '1800000', label: '30 min' },
+                          { value: '3600000', label: '60 min' },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </form.Field>
+              </div>
+            </div>
 
-        <div className="bg-border h-px" />
+            <div className="bg-border h-px" />
+          </>
+        )}
 
         {/* Batch Sizes */}
         <div className="space-y-3">
@@ -555,7 +573,11 @@ export function AdvancedOptionsCard({
             inherit to use the global value above.
           </p>
           <div className="grid gap-3">
-            {CORRECTION_RETRY_FIELDS.map((config) => (
+            {CORRECTION_RETRY_FIELDS.filter(
+              (config) =>
+                REVIEW_ASSISTANCE_UI ||
+                config.name === 'correction.maxRetries.textCorrection',
+            ).map((config) => (
               <form.Field key={config.name} name={config.name}>
                 {(field: OptionalNumberFieldApi) => (
                   <div className="flex items-center justify-between">

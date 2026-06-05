@@ -52,6 +52,11 @@ interface OptionalStringFieldApi {
 
 const NONE_VALUE = '__none__';
 
+// Review-assistance correction is disabled in the demo — only the text-correction
+// stage runs (see `reviewAssistanceEnabled: false` in task-worker.ts). Its UI
+// controls are hidden behind this flag; flip to true to re-expose them.
+const REVIEW_ASSISTANCE_UI: boolean = false;
+
 /**
  * Group models by provider for select dropdown
  */
@@ -263,29 +268,33 @@ export function ProcessingOptionsCard({
           )}
         </form.Field>
 
-        <form.Field name="correction.models.pageGate">
-          {(field: StringFieldApi) => (
-            <VisionModelSelect
-              label="Page Gate Model"
-              description="Classifies pages for structural review noise control"
-              value={field.state.value}
-              onChange={(value) => value && field.handleChange(value)}
-              disabled={disabled}
-            />
-          )}
-        </form.Field>
+        {REVIEW_ASSISTANCE_UI && (
+          <>
+            <form.Field name="correction.models.pageGate">
+              {(field: StringFieldApi) => (
+                <VisionModelSelect
+                  label="Page Gate Model"
+                  description="Classifies pages for structural review noise control"
+                  value={field.state.value}
+                  onChange={(value) => value && field.handleChange(value)}
+                  disabled={disabled}
+                />
+              )}
+            </form.Field>
 
-        <form.Field name="correction.models.reviewAssistance">
-          {(field: StringFieldApi) => (
-            <VisionModelSelect
-              label="Review Assistance Model"
-              description="Runs structural review tasks for eligible pages"
-              value={field.state.value}
-              onChange={(value) => value && field.handleChange(value)}
-              disabled={disabled}
-            />
-          )}
-        </form.Field>
+            <form.Field name="correction.models.reviewAssistance">
+              {(field: StringFieldApi) => (
+                <VisionModelSelect
+                  label="Review Assistance Model"
+                  description="Runs structural review tasks for eligible pages"
+                  value={field.state.value}
+                  onChange={(value) => value && field.handleChange(value)}
+                  disabled={disabled}
+                />
+              )}
+            </form.Field>
+          </>
+        )}
 
         {/* Document Validation Model */}
         <form.Field name="documentValidationModel">
@@ -349,6 +358,7 @@ export function ProcessingOptionsCard({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="1">1 (sequential)</SelectItem>
+                    <SelectItem value="2">2 concurrent</SelectItem>
                     <SelectItem value="3">3 concurrent</SelectItem>
                     <SelectItem value="5">5 concurrent</SelectItem>
                     <SelectItem value="10">10 concurrent</SelectItem>
@@ -361,34 +371,36 @@ export function ProcessingOptionsCard({
           )}
         </form.Field>
 
-        <form.Field name="correction.outputLanguage">
-          {(field: StringFieldApi) => (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                Correction Output Language
-              </label>
-              <p className="text-muted-foreground text-xs">
-                Language of AI-written reasons, descriptions, and issues in the
-                correction report (BCP 47 tag)
-              </p>
-              <DisabledWrapper disabled={disabled}>
-                <Select
-                  value={field.state.value}
-                  onValueChange={(v) => field.handleChange(v)}
-                  disabled={disabled}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ko-KR">한국어 (ko-KR)</SelectItem>
-                    <SelectItem value="en-US">English (en-US)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </DisabledWrapper>
-            </div>
-          )}
-        </form.Field>
+        {REVIEW_ASSISTANCE_UI && (
+          <form.Field name="correction.outputLanguage">
+            {(field: StringFieldApi) => (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Correction Output Language
+                </label>
+                <p className="text-muted-foreground text-xs">
+                  Language of AI-written reasons, descriptions, and issues in
+                  the correction report (BCP 47 tag)
+                </p>
+                <DisabledWrapper disabled={disabled}>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v)}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ko-KR">한국어 (ko-KR)</SelectItem>
+                      <SelectItem value="en-US">English (en-US)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </DisabledWrapper>
+              </div>
+            )}
+          </form.Field>
+        )}
 
         {/* Force Image PDF */}
         <form.Field name="forceImagePdf">
