@@ -195,53 +195,83 @@ function calculateTotalCost(usage: TokenUsageReport): number {
   return Math.round(total * 1_000_000) / 1_000_000;
 }
 
-function buildPDFCorrectionOptions(
-  options: QueuedTask['options'],
-): PDFConvertOptions['correction'] {
-  const taskModels = options.correction.models.reviewAssistanceTasks;
-  const reviewAssistanceTasks: NonNullable<
+type ReviewAssistanceTaskModelIds =
+  QueuedTask['options']['correction']['models']['reviewAssistanceTasks'];
+
+/**
+ * Resolve a per-task review-assistance model map (primary or fallback) into
+ * `LanguageModel` instances. Tasks without an id are skipped.
+ */
+function buildReviewAssistanceTaskModels(
+  taskModels: ReviewAssistanceTaskModelIds,
+): NonNullable<
+  PDFConvertOptions['correction']['models']['reviewAssistanceTasks']
+> {
+  const resolved: NonNullable<
     PDFConvertOptions['correction']['models']['reviewAssistanceTasks']
   > = {};
 
   if (taskModels?.textOcrHanja) {
-    reviewAssistanceTasks.text_ocr_hanja = createModel(taskModels.textOcrHanja);
+    resolved.text_ocr_hanja = createModel(taskModels.textOcrHanja);
   }
   if (taskModels?.textIntegrity) {
-    reviewAssistanceTasks.text_integrity = createModel(
-      taskModels.textIntegrity,
-    );
+    resolved.text_integrity = createModel(taskModels.textIntegrity);
   }
   if (taskModels?.textRoleFootnote) {
-    reviewAssistanceTasks.text_role_footnote = createModel(
-      taskModels.textRoleFootnote,
-    );
+    resolved.text_role_footnote = createModel(taskModels.textRoleFootnote);
   }
   if (taskModels?.tables) {
-    reviewAssistanceTasks.tables = createModel(taskModels.tables);
+    resolved.tables = createModel(taskModels.tables);
   }
   if (taskModels?.picturesCaptions) {
-    reviewAssistanceTasks.pictures_captions = createModel(
-      taskModels.picturesCaptions,
-    );
+    resolved.pictures_captions = createModel(taskModels.picturesCaptions);
   }
   if (taskModels?.layoutBboxOrder) {
-    reviewAssistanceTasks.layout_bbox_order = createModel(
-      taskModels.layoutBboxOrder,
-    );
+    resolved.layout_bbox_order = createModel(taskModels.layoutBboxOrder);
   }
+
+  return resolved;
+}
+
+function buildPDFCorrectionOptions(
+  options: QueuedTask['options'],
+): PDFConvertOptions['correction'] {
+  const models = options.correction.models;
+  const reviewAssistanceTasks = buildReviewAssistanceTaskModels(
+    models.reviewAssistanceTasks,
+  );
+  const reviewAssistanceTasksFallback = buildReviewAssistanceTaskModels(
+    models.reviewAssistanceTasksFallback,
+  );
 
   const stageRetries = options.correction.maxRetries;
   const correction: PDFConvertOptions['correction'] = {
     models: {
-      textCorrection: createModel(options.correction.models.textCorrection),
-      pageGate: createModel(options.correction.models.pageGate),
-      reviewAssistance: createModel(options.correction.models.reviewAssistance),
-      tableCorrection: options.correction.models.tableCorrection
-        ? createModel(options.correction.models.tableCorrection)
+      textCorrection: createModel(models.textCorrection),
+      textCorrectionFallback: models.textCorrectionFallback
+        ? createModel(models.textCorrectionFallback)
+        : undefined,
+      pageGate: createModel(models.pageGate),
+      pageGateFallback: models.pageGateFallback
+        ? createModel(models.pageGateFallback)
+        : undefined,
+      reviewAssistance: createModel(models.reviewAssistance),
+      reviewAssistanceFallback: models.reviewAssistanceFallback
+        ? createModel(models.reviewAssistanceFallback)
+        : undefined,
+      tableCorrection: models.tableCorrection
+        ? createModel(models.tableCorrection)
+        : undefined,
+      tableCorrectionFallback: models.tableCorrectionFallback
+        ? createModel(models.tableCorrectionFallback)
         : undefined,
       reviewAssistanceTasks:
         Object.keys(reviewAssistanceTasks).length > 0
           ? reviewAssistanceTasks
+          : undefined,
+      reviewAssistanceTasksFallback:
+        Object.keys(reviewAssistanceTasksFallback).length > 0
+          ? reviewAssistanceTasksFallback
           : undefined,
     },
     concurrency: options.correction.concurrency,
@@ -254,9 +284,12 @@ function buildPDFCorrectionOptions(
       tableCorrection: stageRetries?.tableCorrection ?? options.maxRetries,
     },
     outputLanguage: options.correction.outputLanguage,
-    // Demo runs have no human reviewer, so auto-apply every valid correction
-    // (tables, low-confidence proposals, structural edits) into the output
-    // instead of routing them to the backoffice "대기 / proposal" queue.
+    // Demo runs the text-correction stage only — the review-assistance stage
+    // (per-page eligibility gate + structural correction runner) is skipped.
+    reviewAssistanceEnabled: false,
+    // Only relevant when review assistance is enabled: demo runs have no human
+    // reviewer, so every valid command would auto-apply instead of routing to a
+    // proposal queue. Kept for when review assistance is re-enabled.
     forceAutoApply: true,
   };
   return correction;
@@ -415,6 +448,13 @@ export async function runTaskWorker(
       ...(options.languageDetectionModel
         ? {
             languageDetectionModel: createModel(options.languageDetectionModel),
+            ...(options.languageDetectionFallbackModel
+              ? {
+                  languageDetectionFallbackModel: createModel(
+                    options.languageDetectionFallbackModel,
+                  ),
+                }
+              : {}),
           }
         : {}),
       ...(isPublicMode && !task.isOtpBypass && options.documentValidationModel
