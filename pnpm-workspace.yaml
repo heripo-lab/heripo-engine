@@ -4,17 +4,33 @@ packages:
   - 'tools/*'
 
 catalog:
-  '@ai-sdk/anthropic': '^3.0.78'
-  '@ai-sdk/google': '^3.0.75'
-  '@ai-sdk/openai': '^3.0.64'
+  '@ai-sdk/anthropic': '^3.0.81'
+  '@ai-sdk/google': '^3.0.80'
+  '@ai-sdk/openai': '^3.0.68'
   '@ai-sdk/openai-compatible': '^2.0.48'
-  '@ai-sdk/togetherai': '^2.0.51'
-  '@vitest/coverage-v8': '^4.1.6'
-  '@vitest/expect': '^4.1.6'
-  'ai': '^6.0.184'
-  'ai-sdk-ollama': '^3.8.4'
-  'es-toolkit': '^1.46.1'
+  '@ai-sdk/togetherai': '^2.0.53'
+  '@vitest/coverage-v8': '^4.1.8'
+  '@vitest/expect': '^4.1.8'
+  'ai': '^6.0.197'
+  'ai-sdk-ollama': '^3.8.6'
+  'es-toolkit': '^1.47.0'
   'tsup': '^8.5.1'
   'tsx': '^4.21.0'
-  'vitest': '^4.1.6'
+  'vitest': '^4.1.8'
   'zod': '^4.4.3'
+
+overrides:
+  minimatch: '^10.2.4'
+  rollup: '^4.59.0'
+  'brace-expansion@>=4.0.0 <5.0.5': '>=5.0.5'
+  'picomatch@>=4.0.0 <4.0.4': '>=4.0.4'
+  'lodash-es@>=4.0.0 <=4.17.23': '>=4.18.0'
+  'lodash@>=4.0.0 <=4.17.23': '>=4.18.0'
+  'lodash-es@<=4.17.23': '>=4.18.0'
+  'lodash@<=4.17.23': '>=4.18.0'
+  vite: '>=8.0.0'
+  'postcss@<8.5.10': '>=8.5.10'
+
+allowBuilds:
+  esbuild: false
+  sharp: false
