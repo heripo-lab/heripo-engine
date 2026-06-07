@@ -65,7 +65,7 @@
 brew install node
 ```
 
-#### 2. pnpm >= 10.0.0
+#### 2. pnpm >= 11.0.0
 
 ```bash
 npm install -g pnpm
