@@ -75,7 +75,7 @@
     "ai": "catalog:",
     "docling-sdk": "^2.0.6",
     "es-toolkit": "catalog:",
-    "yauzl": "^3.3.0",
+    "yauzl": "^3.4.0",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -83,7 +83,7 @@
     "@heripo/tsconfig": "workspace:*",
     "@heripo/tsup-config": "workspace:*",
     "@heripo/vitest-config": "workspace:*",
-    "@types/yauzl": "^2.10.3",
+    "@types/yauzl": "^3.3.0",
     "@vitest/coverage-v8": "catalog:",
     "@vitest/expect": "catalog:",
     "tsup": "catalog:",
