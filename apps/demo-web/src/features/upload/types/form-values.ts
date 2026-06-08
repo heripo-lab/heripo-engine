@@ -20,9 +20,9 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
   threadCount: 4,
   // Document type validation
-  documentValidationModel: 'openai/gpt-5.4',
+  documentValidationModel: 'openai/gpt-5.4-mini',
   // PDF language detection for OCR language hints
-  languageDetectionModel: 'openai/gpt-5.4',
+  languageDetectionModel: 'lmstudio/gemma-4-e4b-it-mlx',
   // Force image PDF pre-conversion
   forceImagePdf: false,
   // Mandatory post-Docling correction.
@@ -35,17 +35,17 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   correction: {
     models: {
       textCorrection: 'lmstudio/gemma-4-26b-a4b-it-mlx',
-      textCorrectionFallback: 'openai/gpt-5.4',
-      pageGate: 'google/gemini-3.1-flash-lite',
-      reviewAssistance: 'google/gemini-3.1-flash-lite',
+      textCorrectionFallback: 'google/gemini-3.1-flash-lite',
+      pageGate: 'lmstudio/gemma-4-26b-a4b-it-mlx',
+      reviewAssistance: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       tableCorrection: 'openai/gpt-5-mini',
       reviewAssistanceTasks: {
-        textOcrHanja: 'google/gemini-3.1-flash-lite',
-        textIntegrity: 'google/gemini-3.1-flash-lite',
-        textRoleFootnote: 'google/gemini-3.1-flash-lite',
+        textOcrHanja: 'lmstudio/gemma-4-26b-a4b-it-mlx',
+        textIntegrity: 'lmstudio/gemma-4-26b-a4b-it-mlx',
+        textRoleFootnote: 'lmstudio/gemma-4-26b-a4b-it-mlx',
         tables: 'openai/gpt-5-mini',
-        picturesCaptions: 'google/gemini-3.1-flash-lite',
-        layoutBboxOrder: 'google/gemini-3.1-flash-lite',
+        picturesCaptions: 'lmstudio/gemma-4-26b-a4b-it-mlx',
+        layoutBboxOrder: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       },
     },
     concurrency: {
@@ -59,12 +59,12 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
     workItemTimeoutMs: 1_800_000,
   },
   // LLM Models
-  fallbackModel: 'openai/gpt-5.4',
-  validatorModel: 'openai/gpt-5.4',
-  pageRangeParserModel: 'google/gemini-3-flash-preview',
-  tocExtractorModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
-  visionTocExtractorModel: 'google/gemini-3-flash-preview',
-  captionParserModel: 'together/Qwen/Qwen3-235B-A22B-Instruct-2507-tput',
+  fallbackModel: 'openai/gpt-5.4-mini',
+  validatorModel: 'openai/gpt-5.4-mini',
+  pageRangeParserModel: 'lmstudio/gemma-4-31b-it-mlx',
+  tocExtractorModel: 'lmstudio/gemma-4-e4b-it-mlx',
+  visionTocExtractorModel: 'lmstudio/gemma-4-31b-it-mlx',
+  captionParserModel: 'lmstudio/gemma-4-e4b-it-mlx',
   // Batch & Retry
   textCleanerBatchSize: 20,
   captionParserBatchSize: 0,

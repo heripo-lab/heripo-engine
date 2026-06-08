@@ -11,6 +11,11 @@ export interface LLMModel {
 export const LLM_MODELS: LLMModel[] = [
   // OpenAI
   {
+    id: 'openai/gpt-5.5',
+    label: 'GPT-5.5',
+    provider: 'OpenAI',
+  },
+  {
     id: 'openai/gpt-5.4',
     label: 'GPT-5.4',
     provider: 'OpenAI',
@@ -38,7 +43,7 @@ export const LLM_MODELS: LLMModel[] = [
 
   // Anthropic
   {
-    id: 'anthropic/claude-opus-4-6',
+    id: 'anthropic/claude-opus-4-8',
     label: 'Claude Opus 4.6',
     provider: 'Anthropic',
   },
@@ -60,8 +65,8 @@ export const LLM_MODELS: LLMModel[] = [
     provider: 'Google',
   },
   {
-    id: 'google/gemini-3-flash-preview',
-    label: 'Gemini 3 Flash Preview',
+    id: 'google/gemini-3.5-flash',
+    label: 'Gemini 3.5 Flash',
     provider: 'Google',
   },
   {
