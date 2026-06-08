@@ -20,7 +20,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
   threadCount: 4,
   // Document type validation
-  documentValidationModel: 'openai/gpt-5.4',
+  documentValidationModel: 'openai/gpt-5.4-mini',
   // PDF language detection for OCR language hints
   languageDetectionModel: 'lmstudio/gemma-4-e4b-it-mlx',
   // Force image PDF pre-conversion
@@ -35,7 +35,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   correction: {
     models: {
       textCorrection: 'lmstudio/gemma-4-26b-a4b-it-mlx',
-      textCorrectionFallback: 'openai/gpt-5.4',
+      textCorrectionFallback: 'google/gemini-3.1-flash-lite',
       pageGate: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       reviewAssistance: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       tableCorrection: 'openai/gpt-5-mini',
@@ -59,8 +59,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
     workItemTimeoutMs: 1_800_000,
   },
   // LLM Models
-  fallbackModel: 'openai/gpt-5.4',
-  validatorModel: 'openai/gpt-5.4',
+  fallbackModel: 'openai/gpt-5.4-mini',
+  validatorModel: 'openai/gpt-5.4-mini',
   pageRangeParserModel: 'lmstudio/gemma-4-31b-it-mlx',
   tocExtractorModel: 'lmstudio/gemma-4-e4b-it-mlx',
   visionTocExtractorModel: 'lmstudio/gemma-4-31b-it-mlx',
