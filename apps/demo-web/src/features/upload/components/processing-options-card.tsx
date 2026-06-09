@@ -260,15 +260,13 @@ export function ProcessingOptionsCard({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <label className="text-sm font-medium">
-                    Auto Correction
-                  </label>
+                  <label className="text-sm font-medium">Auto Correction</label>
                   <p className="text-muted-foreground text-xs">
                     Enable review-assistance based correction stages (page gate,
                     review tasks, table/caption fixes)
                   </p>
                 </div>
-                <div className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <div className="text-muted-foreground ml-2 flex items-center gap-1.5 text-xs">
                   <CheckSquare className="h-3.5 w-3.5" />
                   <span>{field.state.value ? 'On' : 'Off'}</span>
                 </div>

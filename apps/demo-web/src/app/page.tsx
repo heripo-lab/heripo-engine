@@ -10,9 +10,9 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiResponseError } from '~/lib/api/tasks';
 import { publicModeConfig } from '~/lib/config/public-mode';
 
+import { AutoCorrectionDemoNoticeBanner } from '~/components/layout/auto-correction-demo-notice-banner';
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { SampleResultsBanner } from '~/components/layout/sample-results-banner';
-import { AutoCorrectionDemoNoticeBanner } from '~/components/layout/auto-correction-demo-notice-banner';
 import { PipelineStepper } from '~/components/pipeline/pipeline-stepper';
 import { Card, CardContent } from '~/components/ui/card';
 import {
