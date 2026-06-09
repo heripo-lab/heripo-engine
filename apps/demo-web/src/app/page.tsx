@@ -10,6 +10,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { ApiResponseError } from '~/lib/api/tasks';
 import { publicModeConfig } from '~/lib/config/public-mode';
 
+import { AutoCorrectionDemoNoticeBanner } from '~/components/layout/auto-correction-demo-notice-banner';
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { SampleResultsBanner } from '~/components/layout/sample-results-banner';
 import { PipelineStepper } from '~/components/pipeline/pipeline-stepper';
@@ -257,6 +258,9 @@ function HomePageContent() {
             <form onSubmit={handleFormSubmit}>
               {/* Known Limitations Banner */}
               <KnownLimitationsBanner />
+
+              {/* Auto-correction Notice */}
+              <AutoCorrectionDemoNoticeBanner />
 
               {/* Info Banner - Always visible in public mode when not blocked */}
               {isPublicMode && !isBlocked && rateLimit && (

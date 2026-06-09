@@ -284,9 +284,8 @@ function buildPDFCorrectionOptions(
       tableCorrection: stageRetries?.tableCorrection ?? options.maxRetries,
     },
     outputLanguage: options.correction.outputLanguage,
-    // Demo runs the text-correction stage only — the review-assistance stage
-    // (per-page eligibility gate + structural correction runner) is skipped.
-    reviewAssistanceEnabled: false,
+    reviewAssistanceEnabled:
+      options.correction.reviewAssistanceEnabled ?? false,
     // Only relevant when review assistance is enabled: demo runs have no human
     // reviewer, so every valid command would auto-apply instead of routing to a
     // proposal queue. Kept for when review assistance is re-enabled.

@@ -26,13 +26,10 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   // Force image PDF pre-conversion
   forceImagePdf: false,
   // Mandatory post-Docling correction.
-  // NOTE: review assistance (the structural correction logic) is disabled for
-  // the demo — only the text-correction stage runs (see `reviewAssistanceEnabled:
-  // false` in task-worker.ts). Accordingly, only `textCorrection` uses a local
-  // model (LM Studio gemma 26b) with a cloud fallback so it still completes if
-  // the local model fails; every other slot stays on the original cloud models
-  // and is inert while review assistance is off.
+  // review-assistanceEnabled defaults to false so the heavier automatic
+  // correction flow is off by default in the demo UI.
   correction: {
+    reviewAssistanceEnabled: false,
     models: {
       textCorrection: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       textCorrectionFallback: 'google/gemini-3.1-flash-lite',
