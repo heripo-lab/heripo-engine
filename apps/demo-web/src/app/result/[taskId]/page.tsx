@@ -4,6 +4,7 @@ import { Suspense, use } from 'react';
 
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
+import { AutoCorrectionDemoNoticeBanner } from '~/components/layout/auto-correction-demo-notice-banner';
 import {
   Card,
   CardContent,
@@ -86,6 +87,7 @@ function ResultContent({ taskId }: { taskId: string }) {
             onDownloadAll={downloadAll}
             isDownloading={isDownloading}
           />
+          <AutoCorrectionDemoNoticeBanner />
           {task.isSample && <SampleDataBanner />}
           <PreprocessingInfoBanner />
           <ResultSummaryCards

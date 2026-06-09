@@ -1,6 +1,6 @@
 'use client';
 
-import { Eye, Info } from 'lucide-react';
+import { CheckSquare, Eye, Info } from 'lucide-react';
 
 import { cn } from '~/lib/utils';
 
@@ -52,9 +52,8 @@ interface OptionalStringFieldApi {
 
 const NONE_VALUE = '__none__';
 
-// Review-assistance correction is disabled in the demo — only the text-correction
-// stage runs (see `reviewAssistanceEnabled: false` in task-worker.ts). Its UI
-// controls are hidden behind this flag; flip to true to re-expose them.
+// Review-assistance correction controls are hidden behind this flag; flip to true
+// to re-expose them.
 const REVIEW_ASSISTANCE_UI: boolean = false;
 
 /**
@@ -253,6 +252,37 @@ export function ProcessingOptionsCard({
               disabled={disabled}
               optional
             />
+          )}
+        </form.Field>
+
+        <form.Field name="correction.reviewAssistanceEnabled">
+          {(field: BooleanFieldApi) => (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium">
+                    Auto Correction
+                  </label>
+                  <p className="text-muted-foreground text-xs">
+                    Enable review-assistance based correction stages (page gate,
+                    review tasks, table/caption fixes)
+                  </p>
+                </div>
+                <div className="ml-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <CheckSquare className="h-3.5 w-3.5" />
+                  <span>{field.state.value ? 'On' : 'Off'}</span>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <DisabledWrapper disabled={disabled}>
+                  <ToggleSwitch
+                    checked={field.state.value}
+                    onChange={() => field.handleChange(!field.state.value)}
+                    disabled={disabled}
+                  />
+                </DisabledWrapper>
+              </div>
+            </div>
           )}
         </form.Field>
 
