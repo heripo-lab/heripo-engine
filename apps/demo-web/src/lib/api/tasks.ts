@@ -4,6 +4,7 @@ import type {
   ProcessedFootnote,
   ProcessedImage,
   ProcessedTable,
+  TokenUsageReport,
 } from '@heripo/model';
 
 import type { ProcessingOptions } from '~/features/upload';
@@ -25,7 +26,8 @@ export interface Task {
   imagesCount: number | null;
   tablesCount: number | null;
   totalPages: number | null;
-  tokenUsage: unknown | null;
+  tokenUsage: TokenUsageReport | null;
+  tokenCostUSD: number | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -60,7 +62,8 @@ export interface TaskResultResponse {
     chaptersCount: number;
     imagesCount: number;
     tablesCount: number;
-    tokenUsage: unknown;
+    tokenUsage: TokenUsageReport | null;
+    tokenCostUSD: number | null;
     createdAt: string;
     completedAt: string;
   };

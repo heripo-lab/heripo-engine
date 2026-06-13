@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { existsSync, readFileSync } from 'fs';
 import { NextResponse } from 'next/server';
 
+import { resolveTokenCostUSD } from '~/lib/api/task-response';
 import { getTaskByIdForSession } from '~/lib/db/repositories/task-repository';
 import { getOrCreateSessionId } from '~/lib/session';
 import {
@@ -59,6 +60,7 @@ export async function GET(
         imagesCount: task.imagesCount,
         tablesCount: task.tablesCount,
         tokenUsage: task.tokenUsage,
+        tokenCostUSD: resolveTokenCostUSD(task.tokenUsage),
         createdAt: task.createdAt,
         completedAt: task.completedAt,
       },
