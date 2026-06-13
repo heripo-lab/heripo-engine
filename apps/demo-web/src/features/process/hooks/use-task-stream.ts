@@ -30,7 +30,7 @@ export interface TaskStreamState {
   resultUrl?: string;
   isConnected: boolean;
   vlmFallbackTriggered: boolean;
-  tokenUsage?: TokenUsageReport;
+  tokenUsage?: TokenUsageReport | null;
 }
 
 const INITIAL_STATE: TaskStreamState = {
@@ -112,7 +112,7 @@ export function useTaskStream(taskId: string | null): TaskStreamState {
 
     eventSource.addEventListener('token-usage', (e: MessageEvent) => {
       if (isCleanedUp) return;
-      const data = JSON.parse(e.data) as TokenUsageReport;
+      const data = JSON.parse(e.data) as TokenUsageReport | null;
       setState((prev) => ({ ...prev, tokenUsage: data }));
     });
 

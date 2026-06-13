@@ -21,7 +21,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import type { Task, TaskStatus } from '~/lib/api/tasks';
-import { sampleTaskConfig } from '~/lib/config/public-mode';
+import { publicModeConfig, sampleTaskConfig } from '~/lib/config/public-mode';
 import { calculateCost } from '~/lib/cost/model-pricing';
 
 import { Badge } from '~/components/ui/badge';
@@ -166,6 +166,7 @@ export function TaskListTable() {
   const tasks = data?.tasks ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  const showCost = !publicModeConfig.isOfficialDemo;
 
   if (tasks.length === 0 && page === 0) {
     return (
@@ -195,7 +196,9 @@ export function TaskListTable() {
           <TableRow>
             <TableHead className="min-w-52">Filename</TableHead>
             <TableHead className="w-28">Status</TableHead>
-            <TableHead className="min-w-28 text-right">Cost (USD)</TableHead>
+            {showCost && (
+              <TableHead className="min-w-28 text-right">Cost (USD)</TableHead>
+            )}
             <TableHead className="w-24 text-right">Chapters</TableHead>
             <TableHead className="w-20 text-right">Images</TableHead>
             <TableHead className="min-w-48">Created</TableHead>
@@ -221,12 +224,14 @@ export function TaskListTable() {
                 </div>
               </TableCell>
               <TableCell>{getStatusBadge(task.status)}</TableCell>
-              <TableCell className="text-right">
-                {(() => {
-                  const cost = calculateTotalCost(task.tokenUsage);
-                  return cost !== null ? `$${cost.toFixed(4)}` : '-';
-                })()}
-              </TableCell>
+              {showCost && (
+                <TableCell className="text-right">
+                  {(() => {
+                    const cost = calculateTotalCost(task.tokenUsage);
+                    return cost !== null ? `$${cost.toFixed(4)}` : '-';
+                  })()}
+                </TableCell>
+              )}
               <TableCell className="text-right">
                 {task.chaptersCount ?? '-'}
               </TableCell>

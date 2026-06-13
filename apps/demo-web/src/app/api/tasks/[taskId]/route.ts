@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { rmSync } from 'fs';
 import { NextResponse } from 'next/server';
 
+import { toTaskApiResponse } from '~/lib/api/task-response';
 import { sampleTaskConfig } from '~/lib/config/public-mode';
 import { deleteLogsByTaskId } from '~/lib/db/repositories/log-repository';
 import {
@@ -42,7 +43,7 @@ export async function GET(
     const position = queueManager.getQueuePosition(taskId);
 
     return NextResponse.json({
-      ...task,
+      ...toTaskApiResponse(task),
       queuePosition: position > 0 ? position : undefined,
     });
   } catch (error) {

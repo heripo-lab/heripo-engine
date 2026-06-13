@@ -4,6 +4,7 @@ import type { TokenUsageReport } from '@heripo/model';
 
 import { Fragment, useMemo } from 'react';
 
+import { publicModeConfig } from '~/lib/config/public-mode';
 import { FALLBACK_RATE } from '~/lib/cost/exchange-rate';
 import {
   calculateComponentCost,
@@ -24,19 +25,24 @@ import { useExchangeRate } from '../hooks/use-exchange-rate';
 
 interface TokenUsageChartProps {
   tokenUsage?: unknown;
+  tokenCostUSD?: number | null;
 }
 
-export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
+export function TokenUsageChart({
+  tokenUsage,
+  tokenCostUSD,
+}: TokenUsageChartProps) {
   const usage = tokenUsage as TokenUsageReport | null;
-  const { data: exchangeRateResult } = useExchangeRate();
+  const showCost = !publicModeConfig.isOfficialDemo;
+  const { data: exchangeRateResult } = useExchangeRate(showCost);
 
   const exchangeRate = exchangeRateResult?.rate ?? FALLBACK_RATE;
   const isFallbackRate = exchangeRateResult?.isFallback ?? true;
 
   const totalCostUsd = useMemo(() => {
     if (!usage?.components) return 0;
-    return calculateTotalCostUsd(usage.components);
-  }, [usage]);
+    return tokenCostUSD ?? calculateTotalCostUsd(usage.components);
+  }, [tokenCostUSD, usage]);
 
   const totalCostKrw = Math.round(totalCostUsd * exchangeRate);
 
@@ -70,16 +76,21 @@ export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
         <div className="space-y-4">
           {/* Summary */}
           <div className="bg-muted/50 space-y-3 rounded-lg p-4">
-            {/* Exchange Rate Info */}
-            <div className="text-muted-foreground text-xs">
-              Exchange Rate: ₩{exchangeRate.toLocaleString()}/USD
-              {isFallbackRate && (
-                <span className="text-yellow-600"> (default)</span>
-              )}
-            </div>
+            {showCost && (
+              <div className="text-muted-foreground text-xs">
+                Exchange Rate: ₩{exchangeRate.toLocaleString()}/USD
+                {isFallbackRate && (
+                  <span className="text-yellow-600"> (default)</span>
+                )}
+              </div>
+            )}
 
             {/* Token & Cost Grid */}
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+            <div
+              className={`grid grid-cols-2 gap-4 ${
+                showCost ? 'md:grid-cols-5' : 'md:grid-cols-3'
+              }`}
+            >
               <div>
                 <p className="text-muted-foreground text-sm">Input Tokens</p>
                 <p className="text-lg font-semibold">
@@ -98,18 +109,22 @@ export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
                   {(total.totalTokens ?? 0).toLocaleString()}
                 </p>
               </div>
-              <div>
-                <p className="text-muted-foreground text-sm">Cost (USD)</p>
-                <p className="text-lg font-semibold">
-                  ${totalCostUsd.toFixed(4)}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground text-sm">Cost (KRW)</p>
-                <p className="text-lg font-semibold">
-                  ₩{totalCostKrw.toLocaleString()}
-                </p>
-              </div>
+              {showCost && (
+                <>
+                  <div>
+                    <p className="text-muted-foreground text-sm">Cost (USD)</p>
+                    <p className="text-lg font-semibold">
+                      ${totalCostUsd.toFixed(4)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-sm">Cost (KRW)</p>
+                    <p className="text-lg font-semibold">
+                      ₩{totalCostKrw.toLocaleString()}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -133,12 +148,16 @@ export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
                   <th className="px-4 py-2 text-right text-sm font-medium">
                     Total
                   </th>
-                  <th className="px-4 py-2 text-right text-sm font-medium">
-                    Cost (USD)
-                  </th>
-                  <th className="px-4 py-2 text-right text-sm font-medium">
-                    Cost (KRW)
-                  </th>
+                  {showCost && (
+                    <>
+                      <th className="px-4 py-2 text-right text-sm font-medium">
+                        Cost (USD)
+                      </th>
+                      <th className="px-4 py-2 text-right text-sm font-medium">
+                        Cost (KRW)
+                      </th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -164,12 +183,16 @@ export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
                         <td className="px-4 py-2 text-right text-sm font-medium">
                           {comp.total.totalTokens.toLocaleString()}
                         </td>
-                        <td className="px-4 py-2 text-right text-sm font-medium">
-                          ${compCost.toFixed(4)}
-                        </td>
-                        <td className="px-4 py-2 text-right text-sm font-medium">
-                          ₩{compCostKrw.toLocaleString()}
-                        </td>
+                        {showCost && (
+                          <>
+                            <td className="px-4 py-2 text-right text-sm font-medium">
+                              ${compCost.toFixed(4)}
+                            </td>
+                            <td className="px-4 py-2 text-right text-sm font-medium">
+                              ₩{compCostKrw.toLocaleString()}
+                            </td>
+                          </>
+                        )}
                       </tr>
                       {/* Phase detail rows */}
                       {comp.phases.map((phase) => {
@@ -197,12 +220,16 @@ export function TokenUsageChart({ tokenUsage }: TokenUsageChartProps) {
                             <td className="text-muted-foreground px-4 py-2 text-right text-sm">
                               {phase.total.totalTokens.toLocaleString()}
                             </td>
-                            <td className="text-muted-foreground px-4 py-2 text-right text-sm">
-                              ${phaseCost.toFixed(6)}
-                            </td>
-                            <td className="text-muted-foreground px-4 py-2 text-right text-sm">
-                              ₩{phaseCostKrw.toLocaleString()}
-                            </td>
+                            {showCost && (
+                              <>
+                                <td className="text-muted-foreground px-4 py-2 text-right text-sm">
+                                  ${phaseCost.toFixed(6)}
+                                </td>
+                                <td className="text-muted-foreground px-4 py-2 text-right text-sm">
+                                  ₩{phaseCostKrw.toLocaleString()}
+                                </td>
+                              </>
+                            )}
                           </tr>
                         );
                       })}

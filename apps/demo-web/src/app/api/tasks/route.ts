@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { NextResponse } from 'next/server';
 
+import { toTaskApiResponse } from '~/lib/api/task-response';
 import { verifyTOTP } from '~/lib/auth/totp';
 import { isTurnstileTokenValid } from '~/lib/auth/turnstile';
 import { publicModeConfig } from '~/lib/config/public-mode';
@@ -349,7 +350,7 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      tasks: result.tasks,
+      tasks: result.tasks.map(toTaskApiResponse),
       total: result.total,
       limit,
       offset,
