@@ -131,7 +131,10 @@ function ResultContent({ taskId }: { taskId: string }) {
               />
             </div>
           </div>
-          <TokenUsageChart tokenUsage={task.tokenUsage} />
+          <TokenUsageChart
+            tokenUsage={task.tokenUsage}
+            tokenCostUSD={task.tokenCostUSD}
+          />
           <NextStageBanner />
         </div>
       </div>
