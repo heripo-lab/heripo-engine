@@ -35,8 +35,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "jose": "^6.2.3",
-    "lucide-react": "^1.17.0",
-    "next": "^16.2.7",
+    "lucide-react": "^1.18.0",
+    "next": "^16.2.9",
     "node-cron": "^4.2.1",
     "otplib": "^13.4.1",
     "radix-ui": "^1.5.0",
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "@tailwindcss/postcss": "^4.3.0",
+    "@tailwindcss/postcss": "^4.3.1",
     "@tanstack/react-query-devtools": "^5.101.0",
     "@types/archiver": "^8.0.0",
     "@types/node-cron": "^3.0.11",
@@ -56,6 +56,6 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.5.0",
     "postcss": "^8.5.15",
-    "tailwindcss": "^4.3.0"
+    "tailwindcss": "^4.3.1"
   }
 }
