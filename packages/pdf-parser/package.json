@@ -75,7 +75,7 @@
     "ai": "catalog:",
     "docling-sdk": "^2.0.6",
     "es-toolkit": "catalog:",
-    "yauzl": "3.3.2",
+    "yauzl": "3.4.0",
     "zod": "catalog:"
   },
   "devDependencies": {
