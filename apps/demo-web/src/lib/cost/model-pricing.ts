@@ -70,6 +70,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'openai/gpt-5.4': { input: 2.5, output: 15 },
     'openai/gpt-5.2': { input: 1.75, output: 14 },
     'openai/gpt-5.1': { input: 1.25, output: 10 },
+    'openai/gpt-5.4-mini': { input: 0.75, output: 4.5 },
     'openai/gpt-5-mini': { input: 0.25, output: 2 },
     'google/gemini-3.1-pro-preview': { input: 2, output: 12 },
     'google/gemini-3-flash-preview': { input: 0.5, output: 3 },
