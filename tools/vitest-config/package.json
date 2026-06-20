@@ -15,6 +15,6 @@
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "vitest": "catalog:"
+    "vitest": "^4.1.9"
   }
 }

@@ -83,7 +83,7 @@
     "@heripo/tsconfig": "workspace:*",
     "@heripo/tsup-config": "workspace:*",
     "@heripo/vitest-config": "workspace:*",
-    "@types/yauzl": "^3.3.0",
+    "@types/yauzl": "^3.4.0",
     "@vitest/coverage-v8": "catalog:",
     "@vitest/expect": "catalog:",
     "tsup": "catalog:",
