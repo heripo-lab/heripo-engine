@@ -30,6 +30,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'zai-org/GLM-4.7': { input: 0.45, output: 2 },
     'Qwen/Qwen3-235B-A22B-Thinking-2507': { input: 0.65, output: 3 },
     'MiniMaxAI/MiniMax-M2.5': { input: 0.3, output: 1.2 },
+    'MiniMaxAI/MiniMax-M3': { input: 0.3, output: 1.2 },
     'zai-org/GLM-4.5-Air-FP8': { input: 0.2, output: 1.1 },
     'Qwen/Qwen3-Next-80B-A3B-Thinking': { input: 0.15, output: 1.5 },
     'Qwen/Qwen3-Coder-Next-FP8': { input: 0.5, output: 1.2 },
