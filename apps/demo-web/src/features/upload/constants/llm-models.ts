@@ -142,6 +142,11 @@ export const LLM_MODELS: LLMModel[] = [
     provider: 'Together',
   },
   {
+    id: 'together/MiniMaxAI/MiniMax-M3',
+    label: 'MiniMax M3',
+    provider: 'Together',
+  },
+  {
     id: 'together/openai/gpt-oss-120b',
     label: 'OpenAI GPT-OSS 120B',
     provider: 'Together',

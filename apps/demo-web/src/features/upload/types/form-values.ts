@@ -20,7 +20,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
   threadCount: 4,
   // Document type validation
-  documentValidationModel: 'openai/gpt-5.4-mini',
+  documentValidationModel: 'together/MiniMaxAI/MiniMax-M3',
   // PDF language detection for OCR language hints
   languageDetectionModel: 'lmstudio/gemma-4-e4b-it-mlx',
   // Force image PDF pre-conversion
@@ -35,12 +35,12 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
       textCorrectionFallback: 'google/gemini-3.1-flash-lite',
       pageGate: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       reviewAssistance: 'lmstudio/gemma-4-26b-a4b-it-mlx',
-      tableCorrection: 'openai/gpt-5.4-mini',
+      tableCorrection: 'together/MiniMaxAI/MiniMax-M3',
       reviewAssistanceTasks: {
         textOcrHanja: 'lmstudio/gemma-4-26b-a4b-it-mlx',
         textIntegrity: 'lmstudio/gemma-4-26b-a4b-it-mlx',
         textRoleFootnote: 'lmstudio/gemma-4-26b-a4b-it-mlx',
-        tables: 'openai/gpt-5.4-mini',
+        tables: 'together/MiniMaxAI/MiniMax-M3',
         picturesCaptions: 'lmstudio/gemma-4-26b-a4b-it-mlx',
         layoutBboxOrder: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       },
@@ -59,8 +59,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   fallbackModel: 'openai/gpt-5.4-mini',
   validatorModel: 'openai/gpt-5.4-mini',
   pageRangeParserModel: 'lmstudio/gemma-4-31b-it-mlx',
-  tocExtractorModel: 'lmstudio/gemma-4-e4b-it-mlx',
-  visionTocExtractorModel: 'lmstudio/gemma-4-31b-it-mlx',
+  tocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
+  visionTocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
   captionParserModel: 'lmstudio/gemma-4-e4b-it-mlx',
   // Batch & Retry
   textCleanerBatchSize: 20,
