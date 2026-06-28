@@ -286,6 +286,8 @@ function buildPDFCorrectionOptions(
     outputLanguage: options.correction.outputLanguage,
     reviewAssistanceEnabled:
       options.correction.reviewAssistanceEnabled ?? false,
+    tableCorrectionEnabled:
+      options.correction.tableCorrectionEnabled ?? true,
     // Only relevant when review assistance is enabled: demo runs have no human
     // reviewer, so every valid command would auto-apply instead of routing to a
     // proposal queue. Kept for when review assistance is re-enabled.
