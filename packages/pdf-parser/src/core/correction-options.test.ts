@@ -117,4 +117,15 @@ describe('normalizePDFCorrectionOptions', () => {
       ).reviewAssistanceEnabled,
     ).toBe(false);
   });
+
+  test('defaults tableCorrectionEnabled to true and honors an explicit value', () => {
+    expect(
+      normalizePDFCorrectionOptions(correction()).tableCorrectionEnabled,
+    ).toBe(true);
+    expect(
+      normalizePDFCorrectionOptions(
+        correction({ tableCorrectionEnabled: false }),
+      ).tableCorrectionEnabled,
+    ).toBe(false);
+  });
 });
