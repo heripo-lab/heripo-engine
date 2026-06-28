@@ -167,6 +167,7 @@ describe('PostDoclingCorrectionPipeline', () => {
         pageGateModel,
         pageConcurrency: 1,
         taskConcurrency: 6,
+        tableCorrectionEnabled: true,
       }),
     );
     expect(originalCallback).toHaveBeenCalledWith('/test/output');
@@ -393,12 +394,33 @@ describe('PostDoclingCorrectionPipeline', () => {
         workItemTimeoutMs: 600_000,
         maxRetries: 5,
         tableMaxRetries: 6,
+        tableCorrectionEnabled: true,
         outputLanguage: 'ko-KR',
         aggregator,
         abortSignal: abortController.signal,
         onTokenUsage,
         onProgress,
       }),
+    );
+  });
+
+  test('passes tableCorrectionEnabled: false to the runner', async () => {
+    const originalCallback = vi.fn();
+
+    const wrapped = pipeline.wrapCallback(
+      '/tmp/test.pdf',
+      'report-1',
+      correctionOptions({ tableCorrectionEnabled: false }),
+      originalCallback,
+    );
+
+    await wrapped('/test/output');
+
+    expect(mockRunnerInstance.analyzeAndSave).toHaveBeenCalledWith(
+      '/test/output',
+      'report-1',
+      expect.any(Function),
+      expect.objectContaining({ tableCorrectionEnabled: false }),
     );
   });
 

@@ -365,6 +365,7 @@ function makeOptions() {
     proposalThreshold: 0.5,
     maxRetries: 3,
     tableMaxRetries: 3,
+    tableCorrectionEnabled: true,
     temperature: 0,
     outputLanguage: 'en-US',
   };

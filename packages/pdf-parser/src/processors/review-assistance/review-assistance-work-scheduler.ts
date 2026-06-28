@@ -63,19 +63,28 @@ const TEXT_ROLE_REASONS = new Set([
 
 const SEVERE_TABLE_REASONS = new Set(['multi_page_table_candidate']);
 
+export interface ReviewAssistanceWorkSchedulerOptions {
+  skipTableItems?: boolean;
+}
+
 export class ReviewAssistanceWorkScheduler {
-  build(context: PageReviewContext): ReviewAssistanceWorkItem[] {
+  build(
+    context: PageReviewContext,
+    options?: ReviewAssistanceWorkSchedulerOptions,
+  ): ReviewAssistanceWorkItem[] {
     if (!context.reviewAssistanceEligibility.eligible) return [];
 
-    return [
+    const items = [
       ...this.buildTextOcrItems(context),
       ...this.buildTextIntegrityItems(context),
       ...this.buildTextRoleItems(context),
-      ...this.buildTableItems(context),
+      ...(options?.skipTableItems ? [] : this.buildTableItems(context)),
       ...this.buildPictureCaptionItems(context),
       ...this.buildPictureSplitItems(context),
       ...this.buildLayoutItems(context),
     ];
+
+    return items;
   }
 
   private buildTextOcrItems(

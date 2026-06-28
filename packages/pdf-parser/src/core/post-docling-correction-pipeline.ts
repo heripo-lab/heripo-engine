@@ -90,6 +90,7 @@ export class PostDoclingCorrectionPipeline {
             forceAutoApply: correction.forceAutoApply,
             maxRetries: correction.maxRetries.reviewAssistance,
             tableMaxRetries: correction.maxRetries.tableCorrection,
+            tableCorrectionEnabled: correction.tableCorrectionEnabled,
             temperature: correction.temperature,
             outputLanguage: correction.outputLanguage,
             aggregator: options.aggregator,

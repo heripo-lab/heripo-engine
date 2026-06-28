@@ -96,6 +96,7 @@ export interface ReviewAssistanceRunnerOptions {
   tableMaxRetries: number;
   temperature: number;
   outputLanguage: string;
+  tableCorrectionEnabled: boolean;
   pdfPath?: string;
   abortSignal?: AbortSignal;
   aggregator?: LLMTokenUsageAggregator;
@@ -574,7 +575,9 @@ export class ReviewAssistanceRunner {
 
       const image = new Uint8Array(await readFile(context.pageImagePath));
       const scheduler = new ReviewAssistanceWorkScheduler();
-      const workItems = scheduler.build(context);
+      const workItems = scheduler.build(context, {
+        skipTableItems: !options.tableCorrectionEnabled,
+      });
 
       if (workItems.length === 0) {
         const result: ReviewAssistancePageResult = {
