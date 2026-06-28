@@ -30,6 +30,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   // correction flow is off by default in the demo UI.
   correction: {
     reviewAssistanceEnabled: false,
+    tableCorrectionEnabled: false,
     models: {
       textCorrection: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       textCorrectionFallback: 'google/gemini-3.1-flash-lite',

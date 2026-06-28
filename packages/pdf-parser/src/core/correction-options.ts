@@ -65,6 +65,13 @@ export interface PDFCorrectionOptions {
    * text-correction stage runs. Defaults to true.
    */
   reviewAssistanceEnabled?: boolean;
+  /**
+   * When false, the table-correction work item is not generated during review
+   * assistance scheduling. The rest of the review-assistance pipeline (text
+   * OCR, text integrity, footnotes, pictures, layout) continues to run. Only
+   * relevant when `reviewAssistanceEnabled` is true. Defaults to true.
+   */
+  tableCorrectionEnabled?: boolean;
   temperature?: number;
 }
 
@@ -80,6 +87,7 @@ export interface NormalizedPDFCorrectionOptions {
   proposalThreshold: number;
   forceAutoApply: boolean;
   reviewAssistanceEnabled: boolean;
+  tableCorrectionEnabled: boolean;
   temperature: number;
 }
 
@@ -108,6 +116,7 @@ export const PDF_CORRECTION_DEFAULTS: Omit<
   proposalThreshold: 0.5,
   forceAutoApply: false,
   reviewAssistanceEnabled: true,
+  tableCorrectionEnabled: true,
   temperature: 0,
 };
 
@@ -247,6 +256,9 @@ export function normalizePDFCorrectionOptions(
     reviewAssistanceEnabled:
       value.reviewAssistanceEnabled ??
       PDF_CORRECTION_DEFAULTS.reviewAssistanceEnabled,
+    tableCorrectionEnabled:
+      value.tableCorrectionEnabled ??
+      PDF_CORRECTION_DEFAULTS.tableCorrectionEnabled,
     temperature: normalizeTemperature(
       value.temperature,
       PDF_CORRECTION_DEFAULTS.temperature,

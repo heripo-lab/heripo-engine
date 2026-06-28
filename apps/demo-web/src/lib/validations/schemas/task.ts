@@ -58,6 +58,7 @@ const correctionOptionsSchema = z.object({
     reviewAssistanceTasksFallback: correctionTaskModelSchema,
   }),
   reviewAssistanceEnabled: z.boolean().default(false),
+  tableCorrectionEnabled: z.boolean().default(true),
   concurrency: z
     .object({
       pages: z.number().int().positive().max(50).default(1),
