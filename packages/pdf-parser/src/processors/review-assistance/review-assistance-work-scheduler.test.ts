@@ -247,4 +247,37 @@ describe('ReviewAssistanceWorkScheduler', () => {
     expect(item.id.length).toBeLessThanOrEqual(180);
     expect(item.id).toMatch(/-\d+$/);
   });
+
+  test('skips table work items when skipTableItems is true', () => {
+    const context = makeContext();
+    const items = new ReviewAssistanceWorkScheduler().build(context, {
+      skipTableItems: true,
+    });
+
+    expect(items.map((item) => item.kind)).not.toContain('table');
+    expect(items.map((item) => item.kind)).toEqual([
+      'text_ocr_hanja',
+      'text_integrity',
+      'text_role_footnote',
+      'picture_caption',
+      'picture_split',
+      'layout_bbox_order',
+    ]);
+  });
+
+  test('includes table work items when skipTableItems is false', () => {
+    const context = makeContext();
+    const items = new ReviewAssistanceWorkScheduler().build(context, {
+      skipTableItems: false,
+    });
+
+    expect(items.map((item) => item.kind)).toContain('table');
+  });
+
+  test('includes table work items when skipTableItems is not specified', () => {
+    const context = makeContext();
+    const items = new ReviewAssistanceWorkScheduler().build(context);
+
+    expect(items.map((item) => item.kind)).toContain('table');
+  });
 });
