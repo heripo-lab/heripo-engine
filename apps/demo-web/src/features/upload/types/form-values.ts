@@ -22,7 +22,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   // Document type validation
   documentValidationModel: 'together/MiniMaxAI/MiniMax-M3',
   // PDF language detection for OCR language hints
-  languageDetectionModel: 'lmstudio/gemma-4-e4b-it-mlx',
+  languageDetectionModel: 'lmstudio/gemma-4-26b-a4b-it-mlx',
   // Force image PDF pre-conversion
   forceImagePdf: false,
   // Mandatory post-Docling correction.
@@ -62,7 +62,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   pageRangeParserModel: 'lmstudio/gemma-4-31b-it-mlx',
   tocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
   visionTocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
-  captionParserModel: 'lmstudio/gemma-4-e4b-it-mlx',
+  captionParserModel: 'lmstudio/gemma-4-26b-a4b-it-mlx',
   // Batch & Retry
   textCleanerBatchSize: 20,
   captionParserBatchSize: 0,
