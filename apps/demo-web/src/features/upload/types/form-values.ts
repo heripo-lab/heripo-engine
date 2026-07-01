@@ -59,7 +59,7 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   // LLM Models
   fallbackModel: 'openai/gpt-5.4-mini',
   validatorModel: 'openai/gpt-5.4-mini',
-  pageRangeParserModel: 'lmstudio/qwen3.6-35b-a3b-mlx',
+  pageRangeParserModel: 'together/MiniMaxAI/MiniMax-M3',
   tocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
   visionTocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
   captionParserModel: 'lmstudio/gemma-4-26b-a4b-it-mlx',
