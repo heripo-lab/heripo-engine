@@ -26,8 +26,8 @@ export interface VisionLLMComponentOptions extends BaseLLMComponentOptions {
  * Image content structure for vision LLM messages
  */
 export interface ImageContent {
-  type: 'image';
-  image: Uint8Array;
+  type: 'file';
+  data: Uint8Array;
   mediaType: string;
 }
 
@@ -108,8 +108,8 @@ export abstract class VisionLLMComponent extends BaseLLMComponent {
       : path.resolve(this.artifactDir, imagePath);
     const imageData = new Uint8Array(fs.readFileSync(absolutePath));
     return {
-      type: 'image',
-      image: imageData,
+      type: 'file',
+      data: imageData,
       mediaType: mimeType,
     };
   }

@@ -282,8 +282,8 @@ export class PdfLanguageDetector {
               text: KOREAN_DOCUMENT_DETECTION_PROMPT,
             },
             {
-              type: 'image' as const,
-              image: imageData,
+              type: 'file' as const,
+              data: imageData,
               mediaType: 'image/png' as const,
             },
           ],

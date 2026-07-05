@@ -515,7 +515,7 @@ describe('VisionTocExtractor', () => {
         role: string;
         content: Array<{
           type: string;
-          image?: Uint8Array;
+          data?: Uint8Array;
           mediaType?: string;
           text?: string;
         }>;
@@ -525,13 +525,13 @@ describe('VisionTocExtractor', () => {
       // First content should be text prompt
       expect(content[0].type).toBe('text');
 
-      // Following contents should be images
-      expect(content[1].type).toBe('image');
-      expect(content[1].image).toEqual(expectedUint8Array);
+      // Following contents should be image files
+      expect(content[1].type).toBe('file');
+      expect(content[1].data).toEqual(expectedUint8Array);
       expect(content[1].mediaType).toBe('image/png');
 
-      expect(content[2].type).toBe('image');
-      expect(content[2].image).toEqual(expectedUint8Array);
+      expect(content[2].type).toBe('file');
+      expect(content[2].data).toEqual(expectedUint8Array);
       expect(content[2].mediaType).toBe('image/png');
     });
 

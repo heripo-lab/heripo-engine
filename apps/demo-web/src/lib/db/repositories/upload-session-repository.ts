@@ -5,10 +5,7 @@ import type { ProcessingOptions } from '~/features/upload';
 import { readDatabase, writeDatabase } from '../index';
 
 export type UploadSessionStatus =
-  | 'uploading'
-  | 'completed'
-  | 'expired'
-  | 'cancelled';
+  'uploading' | 'completed' | 'expired' | 'cancelled';
 
 export interface UploadSession {
   id: string;

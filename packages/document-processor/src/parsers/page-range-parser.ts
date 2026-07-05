@@ -361,8 +361,8 @@ export class PageRangeParser extends VisionLLMComponent {
 
     // Build image content array
     const imageContents: Array<{
-      type: 'image';
-      image: Uint8Array;
+      type: 'file';
+      data: Uint8Array;
       mediaType: string;
     }> = [];
 
@@ -377,8 +377,8 @@ export class PageRangeParser extends VisionLLMComponent {
       const mimeType = page.image.mimetype || 'image/png';
 
       return {
-        type: 'image' as const,
-        image: imageData,
+        type: 'file' as const,
+        data: imageData,
         mediaType: mimeType,
       };
     });

@@ -269,8 +269,8 @@ describe('VisionLLMComponent', () => {
         path.resolve('/output', 'images/test.png'),
       );
       expect(result).toEqual({
-        type: 'image',
-        image: new Uint8Array(testBuffer),
+        type: 'file',
+        data: new Uint8Array(testBuffer),
         mediaType: 'image/png',
       });
     });
@@ -289,8 +289,8 @@ describe('VisionLLMComponent', () => {
       const result = component.testBuildImageContent('photo.jpg', 'image/jpeg');
 
       expect(result).toEqual({
-        type: 'image',
-        image: new Uint8Array(testBuffer),
+        type: 'file',
+        data: new Uint8Array(testBuffer),
         mediaType: 'image/jpeg',
       });
     });

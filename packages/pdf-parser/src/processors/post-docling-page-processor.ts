@@ -314,8 +314,8 @@ export class PostDoclingPageProcessor {
                 text: fullPrompt,
               },
               {
-                type: 'image' as const,
-                image,
+                type: 'file' as const,
+                data: image,
                 mediaType: 'image/png' as const,
               },
             ],

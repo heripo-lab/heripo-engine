@@ -5,8 +5,7 @@ import { z } from 'zod';
 import { createTaskFormDataSchema } from '../schemas/task';
 
 type SafeParseResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: z.ZodError };
+  { success: true; data: T } | { success: false; error: z.ZodError };
 
 /**
  * Validate route parameters from Next.js dynamic routes.

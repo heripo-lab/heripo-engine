@@ -8,11 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import { taskKeys } from '~/lib/query-keys';
 
 export type TaskStatus =
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface LogEntry {
   id: number;

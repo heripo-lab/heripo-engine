@@ -2,8 +2,8 @@
   "name": "@heripo/shared",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
   "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsup",
