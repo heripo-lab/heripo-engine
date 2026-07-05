@@ -13,7 +13,7 @@ catalog:
   '@vitest/expect': '^4.1.9'
   'ai': '^6.0.208'
   'ai-sdk-ollama': '^3.8.8'
-  'es-toolkit': '^1.47.1'
+  'es-toolkit': '^1.49.0'
   'tsup': '^8.5.1'
   'tsx': '^4.21.0'
   'vitest': '^4.1.9'
