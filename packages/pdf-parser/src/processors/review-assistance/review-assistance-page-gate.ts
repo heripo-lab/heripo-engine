@@ -7,9 +7,7 @@ import { join } from 'node:path';
 import { z } from 'zod/v4';
 
 export type ReviewAssistancePageKind =
-  | 'toc'
-  | 'archaeological_data'
-  | 'non_meaningful';
+  'toc' | 'archaeological_data' | 'non_meaningful';
 
 export interface ReviewAssistancePageEligibility {
   pageNo: number;
@@ -115,8 +113,8 @@ export class ReviewAssistancePageGate {
               text: this.buildPrompt(context, options.outputLanguage),
             },
             {
-              type: 'image' as const,
-              image,
+              type: 'file' as const,
+              data: image,
               mediaType: 'image/png' as const,
             },
           ],

@@ -5,9 +5,7 @@ export type ReviewAssistanceReportSchemaName = 'HeripoReviewAssistanceReport';
 export type ReviewAssistanceReportVersion = '1.0';
 
 export type ReviewAssistanceDisposition =
-  | 'auto_applied'
-  | 'proposal'
-  | 'skipped';
+  'auto_applied' | 'proposal' | 'skipped';
 
 export type ReviewAssistanceFailurePolicy = 'partial_page';
 
@@ -23,9 +21,7 @@ export type ReviewAssistanceWorkItemKind =
   | 'layout_bbox_order';
 
 export type ReviewAssistanceCallTraceValidation =
-  | 'passed'
-  | 'reasked'
-  | 'failed';
+  'passed' | 'reasked' | 'failed';
 
 export type ReviewAssistanceIssueCategory =
   | 'text'
@@ -51,10 +47,7 @@ export type ReviewAssistanceProgressSubstage =
   | 'review-assistance:write-report';
 
 export type ReviewAssistanceProgressStatus =
-  | 'started'
-  | 'progress'
-  | 'completed'
-  | 'failed';
+  'started' | 'progress' | 'completed' | 'failed';
 
 export interface ReviewAssistanceTableCell {
   text: string;

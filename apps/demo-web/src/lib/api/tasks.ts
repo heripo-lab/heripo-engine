@@ -10,11 +10,7 @@ import type {
 import type { ProcessingOptions } from '~/features/upload';
 
 export type TaskStatus =
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface Task {
   id: string;

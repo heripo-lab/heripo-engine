@@ -823,8 +823,8 @@ export class ReviewAssistanceRunner {
                 content: [
                   { type: 'text' as const, text: prompt },
                   {
-                    type: 'image' as const,
-                    image,
+                    type: 'file' as const,
+                    data: image,
                     mediaType: 'image/png' as const,
                   },
                 ],
@@ -1774,8 +1774,7 @@ export class ReviewAssistanceRunner {
     for (const decision of conflicted) {
       const adjacency = (
         decision.metadata?.taskConflict as
-          | { conflictDecisionIds?: string[] }
-          | undefined
+          { conflictDecisionIds?: string[] } | undefined
       )?.conflictDecisionIds;
       if (!adjacency) continue;
       for (const other of adjacency) {
@@ -1940,8 +1939,8 @@ export class ReviewAssistanceRunner {
             content: [
               { type: 'text' as const, text: prompt },
               {
-                type: 'image' as const,
-                image,
+                type: 'file' as const,
+                data: image,
                 mediaType: 'image/png' as const,
               },
             ],
@@ -2017,8 +2016,7 @@ export class ReviewAssistanceRunner {
         !reason.startsWith('conflicts_with_decision:'),
     );
     const priorConflict = winner.metadata?.taskConflict as
-      | { autoAppliedBeforeConflict?: boolean }
-      | undefined;
+      { autoAppliedBeforeConflict?: boolean } | undefined;
     // The conflict that demoted this winner from auto_applied to proposal is
     // now resolved in its favour. Restore auto-apply when the arbiter actively
     // picked it (method 'llm'); fallback picks stay a proposal for safety.

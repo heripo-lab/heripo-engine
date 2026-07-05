@@ -292,8 +292,7 @@ export class LLMCaller {
       });
 
       const toolCall = lastResult.toolCalls?.[0] as
-        | { input: unknown }
-        | undefined;
+        { input: unknown } | undefined;
       if (toolCall) {
         return {
           output: toolCall.input as TOutput,
@@ -443,7 +442,7 @@ export class LLMCaller {
   ): Promise<LLMCallResult<TOutput>> {
     return this.executeWithFallback(config, (model) =>
       this.generateStructuredOutput(model, config.schema, {
-        system: config.systemPrompt,
+        instructions: config.systemPrompt,
         prompt: config.userPrompt,
         temperature: config.temperature,
         maxRetries: config.maxRetries,

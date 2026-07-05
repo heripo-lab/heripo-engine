@@ -229,10 +229,10 @@ export class VisionTocExtractor extends VisionLLMComponent {
   private loadPageImages(
     startPage: number,
     endPage: number,
-  ): Array<{ type: 'image'; image: Uint8Array; mediaType: string }> {
+  ): Array<{ type: 'file'; data: Uint8Array; mediaType: string }> {
     const imageContents: Array<{
-      type: 'image';
-      image: Uint8Array;
+      type: 'file';
+      data: Uint8Array;
       mediaType: string;
     }> = [];
 
@@ -245,8 +245,8 @@ export class VisionTocExtractor extends VisionLLMComponent {
       const imageData = new Uint8Array(fs.readFileSync(imagePath));
 
       imageContents.push({
-        type: 'image',
-        image: imageData,
+        type: 'file',
+        data: imageData,
         mediaType: 'image/png',
       });
     }

@@ -160,8 +160,8 @@ export class VlmPageProcessor {
         content: [
           { type: 'text' as const, text: initialPrompt },
           {
-            type: 'image' as const,
-            image: imageData,
+            type: 'file' as const,
+            data: imageData,
             mediaType: 'image/png' as const,
           },
         ],
@@ -233,7 +233,7 @@ export class VlmPageProcessor {
       role: 'user';
       content: Array<
         | { type: 'text'; text: string }
-        | { type: 'image'; image: Uint8Array; mediaType: 'image/png' }
+        | { type: 'file'; data: Uint8Array; mediaType: 'image/png' }
       >;
     }>,
     model: LanguageModel,
@@ -309,8 +309,8 @@ export class VlmPageProcessor {
         content: [
           { type: 'text' as const, text: retryPrompt },
           {
-            type: 'image' as const,
-            image: imageData,
+            type: 'file' as const,
+            data: imageData,
             mediaType: 'image/png' as const,
           },
         ],

@@ -85,11 +85,7 @@ async function findListeningPid(port: number): Promise<string | null> {
 }
 
 type PDFParserStatus =
-  | 'ready'
-  | 'initializing'
-  | 'not_initialized'
-  | 'unhealthy'
-  | 'shutting_down';
+  'ready' | 'initializing' | 'not_initialized' | 'unhealthy' | 'shutting_down';
 
 class PDFParserManager {
   private static instance: PDFParserManager | null = null;

@@ -287,8 +287,8 @@ describe('VlmPageProcessor', () => {
                   text: expect.stringContaining('Analyze the page image'),
                 },
                 {
-                  type: 'image',
-                  image: new Uint8Array(imageBuffer),
+                  type: 'file',
+                  data: new Uint8Array(imageBuffer),
                   mediaType: 'image/png',
                 },
               ],

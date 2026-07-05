@@ -369,7 +369,7 @@ describe('LLMCaller', () => {
       expect(generateText).toHaveBeenCalledWith({
         model: mockPrimaryModel,
         output: Output.object({ schema: mockSchema }),
-        system: 'System prompt text',
+        instructions: 'System prompt text',
         prompt: 'User prompt text',
         temperature: 0.7,
         maxRetries: 5,
