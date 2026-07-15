@@ -134,7 +134,15 @@ class TaskQueueManager {
   }
 
   async enqueue(task: QueuedTask): Promise<void> {
-    this.queue.push(task);
+    // Dedupe: the constructor restores 'queued' tasks from the DB, and the
+    // task record is created before enqueue, so the first task after an
+    // instance boot would otherwise be queued twice and run twice.
+    const isDuplicate =
+      this.queue.some((queued) => queued.taskId === task.taskId) ||
+      this.activeWorkers.has(task.taskId);
+    if (!isDuplicate) {
+      this.queue.push(task);
+    }
 
     const position = this.queue.length;
     this.emit(task.taskId, {
@@ -167,6 +175,18 @@ class TaskQueueManager {
       console.warn(
         `[TaskQueueManager] Task ${task.taskId} already being processed`,
       );
+      return;
+    }
+
+    // Edge case protection: only run tasks still 'queued' in the DB.
+    // Drops stale duplicates (e.g. already completed or cancelled copies)
+    // and continues with the rest of the queue.
+    const taskRecord = getTaskById(task.taskId);
+    if (!taskRecord || taskRecord.status !== 'queued') {
+      console.warn(
+        `[TaskQueueManager] Skipping task ${task.taskId} with status ${taskRecord?.status ?? 'missing'}`,
+      );
+      this.processQueue();
       return;
     }
 
