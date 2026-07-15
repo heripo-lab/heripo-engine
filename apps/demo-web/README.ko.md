@@ -19,6 +19,7 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 - 실시간 처리 상태 모니터링 (SSE)
 - 처리 결과 시각화 (목차, 이미지, 표, 병합 셀, 원천 페이지)
 - 처리 결과 ZIP 다운로드 (`result-processed.json`, 원천 Docling JSON, source handoff manifest, 이미지, 렌더링 페이지 포함)
+- `processed-document.json` 업로드 기반 원장 추출 미리보기 (PDF 파싱 전체 생략)
 - 작업 큐 관리
 
 ### 기술 스택
@@ -195,6 +196,23 @@ pnpm dev
 - 작업 삭제
 - 이전 작업 결과 재확인
 
+### 5. 원장 추출 (미리보기)
+
+파이프라인 스텝퍼의 `Ledger Extraction` 단계는 PDF 파싱과 문서 전처리를 건너뛰고, 전처리된 문서에 `@heripo/ledger-extractor`를 바로 실행합니다:
+
+1. 홈 페이지 파이프라인 스텝퍼에서 **Ledger Extraction** 선택
+2. 단일 `processed-document.json` 파일 첨부 (최대 100MB, ZIP은 지원하지 않음)
+3. "Start Ledger Extraction" 클릭 — 확장자/MIME → 파일 크기 → JSON 파싱 → `ProcessedDocument` 런타임 검증 순으로 확인 후 원장 작업이 큐에 등록됩니다
+4. **전처리 파일 검증 페이지**(`/ledger/validation/[taskId]`)에서 `LedgerExtractionPreview` 확인: reportId, schemaVersion, 집계 카운트, 챕터 제목/텍스트 블록/이미지 URL/테이블 샘플, 원본 preview JSON
+
+참고:
+
+- 이 단계는 **미리보기 전용**입니다. 입력 데이터가 온전히 전달되었는지 요약할 뿐, 실제 원장 추출(LLM 기반 추출, 도메인 스키마, DB 저장)은 후속 작업입니다.
+- 검증 페이지는 업로드 확인용 임시 화면입니다. 실제 원장 결과 페이지(`/result/[taskId]`)는 디자인이 결정될 때까지 타이틀만 있는 placeholder로 비워져 있습니다.
+- JSON은 `@heripo/model`의 `ProcessedDocument` 타입(`packages/model/src/types/processed-document.ts`)과 호환되어야 합니다.
+- `ProcessedImage.path`에는 `heripo-web` export 스크립트가 생성한 완전한 public CDN URL이 들어와야 하며, 데모는 이 URL을 그대로 사용할 뿐 fetch하거나 재서명하지 않습니다.
+- 테스트용 JSON은 `heripo-web` export 스크립트로 생성하거나, 완료된 Raw Data Extraction 작업의 결과 JSON export로 만들 수 있습니다.
+
 ## 아키텍처
 
 ### 폴더 구조
@@ -267,6 +285,7 @@ const response = await fetch('/api/tasks');
 
 - `@heripo/pdf-parser`: PDF 파싱 핵심 로직
 - `@heripo/document-processor`: 문서 처리 파이프라인
+- `@heripo/ledger-extractor`: 원장 추출 미리보기
 - `@heripo/shared`: 공유 유틸리티
 
 ## 개발 가이드
