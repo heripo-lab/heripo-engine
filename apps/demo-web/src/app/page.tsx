@@ -15,6 +15,7 @@ import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { SampleResultsBanner } from '~/components/layout/sample-results-banner';
 import { PipelineStepper } from '~/components/pipeline/pipeline-stepper';
 import { Card, CardContent } from '~/components/ui/card';
+import { LedgerStagePanel } from '~/features/ledger';
 import {
   AdvancedOptionsCard,
   BypassDialog,
@@ -363,6 +364,8 @@ function HomePageContent() {
                 }
               />
             </form>
+          ) : selectedStage === 'ledger' ? (
+            <LedgerStagePanel />
           ) : (
             /* Coming Soon Content for other stages */
             <Card className="mx-auto max-w-lg">

@@ -1,3 +1,4 @@
+import type { LedgerExtractionPreview } from '@heripo/ledger-extractor';
 import type {
   Chapter,
   PageRange,
@@ -12,8 +13,11 @@ import type { ProcessingOptions } from '~/features/upload';
 export type TaskStatus =
   'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
+export type TaskKind = 'raw-data' | 'ledger';
+
 export interface Task {
   id: string;
+  kind: TaskKind;
   isSample: boolean;
   originalFilename: string;
   status: TaskStatus;
@@ -48,30 +52,45 @@ export interface CreateTaskResponse {
   streamUrl: string;
 }
 
-export interface TaskResultResponse {
-  task: {
-    id: string;
-    originalFilename: string;
-    status: string;
-    isSample: boolean;
-    totalPages: number;
-    chaptersCount: number;
-    imagesCount: number;
-    tablesCount: number;
-    tokenUsage: TokenUsageReport | null;
-    tokenCostUSD: number | null;
-    createdAt: string;
-    completedAt: string;
-  };
-  result: {
-    reportId: string;
-    pageRangeMap: Record<number, PageRange>;
-    chapters: Chapter[];
-    images: ProcessedImage[];
-    tables: ProcessedTable[];
-    footnotes?: ProcessedFootnote[];
-  };
+export interface TaskResultTaskInfo {
+  id: string;
+  kind: TaskKind;
+  originalFilename: string;
+  status: string;
+  isSample: boolean;
+  totalPages: number;
+  chaptersCount: number;
+  imagesCount: number;
+  tablesCount: number;
+  tokenUsage: TokenUsageReport | null;
+  tokenCostUSD: number | null;
+  createdAt: string;
+  completedAt: string;
 }
+
+export interface ProcessedDocumentResult {
+  reportId: string;
+  pageRangeMap: Record<number, PageRange>;
+  chapters: Chapter[];
+  images: ProcessedImage[];
+  tables: ProcessedTable[];
+  footnotes?: ProcessedFootnote[];
+}
+
+export interface RawDataTaskResultResponse {
+  task: TaskResultTaskInfo;
+  resultKind: 'processed-document';
+  result: ProcessedDocumentResult;
+}
+
+export interface LedgerTaskResultResponse {
+  task: TaskResultTaskInfo;
+  resultKind: 'ledger-preview';
+  result: LedgerExtractionPreview;
+}
+
+export type TaskResultResponse =
+  RawDataTaskResultResponse | LedgerTaskResultResponse;
 
 interface ApiError {
   error: string;
@@ -157,6 +176,35 @@ export async function createTask(
   }
 
   const response = await fetch('/api/tasks', {
+    method: 'POST',
+    body: formData,
+  });
+  return handleResponse<CreateTaskResponse>(response);
+}
+
+export interface CreateLedgerTaskInput {
+  file: File;
+  bypassCode?: string;
+  turnstileToken?: string;
+}
+
+/**
+ * Creates a ledger extraction task from a single processed-document.json
+ * file. Ledger tasks have no PDF processing options.
+ */
+export async function createLedgerTask(
+  input: CreateLedgerTaskInput,
+): Promise<CreateTaskResponse> {
+  const formData = new FormData();
+  formData.append('file', input.file);
+  if (input.bypassCode) {
+    formData.append('bypassCode', input.bypassCode);
+  }
+  if (input.turnstileToken) {
+    formData.append('turnstileToken', input.turnstileToken);
+  }
+
+  const response = await fetch('/api/tasks/ledger', {
     method: 'POST',
     body: formData,
   });
