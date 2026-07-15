@@ -23,6 +23,7 @@
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@heripo/document-processor": "workspace:*",
+    "@heripo/ledger-extractor": "workspace:*",
     "@heripo/logger": "workspace:*",
     "@heripo/model": "workspace:*",
     "@heripo/pdf-parser": "workspace:*",

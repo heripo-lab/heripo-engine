@@ -12,9 +12,10 @@ import {
 } from '../db/repositories/task-repository';
 import { createTaskCancelledPayload, sendWebhookAsync } from '../webhook';
 
-export interface QueuedTask {
+export type TaskKind = 'raw-data' | 'ledger';
+
+interface BaseQueuedTask {
   taskId: string;
-  options: ProcessingOptions;
   filePath: string;
   addedAt: Date;
   // Fields for webhook
@@ -24,6 +25,17 @@ export interface QueuedTask {
   filename: string;
   isOtpBypass: boolean;
 }
+
+export interface RawDataQueuedTask extends BaseQueuedTask {
+  kind: 'raw-data';
+  options: ProcessingOptions;
+}
+
+export interface LedgerQueuedTask extends BaseQueuedTask {
+  kind: 'ledger';
+}
+
+export type QueuedTask = RawDataQueuedTask | LedgerQueuedTask;
 
 export type SSEEventType =
   | 'status'
@@ -113,9 +125,8 @@ class TaskQueueManager {
   private restoreQueueFromDatabase(): void {
     const queuedTasks = getQueuedTasks();
     for (const task of queuedTasks) {
-      this.queue.push({
+      const base = {
         taskId: task.id,
-        options: task.options,
         filePath: task.filePath,
         addedAt: new Date(task.createdAt),
         sessionId: task.sessionId,
@@ -123,7 +134,21 @@ class TaskQueueManager {
         userAgent: task.userAgent ?? 'unknown',
         filename: task.originalFilename,
         isOtpBypass: task.isOtpBypass, // TEMP:vlm-flag
-      });
+      };
+
+      if (task.kind === 'ledger') {
+        this.queue.push({ ...base, kind: 'ledger' });
+        continue;
+      }
+
+      if (!task.options) {
+        console.warn(
+          `[TaskQueueManager] Skipping raw-data task ${task.id} without options`,
+        );
+        continue;
+      }
+
+      this.queue.push({ ...base, kind: 'raw-data', options: task.options });
     }
 
     if (this.queue.length > 0) {

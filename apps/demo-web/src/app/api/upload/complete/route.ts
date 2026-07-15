@@ -24,8 +24,8 @@ import {
   updateUploadSessionStatus,
 } from '~/lib/db/repositories/upload-session-repository';
 import { paths } from '~/lib/paths';
+import { runTaskWorker } from '~/lib/queue/task-dispatcher';
 import { TaskQueueManager } from '~/lib/queue/task-queue-manager';
-import { runTaskWorker } from '~/lib/queue/task-worker';
 import { extractClientInfo } from '~/lib/utils/request-info';
 import { createTaskStartedPayload, sendWebhookAsync } from '~/lib/webhook';
 
@@ -208,6 +208,7 @@ export async function POST(request: NextRequest) {
     // Create task record in database
     const task = createTask({
       id: taskId,
+      kind: 'raw-data',
       sessionId: uploadSession.sessionId,
       originalFilename: uploadSession.filename,
       filePath: taskPaths.inputPdf,
@@ -223,6 +224,7 @@ export async function POST(request: NextRequest) {
 
     // Enqueue task
     await queueManager.enqueue({
+      kind: 'raw-data',
       taskId,
       options: uploadSession.options,
       filePath: taskPaths.inputPdf,

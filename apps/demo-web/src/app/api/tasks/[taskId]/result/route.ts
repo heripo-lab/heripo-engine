@@ -39,19 +39,27 @@ export async function GET(
       );
     }
 
-    if (!task.processedResultPath || !existsSync(task.processedResultPath)) {
+    // Resolve the result file by task kind:
+    // raw-data -> ProcessedDocument, ledger -> LedgerExtractionPreview
+    const resultPath =
+      task.kind === 'ledger' ? task.outputResultPath : task.processedResultPath;
+    const resultKind =
+      task.kind === 'ledger' ? 'ledger-preview' : 'processed-document';
+
+    if (!resultPath || !existsSync(resultPath)) {
       return NextResponse.json(
         { error: 'Result file not found' },
         { status: 404 },
       );
     }
 
-    const resultJson = readFileSync(task.processedResultPath, 'utf8');
+    const resultJson = readFileSync(resultPath, 'utf8');
     const result = JSON.parse(resultJson);
 
     return NextResponse.json({
       task: {
         id: task.id,
+        kind: task.kind,
         originalFilename: task.originalFilename,
         status: task.status,
         isSample: task.isSample,
@@ -64,6 +72,7 @@ export async function GET(
         createdAt: task.createdAt,
         completedAt: task.completedAt,
       },
+      resultKind,
       result,
     });
   } catch (error) {

@@ -6,7 +6,7 @@ import type {
 import type { PDFConvertOptions, PDFParser } from '@heripo/pdf-parser';
 import type { EventEmitter } from 'events';
 
-import type { QueuedTask, SSEEvent } from './task-queue-manager';
+import type { RawDataQueuedTask, SSEEvent } from './task-queue-manager';
 
 import { DocumentProcessor } from '@heripo/document-processor';
 import { InvalidDocumentTypeError } from '@heripo/pdf-parser';
@@ -15,7 +15,6 @@ import { readFileSync, writeFileSync } from 'fs';
 import { relative, sep } from 'path';
 
 import { calculateCost } from '../cost/model-pricing';
-import { createLog } from '../db/repositories/log-repository';
 import {
   getTaskById,
   updateTaskProgress,
@@ -33,6 +32,7 @@ import {
   sendWebhookAsync,
 } from '../webhook';
 import { PDFParserManager } from './pdf-parser-manager';
+import { createTaskLogger } from './task-logger';
 
 const SOURCE_HANDOFF_MANIFEST_FILENAME = 'source-handoff-manifest.json';
 
@@ -196,7 +196,7 @@ function calculateTotalCost(usage: TokenUsageReport): number {
 }
 
 type ReviewAssistanceTaskModelIds =
-  QueuedTask['options']['correction']['models']['reviewAssistanceTasks'];
+  RawDataQueuedTask['options']['correction']['models']['reviewAssistanceTasks'];
 
 /**
  * Resolve a per-task review-assistance model map (primary or fallback) into
@@ -234,7 +234,7 @@ function buildReviewAssistanceTaskModels(
 }
 
 function buildPDFCorrectionOptions(
-  options: QueuedTask['options'],
+  options: RawDataQueuedTask['options'],
 ): PDFConvertOptions['correction'] {
   const models = options.correction.models;
   const reviewAssistanceTasks = buildReviewAssistanceTaskModels(
@@ -315,19 +315,6 @@ function getStepIndex(stepId: string): number {
   return PROCESSING_STEPS.findIndex((s) => s.id === stepId);
 }
 
-function maskFilePaths(message: string): string {
-  return (
-    message
-      // file:// URL
-      .replace(/file:\/\/[^\s]+/g, (match) => match.split('/').pop() || match)
-      // 절대 경로 (/Users, /var, /tmp, /home 등)
-      .replace(
-        /\/(?:Users|var|tmp|home)[^\s]*/g,
-        (match) => match.split('/').pop() || match,
-      )
-  );
-}
-
 function calculateProgress(stepIndex: number, stepProgress = 100): number {
   let totalWeight = 0;
   for (let i = 0; i < stepIndex; i++) {
@@ -337,74 +324,8 @@ function calculateProgress(stepIndex: number, stepProgress = 100): number {
   return Math.round(totalWeight + (currentStepWeight * stepProgress) / 100);
 }
 
-interface TaskLoggerMethods {
-  debug: (...args: unknown[]) => void;
-  info: (...args: unknown[]) => void;
-  warn: (...args: unknown[]) => void;
-  error: (...args: unknown[]) => void;
-}
-
-interface TaskLoggerContext {
-  logger: TaskLoggerMethods;
-  detectedSteps: Set<string>;
-}
-
-function createTaskLogger(
-  taskId: string,
-  emitter: EventEmitter,
-  emitProgress: (step: string, percent: number) => void,
-): TaskLoggerContext {
-  const detectedSteps = new Set<string>();
-
-  const emit = (
-    level: 'debug' | 'info' | 'warn' | 'error',
-    ...args: unknown[]
-  ) => {
-    const message = maskFilePaths(
-      args
-        .map((arg) =>
-          typeof arg === 'object' && arg !== null
-            ? JSON.stringify(arg)
-            : String(arg),
-        )
-        .join(' '),
-    );
-    const timestamp = new Date().toISOString();
-
-    // Detect step change from log prefix
-    for (const [prefix, stepId] of Object.entries(STEP_PREFIXES)) {
-      if (message.startsWith(prefix) && !detectedSteps.has(stepId)) {
-        detectedSteps.add(stepId);
-        const stepIndex = getStepIndex(stepId);
-        if (stepIndex !== -1) {
-          emitProgress(stepId, calculateProgress(stepIndex, 0));
-        }
-        break;
-      }
-    }
-
-    const log = createLog(taskId, level, message);
-
-    const event: SSEEvent = {
-      type: 'log',
-      data: { id: log.id, level, message, timestamp },
-    };
-    emitter.emit(`task:${taskId}`, event);
-  };
-
-  return {
-    logger: {
-      debug: (...args: unknown[]) => emit('debug', ...args),
-      info: (...args: unknown[]) => emit('info', ...args),
-      warn: (...args: unknown[]) => emit('warn', ...args),
-      error: (...args: unknown[]) => emit('error', ...args),
-    },
-    detectedSteps,
-  };
-}
-
-export async function runTaskWorker(
-  task: QueuedTask,
+export async function runRawDataTaskWorker(
+  task: RawDataQueuedTask,
   emitter: EventEmitter,
   abortSignal?: AbortSignal,
 ): Promise<void> {
@@ -419,7 +340,15 @@ export async function runTaskWorker(
     emitter.emit(`task:${taskId}`, event);
   };
 
-  const { logger } = createTaskLogger(taskId, emitter, emitProgress);
+  const { logger } = createTaskLogger(taskId, emitter, {
+    stepPrefixes: STEP_PREFIXES,
+    onStepDetected: (stepId) => {
+      const stepIndex = getStepIndex(stepId);
+      if (stepIndex !== -1) {
+        emitProgress(stepId, calculateProgress(stepIndex, 0));
+      }
+    },
+  });
 
   const pdfParserManager = PDFParserManager.getInstance();
 
