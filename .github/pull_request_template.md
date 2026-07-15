@@ -4,6 +4,7 @@
 
 - [ ] `@heripo/pdf-parser`
 - [ ] `@heripo/document-processor`
+- [ ] `@heripo/ledger-extractor`
 - [ ] `@heripo/model`
 - [ ] `@heripo/logger`
 - [ ] `@heripo/shared` (internal)
