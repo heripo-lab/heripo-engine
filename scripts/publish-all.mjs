@@ -40,6 +40,7 @@ const packages = [
   { name: '@heripo/model', dir: 'packages/model' },
   { name: '@heripo/pdf-parser', dir: 'packages/pdf-parser' },
   { name: '@heripo/document-processor', dir: 'packages/document-processor' },
+  { name: '@heripo/ledger-extractor', dir: 'packages/ledger-extractor' },
 ];
 
 const run = (cmd, cmdArgs, options = {}) => {
@@ -243,6 +244,7 @@ const commitAndTag = (version) => {
     'packages/model/package.json',
     'packages/pdf-parser/package.json',
     'packages/document-processor/package.json',
+    'packages/ledger-extractor/package.json',
   ]);
   run('git', ['commit', '-m', `chore: release ${tag}`]);
   run('git', ['tag', '-a', tag, '-m', tag]);

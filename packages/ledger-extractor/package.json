@@ -1,0 +1,78 @@
+{
+  "name": "@heripo/ledger-extractor",
+  "private": false,
+  "type": "module",
+  "version": "0.1.40",
+  "description": "Ledger extraction preview library for heripo engine",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "sideEffects": false,
+  "author": "heripo lab",
+  "contributors": [
+    "Kim, Hongyeon <kimhongyeon89@gmail.com>",
+    "Cho, Hayoung <hmys0500@gmail.com>",
+    "Kim, Gaeun <knospe1@naver.com>"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heripo-lab/heripo-engine",
+    "directory": "packages/ledger-extractor"
+  },
+  "bugs": {
+    "url": "https://github.com/heripo-lab/heripo-engine/issues"
+  },
+  "homepage": "https://github.com/heripo-lab/heripo-engine/tree/main/packages/ledger-extractor",
+  "keywords": [
+    "heripo",
+    "ledger",
+    "extractor",
+    "archaeology"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "pnpm clean && tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "TEST_MODE=ci vitest run --coverage",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:watch": "vitest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
+  },
+  "dependencies": {
+    "@heripo/logger": "workspace:*",
+    "@heripo/model": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@heripo/tsconfig": "workspace:*",
+    "@heripo/tsup-config": "workspace:*",
+    "@heripo/vitest-config": "workspace:*",
+    "@vitest/coverage-v8": "catalog:",
+    "@vitest/expect": "catalog:",
+    "tsup": "catalog:",
+    "vitest": "catalog:"
+  }
+}
