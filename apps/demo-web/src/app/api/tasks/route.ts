@@ -3,20 +3,12 @@ import type { NextRequest } from 'next/server';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { NextResponse } from 'next/server';
 
+import { enforcePublicDemoGuards } from '~/lib/api/public-demo-guard';
 import { toTaskApiResponse } from '~/lib/api/task-response';
-import { verifyTOTP } from '~/lib/auth/totp';
-import { isTurnstileTokenValid } from '~/lib/auth/turnstile';
-import { publicModeConfig } from '~/lib/config/public-mode';
-import {
-  canAttemptOTP,
-  recordOTPAttempt,
-} from '~/lib/db/repositories/otp-lockout-repository';
-import { getWeeklyLockoutStatus } from '~/lib/db/repositories/success-session-repository';
 import { createTask, listTasks } from '~/lib/db/repositories/task-repository';
-import { getUsageStatus } from '~/lib/db/repositories/usage-repository';
 import { paths } from '~/lib/paths';
+import { runTaskWorker } from '~/lib/queue/task-dispatcher';
 import { TaskQueueManager } from '~/lib/queue/task-queue-manager';
-import { runTaskWorker } from '~/lib/queue/task-worker';
 import { getOrCreateSessionId } from '~/lib/session';
 import { extractClientInfo } from '~/lib/utils/request-info';
 import {
@@ -25,14 +17,7 @@ import {
   processingOptionsSchema,
   taskListQuerySchema,
 } from '~/lib/validations';
-import {
-  createOTPFailedPayload,
-  createOTPLockedPayload,
-  createRateLimitExceededPayload,
-  createSessionWeeklyLockedPayload,
-  createTaskStartedPayload,
-  sendWebhookAsync,
-} from '~/lib/webhook';
+import { createTaskStartedPayload, sendWebhookAsync } from '~/lib/webhook';
 
 import { DEFAULT_FORM_VALUES } from '~/features/upload/types/form-values';
 import type { ProcessingOptions } from '~/features/upload/types/form-values';
@@ -122,144 +107,24 @@ export async function POST(request: NextRequest) {
     }
 
     // Public mode: OTP-first verification to avoid Turnstile timing issues
-    let isOtpBypass = false;
-    if (isPublicMode) {
-      if (bypassCode) {
-        // Step 1: bypassCode provided - verify OTP first (skip Turnstile)
-        const identifier = 'global';
-        const attemptCheck = canAttemptOTP(identifier);
-        if (!attemptCheck.allowed) {
-          sendWebhookAsync(
-            createOTPLockedPayload({
-              ...clientInfo,
-              filename: file.name,
-            }),
-          );
+    const guardResult = await enforcePublicDemoGuards({
+      sessionId,
+      clientInfo,
+      filename: file.name,
+      bypassCode,
+      turnstileToken,
+    });
+    if (!guardResult.ok) {
+      return guardResult.response;
+    }
 
-          return NextResponse.json(
-            {
-              error: attemptCheck.reason,
-              code: 'OTP_PERMANENTLY_LOCKED',
-            },
-            { status: 403 },
-          );
-        }
-
-        const isValid = verifyTOTP(bypassCode);
-        recordOTPAttempt(identifier, isValid);
-
-        if (!isValid) {
-          const updatedCheck = canAttemptOTP(identifier);
-          const remainingAttempts = updatedCheck.remainingAttempts ?? 0;
-
-          if (remainingAttempts > 0) {
-            sendWebhookAsync(
-              createOTPFailedPayload({
-                ...clientInfo,
-                filename: file.name,
-                remainingAttempts,
-              }),
-            );
-          } else {
-            sendWebhookAsync(
-              createOTPLockedPayload({
-                ...clientInfo,
-                filename: file.name,
-              }),
-            );
-          }
-
-          return NextResponse.json(
-            {
-              error:
-                remainingAttempts > 0
-                  ? `Invalid bypass code. ${remainingAttempts} ${remainingAttempts === 1 ? 'attempt' : 'attempts'} remaining.`
-                  : 'Invalid bypass code. Your access has been permanently blocked.',
-              code: remainingAttempts > 0 ? 'INVALID_OTP' : 'OTP_LOCKED',
-              remainingAttempts,
-            },
-            { status: remainingAttempts > 0 ? 401 : 403 },
-          );
-        }
-
-        // OTP passed - skip Turnstile
-        isOtpBypass = true;
-
-        // OTP bypass: use user-provided options instead of defaults
-        options = optionsValidation.data;
-      } else {
-        // Step 2: No bypassCode - require Turnstile
-        if (!turnstileToken) {
-          return NextResponse.json(
-            {
-              error: 'Turnstile verification required',
-              code: 'INVALID_TURNSTILE',
-            },
-            { status: 400 },
-          );
-        }
-
-        const isValidTurnstile = await isTurnstileTokenValid(turnstileToken);
-        if (!isValidTurnstile) {
-          return NextResponse.json(
-            {
-              error: 'Turnstile verification failed',
-              code: 'INVALID_TURNSTILE',
-            },
-            { status: 400 },
-          );
-        }
-
-        // Step 3: Check weekly session lockout (official demo + non-OTP only)
-        if (publicModeConfig.isPublicMode && publicModeConfig.isOfficialDemo) {
-          const lockoutStatus = getWeeklyLockoutStatus(sessionId);
-          if (lockoutStatus.locked) {
-            sendWebhookAsync(
-              createSessionWeeklyLockedPayload({
-                ...clientInfo,
-                sessionId,
-                filename: file.name,
-                lockedUntil: lockoutStatus.lockedUntil!,
-              }),
-            );
-
-            return NextResponse.json(
-              {
-                error:
-                  'You have already completed a task this week. Please try again later.',
-                code: 'WEEKLY_SESSION_LOCKED',
-                lockedUntil: lockoutStatus.lockedUntil,
-              },
-              { status: 429 },
-            );
-          }
-        }
-
-        // Step 4: Check rate limit (only for non-OTP users)
-        const usageStatus = getUsageStatus();
-        if (!usageStatus.canCreate) {
-          sendWebhookAsync(
-            createRateLimitExceededPayload({
-              ...clientInfo,
-              filename: file.name,
-              dailyLimit: usageStatus.dailyLimit,
-              todayUsed: usageStatus.todayUsed,
-            }),
-          );
-
-          return NextResponse.json(
-            {
-              error: usageStatus.reason,
-              code: 'RATE_LIMIT_EXCEEDED',
-            },
-            { status: 429 },
-          );
-        }
-      }
+    // OTP bypass: use user-provided options instead of defaults
+    if (isPublicMode && guardResult.isOtpBypass) {
+      options = optionsValidation.data;
     }
 
     // Track if OTP bypass was used (for backwards compatibility)
-    const otpMode = isOtpBypass;
+    const otpMode = guardResult.isOtpBypass;
 
     const taskId = generateTaskId();
     const taskPaths = paths.task(taskId);
@@ -276,6 +141,7 @@ export async function POST(request: NextRequest) {
     // Create task record in database
     const task = createTask({
       id: taskId,
+      kind: 'raw-data',
       sessionId,
       originalFilename: file.name,
       filePath: taskPaths.inputPdf,
@@ -291,6 +157,7 @@ export async function POST(request: NextRequest) {
 
     // Enqueue task (processQueue is called internally by enqueue)
     await queueManager.enqueue({
+      kind: 'raw-data',
       taskId,
       options,
       filePath: taskPaths.inputPdf,
