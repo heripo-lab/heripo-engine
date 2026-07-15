@@ -2,6 +2,8 @@
 
 import { Suspense, use } from 'react';
 
+import type { RawDataTaskResultResponse } from '~/lib/api/tasks';
+
 import { AutoCorrectionDemoNoticeBanner } from '~/components/layout/auto-correction-demo-notice-banner';
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { PipelineBreadcrumb } from '~/components/pipeline/pipeline-breadcrumb';
@@ -41,32 +43,58 @@ function ResultContent({ taskId }: { taskId: string }) {
     retryOnNotCompleted: true,
   });
 
+  if (isLoading) return <ResultLoading />;
+  if (error) return <ResultError message={error.message} />;
+  if (!data) return null;
+
+  // Ledger result page is intentionally an empty placeholder: its design is
+  // not decided yet. Use /ledger/validation/[taskId] to inspect the upload.
+  if (data.resultKind === 'ledger-preview') {
+    return (
+      <div className="container mx-auto px-4 py-10 xl:px-0">
+        <MobileWarningBanner />
+        <div className="mx-auto max-w-7xl space-y-8">
+          <PipelineBreadcrumb currentStage="ledger" />
+          <h1 className="text-3xl font-bold tracking-tight">
+            Ledger Extraction Result
+          </h1>
+        </div>
+      </div>
+    );
+  }
+
+  return <RawDataResultContent taskId={taskId} data={data} />;
+}
+
+function RawDataResultContent({
+  taskId,
+  data,
+}: {
+  taskId: string;
+  data: RawDataTaskResultResponse;
+}) {
   const { selectedChapterId, setSelectedChapterId } = useSelectedChapter({
-    chapters: data?.result.chapters,
+    chapters: data.result.chapters,
   });
 
   const { exportJson } = useExportJson({
-    data: data?.result ?? null,
-    filename: data?.task.originalFilename ?? 'document.pdf',
+    data: data.result ?? null,
+    filename: data.task.originalFilename ?? 'document.pdf',
   });
 
   const { downloadAll, isDownloading } = useDownloadAll({
     taskId,
-    filename: data?.task.originalFilename ?? 'document.pdf',
+    filename: data.task.originalFilename ?? 'document.pdf',
   });
 
   // Page navigation hook
   const pageNav = usePageNavigation({
-    chapters: data?.result.chapters ?? [],
-    images: data?.result.images ?? [],
-    tables: data?.result.tables ?? [],
-    footnotes: data?.result.footnotes ?? [],
-    totalPdfPages: data?.task.totalPages ?? 0,
+    chapters: data.result.chapters ?? [],
+    images: data.result.images ?? [],
+    tables: data.result.tables ?? [],
+    footnotes: data.result.footnotes ?? [],
+    totalPdfPages: data.task.totalPages ?? 0,
   });
-
-  if (isLoading) return <ResultLoading />;
-  if (error) return <ResultError message={error.message} />;
-  if (!data) return null;
 
   const { task, result } = data;
 

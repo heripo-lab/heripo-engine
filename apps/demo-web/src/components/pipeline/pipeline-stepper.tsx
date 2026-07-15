@@ -22,7 +22,7 @@ const PIPELINE_STAGES: PipelineStage[] = [
     id: 'ledger',
     title: 'Ledger Extraction',
     description: 'ProcessedDocument to Ledger',
-    status: 'disabled',
+    status: 'active',
   },
   {
     id: 'standard',
