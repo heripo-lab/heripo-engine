@@ -40,7 +40,13 @@ export default function ProcessPage({ params }: PageProps) {
     useTaskStream(taskId);
   const isProcessing = status === 'queued' || status === 'running';
 
-  useAutoNavigate({ status, resultUrl, taskId, disabled: disableAutoNavigate });
+  useAutoNavigate({
+    status,
+    resultUrl,
+    taskId,
+    kind: task?.kind ?? 'raw-data',
+    disabled: disableAutoNavigate,
+  });
 
   const handleCancelClick = () => {
     setShowCancelDialog(true);
@@ -55,13 +61,16 @@ export default function ProcessPage({ params }: PageProps) {
     });
   };
 
-  const filename = task?.originalFilename ?? 'document.pdf';
+  const taskKind = task?.kind ?? 'raw-data';
+  const filename =
+    task?.originalFilename ??
+    (taskKind === 'ledger' ? 'processed-document.json' : 'document.pdf');
 
   return (
     <div className="container mx-auto px-4 py-10 xl:px-0">
       <MobileWarningBanner />
       <div className="mx-auto max-w-7xl space-y-8">
-        <PipelineBreadcrumb currentStage="raw-data" />
+        <PipelineBreadcrumb currentStage={taskKind} />
         <ProcessHeader
           status={status}
           filename={filename}
@@ -76,13 +85,16 @@ export default function ProcessPage({ params }: PageProps) {
               currentStep={currentStep}
               progress={progress}
               status={status}
+              kind={taskKind}
             />
           </div>
           <div className="w-full lg:w-3/5">
             <LogViewer logs={logs} />
           </div>
         </div>
-        <LiveTokenUsageCard tokenUsage={tokenUsage} />
+        {taskKind === 'raw-data' && (
+          <LiveTokenUsageCard tokenUsage={tokenUsage} />
+        )}
         <ProcessInfoCard />
 
         <ProcessErrorDialog
@@ -106,7 +118,7 @@ export default function ProcessPage({ params }: PageProps) {
         />
 
         <ProcessGuideDialog
-          open={isProcessing && showEntryGuide}
+          open={taskKind === 'raw-data' && isProcessing && showEntryGuide}
           onOpenChange={setShowEntryGuide}
         />
       </div>
