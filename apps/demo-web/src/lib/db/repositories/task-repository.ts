@@ -9,17 +9,23 @@ import { readDatabase, writeDatabase } from '../index';
 export type TaskStatus =
   'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
+export type TaskKind = 'raw-data' | 'ledger';
+
 export interface Task {
   id: string;
+  kind: TaskKind;
   sessionId: string;
   isSample: boolean;
   status: TaskStatus;
   originalFilename: string;
   filePath: string;
-  options: ProcessingOptions;
+  // PDF processing options; null for task kinds without processing options
+  options: ProcessingOptions | null;
   artifactDir: string | null;
   resultPath: string | null;
   processedResultPath: string | null;
+  // Generic result path for non-raw-data task kinds (e.g. ledger preview JSON)
+  outputResultPath: string | null;
   totalPages: number | null;
   chaptersCount: number | null;
   imagesCount: number | null;
@@ -42,15 +48,19 @@ export interface Task {
 function recordToTask(row: TaskRecord): Task {
   return {
     id: row.id,
+    kind: row.kind,
     sessionId: row.session_id,
     isSample: row.is_sample,
     status: row.status,
     originalFilename: row.original_filename,
     filePath: row.file_path,
-    options: JSON.parse(row.options_json) as ProcessingOptions,
+    options: row.options_json
+      ? (JSON.parse(row.options_json) as ProcessingOptions)
+      : null,
     artifactDir: row.artifact_dir,
     resultPath: row.result_path,
     processedResultPath: row.processed_result_path,
+    outputResultPath: row.output_result_path,
     totalPages: row.total_pages,
     chaptersCount: row.chapters_count,
     imagesCount: row.images_count,
@@ -71,10 +81,11 @@ function recordToTask(row: TaskRecord): Task {
 
 export interface CreateTaskInput {
   id: string;
+  kind: TaskKind;
   sessionId: string;
   originalFilename: string;
   filePath: string;
-  options: ProcessingOptions;
+  options: ProcessingOptions | null;
   clientIp: string;
   userAgent: string;
   isOtpBypass: boolean;
@@ -85,15 +96,17 @@ export function createTask(input: CreateTaskInput): Task {
 
   const record: TaskRecord = {
     id: input.id,
+    kind: input.kind,
     session_id: input.sessionId,
     is_sample: false,
     status: 'queued',
     original_filename: input.originalFilename,
     file_path: input.filePath,
-    options_json: JSON.stringify(input.options),
+    options_json: input.options ? JSON.stringify(input.options) : null,
     artifact_dir: null,
     result_path: null,
     processed_result_path: null,
+    output_result_path: null,
     total_pages: null,
     chapters_count: null,
     images_count: null,
@@ -258,6 +271,45 @@ export function updateTaskResult(
   record.progress_percent = 100;
 
   // Record success session for weekly lockout (non-OTP bypass only)
+  if (!record.is_otp_bypass) {
+    db.successSessions.push({
+      session_id: record.session_id,
+      task_id: record.id,
+      completed_at: record.completed_at,
+    });
+  }
+
+  writeDatabase(db);
+}
+
+/**
+ * Marks a ledger task as completed with its preview result.
+ * Mirrors updateTaskResult but writes the generic output_result_path and
+ * only the counts a ledger preview provides.
+ */
+export function updateLedgerTaskResult(
+  id: string,
+  result: {
+    outputResultPath: string;
+    chaptersCount: number;
+    imagesCount: number;
+    tablesCount: number;
+  },
+): void {
+  const db = readDatabase();
+  const record = db.tasks.find((t) => t.id === id);
+  if (!record) return;
+
+  record.output_result_path = result.outputResultPath;
+  record.chapters_count = result.chaptersCount;
+  record.images_count = result.imagesCount;
+  record.tables_count = result.tablesCount;
+  record.status = 'completed';
+  record.completed_at = new Date().toISOString();
+  record.progress_percent = 100;
+
+  // Record success session for weekly lockout (non-OTP bypass only),
+  // keeping the public demo policy consistent across task kinds
   if (!record.is_otp_bypass) {
     db.successSessions.push({
       session_id: record.session_id,

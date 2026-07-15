@@ -16,6 +16,8 @@ export const paths = {
     root: join(TASKS_DIR, taskId),
     outputRoot: join(OUTPUT_DIR, taskId),
     inputPdf: join(TASKS_DIR, taskId, 'input.pdf'),
+    inputJson: join(TASKS_DIR, taskId, 'input.json'),
+    ledgerPreviewJson: join(OUTPUT_DIR, taskId, 'ledger-preview.json'),
     resultJson: join(TASKS_DIR, taskId, 'result.json'),
     processedJson: join(TASKS_DIR, taskId, 'result-processed.json'),
     imagesDir: join(TASKS_DIR, taskId, 'images'),

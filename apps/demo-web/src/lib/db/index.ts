@@ -3,17 +3,24 @@ import { dirname } from 'path';
 
 import { paths } from '../paths';
 
+export type TaskRecordKind = 'raw-data' | 'ledger';
+
 export interface TaskRecord {
   id: string;
+  // Task kind discriminator: 'raw-data' (PDF pipeline) or 'ledger'
+  kind: TaskRecordKind;
   session_id: string;
   is_sample: boolean;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   original_filename: string;
   file_path: string;
-  options_json: string;
+  // PDF processing options; null for task kinds without processing options
+  options_json: string | null;
   artifact_dir: string | null;
   result_path: string | null;
   processed_result_path: string | null;
+  // Generic result path for non-raw-data task kinds (e.g. ledger preview JSON)
+  output_result_path: string | null;
   total_pages: number | null;
   chapters_count: number | null;
   images_count: number | null;
@@ -146,6 +153,19 @@ export function readDatabase(): Database {
     // Migration: add is_otp_bypass to existing tasks
     if ((task as { is_otp_bypass?: boolean }).is_otp_bypass === undefined) {
       (task as TaskRecord).is_otp_bypass = false;
+      needsWrite = true;
+    }
+    // Migration: default existing tasks (all PDF-based) to 'raw-data' kind
+    if ((task as { kind?: TaskRecordKind }).kind === undefined) {
+      (task as TaskRecord).kind = 'raw-data';
+      needsWrite = true;
+    }
+    // Migration: add generic output_result_path for non-raw-data kinds
+    if (
+      (task as { output_result_path?: string | null }).output_result_path ===
+      undefined
+    ) {
+      (task as TaskRecord).output_result_path = null;
       needsWrite = true;
     }
   }
