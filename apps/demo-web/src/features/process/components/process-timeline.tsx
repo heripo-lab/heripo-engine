@@ -20,7 +20,7 @@ interface TimelineStep {
   progressThreshold: number;
 }
 
-const STEPS: TimelineStep[] = [
+const RAW_DATA_STEPS: TimelineStep[] = [
   {
     id: 'pdf-parse',
     title: 'PDF Parsing',
@@ -47,7 +47,29 @@ const STEPS: TimelineStep[] = [
   },
 ];
 
+const LEDGER_STEPS: TimelineStep[] = [
+  {
+    id: 'json-parse',
+    title: 'JSON Parsing',
+    description: 'Read and parse the uploaded processed-document.json',
+    progressThreshold: 0,
+  },
+  {
+    id: 'document-validate',
+    title: 'Document Validation',
+    description: 'Validate the JSON against the ProcessedDocument model',
+    progressThreshold: 20,
+  },
+  {
+    id: 'ledger-extract',
+    title: 'Ledger Extraction',
+    description: 'Summarize the document into a ledger extraction preview',
+    progressThreshold: 45,
+  },
+];
+
 function getStepStatus(
+  STEPS: TimelineStep[],
   step: TimelineStep,
   currentStep: string,
   progress: number,
@@ -82,13 +104,17 @@ interface ProcessTimelineProps {
   currentStep?: string;
   progress?: number;
   status?: TaskStatus;
+  kind?: 'raw-data' | 'ledger';
 }
 
 export function ProcessTimeline({
   currentStep = '',
   progress = 0,
   status,
+  kind = 'raw-data',
 }: ProcessTimelineProps) {
+  const STEPS = kind === 'ledger' ? LEDGER_STEPS : RAW_DATA_STEPS;
+
   return (
     <Card className="h-full">
       <CardHeader>
@@ -100,7 +126,7 @@ export function ProcessTimeline({
       <CardContent className="flex flex-col">
         <div className="space-y-4">
           {STEPS.map((step, index) => {
-            let stepStatus = getStepStatus(step, currentStep, progress);
+            let stepStatus = getStepStatus(STEPS, step, currentStep, progress);
             if (status === 'failed' && stepStatus === 'in_progress') {
               stepStatus = 'failed';
             }
@@ -164,15 +190,17 @@ export function ProcessTimeline({
           })}
         </div>
 
-        {/* Timing Warning */}
-        <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          <Clock className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p>
-            PDF OCR and parsing may take <strong>10+ minutes</strong> depending
-            on document size. Please wait unless you see an error message or no
-            log changes for <strong>30+ minutes</strong>.
-          </p>
-        </div>
+        {/* Timing Warning (PDF pipeline only) */}
+        {kind === 'raw-data' && (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <Clock className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <p>
+              PDF OCR and parsing may take <strong>10+ minutes</strong>{' '}
+              depending on document size. Please wait unless you see an error
+              message or no log changes for <strong>30+ minutes</strong>.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
