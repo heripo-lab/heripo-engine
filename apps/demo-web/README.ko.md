@@ -73,7 +73,7 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 ### Node.js 및 패키지 관리자
 
 - **Node.js** >= 24.0.0
-- **pnpm** >= 10.0.0
+- **pnpm** >= 11
 
 ### LLM API 키
 

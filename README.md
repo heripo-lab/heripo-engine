@@ -172,7 +172,7 @@ For detailed architecture explanation, see [docs/architecture.md](./docs/archite
 
 - **macOS** (Apple Silicon or Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** >= 10.0.0
+- **pnpm** >= 11
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+ is not supported)
 - **jq** (JSON processing tool)
 - **poppler** (PDF text extraction tools)

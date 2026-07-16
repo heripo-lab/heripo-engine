@@ -65,7 +65,7 @@
 brew install node
 ```
 
-#### 2. pnpm >= 11.0.0
+#### 2. pnpm >= 11
 
 ```bash
 npm install -g pnpm
@@ -653,10 +653,25 @@ type PDFConvertOptions = {
 interface PDFCorrectionOptions {
   models: {
     textCorrection: LanguageModel; // Required: page text and table-cell OCR correction
+    textCorrectionFallback?: LanguageModel; // Optional: fallback for text correction
     pageGate: LanguageModel; // Required: structural Review Assistance page gate
+    pageGateFallback?: LanguageModel; // Optional: fallback for page gate
     reviewAssistance: LanguageModel; // Required: default structural review model
+    reviewAssistanceFallback?: LanguageModel; // Optional: common fallback for review assistance
     tableCorrection?: LanguageModel; // Optional: table-specific correction override
+    tableCorrectionFallback?: LanguageModel; // Optional: fallback for table correction
     reviewAssistanceTasks?: Partial<
+      Record<
+        | 'text_ocr_hanja'
+        | 'text_integrity'
+        | 'text_role_footnote'
+        | 'tables'
+        | 'pictures_captions'
+        | 'layout_bbox_order',
+        LanguageModel
+      >
+    >;
+    reviewAssistanceTasksFallback?: Partial<
       Record<
         | 'text_ocr_hanja'
         | 'text_integrity'
@@ -687,6 +702,9 @@ interface PDFCorrectionOptions {
   };
   autoApplyThreshold?: number; // Minimum confidence for direct mutation (default: 0.85)
   proposalThreshold?: number; // Minimum confidence for sidecar proposal (default: 0.5)
+  forceAutoApply?: boolean; // When true, review-assistance commands auto-apply regardless of threshold (default: false)
+  reviewAssistanceEnabled?: boolean; // When false, review-assistance is skipped completely (default: true)
+  tableCorrectionEnabled?: boolean; // When false, table-correction is skipped (default: true)
   temperature?: number; // VLM generation temperature (default: 0)
 }
 ```

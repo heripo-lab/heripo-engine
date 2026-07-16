@@ -168,7 +168,7 @@ heripo-engine/
 
 - **macOS** (Apple Silicon 또는 Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** >= 10.0.0
+- **pnpm** >= 11
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+는 지원하지 않음)
 - **jq** (JSON 처리 도구)
 - **poppler** (PDF 텍스트 추출 도구)
