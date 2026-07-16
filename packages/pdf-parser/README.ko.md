@@ -65,7 +65,7 @@
 brew install node
 ```
 
-#### 2. pnpm >= 11.0.0
+#### 2. pnpm >= 11
 
 ```bash
 npm install -g pnpm
@@ -653,10 +653,25 @@ type PDFConvertOptions = {
 interface PDFCorrectionOptions {
   models: {
     textCorrection: LanguageModel; // 필수: 페이지 텍스트와 표 셀 OCR 보정
+    textCorrectionFallback?: LanguageModel; // 선택: textCorrection 실패 시 fallback
     pageGate: LanguageModel; // 필수: 구조 Review Assistance page gate
+    pageGateFallback?: LanguageModel; // 선택: pageGate 실패 시 fallback
     reviewAssistance: LanguageModel; // 필수: 기본 구조 review 모델
+    reviewAssistanceFallback?: LanguageModel; // 선택: reviewAssistance 공통 fallback
     tableCorrection?: LanguageModel; // 선택: 표 전용 보정 override
+    tableCorrectionFallback?: LanguageModel; // 선택: tableCorrection 실패 시 fallback
     reviewAssistanceTasks?: Partial<
+      Record<
+        | 'text_ocr_hanja'
+        | 'text_integrity'
+        | 'text_role_footnote'
+        | 'tables'
+        | 'pictures_captions'
+        | 'layout_bbox_order',
+        LanguageModel
+      >
+    >;
+    reviewAssistanceTasksFallback?: Partial<
       Record<
         | 'text_ocr_hanja'
         | 'text_integrity'
@@ -687,6 +702,9 @@ interface PDFCorrectionOptions {
   };
   autoApplyThreshold?: number; // 자동 적용 최소 confidence (기본값: 0.85)
   proposalThreshold?: number; // sidecar proposal 최소 confidence (기본값: 0.5)
+  forceAutoApply?: boolean; // true일 경우, confidence 임계값에 관계없이 review-assistance 명령을 자동 적용 (기본값: false)
+  reviewAssistanceEnabled?: boolean; // false일 경우, review-assistance 단계를 완전히 건너뜀 (기본값: true)
+  tableCorrectionEnabled?: boolean; // false일 경우, table-correction 작업을 건너뜀 (기본값: true)
   temperature?: number; // VLM 생성 temperature (기본값: 0)
 }
 ```

@@ -73,7 +73,7 @@ This application depends on `@heripo/pdf-parser`, which has specific system requ
 ### Node.js and Package Manager
 
 - **Node.js** >= 24.0.0
-- **pnpm** >= 10.0.0
+- **pnpm** >= 11
 
 ### LLM API Keys
 
