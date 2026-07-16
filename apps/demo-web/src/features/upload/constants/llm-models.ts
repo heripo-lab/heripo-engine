@@ -11,13 +11,23 @@ export interface LLMModel {
 export const LLM_MODELS: LLMModel[] = [
   // OpenAI
   {
-    id: 'openai/gpt-5.5',
-    label: 'GPT-5.5',
+    id: 'openai/gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
     provider: 'OpenAI',
   },
   {
-    id: 'openai/gpt-5.4',
-    label: 'GPT-5.4',
+    id: 'openai/gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    provider: 'OpenAI',
+  },
+  {
+    id: 'openai/gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    provider: 'OpenAI',
+  },
+  {
+    id: 'openai/gpt-5.5',
+    label: 'GPT-5.5',
     provider: 'OpenAI',
   },
   {
@@ -39,12 +49,12 @@ export const LLM_MODELS: LLMModel[] = [
   // Anthropic
   {
     id: 'anthropic/claude-opus-4-8',
-    label: 'Claude Opus 4.6',
+    label: 'Claude Opus 4.8',
     provider: 'Anthropic',
   },
   {
-    id: 'anthropic/claude-sonnet-4-6',
-    label: 'Claude Sonnet 4.6',
+    id: 'anthropic/claude-sonnet-5',
+    label: 'Claude Sonnet 5',
     provider: 'Anthropic',
   },
   {
@@ -234,23 +244,8 @@ export const LLM_MODELS: LLMModel[] = [
     provider: 'LM Studio',
   },
   {
-    id: 'lmstudio/qwen3.6-35b-a3b-mlx',
+    id: 'lmstudio/qwen3.6-35b-a3b',
     label: 'Qwen 3.6 35B-A3B (MLX)',
-    provider: 'LM Studio',
-  },
-  {
-    id: 'lmstudio/qwen3.6-27b-mlx',
-    label: 'Qwen 3.6 27B (MLX)',
-    provider: 'LM Studio',
-  },
-  {
-    id: 'lmstudio/qwen3.5-27b',
-    label: 'Qwen 3.5 27B',
-    provider: 'LM Studio',
-  },
-  {
-    id: 'lmstudio/qwen3.5-9b-mlx',
-    label: 'Qwen 3.5 9B (MLX)',
     provider: 'LM Studio',
   },
 ];

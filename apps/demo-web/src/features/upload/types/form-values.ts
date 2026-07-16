@@ -57,8 +57,8 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
     workItemTimeoutMs: 1_800_000,
   },
   // LLM Models
-  fallbackModel: 'openai/gpt-5.4-mini',
-  validatorModel: 'openai/gpt-5.4-mini',
+  fallbackModel: 'openai/gpt-5.6-luna',
+  validatorModel: 'openai/gpt-5.6-luna',
   pageRangeParserModel: 'together/MiniMaxAI/MiniMax-M3',
   tocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
   visionTocExtractorModel: 'together/MiniMaxAI/MiniMax-M3',
