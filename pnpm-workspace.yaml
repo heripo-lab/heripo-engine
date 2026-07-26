@@ -4,19 +4,19 @@ packages:
   - 'tools/*'
 
 catalog:
-  '@ai-sdk/anthropic': '^4.0.7'
-  '@ai-sdk/google': '^4.0.8'
-  '@ai-sdk/openai': '^4.0.7'
-  '@ai-sdk/openai-compatible': '^3.0.5'
-  '@ai-sdk/togetherai': '^3.0.6'
-  '@vitest/coverage-v8': '^4.1.9'
-  '@vitest/expect': '^4.1.9'
-  'ai': '^7.0.14'
+  '@ai-sdk/anthropic': '^4.0.20'
+  '@ai-sdk/google': '^4.0.24'
+  '@ai-sdk/openai': '^4.0.20'
+  '@ai-sdk/openai-compatible': '^3.0.14'
+  '@ai-sdk/togetherai': '^3.0.15'
+  '@vitest/coverage-v8': '^4.1.10'
+  '@vitest/expect': '^4.1.10'
+  'ai': '^7.0.37'
   'ai-sdk-ollama': '^4.0.0'
-  'es-toolkit': '^1.49.0'
+  'es-toolkit': '^1.50.0'
   'tsup': '^8.5.1'
   'tsx': '^4.21.0'
-  'vitest': '^4.1.9'
+  'vitest': '^4.1.10'
   'zod': '^4.4.3'
 
 overrides:
@@ -32,6 +32,9 @@ overrides:
   'postcss@<8.5.10': '>=8.5.10'
   esbuild@>=0.17.0 <0.28.1: ^0.28.1
   esbuild@>=0.27.3 <0.28.1: ^0.28.1
+  brace-expansion@<=5.0.7: ^5.0.8
+  brace-expansion@>=3.0.0 <5.0.7: ^5.0.7
+  sharp@<0.35.0: ^0.35.0
 
 allowBuilds:
   esbuild: false
@@ -39,3 +42,5 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - esbuild@0.28.1
+  - brace-expansion@5.0.7 || 5.0.8
+  - sharp@0.35.0
