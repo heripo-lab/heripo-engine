@@ -2,7 +2,7 @@
   "name": "@heripo/document-processor",
   "private": false,
   "type": "module",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "description": "Document processor with LLM-based analysis for heripo engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
