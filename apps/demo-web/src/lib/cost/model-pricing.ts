@@ -56,8 +56,8 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'gpt-5.4': { input: 2.5, output: 15 },
     'gpt-5.5': { input: 5, output: 30 },
     'gpt-5.6-sol': { input: 5, output: 30 },
-    'gpt-5.6-terra': { input: 2.5, output: 15 },
-    'gpt-5.6-luna': { input: 1, output: 6 },
+    'gpt-5.6-terra': { input: 2, output: 12 },
+    'gpt-5.6-luna': { input: 0.2, output: 1.2 },
     'gpt-5.4-mini': { input: 0.75, output: 4.5 },
     'gpt-5-mini': { input: 0.25, output: 2 },
     // Google
@@ -73,8 +73,8 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'anthropic/claude-haiku-4-5': { input: 1, output: 5 },
     // VLM strategy models (provider-prefixed keys from TokenUsageReport)
     'openai/gpt-5.6-sol': { input: 5, output: 30 },
-    'openai/gpt-5.6-terra': { input: 2.5, output: 15 },
-    'openai/gpt-5.6-luna': { input: 1, output: 6 },
+    'openai/gpt-5.6-terra': { input: 2, output: 12 },
+    'openai/gpt-5.6-luna': { input: 0.2, output: 1.2 },
     'openai/gpt-5.4': { input: 2.5, output: 15 },
     'openai/gpt-5.2': { input: 1.75, output: 14 },
     'openai/gpt-5.1': { input: 1.25, output: 10 },
