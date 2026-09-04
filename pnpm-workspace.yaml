@@ -9,14 +9,14 @@ catalog:
   '@ai-sdk/openai': '^4.0.57'
   '@ai-sdk/openai-compatible': '^3.0.43'
   '@ai-sdk/togetherai': '^3.0.44'
-  '@vitest/coverage-v8': '^4.1.10'
-  '@vitest/expect': '^4.1.10'
+  '@vitest/coverage-v8': '^5.0.0'
+  '@vitest/expect': '^5.0.0'
   'ai': '^7.0.91'
   'ai-sdk-ollama': '^4.2.0'
   'es-toolkit': '^1.52.0'
   'tsup': '^8.5.1'
   'tsx': '^4.21.0'
-  'vitest': '^4.1.10'
+  'vitest': '^5.0.0'
   'zod': '^4.5.4'
 
 overrides:
