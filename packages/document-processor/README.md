@@ -56,6 +56,14 @@ npm install ai @ai-sdk/openai @ai-sdk/anthropic @ai-sdk/google
 
 ## Usage
 
+### Runtime and Result Persistence
+
+This package is an ESM library for Node.js 24+. It does not itself require Python or macOS; those requirements belong to `@heripo/pdf-parser`. Align AI SDK/provider versions with the repository [catalog](../../pnpm-workspace.yaml).
+
+In the examples, `doclingDocument` is the parser's corrected `result.json`, and `artifactDir` contains its image/page artifacts. The fallback model also serves every component without an explicit model, so it must support image input and structured output. Set the example-specific `HERIPO_ANTHROPIC_MODEL` and `HERIPO_OPENAI_MODEL` environment variables to available model IDs, and configure credentials for the selected providers.
+
+`process()` does not save files. Save the returned `document` as JSON and preserve referenced images yourself. Its `schemaVersion` is the exported `PROCESSED_DOCUMENT_SCHEMA_VERSION`, currently `processed-document.v2`.
+
 ### Basic Usage
 
 ```typescript
@@ -73,7 +81,7 @@ const logger = new Logger({
 // Basic usage - specify fallback model only
 const processor = new DocumentProcessor({
   logger,
-  fallbackModel: anthropic('claude-opus-4-5'),
+  fallbackModel: anthropic(process.env.HERIPO_ANTHROPIC_MODEL!),
   textCleanerBatchSize: 10,
   captionParserBatchSize: 5,
   captionValidatorBatchSize: 5,
@@ -103,14 +111,14 @@ import { openai } from '@ai-sdk/openai';
 const processor = new DocumentProcessor({
   logger,
   // Fallback model (for retry on failure)
-  fallbackModel: anthropic('claude-opus-4-5'),
+  fallbackModel: anthropic(process.env.HERIPO_ANTHROPIC_MODEL!),
 
   // Per-component model specification
-  pageRangeParserModel: openai('gpt-5.1'), // Vision required
-  tocExtractorModel: openai('gpt-5.1'), // Structured output
-  validatorModel: openai('gpt-5.2'), // Simple validation
-  visionTocExtractorModel: openai('gpt-5.1'), // Vision required
-  captionParserModel: openai('gpt-5-mini'), // Caption parsing
+  pageRangeParserModel: openai(process.env.HERIPO_OPENAI_MODEL!), // Vision required
+  tocExtractorModel: openai(process.env.HERIPO_OPENAI_MODEL!), // Structured output
+  validatorModel: openai(process.env.HERIPO_OPENAI_MODEL!), // Simple validation
+  visionTocExtractorModel: openai(process.env.HERIPO_OPENAI_MODEL!), // Vision required
+  captionParserModel: openai(process.env.HERIPO_OPENAI_MODEL!), // Caption parsing
 
   // Batch size settings
   textCleanerBatchSize: 20, // Synchronous processing (can be large)
@@ -240,9 +248,9 @@ node reference.
 `validateSourceRefs: true` is a compatibility shortcut and behaves like
 `'error'` unless a mode is explicitly provided.
 
-Table cells do not receive cell-level `sourceRef` values. To locate a specific
-cell in the source artifact, combine `table.sourceRef` with the
-`grid[row][col]` row/column indexes.
+Table cells do not receive cell-level `sourceRef` values. Use `table.sourceRef`
+to find the source table, then compare spans and source cell coordinates.
+Compact `grid` array indexes may differ from logical source column indexes.
 
 ### Table Grid Handling
 
@@ -253,9 +261,8 @@ Processed tables expose a compact `grid` of visible cells. The processor:
 - Removes merged-cell shadow entries when Docling repeats covered cells
 - Falls back to `table_cells` when Docling's `data.grid` is empty
 
-`numRows` and `numCols` keep the logical table size. Individual cells do not
-store `sourceRef`; use `table.sourceRef` together with the `grid[row][col]`
-position when tracing a cell back to the source table.
+`numRows` and `numCols` keep the logical table size; do not assume they match
+array lengths. When rendering, skip positions covered by `rowSpan`/`colSpan`.
 
 ## Processing Pipeline
 
@@ -309,6 +316,8 @@ DocumentProcessor processes documents through a 5-stage pipeline:
 - **Caption Validation**: Parsing result validation with CaptionValidator
 
 ### 5. Chapter Conversion (ChapterConverter)
+
+A `Front Matter` (`ch-000`) chapter is always prepended to retain content before the first TOC entry. The remaining hierarchy is built from the supplied or extracted TOC.
 
 - Build chapter tree based on TOC
 - Create Chapter hierarchy
@@ -387,8 +396,8 @@ When `enableFallbackRetry: true` is set (default is `false`), LLM components aut
 ```typescript
 const processor = new DocumentProcessor({
   logger,
-  fallbackModel: anthropic('claude-opus-4-5'), // For retry
-  pageRangeParserModel: openai('gpt-5.2'), // First attempt
+  fallbackModel: anthropic(process.env.HERIPO_ANTHROPIC_MODEL!), // For retry
+  pageRangeParserModel: openai(process.env.HERIPO_OPENAI_MODEL!), // First attempt
   enableFallbackRetry: true, // Use fallback on failure (default: false)
   textCleanerBatchSize: 10,
   captionParserBatchSize: 5,
@@ -402,8 +411,10 @@ const { document, usage } = await processor.process(doc, 'id', 'path');
 ### Batch Size Parameters
 
 - **textCleanerBatchSize**: Synchronous text normalization and filtering batch size. Large values possible due to local processing
-- **captionParserBatchSize**: LLM-based caption parsing batch size. Small values for API request concurrency and cost management
-- **captionValidatorBatchSize**: LLM-based caption validation batch size. Small values to limit validation request concurrency
+- **captionParserBatchSize**: LLM-based caption parsing batch size. Controls captions included per parsing request
+- **captionValidatorBatchSize**: LLM-based caption validation batch size. Controls captions grouped for validation
+
+`textCleanerBatchSize`, `captionParserBatchSize` and `captionValidatorBatchSize` accept `0` for sequential processing without batching. Use positive integers to enable batching. Positive batch sizes group items; they do not impose a global API concurrency limit.
 
 ## Error Handling
 
@@ -413,9 +424,15 @@ Errors thrown when TOC extraction fails:
 
 - `TocNotFoundError`: TOC not found in document
 - `TocParseError`: LLM response parsing failed
-- `TocValidationError`: TOC validation failed
+- `TocValidationError`: May be raised internally, but is not exported from the package root. Catch the exported `TocExtractError` base class.
 
 ```typescript
+import {
+  TocExtractError,
+  TocNotFoundError,
+  TocParseError,
+} from '@heripo/document-processor';
+
 try {
   const { document, usage } = await processor.process(doc, 'id', 'path');
 } catch (error) {
@@ -423,6 +440,10 @@ try {
     console.error('TOC not found. Manual TOC review is required.');
   } else if (error instanceof TocParseError) {
     console.error('TOC parsing failed:', error.message);
+  } else if (error instanceof TocExtractError) {
+    console.error(error.message);
+  } else {
+    throw error;
   }
 }
 ```
@@ -452,18 +473,18 @@ Major LLM components return token usage:
 
 ```typescript
 // PageRangeParser
-const { pageRangeMap, tokenUsage } = await pageRangeParser.parse(doc);
-console.log('Token usage:', tokenUsage);
+const { pageRangeMap, usage } = await pageRangeParser.parse(doc);
+console.log('Token usage:', usage);
 
 // TocExtractor
-const { entries, tokenUsage } = await tocExtractor.extract(markdown);
-console.log('Token usage:', tokenUsage);
+const { entries, usages } = await tocExtractor.extract(markdown);
+console.log('Token usage:', usages);
 ```
 
 ## Related Packages
 
-- [@heripo/pdf-parser](../pdf-parser) - PDF parsing and OCR
-- [@heripo/model](../model) - Data models and type definitions
+- [@heripo/pdf-parser](../pdf-parser/README.md) - PDF parsing and OCR
+- [@heripo/model](../model/README.md) - Data models and type definitions
 
 ## Sponsor
 

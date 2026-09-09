@@ -11,13 +11,13 @@
 
 **English** | [한국어](./README.ko.md)
 
-> ⚠️ **macOS Only**: This project currently supports only macOS (Apple Silicon or Intel).
+> ⚠️ **macOS Only**: The PDF parser and the demo that uses it require macOS (Apple Silicon or Intel). The other library packages have no OS installation restriction.
 > See [@heripo/pdf-parser README](./packages/pdf-parser/README.md#prerequisites) for detailed system requirements.
 
 > ℹ️ **Notes (v0.1.x)**:
 >
-> - **Korean Report Correction**: Korean reports are automatically detected and corrected via VLM (Vision Language Model)
-> - **TOC Dependency**: Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention
+> - **Mandatory Correction**: Fixed ocrmac OCR is followed by VLM text correction regardless of language. Structural review is enabled by default in the library and disabled by default in the demo.
+> - **TOC Dependency**: Failed automatic TOC extraction stops processing. Supply reviewed `tocEntries` and `pageRangeMap` to bypass automatic extraction.
 > - **Vertical Text**: Old vertical-text documents with Chinese numeral page numbers are a long-term goal, not currently scheduled
 
 > 🌐 **Online Demo**: Try it without local installation → [engine-demo.heripo.org](https://engine-demo.heripo.org)
@@ -36,6 +36,7 @@
 - [Demo Application](#demo-application)
 - [Documentation](#documentation)
 - [Roadmap](#roadmap)
+- [Development](#development)
 - [Contributing](#contributing)
 - [Citation and Attribution](#citation-and-attribution)
 - [Sponsor](#sponsor)
@@ -83,7 +84,7 @@ Archaeological excavation reports contain valuable cultural heritage information
 
 - **OCR Quality**: High accuracy recognition of scanned documents using Docling SDK
 - **Structure Extraction**: Automatic identification of document structure including table of contents, chapters/sections, images, and tables
-- **Cost Efficiency**: Cost savings through local processing instead of cloud OCR (free)
+- **Cost Model**: Docling OCR runs locally; subsequent VLM correction and document analysis costs and data transfers depend on the selected local or cloud models.
 
 > **Beyond Archaeology**: While heripo engine is optimized for archaeological reports, its PDF structuring capabilities (text, tables, images, TOC extraction) work well with heavily damaged scanned PDFs and documents from other domains (architecture, history, etc.). Feel free to fork and adapt it to your needs.
 
@@ -121,8 +122,8 @@ For a detailed roadmap, see [docs/roadmap.md](./docs/roadmap.md).
 ### PDF Parsing (`@heripo/pdf-parser`)
 
 - **High-Quality OCR**: Document recognition using Docling SDK (ocrmac / Apple Vision Framework)
-- **Korean Report VLM Correction**: Automatically detects Korean reports and applies VLM text correction to all pages — ocrmac excels at speed and quality for large-scale processing, but Korean archaeological reports often require Hanja restoration and script-aware correction
-- **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
+- **Mandatory VLM Correction**: Page text and table-cell correction after OCR, with configurable structural review and table correction.
+- **Apple Silicon Optimized**: Uses the Apple Vision OCR backend on macOS
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
 - **Review Assistance**: Optional page-level VLM review with audit proposals and high-confidence auto-fixes
@@ -172,24 +173,27 @@ For detailed architecture explanation, see [docs/architecture.md](./docs/archite
 
 - **macOS** (Apple Silicon or Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** >= 11
+- **pnpm** 11.25.0 (`packageManager`)
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+ is not supported)
 - **jq** (JSON processing tool)
 - **poppler** (PDF text extraction tools)
+- **ImageMagick + Ghostscript** (page rendering and image-PDF conversion)
 
 ```bash
 # Install Python 3.11 (recommended)
 brew install python@3.11
+export PATH="$(brew --prefix python@3.11)/libexec/bin:$PATH"
+python3 --version
 
 # Install jq
 brew install jq
 
 # Install poppler
-brew install poppler
+brew install poppler imagemagick ghostscript
 
 # Install Node.js and pnpm
 brew install node
-npm install -g pnpm
+npm install -g pnpm@11.25.0
 ```
 
 For detailed installation guide, see [@heripo/pdf-parser README](./packages/pdf-parser/README.md#prerequisites).
@@ -209,104 +213,95 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/log
 
 ## Packages
 
-| Package                                                     | Version | Description                                    |
-| ----------------------------------------------------------- | ------- | ---------------------------------------------- |
-| [@heripo/pdf-parser](./packages/pdf-parser)                 | 0.1.x   | PDF parsing and OCR                            |
-| [@heripo/document-processor](./packages/document-processor) | 0.1.x   | Document structure analysis and LLM processing |
-| [@heripo/model](./packages/model)                           | 0.1.x   | Data models and type definitions               |
-| [@heripo/logger](./packages/logger)                         | 0.1.x   | Logger interface and adapter                   |
+| Package                                                               | Version | Description                                    |
+| --------------------------------------------------------------------- | ------- | ---------------------------------------------- |
+| [@heripo/pdf-parser](./packages/pdf-parser/README.md)                 | 0.1.x   | PDF parsing and OCR                            |
+| [@heripo/document-processor](./packages/document-processor/README.md) | 0.1.x   | Document structure analysis and LLM processing |
+| [@heripo/model](./packages/model/README.md)                           | 0.1.x   | Data models and type definitions               |
+| [@heripo/logger](./packages/logger/README.md)                         | 0.1.x   | Logger interface and adapter                   |
+
+The parser and document processor ship as ESM; `model` and `logger` provide both ESM and CommonJS. The workspace uses Node.js 24+ and pnpm 11.25.0. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
+
+```bash
+pnpm add @ai-sdk/openai
+```
+
+Internal package documentation:
+
+- [@heripo/shared](./packages/shared/README.md)
+- [@heripo/tsconfig](./tools/tsconfig/README.md)
+- [@heripo/tsup-config](./tools/tsup-config/README.md)
+- [@heripo/vitest-config](./tools/vitest-config/README.md)
 
 ## Usage Examples
 
-### Basic Usage
+Run in an ESM project. This example also requires `@ai-sdk/openai`; configure a model that supports image input and structured output, with its model ID and credentials in your environment.
 
 ```typescript
 import type { DoclingDocument } from '@heripo/model';
 
-import { anthropic } from '@ai-sdk/anthropic';
 import { openai } from '@ai-sdk/openai';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
-const logger = new Logger({
-  debug: (...args) => console.debug('[heripo]', ...args),
-  info: (...args) => console.info('[heripo]', ...args),
-  warn: (...args) => console.warn('[heripo]', ...args),
-  error: (...args) => console.error('[heripo]', ...args),
-});
-
-// 1. PDF Parsing
-const pdfParser = new PDFParser({
-  port: 5001,
-  logger,
-});
-
-await pdfParser.init();
-
-const tokenUsageReport = await pdfParser.parse(
-  'file:///path/to/report.pdf',
-  'report-001',
-  async (artifactDir) => {
-    const doclingDocument = JSON.parse(
-      await readFile(`${artifactDir}/result.json`, 'utf8'),
-    ) as DoclingDocument;
-
-    // 2. Document Processing (inside callback)
-    const processor = new DocumentProcessor({
-      logger,
-      fallbackModel: anthropic('claude-opus-4-5'),
-      pageRangeParserModel: openai('gpt-5.2'),
-      tocExtractorModel: openai('gpt-5.1'),
-      captionParserModel: openai('gpt-5-mini'),
-      textCleanerBatchSize: 10,
-      captionParserBatchSize: 5,
-      captionValidatorBatchSize: 5,
-    });
-
-    const { document, usage } = await processor.process(
-      doclingDocument,
-      'report-001',
-      artifactDir,
-    );
-
-    // 3. Use Results
-    console.log('TOC:', document.chapters);
-    console.log('Images:', document.images);
-    console.log('Tables:', document.tables);
-    console.log('Footnotes:', document.footnotes);
-    console.log('Token Usage:', usage.total);
-  },
-  true, // cleanupAfterCallback
-  {}, // PDFConvertOptions
-);
-
-// Cleanup
-await pdfParser.dispose();
-```
-
-### Advanced Usage
-
-```typescript
-// Specify LLM models per component + fallback retry
+const logger = new Logger(console);
+// Set OPENAI_API_KEY and HERIPO_MODEL to a vision-capable model ID.
+const model = openai(process.env.HERIPO_MODEL!);
+const parser = new PDFParser({ logger, port: 5001, timeout: 1_800_000 });
 const processor = new DocumentProcessor({
   logger,
-  fallbackModel: anthropic('claude-opus-4-5'), // For retry on failure
-  pageRangeParserModel: openai('gpt-5.2'),
-  tocExtractorModel: openai('gpt-5.1'),
-  validatorModel: openai('gpt-5.2'),
-  visionTocExtractorModel: openai('gpt-5-mini'),
-  captionParserModel: openai('gpt-5-nano'),
+  fallbackModel: model,
   textCleanerBatchSize: 20,
-  captionParserBatchSize: 10,
-  captionValidatorBatchSize: 10,
-  maxRetries: 3,
-  maxValidationRetries: 3,
-  enableFallbackRetry: true, // Automatically retry with fallbackModel on failure (default: false)
-  onTokenUsage: (report) => console.log('Token usage:', report.total),
+  captionParserBatchSize: 5,
+  captionValidatorBatchSize: 5,
 });
+
+try {
+  await parser.init();
+  const parserUsage = await parser.parse(
+    'file:///absolute/path/to/report.pdf',
+    'report-001',
+    async (artifactDir) => {
+      const doclingDocument = JSON.parse(
+        await readFile(join(artifactDir, 'result.json'), 'utf8'),
+      ) as DoclingDocument;
+      const { document, usage } = await processor.process(
+        doclingDocument,
+        'report-001',
+        artifactDir,
+      );
+      await writeFile(
+        join(artifactDir, 'result-processed.json'),
+        JSON.stringify(document, null, 2),
+      );
+      console.log('Chapters:', document.chapters.length);
+      console.log('Processor token usage:', usage.total);
+    },
+    false, // Keep artifacts after the callback.
+    {
+      correction: {
+        models: {
+          textCorrection: model,
+          pageGate: model,
+          reviewAssistance: model,
+        },
+      },
+      chunkedConversion: true,
+      chunkSize: 10,
+    },
+  );
+  console.log('Parser token usage:', parserUsage?.total);
+} finally {
+  await parser.dispose();
+}
 ```
+
+`parse()` returns `TokenUsageReport | null`, not a document. Read the corrected Docling document from `artifactDir/result.json` in the callback. With `cleanupAfterCallback: true`, copy required JSON, images and pages elsewhere inside the callback before the directory is removed. The processor returns `{ document, usage }` and does not save files automatically.
+
+See [document-processor](./packages/document-processor/README.md) for manual TOC/page mapping and provenance, and [pdf-parser](./packages/pdf-parser/README.md) for per-stage models, fallbacks and correction options.
 
 ## Demo Application
 
@@ -316,19 +311,19 @@ Try it without local installation:
 
 **🔗 https://engine-demo.heripo.org**
 
-> The online demo has a daily usage limit (3 times). For full functionality, local execution is recommended.
+> Public-mode limits depend on deployment settings, including daily limits and a seven-day session lock after successful processing. See the demo README for details.
 
 ### Web Demo (Next.js)
 
 A web application providing real-time PDF processing monitoring:
 
 ```bash
-cd apps/demo-web
-cp .env.example .env
-# Set LLM API keys in .env file
-
+# Run from the repository root.
 pnpm install
-pnpm dev
+pnpm build:packages
+cp apps/demo-web/.env.example apps/demo-web/.env
+# Configure providers and model settings before processing.
+pnpm demo-web:dev
 ```
 
 Access http://localhost:3000 in your browser

@@ -11,13 +11,13 @@
 
 [English](./README.md) | **한국어**
 
-> ⚠️ **macOS 전용**: 이 프로젝트는 현재 macOS (Apple Silicon 또는 Intel)에서만 지원됩니다.
+> ⚠️ **macOS 전용**: PDF 파서와 이를 사용하는 데모는 macOS (Apple Silicon 또는 Intel) 전용입니다. 다른 라이브러리 패키지에는 OS 설치 제한이 없습니다.
 > 자세한 시스템 요구사항은 [@heripo/pdf-parser README](./packages/pdf-parser/README.ko.md#사전-요구사항)를 참고하세요.
 
 > ℹ️ **참고 사항 (v0.1.x)**:
 >
-> - **한국어 보고서 보정**: 한국어 보고서를 자동 감지하여 VLM(Vision Language Model)으로 보정
-> - **목차 의존성**: 목차가 없는 보고서는 처리 실패 (의도된 동작). 드문 추출 실패는 human intervention으로 대응 예정
+> - **필수 보정**: 고정 ocrmac OCR 후 언어와 관계없이 VLM 텍스트 보정을 수행합니다. 구조 검토는 라이브러리 기본 활성화, 데모 기본 비활성화입니다.
+> - **목차 의존성**: 자동 목차 추출이 실패하면 처리도 실패합니다. 검토한 `tocEntries`와 `pageRangeMap`을 직접 제공하여 자동 추출을 건너뛸 수 있습니다.
 > - **세로쓰기 문서**: 페이지 번호가 한자인 오래된 세로쓰기 문서는 장기 목표이나 현재 계획에 없음
 
 > 🌐 **온라인 데모**: 로컬 설치 없이 바로 체험해 보세요 → [engine-demo.heripo.org](https://engine-demo.heripo.org)
@@ -36,6 +36,7 @@
 - [데모 애플리케이션](#데모-애플리케이션)
 - [문서](#문서)
 - [로드맵](#로드맵)
+- [개발](#개발)
 - [기여하기](#기여하기)
 - [인용 및 출처 표기](#인용-및-출처-표기)
 - [후원](#후원)
@@ -79,7 +80,7 @@ heripo lab은 고고학 도메인 지식과 소프트웨어 엔지니어링 기�
 
 - **OCR 품질**: Docling SDK를 활용하여 스캔된 문서도 높은 정확도로 인식
 - **구조 추출**: 목차, 장/절, 이미지, 표 등 문서 구조를 자동으로 파악
-- **비용 효율성**: 클라우드 OCR 대신 로컬 처리로 비용 절감 (무료)
+- **비용 구조**: Docling OCR은 로컬에서 실행되며, 이후 VLM 보정과 문서 분석 비용·데이터 전송 범위는 선택한 로컬 또는 클라우드 모델에 따라 달라집니다.
 
 > **고고학 외 활용**: heripo engine은 고고학 보고서에 최적화되어 있지만, PDF 구조화 기능(텍스트, 표, 이미지, 목차 추출)은 심하게 훼손된 스캔 PDF나 타 도메인 문서(건축, 역사 등)에서도 충분한 성능을 발휘합니다. 포크(Fork)하여 자유롭게 개조해서 사용해도 됩니다.
 
@@ -117,8 +118,8 @@ heripo lab은 고고학 도메인 지식과 소프트웨어 엔지니어링 기�
 ### PDF 파싱 (`@heripo/pdf-parser`)
 
 - **고품질 OCR**: Docling SDK를 활용한 문서 인식 (ocrmac / Apple Vision Framework)
-- **한국어 보고서 VLM 보정**: 한국어 보고서를 자동 감지하고 모든 페이지에 VLM 텍스트 보정을 적용 — ocrmac은 속도·품질이 우수하여 대량 처리에 최적이지만, 한국어 고고학 보고서는 한자 복원과 문자 체계 인식 보정이 필요할 수 있음
-- **Apple Silicon 최적화**: M1/M2/M3/M4/M5 칩에서 GPU 가속 지원
+- **필수 VLM 보정**: OCR 이후 페이지 텍스트·표 셀 보정, 선택적 구조 검토 및 표 보정을 수행합니다.
+- **Apple Silicon 최적화**: macOS의 Apple Vision OCR 백엔드 사용
 - **자동 환경 설정**: Python 가상환경 및 docling-serve 자동 설치
 - **이미지 추출**: PDF 내 이미지 자동 추출 및 저장
 - **Review Assistance**: 선택적 page-level VLM review와 audit proposal, 고신뢰도 자동 수정
@@ -168,24 +169,27 @@ heripo-engine/
 
 - **macOS** (Apple Silicon 또는 Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** >= 11
+- **pnpm** 11.25.0 (`packageManager`)
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+는 지원하지 않음)
 - **jq** (JSON 처리 도구)
 - **poppler** (PDF 텍스트 추출 도구)
+- **ImageMagick + Ghostscript** (페이지 이미지 렌더링 및 이미지 PDF 변환)
 
 ```bash
 # Python 3.11 설치 (권장)
 brew install python@3.11
+export PATH="$(brew --prefix python@3.11)/libexec/bin:$PATH"
+python3 --version
 
 # jq 설치
 brew install jq
 
 # poppler 설치
-brew install poppler
+brew install poppler imagemagick ghostscript
 
 # Node.js 및 pnpm 설치
 brew install node
-npm install -g pnpm
+npm install -g pnpm@11.25.0
 ```
 
 자세한 설치 가이드는 [@heripo/pdf-parser README](./packages/pdf-parser/README.ko.md#사전-요구사항)를 참고하세요.
@@ -205,104 +209,95 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/log
 
 ## 패키지
 
-| 패키지                                                      | 버전  | 설명                       |
-| ----------------------------------------------------------- | ----- | -------------------------- |
-| [@heripo/pdf-parser](./packages/pdf-parser)                 | 0.1.x | PDF 파싱 및 OCR            |
-| [@heripo/document-processor](./packages/document-processor) | 0.1.x | 문서 구조 분석 및 LLM 처리 |
-| [@heripo/model](./packages/model)                           | 0.1.x | 데이터 모델 및 타입 정의   |
-| [@heripo/logger](./packages/logger)                         | 0.1.x | 로거 인터페이스 및 adapter |
+| 패키지                                                                   | 버전  | 설명                       |
+| ------------------------------------------------------------------------ | ----- | -------------------------- |
+| [@heripo/pdf-parser](./packages/pdf-parser/README.ko.md)                 | 0.1.x | PDF 파싱 및 OCR            |
+| [@heripo/document-processor](./packages/document-processor/README.ko.md) | 0.1.x | 문서 구조 분석 및 LLM 처리 |
+| [@heripo/model](./packages/model/README.ko.md)                           | 0.1.x | 데이터 모델 및 타입 정의   |
+| [@heripo/logger](./packages/logger/README.ko.md)                         | 0.1.x | 로거 인터페이스 및 adapter |
+
+파서와 문서 프로세서는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 루트 워크스페이스는 Node.js 24 이상과 pnpm 11.25.0을 사용합니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
+
+```bash
+pnpm add @ai-sdk/openai
+```
+
+내부 패키지 문서:
+
+- [@heripo/shared](./packages/shared/README.ko.md)
+- [@heripo/tsconfig](./tools/tsconfig/README.ko.md)
+- [@heripo/tsup-config](./tools/tsup-config/README.ko.md)
+- [@heripo/vitest-config](./tools/vitest-config/README.ko.md)
 
 ## 사용 예제
 
-### 기본 사용법
+ESM 프로젝트에서 실행합니다. 아래 예제는 `@ai-sdk/openai`가 추가로 필요하며, 사용하는 모델은 이미지 입력과 구조화된 출력을 지원해야 합니다. 모델 ID와 인증 정보는 실행 환경에 맞게 설정하세요.
 
 ```typescript
 import type { DoclingDocument } from '@heripo/model';
 
-import { anthropic } from '@ai-sdk/anthropic';
 import { openai } from '@ai-sdk/openai';
 import { DocumentProcessor } from '@heripo/document-processor';
 import { Logger } from '@heripo/logger';
 import { PDFParser } from '@heripo/pdf-parser';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
-const logger = new Logger({
-  debug: (...args) => console.debug('[heripo]', ...args),
-  info: (...args) => console.info('[heripo]', ...args),
-  warn: (...args) => console.warn('[heripo]', ...args),
-  error: (...args) => console.error('[heripo]', ...args),
-});
-
-// 1. PDF 파싱
-const pdfParser = new PDFParser({
-  port: 5001,
-  logger,
-});
-
-await pdfParser.init();
-
-const tokenUsageReport = await pdfParser.parse(
-  'file:///path/to/report.pdf',
-  'report-001',
-  async (artifactDir) => {
-    const doclingDocument = JSON.parse(
-      await readFile(`${artifactDir}/result.json`, 'utf8'),
-    ) as DoclingDocument;
-
-    // 2. 문서 처리 (콜백 내부에서)
-    const processor = new DocumentProcessor({
-      logger,
-      fallbackModel: anthropic('claude-opus-4-5'),
-      pageRangeParserModel: openai('gpt-5.2'),
-      tocExtractorModel: openai('gpt-5.1'),
-      captionParserModel: openai('gpt-5-mini'),
-      textCleanerBatchSize: 10,
-      captionParserBatchSize: 5,
-      captionValidatorBatchSize: 5,
-    });
-
-    const { document, usage } = await processor.process(
-      doclingDocument,
-      'report-001',
-      artifactDir,
-    );
-
-    // 3. 결과 활용
-    console.log('목차:', document.chapters);
-    console.log('이미지:', document.images);
-    console.log('표:', document.tables);
-    console.log('각주:', document.footnotes);
-    console.log('토큰 사용량:', usage.total);
-  },
-  true, // cleanupAfterCallback
-  {}, // PDFConvertOptions
-);
-
-// 정리
-await pdfParser.dispose();
-```
-
-### 고급 사용법
-
-```typescript
-// 컴포넌트별 LLM 모델 지정 + fallback 재시도
+const logger = new Logger(console);
+// Set OPENAI_API_KEY and HERIPO_MODEL to a vision-capable model ID.
+const model = openai(process.env.HERIPO_MODEL!);
+const parser = new PDFParser({ logger, port: 5001, timeout: 1_800_000 });
 const processor = new DocumentProcessor({
   logger,
-  fallbackModel: anthropic('claude-opus-4-5'), // 실패 시 재시도용
-  pageRangeParserModel: openai('gpt-5.2'),
-  tocExtractorModel: openai('gpt-5.1'),
-  validatorModel: openai('gpt-5.2'),
-  visionTocExtractorModel: openai('gpt-5-mini'),
-  captionParserModel: openai('gpt-5-nano'),
+  fallbackModel: model,
   textCleanerBatchSize: 20,
-  captionParserBatchSize: 10,
-  captionValidatorBatchSize: 10,
-  maxRetries: 3,
-  maxValidationRetries: 3,
-  enableFallbackRetry: true, // 실패 시 fallbackModel로 자동 재시도 (기본값: false)
-  onTokenUsage: (report) => console.log('토큰 사용량:', report.total),
+  captionParserBatchSize: 5,
+  captionValidatorBatchSize: 5,
 });
+
+try {
+  await parser.init();
+  const parserUsage = await parser.parse(
+    'file:///absolute/path/to/report.pdf',
+    'report-001',
+    async (artifactDir) => {
+      const doclingDocument = JSON.parse(
+        await readFile(join(artifactDir, 'result.json'), 'utf8'),
+      ) as DoclingDocument;
+      const { document, usage } = await processor.process(
+        doclingDocument,
+        'report-001',
+        artifactDir,
+      );
+      await writeFile(
+        join(artifactDir, 'result-processed.json'),
+        JSON.stringify(document, null, 2),
+      );
+      console.log('Chapters:', document.chapters.length);
+      console.log('Processor token usage:', usage.total);
+    },
+    false, // Keep artifacts after the callback.
+    {
+      correction: {
+        models: {
+          textCorrection: model,
+          pageGate: model,
+          reviewAssistance: model,
+        },
+      },
+      chunkedConversion: true,
+      chunkSize: 10,
+    },
+  );
+  console.log('Parser token usage:', parserUsage?.total);
+} finally {
+  await parser.dispose();
+}
 ```
+
+`parse()`는 문서가 아닌 `TokenUsageReport | null`을 반환합니다. 보정된 Docling 문서는 콜백의 `artifactDir/result.json`에서 읽습니다. `cleanupAfterCallback: true`이면 디렉터리가 삭제되므로 필요한 JSON과 이미지·페이지 파일을 콜백 안에서 별도 저장하세요. 프로세서의 `process()`는 `{ document, usage }`를 반환하며 파일을 자동 저장하지 않습니다.
+
+수동 목차·페이지 매핑과 출처 추적 옵션은 [document-processor 문서](./packages/document-processor/README.ko.md)를, 단계별 모델·fallback·보정 옵션은 [pdf-parser 문서](./packages/pdf-parser/README.ko.md)를 참고하세요.
 
 ## 데모 애플리케이션
 
@@ -312,19 +307,19 @@ const processor = new DocumentProcessor({
 
 **🔗 https://engine-demo.heripo.org**
 
-> 온라인 데모는 일일 사용량 제한(3회)이 있습니다. 전체 기능은 로컬 실행을 권장합니다.
+> 퍼블릭 모드에는 배포 설정에 따른 일일 제한과 처리 성공 후 7일 세션 잠금이 적용됩니다. 자세한 조건은 데모 README를 참고하세요.
 
 ### Web Demo (Next.js)
 
 실시간 PDF 처리 모니터링을 제공하는 웹 애플리케이션:
 
 ```bash
-cd apps/demo-web
-cp .env.example .env
-# .env 파일에 LLM API 키 설정
-
+# Run from the repository root.
 pnpm install
-pnpm dev
+pnpm build:packages
+cp apps/demo-web/.env.example apps/demo-web/.env
+# Configure providers and model settings before processing.
+pnpm demo-web:dev
 ```
 
 브라우저에서 http://localhost:3000 접속

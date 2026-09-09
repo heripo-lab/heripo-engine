@@ -38,14 +38,15 @@ Try it without local installation:
 
 ### Online Demo Limitations
 
-The online demo has the following limitations to protect server resources:
+Public-mode limits depend on deployment configuration. Repository behavior is:
 
-| Item                   | Limit         |
-| ---------------------- | ------------- |
-| Daily processing limit | 3 times       |
-| Concurrent processing  | 1             |
-| Processing options     | Default fixed |
-| LLM model selection    | Default fixed |
+| Item                  | Behavior                                                             |
+| --------------------- | -------------------------------------------------------------------- |
+| Daily processing      | `DAILY_LIMIT`; `.env.example` sets 3, unset fallback is 1 (UTC date) |
+| Concurrent task limit | `CONCURRENT_TASK_LIMIT`; unset fallback is 1                         |
+| Successful session    | Seven-day lock for that browser session after success                |
+| Options and models    | Fixed defaults, except authenticated TOTP bypass                     |
+| Upload                | Turnstile validation and large-upload session authentication         |
 
 ### Full Feature Usage
 
@@ -54,7 +55,11 @@ To use all features freely, run locally:
 - Unlimited PDF processing
 - All processing options customizable
 - Various LLM model selection
-- OCR language and thread settings
+- Language detection model and thread settings
+
+### Demo Correction Defaults
+
+The library enables structural review and table correction by default, while the demo form starts with `reviewAssistanceEnabled: false` and `tableCorrectionEnabled: false`. Initial text/table-cell OCR correction still runs. When structural review is enabled, the worker passes `forceAutoApply: true`, applying valid commands automatically. There is no manual approval queue.
 
 ## Prerequisites
 
@@ -67,30 +72,29 @@ This application depends on `@heripo/pdf-parser`, which has specific system requ
 - macOS system requirements (Apple Silicon or Intel)
 - Python version requirements (3.9-3.12)
 - Required system dependencies (poppler, jq, lsof)
-- Optional image PDF fallback dependencies (ImageMagick, Ghostscript)
+- Page rendering and image-PDF dependencies (ImageMagick, Ghostscript)
 - First-run setup instructions
 
 ### Node.js and Package Manager
 
 - **Node.js** >= 24.0.0
-- **pnpm** >= 11
+- **pnpm** 11.25.0
 
-### LLM API Keys
+### LLM Providers and Models
 
-An API key from one or more of the following LLM providers is required:
+Supports OpenAI, Anthropic, Google, Together AI, and local Ollama/LM Studio. Model IDs use `provider/model-name`. Configure credentials for every cloud provider selected for a stage or fallback. Stages using only a local server do not require cloud keys.
 
-- OpenAI (recommended)
-- Anthropic
-- Google Generative AI
-- Together AI
+The current [form defaults](./src/features/upload/types/form-values.ts) combine LM Studio, OpenAI and a Google fallback. Adding a single API key does not configure this entire setup. Load the selected local models or change language detection, document validation, correction, processor and fallback models in the UI to models available in your environment. Models reading pages need image input; structure extraction requires structured output.
 
 ## Installation and Running
+
+Run the following commands from the repository root.
 
 ### 1. Environment Variable Setup
 
 ```bash
 # Copy .env.example to .env
-cp .env.example .env
+cp apps/demo-web/.env.example apps/demo-web/.env
 
 # Edit .env file to enter API keys
 ```
@@ -98,7 +102,10 @@ cp .env.example .env
 `.env` file example:
 
 ```bash
-# At least one API key is required
+# Configure credentials for every selected cloud provider
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+LMSTUDIO_BASE_URL=http://localhost:1234/v1
+LMSTUDIO_API_KEY=
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_GENERATIVE_AI_API_KEY=...
@@ -148,6 +155,7 @@ From the root directory:
 
 ```bash
 pnpm install
+pnpm build:packages
 ```
 
 ### 3. Run Development Server
@@ -186,7 +194,7 @@ After processing completes:
 - View extracted images
 - Check table data with merged cell spans
 - Open rendered PDF pages and source images
-- Download all artifacts as a ZIP (`result-processed.json`, `result.json`, `source-handoff-manifest.json`, `images/`, `pages/`)
+- Download result artifacts as a ZIP (`result-processed.json`, `result.json`, `source-handoff-manifest.json`, `images/`, `pages/`)
 - Export the processed result JSON
 
 ### 4. Job Management
@@ -194,6 +202,43 @@ After processing completes:
 - View all jobs on "Job List" page
 - Delete jobs
 - Re-check previous job results
+
+## Uploads and Stored Artifacts
+
+The maximum PDF size is 2 GiB. Files at least 5 MiB use signed upload sessions and 10 MiB chunks, requiring `UPLOAD_SESSION_SECRET`. The browser uploads up to three chunks concurrently and retries failures. Upload cancellation and cancellation of running tasks are supported.
+
+Paths are relative to the server's working directory, normally `apps/demo-web` when launched with `pnpm --filter @heripo/demo-web ...`.
+
+- `data/heripo.json`: JSON storage for tasks, logs, upload sessions and locks. The runtime does not use SQLite despite the presence of `schema.sql`.
+- `data/tasks/<taskId>/input.pdf`: Uploaded input.
+- `output/<taskId>/`: Parser artifacts and processed output, accessed through the task's stored `artifact_dir`.
+- `result.json`: Corrected Docling document; `result_ocr_origin.json` is the initial OCR snapshot.
+- `result-processed.json`, `source-handoff-manifest.json`: Final document and source/hash metadata saved by the worker.
+- `images/`, `pages/`: Extracted images and rendered pages. Structural review additionally produces reports, checkpoints and snapshots when enabled.
+
+Official demo mode (`NEXT_PUBLIC_HERIPO_OFFICIAL_DEMO=true`) cleans expired task data daily at 16:00 UTC. `NEXT_PUBLIC_DATA_RETENTION_DAYS` defaults to 7. Rebuild after changing `NEXT_PUBLIC_*` values, which are incorporated at build time.
+
+## API Routes
+
+Task APIs scope access by browser session. Deletion cancels queued/running tasks before removing their records and files.
+
+| Method          | Route                                   | Purpose                                             |
+| --------------- | --------------------------------------- | --------------------------------------------------- |
+| `GET`, `POST`   | `/api/tasks`                            | List tasks / direct upload and creation below 5 MiB |
+| `GET`, `DELETE` | `/api/tasks/[taskId]`                   | Task details / cancellation and deletion            |
+| `GET`           | `/api/tasks/[taskId]/stream`            | SSE status, logs and usage                          |
+| `GET`           | `/api/tasks/[taskId]/result`            | Processed document                                  |
+| `GET`           | `/api/tasks/[taskId]/download`          | Result ZIP                                          |
+| `GET`           | `/api/tasks/[taskId]/images/[imageId]`  | Image                                               |
+| `GET`           | `/api/tasks/[taskId]/pages/[pageIndex]` | Rendered page                                       |
+| `POST`          | `/api/upload/session`                   | Create chunked-upload session                       |
+| `POST`          | `/api/upload/chunks`                    | Upload chunk                                        |
+| `POST`          | `/api/upload/complete`                  | Merge upload and create task                        |
+| `DELETE`        | `/api/upload/session/[uploadSessionId]` | Cancel upload                                       |
+| `GET`           | `/api/rate-limit/check`                 | Public-mode limits                                  |
+| `GET`           | `/api/system/status`                    | System status                                       |
+
+The current ZIP includes only processed JSON, corrected Docling JSON, the handoff manifest, `images/` and `pages/`. OCR snapshots, review reports and checkpoints remain separately in the server artifact directory.
 
 ## Architecture
 
@@ -256,7 +301,7 @@ const response = await fetch('/api/tasks');
 - `useDeleteTask()` - Delete task (mutation)
 - `useCreateTask()` - Create task (mutation)
 - `useTaskStream(taskId)` - SSE real-time stream
-- `useDownloadAll({ taskId, filename })` - Download all task artifacts as ZIP
+- `useDownloadAll({ taskId, filename })` - Download result artifacts as ZIP
 - `useExportJson({ data, filename })` - Export processed result JSON
 
 ## About Testing
@@ -279,11 +324,11 @@ Generate TOTP secret for bypassing public mode:
 pnpm --filter @heripo/demo-web generate:otp-secret
 ```
 
-Set the output value in `OTP_SECRET` in your `.env` file.
+Set the output value in `TOTP_SECRET` in your `.env` file.
 
 ### Generate Upload Session Secret
 
-Generate JWT signing secret for large file uploads (50MB+):
+Generate JWT signing secret for large file uploads (5 MiB+):
 
 ```bash
 # Generate random secret with Node.js
@@ -318,7 +363,7 @@ pnpm build
 
 ```bash
 pnpm build
-pnpm start
+pnpm demo-web:start
 ```
 
 ## Deployment Notes

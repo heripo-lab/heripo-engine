@@ -37,8 +37,8 @@
 ## 주요 기능
 
 - **ocrmac 고정 OCR**: Docling 변환은 항상 ocrmac / Apple Vision Framework를 사용
-- **필수 VLM 보정**: Docling 이후 텍스트 보정, page gate, 구조 review 모델을 항상 실행
-- **Apple Silicon 최적화**: M1/M2/M3/M4/M5 칩에서 GPU 가속 지원
+- **필수 VLM 보정**: Docling 이후 텍스트 보정은 필수이며 page gate와 구조 검토는 비활성화 가능
+- **Apple Silicon 백엔드**: Docling 변환에서 `mps` accelerator 요청
 - **자동 환경 설정**: Python 가상환경 및 docling-serve 자동 설치
 - **이미지 추출**: PDF 내 이미지 자동 추출 및 저장
 - **문서 유형 검증**: LLM 기반 고고학 보고서 여부 검증 (선택)
@@ -68,19 +68,20 @@ brew install node
 #### 2. pnpm >= 11
 
 ```bash
-npm install -g pnpm
+npm install -g pnpm@11.25.0
 ```
 
 #### 3. Python 3.9 - 3.12
 
-> **중요**: Python 3.13+는 지원하지 않습니다. Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
+> **중요**: 현재 설치 코드는 Python 3.9–3.12만 허용하고 3.13 이상은 거부합니다. 저장소의 버전 검사 기준이며 모든 upstream Docling 버전의 호환성을 뜻하지는 않습니다.
 
 ```bash
 # Python 3.11 설치 (권장)
 brew install python@3.11
 
 # 버전 확인
-python3.11 --version
+export PATH="$(brew --prefix python@3.11)/libexec/bin:$PATH"
+python3 --version
 ```
 
 #### 4. poppler (PDF 텍스트 추출)
@@ -105,9 +106,9 @@ macOS에 기본적으로 설치되어 있습니다. 확인:
 which lsof
 ```
 
-#### 7. ImageMagick + Ghostscript (선택)
+#### 7. ImageMagick + Ghostscript
 
-이미지 PDF 폴백 기능(`enableImagePdfFallback` 또는 `forceImagePdf`)을 사용할 때만 필요합니다.
+필수 VLM 보정에 사용하는 로컬 PDF 페이지 렌더링과 이미지 PDF 폴백에 필요합니다. `enableImagePdfFallback`과 `forceImagePdf`가 꺼져 있어도 설치하세요.
 
 ```bash
 brew install imagemagick ghostscript
@@ -121,24 +122,26 @@ brew install imagemagick ghostscript
 2. `docling-serve` 및 의존성 설치
 3. 로컬 포트에서 docling-serve 프로세스 시작
 
-이 설정은 한 번만 수행되며 인터넷 연결 상태에 따라 5-10분 정도 소요될 수 있습니다.
+가상환경은 재사용하지만 로컬 초기화에서 의존성 설치 단계를 다시 실행합니다. 설치 코드는 docling-serve 1.16.1과 명시적인 Docling 런타임 버전을 사용합니다. [python-environment.ts](./src/environment/python-environment.ts)를 참고하세요. 별도 `python3.11` 설치 여부보다 PATH의 `python3` 버전이 중요합니다.
 
 ## 설치
 
 ```bash
 # npm으로 설치
-npm install @heripo/pdf-parser @heripo/logger
+npm install @heripo/pdf-parser @heripo/logger @ai-sdk/openai
 
 # pnpm으로 설치
-pnpm add @heripo/pdf-parser @heripo/logger
+pnpm add @heripo/pdf-parser @heripo/logger @ai-sdk/openai
 
 # yarn으로 설치
-yarn add @heripo/pdf-parser @heripo/logger
+yarn add @heripo/pdf-parser @heripo/logger @ai-sdk/openai
 ```
 
 ## 사용법
 
 ### 기본 사용법
+
+ESM 프로젝트에서 실행하세요. 예제의 `HERIPO_MODEL`은 사용자가 설정하는 환경 변수로, 이미지 입력과 구조화된 출력을 지원하는 모델 ID를 지정합니다. `OPENAI_API_KEY`도 설정하세요. 다른 provider는 해당 AI SDK adapter로 대체할 수 있습니다.
 
 ```typescript
 import { openai } from '@ai-sdk/openai';
@@ -158,33 +161,37 @@ const pdfParser = new PDFParser({
   logger,
 });
 
-const correctionModel = openai('gpt-5.1');
+const correctionModel = openai(process.env.HERIPO_MODEL!);
 
 // 초기화 (환경 설정 및 docling-serve 시작)
-await pdfParser.init();
+try {
+  await pdfParser.init();
 
-// PDF 파싱
-const tokenUsageReport = await pdfParser.parse(
-  'file:///path/to/report.pdf', // PDF URL (file:// 또는 http://)
-  'report-001', // 리포트 ID
-  async (outputPath) => {
-    // 변환 완료 콜백
-    console.log('PDF 변환 완료:', outputPath);
-  },
-  false, // cleanupAfterCallback
-  {
-    correction: {
-      models: {
-        textCorrection: correctionModel,
-        pageGate: correctionModel,
-        reviewAssistance: correctionModel,
-      },
+  // PDF 파싱
+  const tokenUsageReport = await pdfParser.parse(
+    'file:///path/to/report.pdf', // PDF URL (file:// 또는 http://)
+    'report-001', // 리포트 ID
+    async (outputPath) => {
+      // 변환 완료 콜백
+      console.log('PDF 변환 완료:', outputPath);
     },
-  }, // PDFConvertOptions
-);
+    false, // cleanupAfterCallback
+    {
+      correction: {
+        models: {
+          textCorrection: correctionModel,
+          pageGate: correctionModel,
+          reviewAssistance: correctionModel,
+        },
+      },
+    }, // PDFConvertOptions
+  );
 
-// 토큰 사용량 리포트 (LLM 사용이 없으면 null)
-console.log('토큰 사용량:', tokenUsageReport);
+  // 토큰 사용량 리포트 (LLM 사용이 없으면 null)
+  console.log('토큰 사용량:', tokenUsageReport);
+} finally {
+  await pdfParser.dispose();
+}
 ```
 
 ### 고급 옵션
@@ -193,7 +200,7 @@ console.log('토큰 사용량:', tokenUsageReport);
 // 옵션 A: 로컬 서버 (포트 모드)
 const pdfParser = new PDFParser({
   logger,
-  port: 5001,                      // 사용할 포트 (기본값: 5001)
+  port: 5001, // Local port must be specified explicitly
   timeout: 10000000,                // 타임아웃 (밀리초)
   venvPath: '/custom/path/.venv',   // 커스텀 venv 경로 (기본값: CWD/.venv)
   killExistingProcess: true,        // 포트의 기존 프로세스 종료 (기본값: false)
@@ -216,13 +223,13 @@ const tokenUsageReport = await pdfParser.parse(
     // Docling 이후 필수 보정
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1'),
-        reviewAssistance: openai('gpt-5.1'),
-        tableCorrection: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
+        tableCorrection: openai(process.env.HERIPO_MODEL!),
         reviewAssistanceTasks: {
-          text_ocr_hanja: openai('gpt-5.1'),
-          tables: openai('gpt-5.1'),
+          text_ocr_hanja: openai(process.env.HERIPO_MODEL!),
+          tables: openai(process.env.HERIPO_MODEL!),
         },
       },
       concurrency: {
@@ -246,7 +253,7 @@ const tokenUsageReport = await pdfParser.parse(
     onReviewAssistanceProgress: (event) => console.log(event),
 
     // 문서 유형 검증
-    documentValidationModel: openai('gpt-5.1'),
+    documentValidationModel: openai(process.env.HERIPO_MODEL!),
 
     // 대용량 PDF 청크 변환
     chunkedConversion: true,
@@ -265,6 +272,12 @@ const tokenUsageReport = await pdfParser.parse(
 );
 ```
 
+### 산출물
+
+콜백은 `output/<reportId>/`의 절대 경로를 받습니다. `result.json`은 보정 결과이고 `result_ocr_origin.json`은 초기 OCR 스냅샷입니다. `images/`와 `pages/`는 추출 이미지와 페이지 이미지입니다. 구조 검토 활성화 시 `result_review_origin.json`, `review_assistance_page_gate.json`, `review_assistance_checkpoint.json`, `review_assistance.json`도 생성됩니다. 실패한 검토 작업은 리포트의 페이지 상태·이슈·call trace를 확인하세요.
+
+`cleanupAfterCallback: true`이면 콜백 이후 산출물 디렉터리가 삭제됩니다. 필요한 파일을 콜백 안에서 다른 위치로 복사하거나 `false`로 보존하세요. 파서는 `result-processed.json`이나 handoff manifest를 만들지 않으며 데모 worker가 별도로 저장합니다.
+
 ### 리소스 정리
 
 작업 완료 후 리소스를 정리합니다:
@@ -278,15 +291,15 @@ await pdfParser.dispose();
 
 ### ocrmac을 고정하는 이유
 
-**ocrmac(Apple Vision Framework)은 매우 우수한 OCR 엔진입니다** -- 무료이고, GPU 가속을 지원하며, 고품질 결과를 제공합니다. 수천~수백만 권의 고고학 보고서를 처리할 때 이만한 솔루션이 없습니다.
+ocrmac은 macOS의 Apple Vision을 사용하는 고정 OCR 백엔드입니다.
 
-`@heripo/pdf-parser`는 더 이상 OCR strategy를 sampling하거나 VLM OCR 경로로 전환하지 않습니다. Docling 변환은 항상 ocrmac으로 실행하고, VLM은 Docling 이후 필수 보정 단계에서만 사용합니다.
+`@heripo/pdf-parser`는 더 이상 OCR strategy를 sampling하거나 VLM OCR 경로로 전환하지 않습니다. Docling 변환은 항상 ocrmac으로 실행하고, VLM 보정은 Docling 이후 실행합니다. 선택적인 언어 감지와 문서 유형 검증에서도 변환 전에 모델을 호출할 수 있습니다.
 
 ### 필수 correction 계약
 
 모든 `parse()` 호출은 `correction.models.textCorrection`, `correction.models.pageGate`, `correction.models.reviewAssistance`를 제공해야 합니다. 필수 모델이 누락되면 변환 callback을 감싸기 전에 명확히 실패합니다.
 
-보정 단계는 다음 순서로 실행됩니다.
+구조 검토가 기본 설정대로 활성화된 경우 보정 단계는 다음과 같습니다.
 
 1. 변경 전 `result_ocr_origin.json`을 저장합니다.
 2. `textCorrection` 모델로 페이지 텍스트와 표 셀 OCR을 보정합니다.
@@ -299,21 +312,39 @@ await pdfParser.dispose();
 
 ### 로컬 모델 권장 실행 방식
 
-보정 파이프라인은 로컬 VLM 기준으로 설계되었습니다. 큰 context 하나보다 작은 context를 자주 호출하고, deterministic validator와 retry, timeout, checkpoint/resume으로 안정성을 확보합니다. 처음에는 `concurrency.pages: 1`, `concurrency.tables: 1`, `modelConcurrency: 1`, `temperature: 0`, 충분한 `workItemTimeoutMs`로 시작하고, 모델이 안정화된 뒤 동시성을 높이는 것을 권장합니다.
+보정 파이프라인은 로컬 VLM 기준으로 설계되었습니다. 큰 context 하나보다 작은 context를 자주 호출하고, deterministic validator와 retry, timeout, checkpoint/resume으로 안정성을 확보합니다. 처음에는 `concurrency.pages: 1`, `concurrency.reviewTasks: 1`, `modelConcurrency: 1`, `temperature: 0`, 충분한 `workItemTimeoutMs`로 시작하고, 모델이 안정화된 뒤 동시성을 높이는 것을 권장합니다.
 
-### 롤아웃 smoke test
+### 검증
 
-레포 contributor는 로컬 demo 고고학 보고서 산출물 2종으로 correction rollout smoke test를 실행할 수 있습니다.
+저장소에 정의된 테스트 명령은 `pnpm --filter @heripo/pdf-parser test:coverage`입니다. 테스트는 외부 모델 호출을 모킹하므로 실제 문서의 보정 품질은 별도 확인해야 합니다.
 
-```bash
-pnpm --filter @heripo/pdf-parser smoke:correction
-```
+### 보정 옵션과 기본값
 
-이 smoke test는 기존 demo artifact를 `/private/tmp/heripo-pdf-parser-correction-smoke`로 복사하고, deterministic local fake model로 correction을 실행한 뒤 `review_assistance.json`, 표 work-item trace, validation status, checkpoint resume 동작을 검증합니다. 파이프라인 기계적 경로를 검증하는 용도이며, 의미론적 표 보정 품질은 실제로 설정한 로컬 VLM 품질에 의존합니다.
+세 필수 모델은 구조 검토를 꺼도 모두 제공해야 합니다. `reviewAssistanceEnabled: false`이면 텍스트·표 셀 OCR 보정만 수행하고 page gate와 구조 검토를 생략합니다. `tableCorrectionEnabled: false`는 구조 검토의 표 작업만 생략하며 초기 표 셀 OCR 보정에는 영향을 주지 않습니다.
+
+`forceAutoApply` 기본값은 `false`입니다. `true`이면 검증을 통과한 명령을 신뢰도 임계값과 구조적 제약에 따른 수동 검토 분기 없이 적용합니다. 명령 검증 자체를 생략하는 옵션은 아닙니다.
+
+| Option                                               | Default                |
+| ---------------------------------------------------- | ---------------------- |
+| `concurrency.pages`                                  | `1`                    |
+| `concurrency.reviewTasks`                            | `6`                    |
+| `modelConcurrency`                                   | `1`                    |
+| `maxRetries.*`                                       | `3`                    |
+| `workItemTimeoutMs`                                  | `1800000` (30 minutes) |
+| `outputLanguage`                                     | `en-US`                |
+| `autoApplyThreshold` / `proposalThreshold`           | `0.85` / `0.5`         |
+| `reviewAssistanceEnabled` / `tableCorrectionEnabled` | `true` / `true`        |
+| `forceAutoApply` / `temperature`                     | `false` / `0`          |
+
+기본값은 내보낸 `PDF_CORRECTION_DEFAULTS`에서도 확인할 수 있습니다. `concurrency.tables`와 `pageGate.structuralNoiseThreshold`는 타입에 있지만 현재 최상위 파이프라인에서 runner 제어값으로 전달되지 않습니다. 표 작업 동시성은 `reviewTasks`와 `modelConcurrency`로 제어하세요.
+
+### 언어 감지
+
+`ocr_lang`이 있으면 그대로 사용합니다. 없으면 로컬 PDF 텍스트 레이어를 분석하고, 부족한 경우 `languageDetectionModel`로 페이지를 감지합니다. `languageDetectionFallbackModel`도 지정할 수 있습니다. 원격 입력이나 감지할 수 없는 입력은 기본 언어 `ko-KR`, `en-US`를 사용합니다. OCR 엔진 선택 기능은 아니며 OCR은 항상 ocrmac입니다.
 
 ## Review Assistance
 
-Review Assistance는 텍스트 보정 이후 항상 실행되지만 모든 페이지를 같은 강도로 처리하지 않습니다. page gate가 표지, 챕터 표지, 바코드/ISBN 페이지, 장식 중심 페이지를 구조 review 저가치 페이지로 분류합니다. skip된 페이지도 `review_assistance.json`에 info issue와 skip reason으로 남습니다.
+Review Assistance는 `correction.reviewAssistanceEnabled: true`일 때(라이브러리 기본값) 텍스트 보정 이후 실행되지만 모든 페이지를 같은 강도로 처리하지 않습니다. page gate가 표지, 챕터 표지, 바코드/ISBN 페이지, 장식 중심 페이지를 구조 review 저가치 페이지로 분류합니다. skip된 페이지도 `review_assistance.json`에 info issue와 skip reason으로 남습니다.
 
 eligible page는 text OCR/Hanja, text integrity, text role/footnote, tables, pictures/captions, layout/bbox/order, table-specific correction 같은 작은 work item으로 쪼개집니다. 각 호출의 timing, model id, attempts, target refs, deterministic validation status는 `review_assistance.json`에 기록됩니다.
 
@@ -330,10 +361,10 @@ const tokenUsageReport = await pdfParser.parse(
   {
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1-mini'),
-        reviewAssistance: openai('gpt-5.1'),
-        tableCorrection: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
+        tableCorrection: openai(process.env.HERIPO_MODEL!),
       },
       autoApplyThreshold: 0.85,
       proposalThreshold: 0.5,
@@ -353,7 +384,7 @@ const tokenUsageReport = await pdfParser.parse(
 );
 ```
 
-Review Assistance는 page image와 text-layer reference를 위해 로컬 `file://` PDF를 필요로 합니다. 고신뢰도 수정은 `result.json`에 적용하고, 원본 snapshot은 `result_review_origin.json`, `result_ocr_origin.json`에 보존하며, `review_assistance_page_gate.json`과 페이지별 결정, 이슈, proposal, call trace, validation status, 요약 count를 담은 `review_assistance.json`을 기록합니다.
+전체 파이프라인에는 로컬 `file://` PDF를 사용하세요. HTTP 입력은 Docling에서 받지만 로컬 페이지 렌더링·언어 감지·문서 검증은 건너뜁니다. `pages/page_<index>.png`가 없으면 텍스트 보정을 생략하므로 콜백 성공이 모든 페이지의 보정 성공을 뜻하지는 않습니다. 보정 호출이 실패한 페이지는 OCR 원문을 유지하고 경고를 기록합니다. 고신뢰도 수정은 `result.json`에 적용하고, 원본 snapshot은 `result_review_origin.json`, `result_ocr_origin.json`에 보존하며, `review_assistance_page_gate.json`과 페이지별 결정, 이슈, proposal, call trace, validation status, 요약 count를 담은 `review_assistance.json`을 기록합니다.
 
 ## 문서 유형 검증
 
@@ -371,12 +402,12 @@ try {
     {
       correction: {
         models: {
-          textCorrection: openai('gpt-5.1'),
-          pageGate: openai('gpt-5.1'),
-          reviewAssistance: openai('gpt-5.1'),
+          textCorrection: openai(process.env.HERIPO_MODEL!),
+          pageGate: openai(process.env.HERIPO_MODEL!),
+          reviewAssistance: openai(process.env.HERIPO_MODEL!),
         },
       },
-      documentValidationModel: openai('gpt-5.1'),
+      documentValidationModel: openai(process.env.HERIPO_MODEL!),
     },
   );
 } catch (error) {
@@ -399,17 +430,19 @@ const tokenUsageReport = await pdfParser.parse(
   {
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1'),
-        reviewAssistance: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
       },
     },
     chunkedConversion: true,
-    chunkSize: 50, // 청크당 페이지 수 (기본값: 상수에서 설정)
-    chunkMaxRetries: 3, // 실패한 청크의 최대 재시도 횟수 (기본값: 상수에서 설정)
+    chunkSize: 50, // Pages per chunk (default: 10)
+    chunkMaxRetries: 3, // Retries per failed chunk (default: 2)
   },
 );
 ```
+
+청크 변환 결과를 합친 뒤 보정을 수행합니다. 현재 구현은 청크 변환 실패 시 `enableImagePdfFallback`과 별개로 이미지 PDF 재시도를 수행하므로 이 경로에도 ImageMagick/Ghostscript가 필요합니다. `chunkedConversion`과 `forceImagePdf`를 함께 지정한 로컬 입력은 청크 분기가 우선합니다.
 
 ## 이미지 PDF 폴백
 
@@ -440,9 +473,9 @@ const tokenUsageReport = await pdfParser.parse(
   {
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1'),
-        reviewAssistance: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
       },
     },
     forceImagePdf: true, // 항상 이미지 PDF로 먼저 변환
@@ -471,16 +504,16 @@ try {
     {
       correction: {
         models: {
-          textCorrection: openai('gpt-5.1'),
-          pageGate: openai('gpt-5.1'),
-          reviewAssistance: openai('gpt-5.1'),
+          textCorrection: openai(process.env.HERIPO_MODEL!),
+          pageGate: openai(process.env.HERIPO_MODEL!),
+          reviewAssistance: openai(process.env.HERIPO_MODEL!),
         },
       },
     },
     controller.signal, // AbortSignal
   );
 } catch (error) {
-  if (error.name === 'AbortError') {
+  if (error instanceof Error && error.name === 'AbortError') {
     console.log('파싱이 취소되었습니다');
   }
 }
@@ -494,35 +527,9 @@ try {
 
 ## 왜 macOS 전용인가?
 
-`@heripo/pdf-parser`는 **의도적으로 macOS에 강하게 의존**합니다. 이 결정의 핵심 이유는 **Docling SDK의 로컬 OCR 성능**입니다.
+패키지는 `os: ["darwin"]`을 선언하고 `init()`에서 macOS와 로컬 도구를 확인합니다. `baseUrl`로 외부 Docling 서버를 연결해도 이 클라이언트 제한은 유지됩니다. ocrmac OCR은 macOS의 Apple Vision을 사용합니다.
 
-### OCR 선택 배경
-
-고고학 발굴조사보고서 PDF는 다음과 같은 특성이 있습니다:
-
-- 수백 페이지 분량의 스캔 문서
-- 복잡한 표, 도면, 사진이 포함된 레이아웃
-- 정밀한 텍스트 추출이 필수적
-
-### OCR 옵션 비교
-
-| 방식                    | 성능  | 비용 | 설명                                    |
-| ----------------------- | ----- | ---- | --------------------------------------- |
-| **Docling (로컬)**      | ★★★★★ | 무료 | Apple Silicon에서 압도적 성능, GPU 활용 |
-| Cloud OCR (Google, AWS) | ★★★★  | $$$  | 수백 페이지당 수십 달러                 |
-| Tesseract (로컬)        | ★★    | 무료 | 한국어 인식률 낮음, 레이아웃 분석 부족  |
-
-### 핵심 장점
-
-- **비용**: 클라우드 OCR 대비 100배 이상 저렴 (무료)
-- **성능**: Apple Silicon M1/M2/M3/M4/M5에서 GPU 가속으로 빠른 처리
-- **품질**: 복잡한 레이아웃의 문서도 정확히 인식
-- **프라이버시**: 문서가 외부 서버로 전송되지 않음
-
-### Trade-off
-
-- macOS + Apple Silicon 환경에서만 최적 성능
-- Linux/Windows 지원은 현재 계획 없음 (아래 "Linux 지원 현황" 참고)
+Docling OCR은 로컬에서 실행할 수 있지만 VLM 보정에는 설정한 모델을 호출합니다. 클라우드 모델을 선택하면 문서 텍스트와 페이지 이미지가 해당 provider로 전송될 수 있고 API 비용이 발생합니다. 전체 처리를 로컬에 유지하려면 언어 감지·문서 검증·보정·fallback·후속 문서 처리 모델까지 로컬로 설정해야 합니다.
 
 ## 시스템 의존성 상세
 
@@ -534,17 +541,18 @@ try {
 | poppler     | Any        | `brew install poppler`     | PDF 페이지 수 확인 (pdfinfo) 및 텍스트 레이어 추출 (pdftotext) |
 | jq          | Any        | `brew install jq`          | JSON 처리 (변환 결과 파싱)                                     |
 | lsof        | Any        | macOS 기본 설치됨          | docling-serve 포트 관리                                        |
-| ImageMagick | Any (선택) | `brew install imagemagick` | 이미지 PDF 폴백 및 페이지 렌더링                               |
-| Ghostscript | Any (선택) | `brew install ghostscript` | 이미지 PDF 폴백 (PDF를 이미지로 변환)                          |
+| ImageMagick | Any        | `brew install imagemagick` | 이미지 PDF 폴백 및 페이지 렌더링                               |
+| Ghostscript | Any        | `brew install ghostscript` | 이미지 PDF 폴백 (PDF를 이미지로 변환)                          |
 
-> **Python 3.13+는 지원하지 않습니다.** Docling SDK의 일부 의존성이 Python 3.13과 호환되지 않습니다.
+> **현재 설치 코드는 Python 3.13 이상을 거부합니다.** [python-version.ts](./src/utils/python-version.ts)의 검사를 참고하세요.
 
 ### Python 버전 확인
 
 ```bash
 # 설치된 Python 버전 확인
 python3 --version
-python3.11 --version
+export PATH="$(brew --prefix python@3.11)/libexec/bin:$PATH"
+python3 --version
 
 # 여러 버전이 설치된 경우
 ls -la /usr/local/bin/python*
@@ -569,12 +577,12 @@ which jq
 ```typescript
 type Options = {
   logger: LoggerMethods; // 로거 인스턴스 (필수)
-  timeout?: number; // 타임아웃 (밀리초, 기본값: 10000000)
+  timeout?: number; // 타임아웃 (밀리초, 기본값: 100000)
   venvPath?: string; // Python venv 경로 (기본값: CWD/.venv)
   killExistingProcess?: boolean; // 포트의 기존 프로세스 종료 (기본값: false)
   enableImagePdfFallback?: boolean; // 이미지 PDF 폴백 활성화 (기본값: false, ImageMagick + Ghostscript 필요)
 } & (
-  | { port?: number } // 로컬 서버 모드 (기본 포트: 5001)
+  | { port?: number } // 로컬 모드; port를 명시해야 함 (런타임 기본값 없음)
   | { baseUrl: string } // 외부 서버 모드
 );
 ```
@@ -614,6 +622,10 @@ PDF 파일을 파싱합니다.
 await pdfParser.dispose();
 ```
 
+##### `isReady(): Promise<boolean>` / `ensureReady(): Promise<void>`
+
+`isReady()`는 복구 없이 상태만 확인합니다. 초기화 후 사용하는 `ensureReady()`는 로컬 서버 복구를 시도하며 외부 서버 오류는 그대로 전달합니다. `dispose()`는 재사용한 서버를 포함해 설정된 로컬 포트의 프로세스를 종료하므로 외부에서 수명을 관리하는 서버는 `baseUrl`로 연결하세요.
+
 ### PDFConvertOptions
 
 ```typescript
@@ -630,6 +642,8 @@ type PDFConvertOptions = {
 
   // 문서 처리
   document_timeout?: number; // 문서 처리 타임아웃 (초)
+  languageDetectionModel?: LanguageModel;
+  languageDetectionFallbackModel?: LanguageModel;
   documentValidationModel?: LanguageModel; // 문서 유형 검증용 LLM
 
   // 보정 진행 상황
@@ -686,7 +700,7 @@ interface PDFCorrectionOptions {
   concurrency?: {
     pages?: number; // 페이지 단위 text correction/page gate 동시성
     reviewTasks?: number; // 구조 Review Assistance work-item 동시성
-    tables?: number; // 표 전용 보정 동시성
+    tables?: number; // Accepted but not forwarded by the top-level pipeline
   };
   maxRetries?: {
     textCorrection?: number;
@@ -800,31 +814,12 @@ brew install imagemagick ghostscript
 
 ## Linux 지원 현황
 
-현재 **macOS 전용**입니다. Linux 지원은 **완전히 배제한 것은 아니지만**, OCR 성능과 비용 효율성 문제로 **현재는 구체적인 계획이 없습니다**.
-
-| 플랫폼                | 상태 | 비고                            |
-| --------------------- | ---- | ------------------------------- |
-| macOS + Apple Silicon | 지원 | 최적 성능, GPU 가속             |
-| macOS + Intel         | 지원 | GPU 가속 없음                   |
-| Linux                 | 미정 | 성능/비용 문제로 현재 계획 없음 |
-| Windows               | 미정 | WSL2 통한 Linux 방식 고려 가능  |
-
-### Linux 미지원 사유
-
-Docling SDK의 로컬 OCR은 macOS에서 Apple Metal GPU 가속을 활용해 성능과 비용 효율성을 모두 달성합니다. Linux에서 동등한 성능과 비용 효율성을 제공하는 OCR 솔루션을 아직 찾지 못했습니다.
-
-### 아이디어 제안 환영
-
-성능과 비용을 모두 잡으면서 Linux를 지원할 수 있는 아이디어가 있다면, [GitHub Discussions](https://github.com/heripo-lab/heripo-engine/discussions) 또는 Issue로 제안해 주세요. 특히 다음과 같은 정보가 도움이 됩니다:
-
-- Linux에서 한국어 문서 OCR 경험
-- 복잡한 레이아웃(표, 도면) 처리 가능한 OCR 솔루션
-- 수백 페이지 처리 시 비용 추산
+현재 `@heripo/pdf-parser`는 macOS 전용이며 Linux/Windows 실행 경로를 제공하지 않습니다. 플랫폼 관련 제안은 [GitHub Discussions](https://github.com/heripo-lab/heripo-engine/discussions)에 남겨주세요.
 
 ## 관련 패키지
 
-- [@heripo/document-processor](../document-processor) - 문서 구조 분석 및 LLM 처리
-- [@heripo/model](../model) - 데이터 모델 및 타입 정의
+- [@heripo/document-processor](../document-processor/README.ko.md) - 문서 구조 분석 및 LLM 처리
+- [@heripo/model](../model/README.ko.md) - 데이터 모델 및 타입 정의
 
 ## 후원
 
@@ -839,13 +834,13 @@ heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 
 
 ## 기여하기
 
-기여는 언제나 환영합니다! [기여 가이드](../../CONTRIBUTING.ko.md)를 참고하세요.
+기여는 언제나 환영합니다! [기여 가이드](../../CONTRIBUTING.md)를 참고하세요.
 
 ## 이슈 및 지원
 
 - **버그 리포트**: [GitHub Issues](https://github.com/heripo-lab/heripo-engine/issues)
 - **토론**: [GitHub Discussions](https://github.com/heripo-lab/heripo-engine/discussions)
-- **보안 취약점**: [보안 정책](../../SECURITY.ko.md) 참고
+- **보안 취약점**: [보안 정책](../../SECURITY.md) 참고
 
 ## 프로젝트 전체 정보
 

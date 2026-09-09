@@ -55,6 +55,23 @@ logger.info('pipeline started');
 
 Pass the instance into any heripo engine package that accepts a `Logger`.
 
+### Runtime and Method Binding
+
+Targets Node.js 24+ with ESM and CommonJS exports. Callers can also pass an object satisfying `LoggerMethods`; constructing `Logger` is optional.
+
+`Logger` stores function references without filtering, formatting, file output or automatic binding. Wrap or bind methods of loggers that depend on `this`.
+
+```typescript
+import type { LoggerMethods } from '@heripo/logger';
+
+const loggerMethods: LoggerMethods = {
+  debug: (...args) => console.debug(...args),
+  info: (...args) => console.info(...args),
+  warn: (...args) => console.warn(...args),
+  error: (...args) => console.error(...args),
+};
+```
+
 ## API
 
 ### `Logger`
@@ -88,9 +105,9 @@ type LogFn = (...args: any[]) => void;
 
 ## Related Packages
 
-- [@heripo/model](../model) - Document models and type definitions
-- [@heripo/pdf-parser](../pdf-parser) - PDF parsing and OCR
-- [@heripo/document-processor](../document-processor) - Document structure analysis
+- [@heripo/model](../model/README.md) - Document models and type definitions
+- [@heripo/pdf-parser](../pdf-parser/README.md) - PDF parsing and OCR
+- [@heripo/document-processor](../document-processor/README.md) - Document structure analysis
 
 ## Sponsor
 
