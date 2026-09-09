@@ -55,6 +55,23 @@ logger.info('pipeline started');
 
 생성한 인스턴스를 `Logger`를 받는 heripo engine 패키지에 전달하면 됩니다.
 
+### 실행 형식과 메서드 바인딩
+
+Node.js 24 이상을 대상으로 하며 ESM과 CommonJS를 모두 제공합니다. `LoggerMethods` 형태의 객체도 직접 전달할 수 있으므로 `Logger` 생성은 필수가 아닙니다.
+
+`Logger`는 전달한 함수 참조를 그대로 보관하며 로그 필터링·형식 지정·파일 저장·자동 바인딩을 하지 않습니다. `this`를 사용하는 로거는 wrapper 또는 `.bind()`로 연결하세요.
+
+```typescript
+import type { LoggerMethods } from '@heripo/logger';
+
+const loggerMethods: LoggerMethods = {
+  debug: (...args) => console.debug(...args),
+  info: (...args) => console.info(...args),
+  warn: (...args) => console.warn(...args),
+  error: (...args) => console.error(...args),
+};
+```
+
 ## API
 
 ### `Logger`
@@ -88,9 +105,9 @@ type LogFn = (...args: any[]) => void;
 
 ## 관련 패키지
 
-- [@heripo/model](../model) - 문서 모델 및 타입 정의
-- [@heripo/pdf-parser](../pdf-parser) - PDF 파싱 및 OCR
-- [@heripo/document-processor](../document-processor) - 문서 구조 분석
+- [@heripo/model](../model/README.ko.md) - 문서 모델 및 타입 정의
+- [@heripo/pdf-parser](../pdf-parser/README.ko.md) - PDF 파싱 및 OCR
+- [@heripo/document-processor](../document-processor/README.ko.md) - 문서 구조 분석
 
 ## 후원
 

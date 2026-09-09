@@ -38,14 +38,15 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 
 ### 온라인 데모 제한 사항
 
-온라인 데모는 서버 자원 보호를 위해 다음과 같은 제한이 있습니다:
+퍼블릭 모드의 제한은 배포 환경에 따라 달라집니다. 저장소 설정 기준은 다음과 같습니다.
 
-| 항목           | 제한        |
-| -------------- | ----------- |
-| 일일 처리 횟수 | 3회         |
-| 동시 처리      | 1개         |
-| 처리 옵션      | 기본값 고정 |
-| LLM 모델 선택  | 기본값 고정 |
+| 항목           | 동작                                                           |
+| -------------- | -------------------------------------------------------------- |
+| 일일 처리      | `DAILY_LIMIT`; `.env.example`은 3, 미설정 시 1 (UTC 날짜 기준) |
+| 동시 작업 제한 | `CONCURRENT_TASK_LIMIT`; 미설정 시 1                           |
+| 성공 세션      | 처리 성공 후 해당 브라우저 세션을 7일간 잠금                   |
+| 처리 옵션·모델 | 기본값 고정; 인증된 TOTP 우회는 예외                           |
+| 업로드         | Turnstile 검증, 대용량 업로드 세션 인증                        |
 
 ### 전체 기능 사용
 
@@ -54,7 +55,11 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 - 무제한 PDF 처리
 - 모든 처리 옵션 커스터마이징
 - 다양한 LLM 모델 선택
-- OCR 언어 및 스레드 설정
+- 언어 감지 모델 및 스레드 설정
+
+### 데모의 보정 기본값
+
+라이브러리는 구조 검토와 표 보정을 기본 활성화하지만, 데모 폼은 `reviewAssistanceEnabled: false`, `tableCorrectionEnabled: false`로 시작합니다. 초기 텍스트·표 셀 OCR 보정은 계속 수행합니다. 구조 검토를 활성화하면 worker가 `forceAutoApply: true`를 전달하므로 유효한 명령은 자동 적용됩니다. 수동 승인 대기열은 없습니다.
 
 ## 사전 요구사항
 
@@ -67,30 +72,29 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 - macOS 시스템 요구사항 (Apple Silicon 또는 Intel)
 - Python 버전 요구사항 (3.9-3.12)
 - 필수 시스템 의존성 (poppler, jq, lsof)
-- 선택적 이미지 PDF 폴백 의존성 (ImageMagick, Ghostscript)
+- 페이지 렌더링 및 이미지 PDF 의존성 (ImageMagick, Ghostscript)
 - 최초 실행 설정 안내
 
 ### Node.js 및 패키지 관리자
 
 - **Node.js** >= 24.0.0
-- **pnpm** >= 11
+- **pnpm** 11.25.0
 
-### LLM API 키
+### LLM 제공자와 모델
 
-다음 LLM 프로파이더 중 하나 이상의 API 키가 필요합니다:
+OpenAI, Anthropic, Google, Together AI와 로컬 Ollama·LM Studio를 지원합니다. 모델 ID는 `provider/model-name` 형식이며 각 단계와 fallback에 선택한 클라우드 provider의 API 키를 모두 설정해야 합니다. 로컬 서버만 쓰는 단계에는 클라우드 키가 필요하지 않습니다.
 
-- OpenAI (권장)
-- Anthropic
-- Google Generative AI
-- Together AI
+현재 [폼 기본값](./src/features/upload/types/form-values.ts)은 LM Studio, OpenAI, Google fallback을 함께 사용합니다. 환경 변수에 API 키 하나를 추가하는 것만으로 전체 기본 구성이 준비되지는 않습니다. 로컬 서버에서 모델을 로드하거나 UI에서 언어 감지·문서 검증·보정·프로세서·fallback 모델을 사용 가능한 모델로 바꾸세요. 페이지를 읽는 모델은 이미지 입력을, 구조 추출 모델은 구조화된 출력을 지원해야 합니다.
 
 ## 설치 및 실행
+
+아래 명령은 저장소 루트에서 실행합니다.
 
 ### 1. 환경 변수 설정
 
 ```bash
 # .env.example을 .env로 복사
-cp .env.example .env
+cp apps/demo-web/.env.example apps/demo-web/.env
 
 # .env 파일을 편집하여 API 키 입력
 ```
@@ -98,7 +102,10 @@ cp .env.example .env
 `.env` 파일 예시:
 
 ```bash
-# 최소 하나의 API 키는 필수입니다
+# 선택한 모든 클라우드 provider의 인증 정보를 설정하세요
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+LMSTUDIO_BASE_URL=http://localhost:1234/v1
+LMSTUDIO_API_KEY=
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_GENERATIVE_AI_API_KEY=...
@@ -148,6 +155,7 @@ WEBHOOK_SECRET=your-hmac-secret-key
 
 ```bash
 pnpm install
+pnpm build:packages
 ```
 
 ### 3. 개발 서버 실행
@@ -194,6 +202,43 @@ pnpm dev
 - "작업 목록" 페이지에서 모든 작업 확인
 - 작업 삭제
 - 이전 작업 결과 재확인
+
+## 업로드와 저장 파일
+
+최대 PDF 크기는 2 GiB입니다. 5 MiB 이상은 서명된 업로드 세션과 10 MiB 청크 업로드를 사용하므로 `UPLOAD_SESSION_SECRET`이 필요합니다. 브라우저는 최대 3개 청크를 동시에 업로드하고 실패를 재시도합니다. 업로드 취소와 처리 중 작업 취소도 지원합니다.
+
+경로는 서버의 현재 작업 디렉터리 기준입니다. `pnpm --filter @heripo/demo-web ...`로 실행하면 보통 `apps/demo-web` 아래에 생성됩니다.
+
+- `data/heripo.json`: 작업·로그·업로드 세션·잠금 정보의 JSON 저장소. `schema.sql`이 있어도 실행 중 SQLite를 사용하지 않습니다.
+- `data/tasks/<taskId>/input.pdf`: 업로드 원본.
+- `output/<taskId>/`: 파서 산출물 및 처리 결과. 저장된 작업의 `artifact_dir`를 기준으로 접근합니다.
+- `result.json`: 보정된 Docling 문서. `result_ocr_origin.json`은 초기 OCR 스냅샷입니다.
+- `result-processed.json`, `source-handoff-manifest.json`: worker가 저장한 최종 문서와 출처·해시 정보.
+- `images/`, `pages/`: 추출 이미지와 렌더링 페이지. 구조 검토 활성화 시 검토 리포트·체크포인트·추가 스냅샷도 생성됩니다.
+
+공식 데모 모드(`NEXT_PUBLIC_HERIPO_OFFICIAL_DEMO=true`)에서는 매일 16:00 UTC에 보관 기간이 지난 작업을 정리합니다. `NEXT_PUBLIC_DATA_RETENTION_DAYS` 기본값은 7일입니다. `NEXT_PUBLIC_*` 값은 빌드에 반영되므로 변경 후 다시 빌드하세요.
+
+## API 경로
+
+작업 API는 브라우저 세션으로 접근 범위를 제한합니다. 삭제 API는 대기·실행 중인 작업을 취소한 뒤 기록과 파일을 삭제합니다.
+
+| 메서드          | 경로                                    | 역할                                    |
+| --------------- | --------------------------------------- | --------------------------------------- |
+| `GET`, `POST`   | `/api/tasks`                            | 작업 목록 / 5 MiB 미만 직접 업로드·생성 |
+| `GET`, `DELETE` | `/api/tasks/[taskId]`                   | 작업 조회 / 취소·삭제                   |
+| `GET`           | `/api/tasks/[taskId]/stream`            | SSE 상태·로그·사용량                    |
+| `GET`           | `/api/tasks/[taskId]/result`            | 처리된 문서                             |
+| `GET`           | `/api/tasks/[taskId]/download`          | 결과 ZIP                                |
+| `GET`           | `/api/tasks/[taskId]/images/[imageId]`  | 이미지                                  |
+| `GET`           | `/api/tasks/[taskId]/pages/[pageIndex]` | 렌더링 페이지                           |
+| `POST`          | `/api/upload/session`                   | 청크 업로드 세션 생성                   |
+| `POST`          | `/api/upload/chunks`                    | 청크 업로드                             |
+| `POST`          | `/api/upload/complete`                  | 업로드 합치기·작업 생성                 |
+| `DELETE`        | `/api/upload/session/[uploadSessionId]` | 업로드 취소                             |
+| `GET`           | `/api/rate-limit/check`                 | 퍼블릭 모드 제한 조회                   |
+| `GET`           | `/api/system/status`                    | 시스템 상태                             |
+
+현재 ZIP에는 처리된 JSON, 보정된 Docling JSON, handoff manifest, `images/`, `pages/`만 포함됩니다. OCR 스냅샷·검토 리포트·체크포인트는 서버 산출물 디렉터리에 별도로 남습니다.
 
 ## 아키텍처
 
@@ -279,11 +324,11 @@ const response = await fetch('/api/tasks');
 pnpm --filter @heripo/demo-web generate:otp-secret
 ```
 
-출력된 값을 `.env` 파일의 `OTP_SECRET`에 설정하세요.
+출력된 값을 `.env` 파일의 `TOTP_SECRET`에 설정하세요.
 
 ### 업로드 세션 시크릿 생성
 
-대용량 파일(50MB 이상) 업로드를 위한 JWT 서명 시크릿을 생성합니다:
+대용량 파일(5 MiB 이상) 업로드를 위한 JWT 서명 시크릿을 생성합니다:
 
 ```bash
 # Node.js로 랜덤 시크릿 생성
@@ -318,7 +363,7 @@ pnpm build
 
 ```bash
 pnpm build
-pnpm start
+pnpm demo-web:start
 ```
 
 ## 배포 시 주의사항

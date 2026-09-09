@@ -56,6 +56,14 @@ npm install ai @ai-sdk/openai @ai-sdk/anthropic @ai-sdk/google
 
 ## 사용법
 
+### 실행 조건과 결과 저장
+
+이 패키지는 Node.js 24 이상에서 사용하는 ESM 라이브러리입니다. Python이나 macOS는 이 패키지 자체의 필수 조건이 아니며, PDF를 만드는 `@heripo/pdf-parser`에서 요구합니다. AI SDK/provider 버전은 저장소의 [catalog](../../pnpm-workspace.yaml)와 맞추세요.
+
+아래 예제의 `doclingDocument`는 파서의 보정된 `result.json`, `artifactDir`는 해당 이미지·페이지 산출물이 있는 디렉터리입니다. 기본 모델은 개별 모델이 생략된 모든 컴포넌트에도 사용되므로 이미지 입력과 구조화된 출력을 지원해야 합니다. 예제용 환경 변수 `HERIPO_ANTHROPIC_MODEL`과 `HERIPO_OPENAI_MODEL`에 사용할 모델 ID를 설정하고, 선택한 provider의 API 키도 설정하세요.
+
+`process()`는 파일을 저장하지 않습니다. 반환한 `document`를 직접 JSON으로 저장하고 참조 이미지도 보존하세요. 출력 `schemaVersion`은 내보낸 `PROCESSED_DOCUMENT_SCHEMA_VERSION` 값인 `processed-document.v2`입니다.
+
 ### 기본 사용법
 
 ```typescript
@@ -73,7 +81,7 @@ const logger = new Logger({
 // 기본 사용 - fallback 모델만 지정
 const processor = new DocumentProcessor({
   logger,
-  fallbackModel: anthropic('claude-opus-4-5'),
+  fallbackModel: anthropic(process.env.HERIPO_ANTHROPIC_MODEL!),
   textCleanerBatchSize: 10,
   captionParserBatchSize: 5,
   captionValidatorBatchSize: 5,
@@ -103,14 +111,14 @@ import { openai } from '@ai-sdk/openai';
 const processor = new DocumentProcessor({
   logger,
   // Fallback 모델 (실패 시 재시도용)
-  fallbackModel: anthropic('claude-opus-4-5'),
+  fallbackModel: anthropic(process.env.HERIPO_ANTHROPIC_MODEL!),
 
   // 컴포넌트별 모델 지정
-  pageRangeParserModel: openai('gpt-5.1'), // Vision 필요
-  tocExtractorModel: openai('gpt-5.1'), // 구조화 출력
-  validatorModel: openai('gpt-5.2'), // 간단한 검증
-  visionTocExtractorModel: openai('gpt-5.1'), // Vision 필요
-  captionParserModel: openai('gpt-5-mini'), // 캡션 파싱
+  pageRangeParserModel: openai(process.env.HERIPO_OPENAI_MODEL!), // Vision 필요
+  tocExtractorModel: openai(process.env.HERIPO_OPENAI_MODEL!), // 구조화 출력
+  validatorModel: openai(process.env.HERIPO_OPENAI_MODEL!), // 간단한 검증
+  visionTocExtractorModel: openai(process.env.HERIPO_OPENAI_MODEL!), // Vision 필요
+  captionParserModel: openai(process.env.HERIPO_OPENAI_MODEL!), // 캡션 파싱
 
   // 배치 크기 설정
   textCleanerBatchSize: 20, // 동기 처리 (크게 가능)
@@ -228,7 +236,7 @@ console.log(document.images[0].captionSourceRefs);
 
 `sourceRefValidationMode: 'error'`는 누락된 참조가 있으면 처리를 실패시킵니다. `validateSourceRefs: true`는 호환용 단축 옵션이며, 별도 mode를 지정하지 않으면 `'error'`와 같습니다.
 
-테이블 셀에는 cell-level `sourceRef`를 만들지 않습니다. 특정 셀의 원천 위치는 `table.sourceRef`와 `grid[row][col]`의 row/column index를 함께 사용해 추적합니다.
+테이블 셀에는 개별 `sourceRef`가 없습니다. `table.sourceRef`로 원천 표를 찾고 span과 원천 셀 좌표를 대조하세요. 압축된 `grid`의 배열 인덱스는 원천 표의 논리적 열 번호와 다를 수 있습니다.
 
 ### 테이블 그리드 처리
 
@@ -239,7 +247,7 @@ console.log(document.images[0].captionSourceRefs);
 - Docling이 병합 셀의 덮인 영역을 반복 제공하는 경우 shadow entry 제거
 - Docling의 `data.grid`가 비어 있으면 `table_cells`에서 그리드 구성
 
-`numRows`와 `numCols`는 논리적 테이블 크기를 유지합니다. 개별 셀에는 `sourceRef`를 저장하지 않으므로, 셀의 원천 위치를 추적할 때는 `table.sourceRef`와 `grid[row][col]` 위치를 함께 사용합니다.
+`numRows`와 `numCols`는 논리적 테이블 크기이며 각 배열의 길이와 같다고 가정하면 안 됩니다. 렌더링 시 `rowSpan`과 `colSpan`으로 이미 덮인 위치를 건너뛰세요.
 
 ## 처리 파이프라인
 
@@ -293,6 +301,8 @@ DocumentProcessor는 다음 5단계 파이프라인으로 문서를 처리합니
 - **캡션 검증**: CaptionValidator로 파싱 결과 검증
 
 ### 5. 챕터 변환 (ChapterConverter)
+
+`Front Matter` (`ch-000`) 챕터를 항상 첫 항목으로 생성하여 첫 목차 항목 이전의 내용을 보존합니다. 이후 계층은 제공·추출한 TOC로 구성됩니다.
 
 - TOC 기반 챕터 트리 구성
 - Chapter 계층 생성
@@ -371,8 +381,8 @@ interface DocumentProcessorProcessOptions {
 ```typescript
 const processor = new DocumentProcessor({
   logger,
-  fallbackModel: anthropic('claude-opus-4-5'), // 재시도용
-  pageRangeParserModel: openai('gpt-5.2'), // 첫 시도
+  fallbackModel: anthropic(process.env.HERIPO_ANTHROPIC_MODEL!), // 재시도용
+  pageRangeParserModel: openai(process.env.HERIPO_OPENAI_MODEL!), // 첫 시도
   enableFallbackRetry: true, // 실패 시 fallback 사용 (기본값: false)
   textCleanerBatchSize: 10,
   captionParserBatchSize: 5,
@@ -386,8 +396,10 @@ const { document, usage } = await processor.process(doc, 'id', 'path');
 ### 배치 크기 파라미터
 
 - **textCleanerBatchSize**: 동기 텍스트 정규화 및 필터링 배치 크기. 로컬 처리이므로 큰 값 가능
-- **captionParserBatchSize**: LLM 기반 캡션 파싱 배치 크기. API 요청 동시성 및 비용 관리를 위해 작은 값 사용
-- **captionValidatorBatchSize**: LLM 기반 캡션 검증 배치 크기. 검증 요청 동시성 제한을 위해 작은 값 사용
+- **captionParserBatchSize**: LLM 기반 캡션 파싱 배치 크기. 요청 하나에 포함하는 캡션 수 조절
+- **captionValidatorBatchSize**: LLM 기반 캡션 검증 배치 크기. 검증할 캡션 묶음 크기 조절
+
+`textCleanerBatchSize`, `captionParserBatchSize`, `captionValidatorBatchSize`는 `0`이면 묶음 처리 없이 순차 처리합니다. 묶음 처리를 사용할 때는 양의 정수로 지정하세요. 양수 배치 크기는 항목 묶음 크기이며 전체 API 호출 동시성의 상한은 아닙니다.
 
 ## 에러 처리
 
@@ -397,9 +409,15 @@ TOC 추출 실패 시 발생하는 에러들:
 
 - `TocNotFoundError`: 문서에서 TOC를 찾을 수 없음
 - `TocParseError`: LLM 응답 파싱 실패
-- `TocValidationError`: TOC 검증 실패
+- `TocValidationError`: 내부 검증 오류로 발생할 수 있지만 패키지 루트에서 export하지 않습니다. 공개 API에서는 `TocExtractError`를 사용해 처리하세요.
 
 ```typescript
+import {
+  TocExtractError,
+  TocNotFoundError,
+  TocParseError,
+} from '@heripo/document-processor';
+
 try {
   const { document, usage } = await processor.process(doc, 'id', 'path');
 } catch (error) {
@@ -407,6 +425,10 @@ try {
     console.error('TOC를 찾을 수 없습니다. 수동 TOC 검수가 필요합니다.');
   } else if (error instanceof TocParseError) {
     console.error('TOC 파싱 실패:', error.message);
+  } else if (error instanceof TocExtractError) {
+    console.error(error.message);
+  } else {
+    throw error;
   }
 }
 ```
@@ -436,18 +458,18 @@ import {
 
 ```typescript
 // PageRangeParser
-const { pageRangeMap, tokenUsage } = await pageRangeParser.parse(doc);
-console.log('토큰 사용:', tokenUsage);
+const { pageRangeMap, usage } = await pageRangeParser.parse(doc);
+console.log('Token usage:', usage);
 
 // TocExtractor
-const { entries, tokenUsage } = await tocExtractor.extract(markdown);
-console.log('토큰 사용:', tokenUsage);
+const { entries, usages } = await tocExtractor.extract(markdown);
+console.log('Token usage:', usages);
 ```
 
 ## 관련 패키지
 
-- [@heripo/pdf-parser](../pdf-parser) - PDF 파싱 및 OCR
-- [@heripo/model](../model) - 데이터 모델 및 타입 정의
+- [@heripo/pdf-parser](../pdf-parser/README.ko.md) - PDF 파싱 및 OCR
+- [@heripo/model](../model/README.ko.md) - 데이터 모델 및 타입 정의
 
 ## 후원
 
@@ -462,7 +484,7 @@ heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 
 
 ## 기여하기
 
-기여는 언제나 환영합니다! [기여 가이드](../../CONTRIBUTING.ko.md)를 참고하세요.
+기여는 언제나 환영합니다! [기여 가이드](../../CONTRIBUTING.md)를 참고하세요.
 
 ## 이슈 및 지원
 

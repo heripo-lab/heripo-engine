@@ -35,6 +35,8 @@ ProcessedDocument (LLM 최적화 중간 모델)
 
 `@heripo/model`은 현재 PDF 파싱 및 문서 구조 추출 단계에서 사용되는 데이터 모델을 정의합니다. 향후 고고학 데이터 분석, 표준화, 시맨틱 모델링 등 다양한 분야별 모델이 추가될 예정입니다.
 
+Node.js 24 이상을 대상으로 하며 ESM과 CommonJS를 모두 제공합니다. 문서 인터페이스는 `import type`으로 가져오고, 언어 유틸리티는 일반 import로 사용하세요. JSON 파싱 결과를 타입 단언하는 것만으로 런타임 검증이 되지는 않습니다.
+
 ## 설치
 
 ```bash
@@ -65,6 +67,8 @@ import type { DoclingDocument } from '@heripo/model';
 - `body`, `furniture`, `groups`: 문서 트리 및 그룹 구조
 - `texts`, `pictures`, `tables`: 추출된 content node
 - `pages`: 페이지 metadata와 렌더링된 페이지 이미지 참조
+
+`DoclingReference.$ref`와 각 노드의 `self_ref`로 원천 노드를 연결합니다. `DoclingProv.page_no`와 처리 모델의 `pdfPageNo`는 1부터 시작하지만 렌더링 파일은 `pages/page_0.png`부터 시작합니다. `Chapter.pageNo`와 `PageRange`는 인쇄된 문서의 논리 페이지 번호이므로 PDF 페이지 번호와 구분하세요. `DoclingBBox.coord_origin`을 확인한 뒤 좌표를 해석해야 합니다.
 
 ### ProcessedDocument
 
@@ -175,9 +179,9 @@ interface ProcessedTable {
 
 `grid`는 화면에 보이는 셀만 담은 compact list입니다. 병합 셀은
 `rowSpan`, `colSpan`으로 표현하고, span으로 덮인 shadow cell은 포함하지
-않습니다. 테이블 셀에는 의도적으로 cell-level `sourceRef`가 없습니다. 셀을
-원천 테이블로 추적할 때는 `table.sourceRef`와 `grid[row][col]` 위치를 함께
-사용합니다.
+않습니다. 테이블 셀에는 의도적으로 cell-level `sourceRef`가 없습니다.
+`table.sourceRef`로 원천 표를 찾은 뒤 셀의 span과 원본 좌표를 대조하세요.
+압축 배열의 인덱스는 원천 표의 논리적 열 번호와 다를 수 있습니다.
 
 ### ProcessedTableCell
 
@@ -202,7 +206,7 @@ interface ProcessedTableCell {
 import type { Caption } from '@heripo/model';
 
 interface Caption {
-  num?: string; // 캡션 번호 (예: "그림 1"의 "1")
+  num?: string; // Caption prefix and number (e.g., "Figure 1")
   fullText: string; // 전체 캡션 텍스트
 }
 ```
@@ -250,7 +254,7 @@ interface DocumentProcessResult {
 
 ### OcrStrategy
 
-OCR 전략 선택 결과입니다.
+OCR 전략 데이터를 표현하는 기존 타입입니다. 현재 PDF 파서는 고정 ocrmac과 후속 보정을 사용하며 이 전략을 선택하거나 반환하지 않습니다.
 
 ```typescript
 import type { OcrStrategy } from '@heripo/model';
@@ -274,6 +278,7 @@ import type {
   ComponentUsageReport,
   ModelUsageDetail,
   PhaseUsageReport,
+  TokenUsageMetadata,
   TokenUsageReport,
   TokenUsageSummary,
 } from '@heripo/model';
@@ -290,6 +295,7 @@ interface ComponentUsageReport {
 }
 
 interface PhaseUsageReport {
+  metadata?: TokenUsageMetadata[]; // Per-call context
   phase: string; // 단계 이름
   primary?: ModelUsageDetail; // 기본 모델 사용량
   fallback?: ModelUsageDetail; // 폴백 모델 사용량
@@ -312,83 +318,47 @@ interface TokenUsageSummary {
 
 ### Review Assistance 타입
 
-`@heripo/pdf-parser`에서 `reviewAssistance`를 활성화했을 때 생성되는 선택적
-page-level review assistance 결과 타입입니다.
+`correction.reviewAssistanceEnabled: true`일 때(파서 기본값) 생성하는 별도 감사 리포트입니다. `ProcessedDocument` 안에 포함되지 않습니다. [전체 타입 정의](./src/types/review-assistance.ts)는 명령, 근거, 이슈, 실행 추적 및 진행 이벤트를 제공합니다.
+
+리포트의 필수 필드는 `schemaName`, `version`, `reportId`, `source`, `options`, `summary`, `pages`, `callTraces`입니다. 검증에서 거부된 결정은 `command`가 없고 `invalidOp`만 있을 수 있으므로 먼저 확인하세요.
 
 ```typescript
-import type {
-  ReviewAssistanceDecision,
-  ReviewAssistanceIssue,
-  ReviewAssistanceProgressEvent,
-  ReviewAssistanceReport,
-} from '@heripo/model';
+import type { ReviewAssistanceReport } from '@heripo/model';
 
-interface ReviewAssistanceReport {
-  schemaName: 'HeripoReviewAssistanceReport';
-  version: '1.0';
-  reportId: string;
-  source: {
-    doclingResult: 'result.json';
-    ocrOriginSnapshot?: 'result_ocr_origin.json';
-    originSnapshot?: 'result_review_origin.json';
-  };
-  summary: {
-    pageCount: number;
-    pagesSucceeded: number;
-    pagesFailed: number;
-    autoAppliedCount: number;
-    proposalCount: number;
-    skippedCount: number;
-    issueCount: number;
-  };
-  pages: Array<{
-    pageNo: number;
-    status: 'succeeded' | 'failed';
-    decisions: ReviewAssistanceDecision[];
-    issues: ReviewAssistanceIssue[];
-  }>;
-}
-
-interface ReviewAssistanceProgressEvent {
-  substage:
-    | 'review-assistance:prepare'
-    | 'review-assistance:page'
-    | 'review-assistance:patch'
-    | 'review-assistance:write-report';
-  status: 'started' | 'progress' | 'completed' | 'failed';
-  reportId: string;
-  pageNo?: number;
-  pageCount?: number;
+function summarizeReview(report: ReviewAssistanceReport) {
+  for (const page of report.pages) {
+    for (const decision of page.decisions) {
+      console.log(
+        page.pageNo,
+        decision.command?.op ?? decision.invalidOp,
+        decision.disposition,
+      );
+    }
+  }
+  console.log(report.summary, report.callTraces);
 }
 ```
 
 ### BCP-47 언어 태그 유틸리티
 
-BCP-47 언어 태그를 다루기 위한 유틸리티입니다.
+언어 코드는 지원 목록에 대해 검증·정규화합니다. 일반 BCP-47 문법 전체를 검증하는 함수는 아닙니다. 표시 이름 유틸리티도 런타임 export입니다.
 
 ```typescript
 import {
-  type Bcp47LanguageTag,
   BCP47_LANGUAGE_TAGS,
   BCP47_LANGUAGE_TAG_SET,
+  LANGUAGE_DISPLAY_NAMES,
+  buildLanguageDescription,
+  getLanguageDisplayName,
   isValidBcp47Tag,
   normalizeToBcp47,
 } from '@heripo/model';
 
-// Bcp47LanguageTag - 지원되는 전체 BCP-47 언어 태그의 유니온 타입
-type Bcp47LanguageTag = (typeof BCP47_LANGUAGE_TAGS)[number];
-
-// BCP47_LANGUAGE_TAGS - ocrmac에서 지원하는 언어 태그 상수 배열
-const BCP47_LANGUAGE_TAGS: readonly Bcp47LanguageTag[];
-
-// BCP47_LANGUAGE_TAG_SET - O(1) 조회를 위한 ReadonlySet
-const BCP47_LANGUAGE_TAG_SET: ReadonlySet<string>;
-
-// isValidBcp47Tag - 문자열이 유효한 BCP-47 태그인지 확인
-function isValidBcp47Tag(tag: string): tag is Bcp47LanguageTag;
-
-// normalizeToBcp47 - 언어 문자열을 BCP-47 형식으로 정규화
-function normalizeToBcp47(tag: string): Bcp47LanguageTag | null;
+console.log(normalizeToBcp47('ko')); // 'ko-KR'
+console.log(isValidBcp47Tag('ko-KR')); // true
+console.log(BCP47_LANGUAGE_TAGS.length, BCP47_LANGUAGE_TAG_SET.has('ko-KR'));
+console.log(LANGUAGE_DISPLAY_NAMES.ko, getLanguageDisplayName('ko-KR'));
+console.log(buildLanguageDescription(['ko-KR', 'en-US']));
 ```
 
 ## 사용법
@@ -452,11 +422,11 @@ doc.chapters.forEach((chapter) => traverseChapters(chapter));
 ### 타입 가드
 
 ```typescript
-import type { ProcessedImage, ProcessedTable } from '@heripo/model';
+import type { Caption, ProcessedImage, ProcessedTable } from '@heripo/model';
 
 function hasCaption(
   resource: ProcessedImage | ProcessedTable,
-): resource is ProcessedImage | ProcessedTable {
+): resource is (ProcessedImage | ProcessedTable) & { caption: Caption } {
   return resource.caption !== undefined;
 }
 
@@ -466,8 +436,8 @@ const resourcesWithCaptions = [...doc.images, ...doc.tables].filter(hasCaption);
 
 ## 관련 패키지
 
-- [@heripo/pdf-parser](../pdf-parser) - PDF 파싱 및 OCR
-- [@heripo/document-processor](../document-processor) - 문서 구조 분석
+- [@heripo/pdf-parser](../pdf-parser/README.ko.md) - PDF 파싱 및 OCR
+- [@heripo/document-processor](../document-processor/README.ko.md) - 문서 구조 분석
 
 ## 후원
 
@@ -482,7 +452,7 @@ heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 
 
 ## 기여하기
 
-기여는 언제나 환영합니다! [기여 가이드](../../CONTRIBUTING.ko.md)를 참고하세요.
+기여는 언제나 환영합니다! [기여 가이드](../../CONTRIBUTING.md)를 참고하세요.
 
 ## 프로젝트 전체 정보
 

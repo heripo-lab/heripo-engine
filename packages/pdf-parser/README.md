@@ -37,8 +37,8 @@
 ## Key Features
 
 - **Fixed ocrmac OCR**: Docling conversion always uses ocrmac / Apple Vision Framework
-- **Mandatory VLM Correction**: Post-Docling correction always runs with text correction, page gating, and structural review models
-- **Apple Silicon Optimized**: GPU acceleration on M1/M2/M3/M4/M5 chips
+- **Mandatory VLM Correction**: Post-Docling text correction always runs; page gating and structural review can be disabled
+- **Apple Silicon Backend**: Docling conversion requests the `mps` accelerator
 - **Automatic Environment Setup**: Automatic Python virtual environment and docling-serve installation
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
 - **Document Type Validation**: Optional LLM-based validation that a PDF is an archaeological report
@@ -68,19 +68,20 @@ brew install node
 #### 2. pnpm >= 11
 
 ```bash
-npm install -g pnpm
+npm install -g pnpm@11.25.0
 ```
 
 #### 3. Python 3.9 - 3.12
 
-> **Important**: Python 3.13+ is not supported. Some Docling SDK dependencies are not compatible with Python 3.13.
+> **Important**: The current installer accepts Python 3.9–3.12 and rejects 3.13+. This is the repository's version check, not a compatibility statement for every upstream Docling release.
 
 ```bash
 # Install Python 3.11 (recommended)
 brew install python@3.11
 
 # Verify version
-python3.11 --version
+export PATH="$(brew --prefix python@3.11)/libexec/bin:$PATH"
+python3 --version
 ```
 
 #### 4. poppler (PDF text extraction)
@@ -105,9 +106,9 @@ Installed by default on macOS. Verify:
 which lsof
 ```
 
-#### 7. ImageMagick + Ghostscript (optional)
+#### 7. ImageMagick + Ghostscript
 
-Required only when using the image PDF fallback feature (`enableImagePdfFallback` or `forceImagePdf`).
+Required for rendering local PDF pages used by mandatory VLM correction, as well as image-PDF fallback. Install these even when `enableImagePdfFallback` and `forceImagePdf` are disabled.
 
 ```bash
 brew install imagemagick ghostscript
@@ -121,24 +122,26 @@ When using `@heripo/pdf-parser` for the first time, it automatically:
 2. Installs `docling-serve` and dependencies
 3. Starts docling-serve process on local port
 
-This setup runs only once and may take 5-10 minutes depending on internet connection.
+The virtual environment is reused, but local initialization runs dependency setup again. The installer pins docling-serve 1.16.1 and an explicit Docling runtime set; see [python-environment.ts](./src/environment/python-environment.ts). Ensure the `python3` command on PATH is a supported version, not just a separately installed `python3.11`.
 
 ## Installation
 
 ```bash
 # Install with npm
-npm install @heripo/pdf-parser @heripo/logger
+npm install @heripo/pdf-parser @heripo/logger @ai-sdk/openai
 
 # Install with pnpm
-pnpm add @heripo/pdf-parser @heripo/logger
+pnpm add @heripo/pdf-parser @heripo/logger @ai-sdk/openai
 
 # Install with yarn
-yarn add @heripo/pdf-parser @heripo/logger
+yarn add @heripo/pdf-parser @heripo/logger @ai-sdk/openai
 ```
 
 ## Usage
 
 ### Basic Usage
+
+Use an ESM project. `HERIPO_MODEL` is an example-specific environment variable for a model ID supporting image input and structured output; also set `OPENAI_API_KEY`. Other providers can be supplied through their AI SDK adapters.
 
 ```typescript
 import { openai } from '@ai-sdk/openai';
@@ -158,33 +161,37 @@ const pdfParser = new PDFParser({
   logger,
 });
 
-const correctionModel = openai('gpt-5.1');
+const correctionModel = openai(process.env.HERIPO_MODEL!);
 
 // Initialize (environment setup and start docling-serve)
-await pdfParser.init();
+try {
+  await pdfParser.init();
 
-// Parse PDF
-const tokenUsageReport = await pdfParser.parse(
-  'file:///path/to/report.pdf', // PDF URL (file:// or http://)
-  'report-001', // Report ID
-  async (outputPath) => {
-    // Conversion complete callback
-    console.log('PDF conversion complete:', outputPath);
-  },
-  false, // cleanupAfterCallback
-  {
-    correction: {
-      models: {
-        textCorrection: correctionModel,
-        pageGate: correctionModel,
-        reviewAssistance: correctionModel,
-      },
+  // Parse PDF
+  const tokenUsageReport = await pdfParser.parse(
+    'file:///path/to/report.pdf', // PDF URL (file:// or http://)
+    'report-001', // Report ID
+    async (outputPath) => {
+      // Conversion complete callback
+      console.log('PDF conversion complete:', outputPath);
     },
-  }, // PDFConvertOptions
-);
+    false, // cleanupAfterCallback
+    {
+      correction: {
+        models: {
+          textCorrection: correctionModel,
+          pageGate: correctionModel,
+          reviewAssistance: correctionModel,
+        },
+      },
+    }, // PDFConvertOptions
+  );
 
-// Token usage report (null when no LLM usage)
-console.log('Token usage:', tokenUsageReport);
+  // Token usage report (null when no LLM usage)
+  console.log('Token usage:', tokenUsageReport);
+} finally {
+  await pdfParser.dispose();
+}
 ```
 
 ### Advanced Options
@@ -193,7 +200,7 @@ console.log('Token usage:', tokenUsageReport);
 // Option A: Use local server with port
 const pdfParser = new PDFParser({
   logger,
-  port: 5001,                      // Port to use (default: 5001)
+  port: 5001,                      // Set the local port explicitly
   timeout: 10000000,                // Timeout (milliseconds)
   venvPath: '/custom/path/.venv',   // Custom venv path (default: CWD/.venv)
   killExistingProcess: true,        // Kill existing process on port (default: false)
@@ -216,13 +223,13 @@ const tokenUsageReport = await pdfParser.parse(
     // Mandatory post-Docling correction
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1'),
-        reviewAssistance: openai('gpt-5.1'),
-        tableCorrection: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
+        tableCorrection: openai(process.env.HERIPO_MODEL!),
         reviewAssistanceTasks: {
-          text_ocr_hanja: openai('gpt-5.1'),
-          tables: openai('gpt-5.1'),
+          text_ocr_hanja: openai(process.env.HERIPO_MODEL!),
+          tables: openai(process.env.HERIPO_MODEL!),
         },
       },
       concurrency: {
@@ -246,7 +253,7 @@ const tokenUsageReport = await pdfParser.parse(
     onReviewAssistanceProgress: (event) => console.log(event),
 
     // Document validation
-    documentValidationModel: openai('gpt-5.1'),
+    documentValidationModel: openai(process.env.HERIPO_MODEL!),
 
     // Chunked conversion for large PDFs
     chunkedConversion: true,
@@ -265,6 +272,12 @@ const tokenUsageReport = await pdfParser.parse(
 );
 ```
 
+### Artifacts
+
+The callback receives the absolute `output/<reportId>/` path. `result.json` is the corrected document and `result_ocr_origin.json` is the initial OCR snapshot. `images/` and `pages/` hold extracted and page images. Structural review also produces `result_review_origin.json`, `review_assistance_page_gate.json`, `review_assistance_checkpoint.json` and `review_assistance.json`. Check page status, issues and call traces for failed review work.
+
+With `cleanupAfterCallback: true`, the artifact directory is removed after the callback. Copy required files elsewhere inside it or use `false` to preserve them. The parser does not create `result-processed.json` or a handoff manifest; the demo worker saves those separately.
+
 ### Resource Cleanup
 
 Clean up resources after work is complete:
@@ -278,15 +291,15 @@ await pdfParser.dispose();
 
 ### Why ocrmac Is Fixed
 
-**ocrmac (Apple Vision Framework) is an excellent OCR engine** -- it's free, GPU-accelerated, and delivers high-quality results. For processing thousands to millions of archaeological reports, there's no better solution.
+ocrmac is the fixed OCR backend, using Apple Vision on macOS.
 
-`@heripo/pdf-parser` no longer samples OCR strategies or switches to a VLM OCR path. Docling conversion always uses ocrmac. VLMs are used only after Docling conversion as a mandatory correction stage.
+`@heripo/pdf-parser` no longer samples OCR strategies or switches to a VLM OCR path. Docling conversion always uses ocrmac. VLM correction runs after Docling conversion. Optional language detection and document validation can also call a model before conversion.
 
 ### Required Correction Contract
 
 Every `parse()` call must provide `correction.models.textCorrection`, `correction.models.pageGate`, and `correction.models.reviewAssistance`. If any required correction model is missing, parsing fails before conversion callback wrapping.
 
-The correction stage runs in this order:
+With the default review controls enabled, the correction stage runs as follows:
 
 1. Save `result_ocr_origin.json` before mutations.
 2. Run page-level text and table-cell OCR correction with `textCorrection`.
@@ -299,21 +312,39 @@ Text correction applies to every page with text or table content. The page gate 
 
 ### Local Model Execution
 
-The correction pipeline is optimized for local VLMs: small contexts, many calls, deterministic validation, retry loops, bounded concurrency, and resumable checkpoints. For local models, start with `concurrency.pages: 1`, `concurrency.tables: 1`, `modelConcurrency: 1`, `temperature: 0`, and a generous `workItemTimeoutMs`. Increase concurrency only after the model is stable.
+The correction pipeline is optimized for local VLMs: small contexts, many calls, deterministic validation, retry loops, bounded concurrency, and resumable checkpoints. For local models, start with `concurrency.pages: 1`, `concurrency.reviewTasks: 1`, `modelConcurrency: 1`, `temperature: 0`, and a generous `workItemTimeoutMs`. Increase concurrency only after the model is stable.
 
-### Rollout Smoke Test
+### Validation
 
-Repository contributors can run the correction rollout smoke test against two local demo archaeological report artifacts:
+Run the defined package check with `pnpm --filter @heripo/pdf-parser test:coverage`. Tests mock external model calls; correction quality on real documents requires separate evaluation.
 
-```bash
-pnpm --filter @heripo/pdf-parser smoke:correction
-```
+### Correction Controls and Defaults
 
-The smoke test copies existing demo artifacts into `/private/tmp/heripo-pdf-parser-correction-smoke`, runs correction with a deterministic local fake model, verifies `review_assistance.json`, table work-item traces, validation status, and checkpoint resume behavior. It exercises pipeline mechanics; semantic table quality still depends on the configured real local VLM.
+All three required models must still be supplied when structural review is disabled. `reviewAssistanceEnabled: false` runs only text/table-cell OCR correction, skipping the page gate and structural review. `tableCorrectionEnabled: false` skips structural table work items, but does not disable initial table-cell OCR correction.
+
+`forceAutoApply` defaults to `false`. When true, validated commands are applied without routing to manual review based on confidence thresholds or structural block reasons. Command validation still runs.
+
+| Option                                               | Default                |
+| ---------------------------------------------------- | ---------------------- |
+| `concurrency.pages`                                  | `1`                    |
+| `concurrency.reviewTasks`                            | `6`                    |
+| `modelConcurrency`                                   | `1`                    |
+| `maxRetries.*`                                       | `3`                    |
+| `workItemTimeoutMs`                                  | `1800000` (30 minutes) |
+| `outputLanguage`                                     | `en-US`                |
+| `autoApplyThreshold` / `proposalThreshold`           | `0.85` / `0.5`         |
+| `reviewAssistanceEnabled` / `tableCorrectionEnabled` | `true` / `true`        |
+| `forceAutoApply` / `temperature`                     | `false` / `0`          |
+
+Defaults are also exported as `PDF_CORRECTION_DEFAULTS`. `concurrency.tables` and `pageGate.structuralNoiseThreshold` exist in the type but are not forwarded as runner controls by the current top-level pipeline. Use `reviewTasks` and `modelConcurrency` to bound table work.
+
+### Language Detection
+
+Explicit `ocr_lang` values take precedence. Otherwise local PDF text is inspected, with optional vision-based detection through `languageDetectionModel` and `languageDetectionFallbackModel` when needed. Remote inputs and undetected inputs use `ko-KR`, `en-US` as defaults. This does not select an OCR engine: OCR remains ocrmac.
 
 ## Review Assistance
 
-Review Assistance always runs after text correction, but it does not process every page with the same intensity. The page gate marks covers, chapter covers, barcode/ISBN pages, and decorative pages as low-value for structural review. Skipped pages remain observable in `review_assistance.json` with an info issue and skip reason.
+Review Assistance runs after text correction when `correction.reviewAssistanceEnabled` is true (library default), but it does not process every page with the same intensity. The page gate marks covers, chapter covers, barcode/ISBN pages, and decorative pages as low-value for structural review. Skipped pages remain observable in `review_assistance.json` with an info issue and skip reason.
 
 Eligible pages are split into small work items for text OCR/Hanja review, text integrity, text role/footnote review, tables, pictures/captions, layout/bbox/order, and table-specific correction. Each call records timing, model id, attempts, target refs, and deterministic validation status in `review_assistance.json`.
 
@@ -330,10 +361,10 @@ const tokenUsageReport = await pdfParser.parse(
   {
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1-mini'),
-        reviewAssistance: openai('gpt-5.1'),
-        tableCorrection: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
+        tableCorrection: openai(process.env.HERIPO_MODEL!),
       },
       autoApplyThreshold: 0.85,
       proposalThreshold: 0.5,
@@ -353,7 +384,7 @@ const tokenUsageReport = await pdfParser.parse(
 );
 ```
 
-Review Assistance requires a local `file://` PDF for page image and text-layer references. It updates `result.json` with auto-applied fixes, keeps snapshots in `result_review_origin.json` and `result_ocr_origin.json`, writes `review_assistance_page_gate.json`, and writes `review_assistance.json` containing per-page decisions, issues, proposals, call traces, validation status, and summary counts.
+Use a local `file://` PDF for the complete pipeline. HTTP inputs are accepted by Docling, but local page rendering, language detection and document validation are skipped. Missing `pages/page_<index>.png` files cause text correction to be skipped; a successful callback does not prove every page was corrected. Failed correction calls retain the original OCR text and emit warnings. It updates `result.json` with auto-applied fixes, keeps snapshots in `result_review_origin.json` and `result_ocr_origin.json`, writes `review_assistance_page_gate.json`, and writes `review_assistance.json` containing per-page decisions, issues, proposals, call traces, validation status, and summary counts.
 
 ## Document Type Validation
 
@@ -371,12 +402,12 @@ try {
     {
       correction: {
         models: {
-          textCorrection: openai('gpt-5.1'),
-          pageGate: openai('gpt-5.1'),
-          reviewAssistance: openai('gpt-5.1'),
+          textCorrection: openai(process.env.HERIPO_MODEL!),
+          pageGate: openai(process.env.HERIPO_MODEL!),
+          reviewAssistance: openai(process.env.HERIPO_MODEL!),
         },
       },
-      documentValidationModel: openai('gpt-5.1'),
+      documentValidationModel: openai(process.env.HERIPO_MODEL!),
     },
   );
 } catch (error) {
@@ -399,17 +430,19 @@ const tokenUsageReport = await pdfParser.parse(
   {
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1'),
-        reviewAssistance: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
       },
     },
     chunkedConversion: true,
-    chunkSize: 50, // Pages per chunk (default: configured in constants)
-    chunkMaxRetries: 3, // Max retry attempts per failed chunk (default: configured in constants)
+    chunkSize: 50, // Pages per chunk (default: 10)
+    chunkMaxRetries: 3, // Retries per failed chunk (default: 2)
   },
 );
 ```
+
+Correction runs after chunk results are merged. The current chunked failure path attempts image-PDF conversion independently of `enableImagePdfFallback`, so ImageMagick/Ghostscript are needed for that recovery path too. For local inputs, the chunked branch takes precedence when `chunkedConversion` and `forceImagePdf` are both set.
 
 ## Image PDF Fallback
 
@@ -440,9 +473,9 @@ const tokenUsageReport = await pdfParser.parse(
   {
     correction: {
       models: {
-        textCorrection: openai('gpt-5.1'),
-        pageGate: openai('gpt-5.1'),
-        reviewAssistance: openai('gpt-5.1'),
+        textCorrection: openai(process.env.HERIPO_MODEL!),
+        pageGate: openai(process.env.HERIPO_MODEL!),
+        reviewAssistance: openai(process.env.HERIPO_MODEL!),
       },
     },
     forceImagePdf: true, // Always convert to image PDF first
@@ -471,16 +504,16 @@ try {
     {
       correction: {
         models: {
-          textCorrection: openai('gpt-5.1'),
-          pageGate: openai('gpt-5.1'),
-          reviewAssistance: openai('gpt-5.1'),
+          textCorrection: openai(process.env.HERIPO_MODEL!),
+          pageGate: openai(process.env.HERIPO_MODEL!),
+          reviewAssistance: openai(process.env.HERIPO_MODEL!),
         },
       },
     },
     controller.signal, // AbortSignal
   );
 } catch (error) {
-  if (error.name === 'AbortError') {
+  if (error instanceof Error && error.name === 'AbortError') {
     console.log('Parsing was cancelled');
   }
 }
@@ -494,35 +527,9 @@ When using a local docling-serve instance (port mode), the parser automatically 
 
 ## Why macOS Only?
 
-`@heripo/pdf-parser` **intentionally relies heavily on macOS**. The key reason for this decision is **Docling SDK's local OCR performance**.
+The package declares `os: ["darwin"]` and checks macOS and local tools in `init()`. Connecting to an external Docling server through `baseUrl` does not remove this client-side restriction. ocrmac uses Apple Vision on macOS.
 
-### OCR Selection Background
-
-Archaeological excavation report PDFs have the following characteristics:
-
-- Scanned documents spanning hundreds of pages
-- Layouts containing complex tables, diagrams, photographs
-- Precise text extraction is essential
-
-### OCR Option Comparison
-
-| Method                  | Performance | Cost | Description                                                |
-| ----------------------- | ----------- | ---- | ---------------------------------------------------------- |
-| **Docling (Local)**     | ★★★★★       | Free | Overwhelming performance on Apple Silicon, GPU utilization |
-| Cloud OCR (Google, AWS) | ★★★★        | $$$  | Tens of dollars per hundreds of pages                      |
-| Tesseract (Local)       | ★★          | Free | Low Korean recognition rate, lacking layout analysis       |
-
-### Key Advantages
-
-- **Cost**: 100x+ cheaper than cloud OCR (free)
-- **Performance**: Fast processing with GPU acceleration on Apple Silicon M1/M2/M3/M4/M5
-- **Quality**: Accurate recognition even for complex documents
-- **Privacy**: Documents are not sent to external servers
-
-### Trade-off
-
-- Optimal performance only in macOS + Apple Silicon environment
-- No current plans for Linux/Windows support (see "Linux Support Status" below)
+Docling OCR can run locally, but VLM correction calls the configured models. Cloud models can receive document text and page images and incur API charges. To keep the full pipeline local, configure local models for language detection, document validation, correction, fallbacks and downstream document processing.
 
 ## System Dependencies Details
 
@@ -534,17 +541,18 @@ Archaeological excavation report PDFs have the following characteristics:
 | poppler     | Any              | `brew install poppler`     | PDF page counting (pdfinfo) and text layer extraction (pdftotext) |
 | jq          | Any              | `brew install jq`          | JSON processing (conversion result parsing)                       |
 | lsof        | Any              | Included with macOS        | docling-serve port management                                     |
-| ImageMagick | Any (optional)   | `brew install imagemagick` | Image PDF fallback and page rendering                             |
-| Ghostscript | Any (optional)   | `brew install ghostscript` | Image PDF fallback (PDF to image conversion)                      |
+| ImageMagick | Any              | `brew install imagemagick` | Image PDF fallback and page rendering                             |
+| Ghostscript | Any              | `brew install ghostscript` | Image PDF fallback (PDF to image conversion)                      |
 
-> **Python 3.13+ is not supported.** Some Docling SDK dependencies are not compatible with Python 3.13.
+> **Python 3.13+ is rejected by the current installer.** See the version check in [python-version.ts](./src/utils/python-version.ts).
 
 ### Checking Python Version
 
 ```bash
 # Check installed Python version
 python3 --version
-python3.11 --version
+export PATH="$(brew --prefix python@3.11)/libexec/bin:$PATH"
+python3 --version
 
 # When multiple versions are installed
 ls -la /usr/local/bin/python*
@@ -569,12 +577,12 @@ which jq
 ```typescript
 type Options = {
   logger: LoggerMethods; // Logger instance (REQUIRED)
-  timeout?: number; // Timeout in milliseconds (default: 10000000)
+  timeout?: number; // Timeout in milliseconds (default: 100000)
   venvPath?: string; // Python venv path (default: CWD/.venv)
   killExistingProcess?: boolean; // Kill existing process on port (default: false)
   enableImagePdfFallback?: boolean; // Enable image PDF fallback (default: false, requires ImageMagick + Ghostscript)
 } & (
-  | { port?: number } // Local server mode (default port: 5001)
+  | { port?: number } // Local mode; explicitly provide port (no runtime default)
   | { baseUrl: string } // External server mode
 );
 ```
@@ -614,6 +622,10 @@ Disposes the parser instance, kills the local docling-serve process (if started)
 await pdfParser.dispose();
 ```
 
+##### `isReady(): Promise<boolean>` / `ensureReady(): Promise<void>`
+
+`isReady()` checks health without recovery. `ensureReady()` requires initialization and attempts recovery for a local server. External server failures are propagated. `dispose()` also terminates a process on the configured local port, including a reused server; use `baseUrl` for an externally managed lifecycle.
+
 ### PDFConvertOptions
 
 ```typescript
@@ -630,6 +642,8 @@ type PDFConvertOptions = {
 
   // Document processing
   document_timeout?: number; // Document processing timeout in seconds
+  languageDetectionModel?: LanguageModel;
+  languageDetectionFallbackModel?: LanguageModel;
   documentValidationModel?: LanguageModel; // LLM for document type validation
 
   // Correction progress
@@ -686,7 +700,7 @@ interface PDFCorrectionOptions {
   concurrency?: {
     pages?: number; // Page-level text correction and page gate concurrency
     reviewTasks?: number; // Structural Review Assistance work-item concurrency
-    tables?: number; // Table-specific correction concurrency
+    tables?: number; // Accepted but not forwarded by the top-level pipeline
   };
   maxRetries?: {
     textCorrection?: number;
@@ -800,31 +814,12 @@ brew install imagemagick ghostscript
 
 ## Linux Support Status
 
-Currently **macOS only**. Linux support is **not entirely ruled out**, but due to OCR performance and cost efficiency issues, **there are no specific plans at this time**.
-
-| Platform              | Status    | Notes                                           |
-| --------------------- | --------- | ----------------------------------------------- |
-| macOS + Apple Silicon | Supported | Optimal performance, GPU acceleration           |
-| macOS + Intel         | Supported | No GPU acceleration                             |
-| Linux                 | TBD       | No current plans due to performance/cost issues |
-| Windows               | TBD       | WSL2 Linux approach possible                    |
-
-### Reason for No Linux Support
-
-Docling SDK's local OCR achieves both performance and cost efficiency by utilizing Apple Metal GPU acceleration on macOS. We have not yet found an OCR solution on Linux that provides equivalent performance and cost efficiency.
-
-### Ideas Welcome
-
-If you have ideas for supporting Linux while maintaining both performance and cost efficiency, please suggest them via [GitHub Discussions](https://github.com/heripo-lab/heripo-engine/discussions) or Issues. The following information is particularly helpful:
-
-- Experience with Korean document OCR on Linux
-- OCR solutions capable of handling complex layouts (tables, diagrams)
-- Cost estimates for processing hundreds of pages
+The current `@heripo/pdf-parser` package supports macOS and does not provide a Linux/Windows runtime path. Platform proposals are welcome in [GitHub Discussions](https://github.com/heripo-lab/heripo-engine/discussions).
 
 ## Related Packages
 
-- [@heripo/document-processor](../document-processor) - Document structure analysis and LLM processing
-- [@heripo/model](../model) - Data models and type definitions
+- [@heripo/document-processor](../document-processor/README.md) - Document structure analysis and LLM processing
+- [@heripo/model](../model/README.md) - Data models and type definitions
 
 ## Sponsor
 
