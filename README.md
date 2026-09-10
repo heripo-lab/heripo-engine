@@ -28,6 +28,7 @@
   - [About heripo lab](#about-heripo-lab)
   - [Why heripo engine?](#why-heripo-engine)
   - [Data Pipeline](#data-pipeline)
+- [Built with heripo engine: heripo basecamp](#built-with-heripo-engine-heripo-basecamp)
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Installation](#installation)
@@ -116,6 +117,18 @@ Raw Data Extraction → Archaeological Data Ledger → Archaeological Data Stand
 - 🔜 Production Ready (performance optimization, API stability)
 
 For a detailed roadmap, see [docs/roadmap.md](./docs/roadmap.md).
+
+## Built with heripo engine: heripo basecamp
+
+**heripo basecamp** is a research tool currently in a private alpha. It is a separate service that uses heripo engine to build its own structured report dataset for research discovery.
+
+**Starting in Korea, growing across borders.** basecamp begins with archaeological excavation reports from Korea, with a scope that extends beyond any one country. Its goal is to help researchers discover and explore reports across countries and regions.
+
+- **Find reports on a map** and narrow the search with criteria and AI filters.
+- **Explore report content** through a reader that brings together source PDFs, text, images, and tables.
+- **Build on structured data**: the engine handles PDF extraction and document structure; basecamp adds the research interface and discovery features.
+
+The [engine demo](https://engine-demo.heripo.org) lets you try PDF processing. [heripo basecamp](https://heripo.app) is a separate application of the same engine, with its own dataset. Reports uploaded to the demo and their processing results are not added to basecamp.
 
 ## Key Features
 

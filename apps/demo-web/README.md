@@ -13,6 +13,8 @@
 
 Demo Web is a full-stack Next.js application that allows you to monitor and visualize heripo engine's PDF parsing and document processing capabilities in real-time.
 
+The home page also introduces [heripo basecamp](https://heripo.app), a separate research service that uses heripo engine to build its own report dataset and is currently in a private alpha. The showcase supports Korean and English based on browser language and notes that basecamp is in private alpha. It also introduces basecamp’s direction: starting with reports from Korea and expanding across national borders. Reports uploaded to the demo and their processing results are not added to basecamp.
+
 ### Key Features
 
 - PDF upload and processing option configuration

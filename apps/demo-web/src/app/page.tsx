@@ -11,6 +11,7 @@ import type { ApiResponseError } from '~/lib/api/tasks';
 import { publicModeConfig } from '~/lib/config/public-mode';
 
 import { AutoCorrectionDemoNoticeBanner } from '~/components/layout/auto-correction-demo-notice-banner';
+import { BasecampShowcase } from '~/components/layout/basecamp-showcase';
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
 import { SampleResultsBanner } from '~/components/layout/sample-results-banner';
 import { PipelineStepper } from '~/components/pipeline/pipeline-stepper';
@@ -243,9 +244,11 @@ function HomePageContent() {
               >
                 heripo engine
               </a>
-              , an open source project — not a commercial product.
+              , an open source toolkit for structuring report PDFs.
             </p>
           </div>
+
+          <BasecampShowcase />
 
           {/* Pipeline Stepper */}
           <PipelineStepper
