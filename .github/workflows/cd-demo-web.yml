@@ -162,7 +162,10 @@ jobs:
           DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
           cd "$DEPLOY_PATH"
 
-          pm2 restart demo-web || pm2 start pnpm --name "demo-web" -- demo-web:start
+          # Replace the legacy pnpm-backed process so PM2 does not invoke pnpm's
+          # packageManager version switching when the application restarts.
+          pm2 delete demo-web || true
+          pm2 start ecosystem.config.cjs --only demo-web
           pm2 save
           echo "✅ Application restarted"
 

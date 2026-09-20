@@ -395,11 +395,14 @@ Demo Web은 heripo engine의 기능을 시연하기 위한 **데모용 애플리
 
 ```bash
 # ✅ 올바름: fork 모드 (싱글 프로세스)
-pm2 start pnpm --name "demo-web" -- start
+pm2 start ecosystem.config.cjs --only demo-web
 
 # ❌ 금지: 클러스터 모드 (멀티 프로세스)
 pm2 start pnpm --name "demo-web" -i max -- start
 ```
+
+ecosystem 설정은 Next.js CLI를 Node로 직접 실행합니다. 따라서 애플리케이션을
+재시작할 때 pnpm의 패키지 매니저 버전 전환에 영향을 받지 않습니다.
 
 ## 문제 해결
 

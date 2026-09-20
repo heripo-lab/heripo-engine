@@ -395,11 +395,14 @@ Therefore, we **intentionally maintain a simple architecture**, and multi-proces
 
 ```bash
 # ✅ Correct: fork mode (single process)
-pm2 start pnpm --name "demo-web" -- start
+pm2 start ecosystem.config.cjs --only demo-web
 
 # ❌ Forbidden: cluster mode (multi-process)
 pm2 start pnpm --name "demo-web" -i max -- start
 ```
+
+The ecosystem configuration runs the Next.js CLI directly with Node. This keeps
+application restarts independent of pnpm's package manager version switching.
 
 ## Troubleshooting
 
