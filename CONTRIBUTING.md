@@ -5,7 +5,7 @@ Thank you for your interest in this project! This guide explains local developme
 ## Development Environment
 
 - Node.js: >= 24
-- Package manager: pnpm 11
+- Package manager: pnpm 12
 - Monorepo: pnpm workspaces with Turbo
 - Language/Runtime: TypeScript, ESM (ES2022)
 

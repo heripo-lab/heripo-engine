@@ -43,7 +43,7 @@ OpenAI, Google, Anthropic, Together AI, Ollama, LM Studio를 구분합니다. To
 
 ## 개발
 
-저장소 루트에서 실행합니다. Node.js 24 이상, pnpm 11.25.0을 사용합니다.
+저장소 루트에서 실행합니다. Node.js 24 이상, pnpm 12를 사용합니다.
 
 ```bash
 pnpm install
