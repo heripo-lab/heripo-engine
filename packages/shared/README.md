@@ -43,7 +43,7 @@ Calls return `{ output, usage, usedFallback }`. Pass `usage` to the aggregator's
 
 ## Development
 
-Run from the repository root with Node.js 24+ and pnpm 11.25.0.
+Run from the repository root with Node.js 24+ and pnpm 12.
 
 ```bash
 pnpm install

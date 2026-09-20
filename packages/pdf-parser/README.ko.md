@@ -65,10 +65,10 @@
 brew install node
 ```
 
-#### 2. pnpm >= 11
+#### 2. pnpm >= 12
 
 ```bash
-npm install -g pnpm@11.25.0
+npm install -g pnpm@12
 ```
 
 #### 3. Python 3.9 - 3.12

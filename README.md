@@ -186,7 +186,7 @@ For detailed architecture explanation, see [docs/architecture.md](./docs/archite
 
 - **macOS** (Apple Silicon or Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** 11.25.0 (`packageManager`)
+- **pnpm** 12 (`packageManager`)
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+ is not supported)
 - **jq** (JSON processing tool)
 - **poppler** (PDF text extraction tools)
@@ -206,7 +206,7 @@ brew install poppler imagemagick ghostscript
 
 # Install Node.js and pnpm
 brew install node
-npm install -g pnpm@11.25.0
+npm install -g pnpm@12
 ```
 
 For detailed installation guide, see [@heripo/pdf-parser README](./packages/pdf-parser/README.md#prerequisites).
@@ -233,7 +233,7 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/log
 | [@heripo/model](./packages/model/README.md)                           | 0.1.x   | Data models and type definitions               |
 | [@heripo/logger](./packages/logger/README.md)                         | 0.1.x   | Logger interface and adapter                   |
 
-The parser and document processor ship as ESM; `model` and `logger` provide both ESM and CommonJS. The workspace uses Node.js 24+ and pnpm 11.25.0. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
+The parser and document processor ship as ESM; `model` and `logger` provide both ESM and CommonJS. The workspace uses Node.js 24+ and pnpm 12. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
 
 ```bash
 pnpm add @ai-sdk/openai

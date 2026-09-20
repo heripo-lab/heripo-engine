@@ -182,7 +182,7 @@ heripo-engine/
 
 - **macOS** (Apple Silicon 또는 Intel)
 - **Node.js** >= 24.0.0
-- **pnpm** 11.25.0 (`packageManager`)
+- **pnpm** 12 (`packageManager`)
 - **Python** 3.9 - 3.12 (⚠️ Python 3.13+는 지원하지 않음)
 - **jq** (JSON 처리 도구)
 - **poppler** (PDF 텍스트 추출 도구)
@@ -202,7 +202,7 @@ brew install poppler imagemagick ghostscript
 
 # Node.js 및 pnpm 설치
 brew install node
-npm install -g pnpm@11.25.0
+npm install -g pnpm@12
 ```
 
 자세한 설치 가이드는 [@heripo/pdf-parser README](./packages/pdf-parser/README.ko.md#사전-요구사항)를 참고하세요.
@@ -229,7 +229,7 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/log
 | [@heripo/model](./packages/model/README.ko.md)                           | 0.1.x | 데이터 모델 및 타입 정의   |
 | [@heripo/logger](./packages/logger/README.ko.md)                         | 0.1.x | 로거 인터페이스 및 adapter |
 
-파서와 문서 프로세서는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 루트 워크스페이스는 Node.js 24 이상과 pnpm 11.25.0을 사용합니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
+파서와 문서 프로세서는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 루트 워크스페이스는 Node.js 24 이상과 pnpm 12를 사용합니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
 
 ```bash
 pnpm add @ai-sdk/openai
