@@ -88,6 +88,8 @@ OpenAI, Anthropic, Google, Together AI와 로컬 Ollama·LM Studio를 지원합�
 
 현재 [폼 기본값](./src/features/upload/types/form-values.ts)은 LM Studio, OpenAI, Google fallback을 함께 사용합니다. 환경 변수에 API 키 하나를 추가하는 것만으로 전체 기본 구성이 준비되지는 않습니다. 로컬 서버에서 모델을 로드하거나 UI에서 언어 감지·문서 검증·보정·프로세서·fallback 모델을 사용 가능한 모델로 바꾸세요. 페이지를 읽는 모델은 이미지 입력을, 구조 추출 모델은 구조화된 출력을 지원해야 합니다.
 
+모델 선택 목록에서 OpenAI GPT-6 Astra, Sol, Luna를 사용할 수 있습니다. 기존에 GPT-5.6 Luna가 기본값이던 단계는 GPT-6 Luna를 사용합니다. 표시되는 비용 추정치는 [Standard 단기 컨텍스트의 입력·출력 요금](https://developers.openai.com/api/docs/pricing?latest-pricing=standard)을 사용하며 캐시된 입력과 장기 컨텍스트 요금은 반영하지 않습니다.
+
 ## 설치 및 실행
 
 아래 명령은 저장소 루트에서 실행합니다.

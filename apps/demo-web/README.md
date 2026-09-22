@@ -88,6 +88,8 @@ Supports OpenAI, Anthropic, Google, Together AI, and local Ollama/LM Studio. Mod
 
 The current [form defaults](./src/features/upload/types/form-values.ts) combine LM Studio, OpenAI and a Google fallback. Adding a single API key does not configure this entire setup. Load the selected local models or change language detection, document validation, correction, processor and fallback models in the UI to models available in your environment. Models reading pages need image input; structure extraction requires structured output.
 
+OpenAI GPT-6 Astra, Sol and Luna are available in the model selector. Stages previously defaulting to GPT-5.6 Luna now use GPT-6 Luna. The displayed cost estimate uses [Standard short-context input and output rates](https://developers.openai.com/api/docs/pricing?latest-pricing=standard); it does not account for cached input or long-context pricing.
+
 ## Installation and Running
 
 Run the following commands from the repository root.

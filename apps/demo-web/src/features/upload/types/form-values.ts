@@ -14,13 +14,13 @@ export interface ProcessingFormValues extends ProcessingOptions {
 
 /**
  * Default values for the processing form.
- * LLM models are tested for optimal performance and cost balance.
+ * Model defaults for the demo processing pipeline.
  */
 export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
   file: null,
   threadCount: 4,
   // Document type validation
-  documentValidationModel: 'openai/gpt-5.6-luna',
+  documentValidationModel: 'openai/gpt-6-luna',
   // PDF language detection for OCR language hints
   languageDetectionModel: 'lmstudio/gemma-4-26b-a4b-it-mlx',
   // Force image PDF pre-conversion
@@ -36,12 +36,12 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
       textCorrectionFallback: 'google/gemini-3.1-flash-lite',
       pageGate: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       reviewAssistance: 'lmstudio/gemma-4-26b-a4b-it-mlx',
-      tableCorrection: 'openai/gpt-5.6-luna',
+      tableCorrection: 'openai/gpt-6-luna',
       reviewAssistanceTasks: {
         textOcrHanja: 'lmstudio/gemma-4-26b-a4b-it-mlx',
         textIntegrity: 'lmstudio/gemma-4-26b-a4b-it-mlx',
         textRoleFootnote: 'lmstudio/gemma-4-26b-a4b-it-mlx',
-        tables: 'openai/gpt-5.6-luna',
+        tables: 'openai/gpt-6-luna',
         picturesCaptions: 'lmstudio/gemma-4-26b-a4b-it-mlx',
         layoutBboxOrder: 'lmstudio/gemma-4-26b-a4b-it-mlx',
       },
@@ -57,11 +57,11 @@ export const DEFAULT_FORM_VALUES: ProcessingFormValues = {
     workItemTimeoutMs: 1_800_000,
   },
   // LLM Models
-  fallbackModel: 'openai/gpt-5.6-luna',
-  validatorModel: 'openai/gpt-5.6-luna',
-  pageRangeParserModel: 'openai/gpt-5.6-luna',
-  tocExtractorModel: 'openai/gpt-5.6-luna',
-  visionTocExtractorModel: 'openai/gpt-5.6-luna',
+  fallbackModel: 'openai/gpt-6-luna',
+  validatorModel: 'openai/gpt-6-luna',
+  pageRangeParserModel: 'openai/gpt-6-luna',
+  tocExtractorModel: 'openai/gpt-6-luna',
+  visionTocExtractorModel: 'openai/gpt-6-luna',
   captionParserModel: 'lmstudio/gemma-4-26b-a4b-it-mlx',
   // Batch & Retry
   textCleanerBatchSize: 20,

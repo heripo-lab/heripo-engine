@@ -5,11 +5,25 @@ export interface LLMModel {
 }
 
 /**
- * LLM Models tested for this project.
- * These are models that have been directly tested and found to be reasonably capable.
+ * LLM models available for selection in the demo.
  */
 export const LLM_MODELS: LLMModel[] = [
   // OpenAI
+  {
+    id: 'openai/gpt-6-astra',
+    label: 'GPT-6 Astra',
+    provider: 'OpenAI',
+  },
+  {
+    id: 'openai/gpt-6-sol',
+    label: 'GPT-6 Sol',
+    provider: 'OpenAI',
+  },
+  {
+    id: 'openai/gpt-6-luna',
+    label: 'GPT-6 Luna',
+    provider: 'OpenAI',
+  },
   {
     id: 'openai/gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
