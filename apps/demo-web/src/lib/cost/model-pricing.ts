@@ -51,6 +51,10 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'meta-llama/Llama-3.2-3B-Instruct-Turbo': { input: 0.06, output: 0.06 },
     // OpenAI
     'openai/gpt-oss-120b': { input: 0.15, output: 0.6 },
+    // Standard, short-context rates: https://developers.openai.com/api/docs/pricing?latest-pricing=standard
+    'gpt-6-astra': { input: 10, output: 50 },
+    'gpt-6-sol': { input: 2, output: 10 },
+    'gpt-6-luna': { input: 0.1, output: 0.5 },
     'gpt-5.1': { input: 1.25, output: 10 },
     'gpt-5.2': { input: 1.75, output: 14 },
     'gpt-5.4': { input: 2.5, output: 15 },
@@ -72,6 +76,9 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'anthropic/claude-sonnet-4-6': { input: 3, output: 15 },
     'anthropic/claude-haiku-4-5': { input: 1, output: 5 },
     // VLM strategy models (provider-prefixed keys from TokenUsageReport)
+    'openai/gpt-6-astra': { input: 10, output: 50 },
+    'openai/gpt-6-sol': { input: 2, output: 10 },
+    'openai/gpt-6-luna': { input: 0.1, output: 0.5 },
     'openai/gpt-5.6-sol': { input: 5, output: 30 },
     'openai/gpt-5.6-terra': { input: 2, output: 12 },
     'openai/gpt-5.6-luna': { input: 0.2, output: 1.2 },
