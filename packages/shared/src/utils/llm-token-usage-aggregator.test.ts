@@ -20,6 +20,34 @@ describe('LLMTokenUsageAggregator', () => {
     };
   });
 
+  test('exports cache buckets at model, phase, component, and report totals', () => {
+    for (const cachedInputTokens of [10, 20]) {
+      aggregator.track({
+        component: 'TocExtractor',
+        phase: 'extraction',
+        model: 'primary',
+        modelName: 'gpt-5',
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 110,
+        cachedInputTokens,
+        cacheWriteTokens: 5,
+        cacheWrite1hTokens: 2,
+      });
+    }
+
+    const report = aggregator.getReport();
+    const expected = {
+      cachedInputTokens: 30,
+      cacheWriteTokens: 10,
+      cacheWrite1hTokens: 4,
+    };
+    expect(report.components[0].phases[0].primary).toMatchObject(expected);
+    expect(report.components[0].phases[0].total).toMatchObject(expected);
+    expect(report.components[0].total).toMatchObject(expected);
+    expect(report.total).toMatchObject(expected);
+  });
+
   describe('track', () => {
     test('should track single usage', () => {
       const usage: ExtendedTokenUsage = {

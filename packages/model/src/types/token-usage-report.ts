@@ -145,6 +145,15 @@ export interface ModelUsageDetail {
    * Always equals inputTokens + outputTokens.
    */
   totalTokens: number;
+
+  /** Cached input tokens reported by the provider; null means unreported. */
+  cachedInputTokens?: number | null;
+
+  /** Cache creation tokens at the default duration; null means unreported. */
+  cacheWriteTokens?: number | null;
+
+  /** Cache creation tokens at the one-hour duration; null means unreported. */
+  cacheWrite1hTokens?: number | null;
 }
 
 /**
@@ -167,6 +176,15 @@ export interface TokenUsageSummary {
    * Total tokens (input + output)
    */
   totalTokens: number;
+
+  /** Cached input tokens, when reported for every contributing call. */
+  cachedInputTokens?: number | null;
+
+  /** Default-duration cache writes, when reported for every contributing call. */
+  cacheWriteTokens?: number | null;
+
+  /** One-hour cache writes, when reported for every contributing call. */
+  cacheWrite1hTokens?: number | null;
 }
 
 export type TokenUsageMetadataValue = string | number | boolean | null;

@@ -9,6 +9,9 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  cachedInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  cacheWrite1hTokens?: number | null;
 }
 
 /**
@@ -21,28 +24,44 @@ function formatTokens(usage: TokenUsage): string {
   return `${usage.inputTokens} input, ${usage.outputTokens} output, ${usage.totalTokens} total`;
 }
 
-interface MutableUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-}
+type MutableUsage = TokenUsage;
 
 function emptyUsage(): MutableUsage {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 }
 
 function addInto(target: MutableUsage, src: TokenUsage): void {
+  const hadUsage =
+    target.inputTokens !== 0 ||
+    target.outputTokens !== 0 ||
+    target.totalTokens !== 0;
   target.inputTokens += src.inputTokens;
   target.outputTokens += src.outputTokens;
   target.totalTokens += src.totalTokens;
+  for (const key of CACHE_KEYS) {
+    const next = src[key];
+    const current = target[key];
+    if (next === undefined) {
+      if (current !== undefined) target[key] = null;
+    } else if (current === undefined) {
+      target[key] = hadUsage ? null : next;
+    } else {
+      target[key] = current === null || next === null ? null : current + next;
+    }
+  }
 }
 
+const CACHE_KEYS = [
+  'cachedInputTokens',
+  'cacheWriteTokens',
+  'cacheWrite1hTokens',
+] as const;
+
 function sumUsage(a?: MutableUsage, b?: MutableUsage): MutableUsage {
-  return {
-    inputTokens: (a?.inputTokens ?? 0) + (b?.inputTokens ?? 0),
-    outputTokens: (a?.outputTokens ?? 0) + (b?.outputTokens ?? 0),
-    totalTokens: (a?.totalTokens ?? 0) + (b?.totalTokens ?? 0),
-  };
+  const total = emptyUsage();
+  if (a) addInto(total, a);
+  if (b) addInto(total, b);
+  return total;
 }
 
 /**
@@ -90,33 +109,22 @@ interface ComponentAggregate {
   total: MutableUsage;
 }
 
-interface ModelUsageReport {
+interface ModelUsageReport extends TokenUsage {
   modelName: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
 }
 
 interface PhaseReport {
   phase: string;
   primary?: ModelUsageReport;
   fallback?: ModelUsageReport;
-  total: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
+  total: TokenUsage;
   metadata?: TokenUsageMetadata[];
 }
 
 interface ComponentReport {
   component: string;
   phases: PhaseReport[];
-  total: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
+  total: TokenUsage;
 }
 
 /**
@@ -307,11 +315,7 @@ export class LLMTokenUsageAggregator {
       components.push({
         component: component.component,
         phases,
-        total: {
-          inputTokens: component.total.inputTokens,
-          outputTokens: component.total.outputTokens,
-          totalTokens: component.total.totalTokens,
-        },
+        total: { ...component.total },
       });
     }
 
@@ -319,11 +323,7 @@ export class LLMTokenUsageAggregator {
 
     return {
       components,
-      total: {
-        inputTokens: totalUsage.inputTokens,
-        outputTokens: totalUsage.outputTokens,
-        totalTokens: totalUsage.totalTokens,
-      },
+      total: totalUsage,
     };
   }
 
@@ -333,21 +333,11 @@ export class LLMTokenUsageAggregator {
    * @returns Aggregated token usage totals
    */
   getTotalUsage(): TokenUsage {
-    let totalInput = 0;
-    let totalOutput = 0;
-    let totalTokens = 0;
-
+    const total = emptyUsage();
     for (const component of Object.values(this.usage)) {
-      totalInput += component.total.inputTokens;
-      totalOutput += component.total.outputTokens;
-      totalTokens += component.total.totalTokens;
+      addInto(total, component.total);
     }
-
-    return {
-      inputTokens: totalInput,
-      outputTokens: totalOutput,
-      totalTokens: totalTokens,
-    };
+    return total;
   }
 
   /**

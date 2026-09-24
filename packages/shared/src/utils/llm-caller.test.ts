@@ -102,6 +102,44 @@ describe('LLMCaller', () => {
     vi.mocked(detectProvider).mockReturnValue('openai');
   });
 
+  test('preserves cache reads and separates one-hour cache writes from step usage', async () => {
+    vi.mocked(generateText).mockResolvedValueOnce({
+      output: { value: 'ok' },
+      usage: {
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 110,
+        inputTokenDetails: { cacheReadTokens: 40, cacheWriteTokens: 30 },
+      },
+      steps: [
+        {
+          usage: {
+            raw: {
+              cache_creation: { ephemeral_1h_input_tokens: 12 },
+            },
+          },
+        },
+      ],
+    } as any);
+
+    const result = await LLMCaller.call({
+      schema: mockSchema,
+      systemPrompt: 'system',
+      userPrompt: 'user',
+      primaryModel: mockPrimaryModel,
+      maxRetries: 0,
+      component: 'Test',
+      phase: 'cache',
+    });
+
+    expect(result.usage).toMatchObject({
+      inputTokens: 100,
+      cachedInputTokens: 40,
+      cacheWriteTokens: 18,
+      cacheWrite1hTokens: 12,
+    });
+  });
+
   describe('extractModelName (via model name extraction)', () => {
     test('should extract modelId when available', async () => {
       const mockResponse = createMockGenerateTextResult(
