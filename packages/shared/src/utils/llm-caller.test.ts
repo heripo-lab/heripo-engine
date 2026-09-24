@@ -140,6 +140,32 @@ describe('LLMCaller', () => {
     });
   });
 
+  test('keeps default cache writes when steps have no one-hour cache data', async () => {
+    vi.mocked(generateText).mockResolvedValueOnce({
+      output: { value: 'ok' },
+      usage: {
+        inputTokens: 50,
+        outputTokens: 5,
+        totalTokens: 55,
+        inputTokenDetails: { cacheWriteTokens: 10 },
+      },
+      steps: [{ usage: { raw: {} } }],
+    } as any);
+
+    const result = await LLMCaller.call({
+      schema: mockSchema,
+      systemPrompt: 'system',
+      userPrompt: 'user',
+      primaryModel: mockPrimaryModel,
+      maxRetries: 0,
+      component: 'Test',
+      phase: 'cache',
+    });
+
+    expect(result.usage.cacheWriteTokens).toBe(10);
+    expect(result.usage.cacheWrite1hTokens).toBeUndefined();
+  });
+
   describe('extractModelName (via model name extraction)', () => {
     test('should extract modelId when available', async () => {
       const mockResponse = createMockGenerateTextResult(

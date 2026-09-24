@@ -48,6 +48,38 @@ describe('LLMTokenUsageAggregator', () => {
     expect(report.total).toMatchObject(expected);
   });
 
+  test('does not report incomplete cache totals as exact counts', () => {
+    const usage: ExtendedTokenUsage = {
+      component: 'TocExtractor',
+      phase: 'extraction',
+      model: 'primary',
+      modelName: 'gpt-5',
+      inputTokens: 100,
+      outputTokens: 10,
+      totalTokens: 110,
+      cachedInputTokens: 20,
+      cacheWriteTokens: 5,
+      cacheWrite1hTokens: 2,
+    };
+    aggregator.track(usage);
+    aggregator.track({
+      ...usage,
+      cachedInputTokens: undefined,
+      cacheWriteTokens: null,
+      cacheWrite1hTokens: 0,
+    });
+    expect(aggregator.getReport().total).toMatchObject({
+      cachedInputTokens: null,
+      cacheWriteTokens: null,
+      cacheWrite1hTokens: 2,
+    });
+
+    aggregator.reset();
+    aggregator.track({ ...usage, cachedInputTokens: undefined });
+    aggregator.track(usage);
+    expect(aggregator.getReport().total.cachedInputTokens).toBeNull();
+  });
+
   describe('track', () => {
     test('should track single usage', () => {
       const usage: ExtendedTokenUsage = {
