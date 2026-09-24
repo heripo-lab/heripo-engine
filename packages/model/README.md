@@ -308,14 +308,22 @@ interface ModelUsageDetail {
   inputTokens: number; // Input token count
   outputTokens: number; // Output token count
   totalTokens: number; // Total token count
+  cachedInputTokens?: number | null; // Cache reads
+  cacheWriteTokens?: number | null; // Default-duration cache writes
+  cacheWrite1hTokens?: number | null; // One-hour cache writes
 }
 
 interface TokenUsageSummary {
   inputTokens: number; // Input token count
   outputTokens: number; // Output token count
   totalTokens: number; // Total token count
+  cachedInputTokens?: number | null; // Cache reads across contributing calls
+  cacheWriteTokens?: number | null; // Default-duration cache writes
+  cacheWrite1hTokens?: number | null; // One-hour cache writes
 }
 ```
+
+Cache counts are subsets of `inputTokens`, not additional tokens. Missing fields or `null` mean the provider did not report a complete count; `0` means it reported zero.
 
 ### Review Assistance Types
 

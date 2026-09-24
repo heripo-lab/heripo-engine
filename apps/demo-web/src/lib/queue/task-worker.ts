@@ -148,9 +148,29 @@ function mergeVlmUsage(
   vlmUsage: TokenUsageReport,
 ): void {
   target.components.unshift(...vlmUsage.components);
-  target.total.inputTokens += vlmUsage.total.inputTokens;
-  target.total.outputTokens += vlmUsage.total.outputTokens;
-  target.total.totalTokens += vlmUsage.total.totalTokens;
+  target.total = combineUsageTotals(vlmUsage.total, target.total);
+}
+
+function combineUsageTotals(
+  first: TokenUsageReport['total'],
+  second: TokenUsageReport['total'],
+): TokenUsageReport['total'] {
+  const total: TokenUsageReport['total'] = {
+    inputTokens: first.inputTokens + second.inputTokens,
+    outputTokens: first.outputTokens + second.outputTokens,
+    totalTokens: first.totalTokens + second.totalTokens,
+  };
+  for (const key of [
+    'cachedInputTokens',
+    'cacheWriteTokens',
+    'cacheWrite1hTokens',
+  ] as const) {
+    const left = first[key];
+    const right = second[key];
+    if (left === undefined && right === undefined) continue;
+    total[key] = left == null || right == null ? null : left + right;
+  }
+  return total;
 }
 
 /**
@@ -164,11 +184,7 @@ function combineTokenReports(
   if (!vlm) return dp;
   return {
     components: [...vlm.components, ...dp.components],
-    total: {
-      inputTokens: vlm.total.inputTokens + dp.total.inputTokens,
-      outputTokens: vlm.total.outputTokens + dp.total.outputTokens,
-      totalTokens: vlm.total.totalTokens + dp.total.totalTokens,
-    },
+    total: combineUsageTotals(vlm.total, dp.total),
   };
 }
 

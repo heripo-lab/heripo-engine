@@ -2,6 +2,7 @@ import type { z } from 'zod';
 
 import {
   type LanguageModel,
+  type LanguageModelUsage,
   NoObjectGeneratedError,
   Output,
   generateText,
@@ -141,6 +142,9 @@ export interface ExtendedTokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  cachedInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  cacheWrite1hTokens?: number | null;
   metadata?: TokenUsageMetadata;
 }
 
@@ -163,6 +167,24 @@ interface ExecutionConfig {
   component: string;
   phase: string;
   metadata?: TokenUsageMetadata;
+}
+
+interface GeneratedUsage {
+  usage?: LanguageModelUsage;
+  steps?: readonly { usage: LanguageModelUsage }[];
+}
+
+function cacheWrite1hTokens(
+  steps: GeneratedUsage['steps'],
+): number | undefined {
+  let total: number | undefined;
+  for (const step of steps ?? []) {
+    const raw = step.usage.raw as
+      { cache_creation?: { ephemeral_1h_input_tokens?: number } } | undefined;
+    const value = raw?.cache_creation?.ephemeral_1h_input_tokens;
+    if (value !== undefined) total = (total ?? 0) + value;
+  }
+  return total;
 }
 
 /**
@@ -216,15 +238,12 @@ export class LLMCaller {
   private static buildUsage(
     config: ExecutionConfig,
     modelName: string,
-    response: {
-      usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-      };
-    },
+    response: GeneratedUsage,
     usedFallback: boolean,
   ): ExtendedTokenUsage {
+    const usage = response.usage;
+    const write1h = cacheWrite1hTokens(response.steps);
+    const allWrites = usage?.inputTokenDetails?.cacheWriteTokens;
     return {
       component: config.component,
       phase: config.phase,
@@ -233,6 +252,13 @@ export class LLMCaller {
       inputTokens: response.usage?.inputTokens ?? 0,
       outputTokens: response.usage?.outputTokens ?? 0,
       totalTokens: response.usage?.totalTokens ?? 0,
+      ...(usage?.inputTokenDetails?.cacheReadTokens != null && {
+        cachedInputTokens: usage.inputTokenDetails.cacheReadTokens,
+      }),
+      ...(allWrites != null && {
+        cacheWriteTokens: allWrites - (write1h ?? 0),
+      }),
+      ...(write1h !== undefined && { cacheWrite1hTokens: write1h }),
       metadata: config.metadata,
     };
   }
@@ -265,11 +291,8 @@ export class LLMCaller {
     promptParams: Record<string, unknown>,
   ): Promise<{
     output: TOutput;
-    usage?: {
-      inputTokens?: number;
-      outputTokens?: number;
-      totalTokens?: number;
-    };
+    usage?: LanguageModelUsage;
+    steps?: GeneratedUsage['steps'];
   }> {
     const submitTool = tool({
       description: 'Submit the structured result',
@@ -297,6 +320,7 @@ export class LLMCaller {
         return {
           output: toolCall.input as TOutput,
           usage: lastResult.usage,
+          steps: lastResult.steps,
         };
       }
     }
@@ -330,11 +354,8 @@ export class LLMCaller {
     promptParams: Record<string, unknown>,
   ): Promise<{
     output: TOutput;
-    usage?: {
-      inputTokens?: number;
-      outputTokens?: number;
-      totalTokens?: number;
-    };
+    usage?: LanguageModelUsage;
+    steps?: GeneratedUsage['steps'];
   }> {
     const providerType = detectProvider(model);
 
@@ -381,11 +402,8 @@ export class LLMCaller {
     config: ExecutionConfig,
     generateFn: (model: LanguageModel) => Promise<{
       output: TOutput;
-      usage?: {
-        inputTokens?: number;
-        outputTokens?: number;
-        totalTokens?: number;
-      };
+      usage?: LanguageModelUsage;
+      steps?: GeneratedUsage['steps'];
     }>,
   ): Promise<LLMCallResult<TOutput>> {
     const primaryModelName = this.extractModelName(config.primaryModel);

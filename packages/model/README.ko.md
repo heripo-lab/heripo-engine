@@ -307,14 +307,22 @@ interface ModelUsageDetail {
   inputTokens: number; // 입력 토큰 수
   outputTokens: number; // 출력 토큰 수
   totalTokens: number; // 전체 토큰 수
+  cachedInputTokens?: number | null; // 캐시 읽기 토큰
+  cacheWriteTokens?: number | null; // 기본 기간 캐시 쓰기 토큰
+  cacheWrite1hTokens?: number | null; // 1시간 캐시 쓰기 토큰
 }
 
 interface TokenUsageSummary {
   inputTokens: number; // 입력 토큰 수
   outputTokens: number; // 출력 토큰 수
   totalTokens: number; // 전체 토큰 수
+  cachedInputTokens?: number | null; // 합산된 캐시 읽기 토큰
+  cacheWriteTokens?: number | null; // 합산된 기본 기간 캐시 쓰기 토큰
+  cacheWrite1hTokens?: number | null; // 합산된 1시간 캐시 쓰기 토큰
 }
 ```
+
+캐시 토큰은 `inputTokens`에 포함된 부분집합이며 추가 토큰이 아닙니다. 필드가 없거나 `null`이면 제공자가 완전한 값을 보고하지 않은 것이고, `0`은 사용량이 없다고 보고한 값입니다.
 
 ### Review Assistance 타입
 

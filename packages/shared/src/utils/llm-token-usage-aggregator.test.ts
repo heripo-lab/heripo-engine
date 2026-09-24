@@ -20,6 +20,66 @@ describe('LLMTokenUsageAggregator', () => {
     };
   });
 
+  test('exports cache buckets at model, phase, component, and report totals', () => {
+    for (const cachedInputTokens of [10, 20]) {
+      aggregator.track({
+        component: 'TocExtractor',
+        phase: 'extraction',
+        model: 'primary',
+        modelName: 'gpt-5',
+        inputTokens: 100,
+        outputTokens: 10,
+        totalTokens: 110,
+        cachedInputTokens,
+        cacheWriteTokens: 5,
+        cacheWrite1hTokens: 2,
+      });
+    }
+
+    const report = aggregator.getReport();
+    const expected = {
+      cachedInputTokens: 30,
+      cacheWriteTokens: 10,
+      cacheWrite1hTokens: 4,
+    };
+    expect(report.components[0].phases[0].primary).toMatchObject(expected);
+    expect(report.components[0].phases[0].total).toMatchObject(expected);
+    expect(report.components[0].total).toMatchObject(expected);
+    expect(report.total).toMatchObject(expected);
+  });
+
+  test('does not report incomplete cache totals as exact counts', () => {
+    const usage: ExtendedTokenUsage = {
+      component: 'TocExtractor',
+      phase: 'extraction',
+      model: 'primary',
+      modelName: 'gpt-5',
+      inputTokens: 100,
+      outputTokens: 10,
+      totalTokens: 110,
+      cachedInputTokens: 20,
+      cacheWriteTokens: 5,
+      cacheWrite1hTokens: 2,
+    };
+    aggregator.track(usage);
+    aggregator.track({
+      ...usage,
+      cachedInputTokens: undefined,
+      cacheWriteTokens: null,
+      cacheWrite1hTokens: 0,
+    });
+    expect(aggregator.getReport().total).toMatchObject({
+      cachedInputTokens: null,
+      cacheWriteTokens: null,
+      cacheWrite1hTokens: 2,
+    });
+
+    aggregator.reset();
+    aggregator.track({ ...usage, cachedInputTokens: undefined });
+    aggregator.track(usage);
+    expect(aggregator.getReport().total.cachedInputTokens).toBeNull();
+  });
+
   describe('track', () => {
     test('should track single usage', () => {
       const usage: ExtendedTokenUsage = {
