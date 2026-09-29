@@ -15,6 +15,11 @@ export const LLM_MODELS: LLMModel[] = [
     provider: 'OpenAI',
   },
   {
+    id: 'openai/gpt-6.1-sol',
+    label: 'GPT-6.1 Sol',
+    provider: 'OpenAI',
+  },
+  {
     id: 'openai/gpt-6-sol',
     label: 'GPT-6 Sol',
     provider: 'OpenAI',
