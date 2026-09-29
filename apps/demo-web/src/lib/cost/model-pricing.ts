@@ -53,6 +53,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'openai/gpt-oss-120b': { input: 0.15, output: 0.6 },
     // Standard, short-context rates: https://developers.openai.com/api/docs/pricing?latest-pricing=standard
     'gpt-6-astra': { input: 10, output: 50 },
+    'gpt-6.1-sol': { input: 2, output: 10 },
     'gpt-6-sol': { input: 2, output: 10 },
     'gpt-6-luna': { input: 0.1, output: 0.5 },
     'gpt-5.1': { input: 1.25, output: 10 },
@@ -77,6 +78,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'anthropic/claude-haiku-4-5': { input: 1, output: 5 },
     // VLM strategy models (provider-prefixed keys from TokenUsageReport)
     'openai/gpt-6-astra': { input: 10, output: 50 },
+    'openai/gpt-6.1-sol': { input: 2, output: 10 },
     'openai/gpt-6-sol': { input: 2, output: 10 },
     'openai/gpt-6-luna': { input: 0.1, output: 0.5 },
     'openai/gpt-5.6-sol': { input: 5, output: 30 },
