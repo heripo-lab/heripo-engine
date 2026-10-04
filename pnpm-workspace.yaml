@@ -4,25 +4,24 @@ packages:
   - 'tools/*'
 
 catalog:
-  '@ai-sdk/anthropic': '^4.0.58'
-  '@ai-sdk/google': '^4.0.76'
-  '@ai-sdk/openai': '^4.0.71'
-  '@ai-sdk/openai-compatible': '^3.0.53'
-  '@ai-sdk/togetherai': '^3.0.54'
-  '@vitest/coverage-v8': '^5.0.1'
-  '@vitest/expect': '^5.0.1'
-  'ai': '^7.0.107'
-  'ai-sdk-ollama': '^4.3.0'
+  '@ai-sdk/anthropic': ^4.0.71
+  '@ai-sdk/google': ^4.0.87
+  '@ai-sdk/openai': ^4.0.83
+  '@ai-sdk/openai-compatible': ^3.0.62
+  '@ai-sdk/togetherai': ^3.0.63
+  '@vitest/coverage-v8': ^5.0.3
+  '@vitest/expect': ^5.0.3
+  'ai': ^7.0.127
+  'ai-sdk-ollama': ^4.4.0
   'es-toolkit': '^1.52.0'
   'tsup': '^8.5.1'
   'tsx': '^4.21.0'
-  'vitest': '^5.0.1'
+  'vitest': ^5.0.3
   'zod': '^4.6.5'
 
 overrides:
   minimatch: '^10.2.4'
   rollup: '^4.59.0'
-  'brace-expansion@>=4.0.0 <5.0.5': '>=5.0.5'
   'picomatch@>=4.0.0 <4.0.4': '>=4.0.4'
   'lodash-es@>=4.0.0 <=4.17.23': '>=4.18.0'
   'lodash@>=4.0.0 <=4.17.23': '>=4.18.0'
@@ -32,10 +31,8 @@ overrides:
   'postcss@<8.5.10': '>=8.5.10'
   esbuild@>=0.17.0 <0.28.1: ^0.28.1
   esbuild@>=0.27.3 <0.28.1: ^0.28.1
-  brace-expansion@<=5.0.7: ^5.0.8
-  brace-expansion@>=3.0.0 <5.0.7: ^5.0.7
+  brace-expansion@<5.0.12: ^5.0.12
   sharp@<0.35.0: ^0.35.0
-  brace-expansion@>=4.0.0 <5.0.9: ^5.0.9
   nanoid@<3.3.18: ^3.3.18
 
 allowBuilds:
@@ -44,5 +41,5 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - esbuild@0.28.1
-  - brace-expansion@5.0.7 || 5.0.8 || 5.0.9
+  - brace-expansion@5.0.12
   - sharp@0.35.0
