@@ -169,6 +169,7 @@ const prepare = async () => {
 const empty = (): ContentAttachmentResponse => ({
   assignments: [],
   unresolved: [],
+  ignoredPassages: [],
   ignoredSources: [],
 });
 const audit = (
@@ -388,6 +389,7 @@ describe('bounded content attachment', () => {
         },
       ],
       unresolved: [],
+      ignoredPassages: [],
       ignoredSources: p.units[1].sources
         .filter(
           (s) =>
@@ -426,6 +428,7 @@ describe('bounded content attachment', () => {
           reason: '対応不明',
         },
       ],
+      ignoredPassages: [],
       ignoredSources: [],
     });
     const before = structuredClone([p, a, b]);
@@ -524,7 +527,11 @@ describe('bounded content attachment', () => {
   });
   test('requires exact audit bindings, source coverage and non-conflicting ignore decisions', async () => {
     const p = await prepare();
-    const a = audit(p, 0, { ...empty(), ignoredSources: ignore(p, 0) });
+    const a = audit(p, 0, {
+      ...empty(),
+      ignoredPassages: [],
+      ignoredSources: ignore(p, 0),
+    });
     expect(assembleContentAttachment(p, [a, a]).issues[0].reason).toContain(
       'repeated',
     );
@@ -552,6 +559,7 @@ describe('bounded content attachment', () => {
         },
       ],
       unresolved: [],
+      ignoredPassages: [],
       ignoredSources: [...ignore(p, 0), { sourceId: 'outside', reason: 'x' }],
     });
     expect(assembleContentAttachment(p, [conflict]).issues).toHaveLength(2);
@@ -663,6 +671,7 @@ describe('bounded content attachment', () => {
           },
         ],
         unresolved: [],
+        ignoredPassages: [],
         ignoredSources: p.units[1].sources
           .slice(1)
           .map((_, i) => ({ sourceId: `S${i + 2}`, reason: '対象外' })),
@@ -707,7 +716,11 @@ describe('bounded content attachment', () => {
     invalid.response.assignments[0].fragments[0].sourceId =
       p.units[1].sources[0].sourceId;
     expect(assembleContentAttachment(p, [invalid]).contents).toEqual([]);
-    const legacy = audit(p, 0, { ...empty(), ignoredSources: ignore(p, 0) });
+    const legacy = audit(p, 0, {
+      ...empty(),
+      ignoredPassages: [],
+      ignoredSources: ignore(p, 0),
+    });
     expect(
       assembleContentAttachment(p, [legacy, raw]).completedUnitIds,
     ).toHaveLength(2);
@@ -731,6 +744,7 @@ describe('bounded content attachment', () => {
         },
       ],
       unresolved: [],
+      ignoredPassages: [],
       ignoredSources: unit.sources
         .slice(1)
         .map((_, i) => ({ sourceId: `S${i + 2}`, reason: '対象外' })),
@@ -762,7 +776,7 @@ describe('bounded content attachment', () => {
       unit,
       'content-attachment.v2',
     );
-    expect(current.promptVersion).toBe('content-attachment.v5');
+    expect(current.promptVersion).toBe('content-attachment.v6');
     expect(current.systemPrompt).toContain('exactly ONE original sentence');
     expect(current.systemPrompt).toContain(
       'include ALL those candidateRefs in the SAME item',
@@ -801,6 +815,7 @@ describe('bounded content attachment', () => {
         reason: '原文の一部',
       })),
       unresolved: [],
+      ignoredPassages: [],
       ignoredSources: unit.sources
         .slice(1)
         .map((_, i) => ({ sourceId: `S${i + 2}`, reason: '対象外' })),
@@ -861,6 +876,7 @@ describe('bounded content attachment', () => {
         },
       ],
       unresolved: [],
+      ignoredPassages: [],
       ignoredSources: [{ sourceId: 'S2', reason: '分類見出し' }],
     };
     const raw: ContentAttachmentAudit = {
@@ -890,10 +906,206 @@ describe('bounded content attachment', () => {
     expect(raw.systemPrompt).toContain('ALREADY REGISTERED');
     expect(assembleContentAttachment(p, [{ ...raw, ...v4 }])).toEqual(result);
   });
+  test('reports an omitted middle sentence and exact uncovered ranges without altering raw decisions or historical v5 replay', async () => {
+    const p = await prepare(),
+      unit = p.units[0];
+    unit.sources[0].resource.data.text = '形態。 方向を推定する。 規模。';
+    const response: ContentAttachmentResponse = {
+      ...empty(),
+      assignments: ['形態。', '規模。'].map((quote) => ({
+        candidateRefs: ['R1'],
+        fragments: [{ sourceId: 'S1', quote }],
+        reason: '原文',
+      })),
+    };
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      response,
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+    };
+    const before = structuredClone([p, raw]);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([
+      {
+        unitId: unit.unitId,
+        reason:
+          'Unaccounted text: path:/chapters/0/textBlocks/0 [3, 13) " 方向を推定する。 "',
+      },
+    ]);
+    expect(result.completedUnitIds).toEqual([]);
+    expect(result.contents[0].excerpts.map((e) => e.fragments)).toEqual([
+      ['形態。'],
+      ['規模。'],
+    ]);
+    expect([p, raw]).toEqual(before);
+    const historical = {
+      ...structuredClone(raw),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v5'),
+    };
+    delete historical.response.ignoredPassages;
+    expect(assembleContentAttachment(p, [historical]).issues).toEqual([]);
+    expect(historical.systemPrompt).not.toContain(
+      'EXHAUSTIVE PASSAGE ACCOUNTING',
+    );
+    expect(raw.systemPrompt).toContain(
+      'including direction, orientation, uncertainty and interpretation',
+    );
+    expect(raw.systemPrompt).toContain('founded on or constructed on');
+    expect(raw.systemPrompt).toContain('a layer number need not occur');
+    expect(raw.userPrompt).toBe(historical.userPrompt);
+  });
+  test('accounts for shared foundations, unresolved identity, partial exclusions and whitespace while retaining exact evidence', async () => {
+    const p = await prepare(),
+      unit = p.units[0];
+    unit.sources[0].resource.data.text =
+      '井戸は岩盤に築く。\n\t対象不明。 比較対象。\n';
+    const response: ContentAttachmentResponse = {
+      assignments: [
+        {
+          candidateRefs: ['R1', 'R2'],
+          fragments: [{ sourceId: 'S1', quote: '井戸は岩盤に築く。' }],
+          reason: '造営基盤を共有',
+        },
+      ],
+      unresolved: [
+        {
+          candidateRefs: [],
+          fragments: [{ sourceId: 'S1', quote: '対象不明。' }],
+          reason: '同一性不明',
+        },
+      ],
+      ignoredPassages: [
+        {
+          fragments: [{ sourceId: 'S1', quote: '比較対象。' }],
+          reason: '比較例',
+        },
+      ],
+      ignoredSources: [],
+    };
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      response,
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+    };
+    const before = structuredClone([p, raw]);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.completedUnitIds).toEqual([unit.unitId]);
+    expect(result.contents.map((c) => c.excerpts[0].fragments)).toEqual([
+      ['井戸は岩盤に築く。'],
+      ['井戸は岩盤に築く。'],
+    ]);
+    expect(result.ignoredPassages[0]).toMatchObject({
+      unitId: unit.unitId,
+      reason: '比較例',
+      evidence: [
+        { quote: '比較対象。', charStart: 17, charEnd: 22, pdfPageNo: 2 },
+      ],
+    });
+    expect(result.reviewStatus).toBe('not_reviewed');
+    expect([p, raw]).toEqual(before);
+    const overlap = structuredClone(raw);
+    overlap.response.ignoredPassages![0].fragments[0].quote = '対象不明。';
+    expect(
+      assembleContentAttachment(p, [overlap]).issues.some((i) =>
+        i.reason.includes('overlaps'),
+      ),
+    ).toBe(true);
+    const invalid = structuredClone(raw);
+    invalid.response.ignoredPassages![0].fragments[0].quote = '修正文';
+    expect(
+      assembleContentAttachment(p, [invalid]).issues.some((i) =>
+        i.reason.includes('Ignored passage does not match'),
+      ),
+    ).toBe(true);
+    const conflict = structuredClone(raw);
+    conflict.response.ignoredSources.push({
+      sourceId: 'S1',
+      reason: '全体除外',
+    });
+    expect(
+      assembleContentAttachment(p, [conflict]).issues.some((i) =>
+        i.reason.includes('also used'),
+      ),
+    ).toBe(true);
+    const repeated = structuredClone(raw);
+    repeated.response.ignoredPassages!.push(
+      repeated.response.ignoredPassages![0],
+    );
+    expect(
+      assembleContentAttachment(p, [repeated]).issues.some((i) =>
+        i.reason.includes('overlaps'),
+      ),
+    ).toBe(true);
+  });
+  test('detects uncovered leading and trailing text, table-cell substrings and punctuation without sentence guessing', async () => {
+    const p = await prepare(),
+      unit = p.units[0];
+    unit.sources[0].resource.data.text = '前。中央。後。';
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      response: {
+        ...empty(),
+        assignments: [
+          {
+            candidateRefs: ['R1'],
+            fragments: [{ sourceId: 'S1', quote: '中央' }],
+            reason: '原文',
+          },
+        ],
+      },
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+    };
+    expect(
+      assembleContentAttachment(p, [raw]).issues.map((i) => i.reason),
+    ).toEqual([
+      'Unaccounted text: path:/chapters/0/textBlocks/0 [0, 2) "前。"',
+      'Unaccounted text: path:/chapters/0/textBlocks/0 [4, 7) "。後。"',
+    ]);
+    const tableUnit = p.units[1];
+    const cellIndex = tableUnit.sources.findIndex(
+      (s) => s.resource.kind === 'tableCell' && s.resource.data.text === '20',
+    );
+    const cellRef = `S${cellIndex + 1}`;
+    const tableAudit: ContentAttachmentAudit = {
+      unitId: tableUnit.unitId,
+      ...createContentAttachmentRequest(p, tableUnit),
+      response: {
+        ...empty(),
+        assignments: [
+          {
+            candidateRefs: ['R1'],
+            fragments: [{ sourceId: cellRef, quote: '2' }],
+            reason: '原文',
+          },
+        ],
+        ignoredSources: tableUnit.sources.flatMap((_, i) =>
+          i === cellIndex ? [] : [{ sourceId: `S${i + 1}`, reason: '対象外' }],
+        ),
+      },
+      usage,
+      codeMap: createContentAttachmentInput(p, tableUnit).codeMap,
+    };
+    expect(
+      assembleContentAttachment(p, [tableAudit]).issues[0].reason,
+    ).toContain('[1, 2) "0"');
+    const missingField = structuredClone(raw);
+    delete missingField.response.ignoredPassages;
+    expect(assembleContentAttachment(p, [missingField]).issues[0].reason).toBe(
+      'Invalid attachment response schema',
+    );
+  });
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
     const response = {
       ...empty(),
+      ignoredPassages: [],
       ignoredSources: [{ sourceId: 'S1', reason: '対象外' }],
     };
     vi.mocked(LLMCaller.call).mockResolvedValue({
@@ -909,6 +1121,11 @@ describe('bounded content attachment', () => {
     expect(out.response).toEqual(response);
     const call = vi.mocked(LLMCaller.call).mock.calls[0][0];
     expect(call.schema.safeParse(response).success).toBe(true);
+    const withoutPartialExclusions = {
+      ...response,
+    } as ContentAttachmentResponse;
+    delete withoutPartialExclusions.ignoredPassages;
+    expect(call.schema.safeParse(withoutPartialExclusions).success).toBe(false);
     expect(
       call.schema.safeParse({
         ...response,
