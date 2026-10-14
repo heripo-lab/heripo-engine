@@ -79,8 +79,11 @@ export type {
   ContentAttachmentPlan,
   ContentAttachmentAudit,
   ContentAttachmentResponse,
+  ContentAttachmentSelectionResponse,
+  ContentAttachmentSelectionAudit,
   ContentAttachmentResult,
   AttachmentUnit,
 } from './content-attachment';
 
 export { createContentAttachmentInput } from './content-attachment-input';
+export { createContentAttachmentSelectionInput } from './content-attachment-excerpts';

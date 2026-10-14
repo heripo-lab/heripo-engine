@@ -2,6 +2,7 @@ import type {
   ContentAttachmentAudit,
   ContentAttachmentPlan,
   ContentAttachmentResult,
+  ContentAttachmentSelectionAudit,
 } from '@heripo/ledger-extractor';
 
 import {
@@ -10,8 +11,8 @@ import {
   assembleContentAttachment,
   attachContentUnit,
   buildDocumentResourceIndex,
-  createContentAttachmentInput,
   createContentAttachmentRequest,
+  createContentAttachmentSelectionInput,
   prepareContentAttachment,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
@@ -48,7 +49,9 @@ export interface ContentAttachmentRun {
   firstRequest: ReturnType<typeof createContentAttachmentRequest> | null;
   settings: { modelId: string; maxRetries: number; maxUnitChars: number };
   result: ContentAttachmentResult;
-  modelResponse?: ContentAttachmentAudit['response'];
+  modelResponse?:
+    | ContentAttachmentAudit['response']
+    | ContentAttachmentSelectionAudit['response'];
   modelUsage?: ContentAttachmentAudit['usage'];
   error: string | null;
   fullSweepExecuted: false;
@@ -166,7 +169,7 @@ export async function prepareContentAttachmentRun(
     writeFileSync(
       join(dir, 'first-unit-code-map.json'),
       JSON.stringify(
-        createContentAttachmentInput(plan, firstUnit).codeMap,
+        createContentAttachmentSelectionInput(plan, firstUnit).codeMap,
         null,
         2,
       ),
@@ -219,7 +222,9 @@ export function startFirstContentAttachment(
     throw new Error('First-unit request changed');
   if (
     JSON.stringify(read(join(dir, 'first-unit-code-map.json'))) !==
-    JSON.stringify(createContentAttachmentInput(plan, plan.units[0]).codeMap)
+    JSON.stringify(
+      createContentAttachmentSelectionInput(plan, plan.units[0]).codeMap,
+    )
   )
     throw new Error('First-unit code map changed');
   const model = createModel(run.settings.modelId);
@@ -228,11 +233,10 @@ export function startFirstContentAttachment(
   save(taskId, run);
   void (async () => {
     try {
-      const audit: ContentAttachmentAudit = await attachContentUnit(
-        plan,
-        plan.units[0],
-        { model, maxRetries: run.settings.maxRetries },
-      );
+      const audit = await attachContentUnit(plan, plan.units[0], {
+        model,
+        maxRetries: run.settings.maxRetries,
+      });
       writeFileSync(
         join(dir, 'first-unit-audit.json'),
         JSON.stringify(audit, null, 2),
