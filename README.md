@@ -527,3 +527,5 @@ Investigation candidate discovery now includes a separate whole-pool LLM duplica
 Failed investigation-discovery units can be retried selectively while preserving successful original responses, followed by a new whole-pool duplicate review.
 
 Candidate discovery preserves merged table headers and chapter continuation sources, checks table identifiers against their explicitly selected original cells, and supports retrying explicitly reviewed omissions alongside validation failures while retaining all other audits.
+
+Whole-pool layer deduplication can connect unnumbered local occurrences to report-defined layers through the supplied overall definition, location, material and stratigraphic context, preserving original candidate wording and identifiers.
