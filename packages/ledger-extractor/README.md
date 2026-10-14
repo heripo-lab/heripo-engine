@@ -99,6 +99,26 @@ Validates an unknown value and returns a typed `ProcessedDocument`. Throws `Proc
 
 Returns aggregated counts (`chapters`, `textBlocks`, `images`, `tables`, `tableCells`, `footnotes`) and samples (`chapterTitles`, `textBlocks`, `images`, `tables`).
 
+## S0: Whole-document resource index
+
+`buildDocumentResourceIndex(document)` indexes every chapter, text block, image, table, actual grid cell and footnote without LLM calls or I/O. `queryDocumentResources(index, query)` combines optional kind, direct chapter, exact resource ID, exact source reference, PDF page, signed logical page and literal substring filters with AND.
+
+```typescript
+import {
+  buildDocumentResourceIndex,
+  queryDocumentResources,
+} from '@heripo/ledger-extractor';
+
+const index = buildDocumentResourceIndex(document);
+const matches = queryDocumentResources(index, { text: '우물' });
+const page = queryDocumentResources(index, { pdfPageNo: 122 });
+const source = queryDocumentResources(index, { sourceRef: '#/texts/5616' });
+```
+
+The index preserves source strings and direct chapter assignments, including unassigned media and multiple assignments. Caption references resolve to their image or table. Cell references use the parent table reference and zero-based indexes into the actual grid; merged shadows are not expanded. Missing IDs/references/page mappings remain missing. Chapter PDF pages are not inferred from their logical start pages. Resources retain storage traversal order, not a reconstructed PDF reading order. The JSON pointer `key` locates an occurrence in this exact input snapshot; it is not a cross-version ledger ID. Keep the input file hash alongside exported indexes.
+
+S0 provides source lookup only. It does not classify investigation scope or register archaeological objects. `LedgerExtractor.extract()` retains its existing bounded preview response.
+
 ## License
 
 Apache-2.0 — see [LICENSE](../../LICENSE).

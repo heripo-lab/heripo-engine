@@ -26,6 +26,7 @@ import {
   CardTitle,
 } from '~/components/ui/card';
 
+import { DocumentResourceInspector } from './document-resource-inspector';
 import { LedgerPreviewImage } from './ledger-preview-image';
 
 interface MetricCardProps {
@@ -89,7 +90,7 @@ export function LedgerValidationContent({
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
-              Preprocessed Document Validation
+              S0 · 전체 문서 자원 확인
             </h1>
             <p className="text-muted-foreground mt-1">
               {task.originalFilename} · reportId:{' '}
@@ -99,9 +100,9 @@ export function LedgerValidationContent({
               </span>
             </p>
             <p className="text-muted-foreground mt-1 text-sm">
-              Temporary view to confirm the uploaded processed-document.json was
-              delivered intact. The ledger extraction result page is still being
-              designed.
+              전처리 데이터 전체를 색인하고 출처를 확인하는 단계입니다. 다음
+              단계의 조사 범위 판정과 원장 객체 후보 등록은 아직 실행하지
+              않습니다.
             </p>
           </div>
           <Button variant="outline" onClick={handleExportJson}>
@@ -144,143 +145,153 @@ export function LedgerValidationContent({
           />
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Sample chapter titles */}
+        <DocumentResourceInspector taskId={task.id} />
+
+        <details className="space-y-6">
+          <summary className="cursor-pointer text-sm">
+            기존 요약 샘플과 미리보기 JSON
+          </summary>
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Sample chapter titles */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Sample Chapter Titles</CardTitle>
+                <CardDescription>
+                  First chapters in depth-first order
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {samples.chapterTitles.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">No chapters</p>
+                ) : (
+                  <ol className="list-decimal space-y-1 pl-5 text-sm">
+                    {samples.chapterTitles.map((title, index) => (
+                      <li key={`${index}-${title}`}>{title}</li>
+                    ))}
+                  </ol>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Sample text blocks */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Sample Text Blocks</CardTitle>
+                <CardDescription>
+                  Truncated excerpts with chapter and page references
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {samples.textBlocks.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    No text blocks
+                  </p>
+                ) : (
+                  <ul className="space-y-3 text-sm">
+                    {samples.textBlocks.map((block, index) => (
+                      <li
+                        key={`${block.chapterId}-${index}`}
+                        className="rounded-md border p-3"
+                      >
+                        <p>{block.text}</p>
+                        <p className="text-muted-foreground mt-1 text-xs">
+                          chapter: {block.chapterId} · PDF page{' '}
+                          {block.pdfPageNo}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Sample images */}
           <Card>
             <CardHeader>
-              <CardTitle>Sample Chapter Titles</CardTitle>
+              <CardTitle>Sample Images</CardTitle>
               <CardDescription>
-                First chapters in depth-first order
+                Image URLs are consumed as-is from ProcessedImage.path (public
+                CDN URLs)
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {samples.chapterTitles.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No chapters</p>
+              {samples.images.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No images</p>
               ) : (
-                <ol className="list-decimal space-y-1 pl-5 text-sm">
-                  {samples.chapterTitles.map((title, index) => (
-                    <li key={`${index}-${title}`}>{title}</li>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {samples.images.map((image) => (
+                    <LedgerPreviewImage
+                      key={image.id}
+                      id={image.id}
+                      pdfPageNo={image.pdfPageNo}
+                      url={image.url}
+                    />
                   ))}
-                </ol>
+                </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Sample text blocks */}
+          {/* Sample tables */}
           <Card>
             <CardHeader>
-              <CardTitle>Sample Text Blocks</CardTitle>
-              <CardDescription>
-                Truncated excerpts with chapter and page references
-              </CardDescription>
+              <CardTitle>Sample Tables</CardTitle>
+              <CardDescription>Caption and grid dimensions</CardDescription>
             </CardHeader>
             <CardContent>
-              {samples.textBlocks.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No text blocks</p>
+              {samples.tables.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No tables</p>
               ) : (
-                <ul className="space-y-3 text-sm">
-                  {samples.textBlocks.map((block, index) => (
+                <ul className="space-y-2 text-sm">
+                  {samples.tables.map((table) => (
                     <li
-                      key={`${block.chapterId}-${index}`}
-                      className="rounded-md border p-3"
+                      key={table.id}
+                      className="flex flex-col gap-1 rounded-md border p-3 md:flex-row md:items-center md:justify-between"
                     >
-                      <p>{block.text}</p>
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        chapter: {block.chapterId} · PDF page {block.pdfPageNo}
-                      </p>
+                      <span>
+                        <span className="font-medium">{table.id}</span>{' '}
+                        <span className="text-muted-foreground">
+                          {table.caption ?? 'No caption'}
+                        </span>
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {table.numRows} rows × {table.numCols} cols · PDF page{' '}
+                        {table.pdfPageNo}
+                      </span>
                     </li>
                   ))}
                 </ul>
               )}
             </CardContent>
           </Card>
-        </div>
 
-        {/* Sample images */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Sample Images</CardTitle>
-            <CardDescription>
-              Image URLs are consumed as-is from ProcessedImage.path (public CDN
-              URLs)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {samples.images.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No images</p>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {samples.images.map((image) => (
-                  <LedgerPreviewImage
-                    key={image.id}
-                    id={image.id}
-                    pdfPageNo={image.pdfPageNo}
-                    url={image.url}
-                  />
-                ))}
-              </div>
+          {/* Raw preview JSON (collapsible) */}
+          <Card>
+            <CardHeader>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 text-left"
+                onClick={() => setRawJsonExpanded((expanded) => !expanded)}
+              >
+                {rawJsonExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                <FileJson className="h-4 w-4" />
+                <CardTitle className="text-base">Raw Preview JSON</CardTitle>
+              </button>
+            </CardHeader>
+            {rawJsonExpanded && (
+              <CardContent>
+                <pre className="bg-muted/50 max-h-96 overflow-auto rounded-md p-4 text-xs">
+                  {JSON.stringify(result, null, 2)}
+                </pre>
+              </CardContent>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Sample tables */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Sample Tables</CardTitle>
-            <CardDescription>Caption and grid dimensions</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {samples.tables.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No tables</p>
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {samples.tables.map((table) => (
-                  <li
-                    key={table.id}
-                    className="flex flex-col gap-1 rounded-md border p-3 md:flex-row md:items-center md:justify-between"
-                  >
-                    <span>
-                      <span className="font-medium">{table.id}</span>{' '}
-                      <span className="text-muted-foreground">
-                        {table.caption ?? 'No caption'}
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      {table.numRows} rows × {table.numCols} cols · PDF page{' '}
-                      {table.pdfPageNo}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Raw preview JSON (collapsible) */}
-        <Card>
-          <CardHeader>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 text-left"
-              onClick={() => setRawJsonExpanded((expanded) => !expanded)}
-            >
-              {rawJsonExpanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-              <FileJson className="h-4 w-4" />
-              <CardTitle className="text-base">Raw Preview JSON</CardTitle>
-            </button>
-          </CardHeader>
-          {rawJsonExpanded && (
-            <CardContent>
-              <pre className="bg-muted/50 max-h-96 overflow-auto rounded-md p-4 text-xs">
-                {JSON.stringify(result, null, 2)}
-              </pre>
-            </CardContent>
-          )}
-        </Card>
+          </Card>
+        </details>
       </div>
     </div>
   );

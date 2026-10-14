@@ -53,6 +53,26 @@ const preview = await extractor.extract(document);
 - `ProcessedImage.path`에는 로컬 파일 경로나 B2 object key가 아니라 `heripo-web` export 스크립트가 생성한 **완전한 public CDN URL**이 들어와야 합니다. 이 URL은 그대로 소비되며, fetch·서명·변환하지 않습니다.
 - 입력 문서를 변경(mutate)하지 않습니다.
 
+## S0: 전체 문서 자원 색인
+
+`buildDocumentResourceIndex(document)`는 LLM 호출과 I/O 없이 장·텍스트·이미지·표·실제 grid 셀·각주 전체를 색인합니다. `queryDocumentResources(index, query)`는 종류, 직접 소속 장, 정확한 자원 ID, 정확한 sourceRef, PDF 페이지, 음수·0을 포함한 논리 페이지, 문자 그대로의 부분 문자열 필터를 AND로 조합합니다.
+
+```typescript
+import {
+  buildDocumentResourceIndex,
+  queryDocumentResources,
+} from '@heripo/ledger-extractor';
+
+const index = buildDocumentResourceIndex(document);
+const matches = queryDocumentResources(index, { text: '우물' });
+const page = queryDocumentResources(index, { pdfPageNo: 122 });
+const source = queryDocumentResources(index, { sourceRef: '#/texts/5616' });
+```
+
+원문과 직접 장 소속을 그대로 보존하며, 소속 없는 매체와 복수 소속도 유지합니다. 캡션 참조는 해당 이미지·표로 조회됩니다. 셀은 부모 표의 참조와 실제 grid 배열의 0부터 시작하는 좌표를 사용하며 병합 생략 칸을 복원하지 않습니다. ID·출처·페이지 매핑이 없으면 없는 상태를 유지하고 장의 논리 시작 페이지에서 PDF 페이지를 추정하지 않습니다. 목록은 PDF 읽기 순서를 복원한 결과가 아닌 입력 저장 순서입니다. `key`는 해당 입력 스냅샷 내부 위치를 가리키는 JSON pointer이며 버전 간 원장 ID가 아닙니다. 색인을 내보낼 때 입력 파일 해시를 함께 보관하세요.
+
+S0는 출처 조회 단계입니다. 조사 범위 판정과 고고학 객체 등록은 후속 단계이며 `LedgerExtractor.extract()`의 기존 제한된 미리보기 응답은 유지합니다.
+
 ## 라이선스
 
 Apache-2.0 — [LICENSE](../../LICENSE) 참고.
