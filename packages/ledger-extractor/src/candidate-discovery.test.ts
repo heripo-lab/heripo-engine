@@ -13,7 +13,9 @@ import { describe, expect, test, vi } from 'vitest';
 import {
   assembleCandidateDiscovery,
   createCandidateDiscoveryRequest,
+  createCandidateDiscoverySchema,
   discoverCandidateUnit,
+  getCandidateSources,
   prepareCandidateDiscovery,
 } from './candidate-discovery';
 import { buildDocumentResourceIndex } from './document-resource-index';
@@ -91,7 +93,9 @@ const proposal = (
   sourceIdentifier: '1호',
   eligibilityBasis: 'independent_body',
   reason: '독립 설명',
-  evidence: [{ resourceKey: unit.resources[0].key, quote: '1호 우물' }],
+  evidence: [
+    { sourceId: getCandidateSources(unit)[0].sourceId, quote: '1호 우물' },
+  ],
 });
 const audit = (
   unit: CandidateDiscoveryUnit,
@@ -196,7 +200,9 @@ describe('candidate discovery', () => {
       model: {} as LanguageModel,
       maxRetries: 0,
     });
-    expect(result.userPrompt).toBe(JSON.stringify(unit));
+    expect(result.userPrompt).toBe(
+      createCandidateDiscoveryRequest(unit).userPrompt,
+    );
     expect(result.response).toEqual(response);
     expect(result.systemPrompt).toContain('THIS investigation');
     expect(LLMCaller.call).toHaveBeenCalledWith(
@@ -218,7 +224,12 @@ describe('candidate discovery', () => {
     const unit = plan.units[0];
     const response = {
       candidates: [proposal(unit)],
-      exclusions: [{ resourceKey: unit.resources[1].key, reason: '대상 제외' }],
+      exclusions: [
+        {
+          sourceId: getCandidateSources(unit)[1].sourceId,
+          reason: '대상 제외',
+        },
+      ],
     };
     const first = await assembleCandidateDiscovery(plan, [
       audit(unit, response),
@@ -254,7 +265,10 @@ describe('candidate discovery', () => {
       ...proposal(unit),
       sourceIdentifier: null,
       evidence: [
-        { resourceKey: unit.resources[1].key, quote: '우물의 독립 본문이다.' },
+        {
+          sourceId: getCandidateSources(unit)[1].sourceId,
+          quote: '우물의 독립 본문이다.',
+        },
       ],
     };
     expect(
@@ -270,10 +284,15 @@ describe('candidate discovery', () => {
     const unit = plan.units[0];
     const p = proposal(unit);
     const invalids = [
-      { ...p, evidence: [{ resourceKey: 'outside', quote: '1호 우물' }] },
+      { ...p, evidence: [{ sourceId: 'outside', quote: '1호 우물' }] },
       {
         ...p,
-        evidence: [{ resourceKey: unit.resources[0].key, quote: '다른 원문' }],
+        evidence: [
+          {
+            sourceId: getCandidateSources(unit)[0].sourceId,
+            quote: '다른 원문',
+          },
+        ],
       },
       { ...p, sourceName: '추정 석축 우물' },
       { ...p, sourceIdentifier: '999' },
@@ -283,7 +302,7 @@ describe('candidate discovery', () => {
     const result = await assembleCandidateDiscovery(plan, [
       audit(unit, {
         candidates: invalids,
-        exclusions: [{ resourceKey: 'outside', reason: 'invalid' }],
+        exclusions: [{ sourceId: 'outside', reason: 'invalid' }],
       }),
     ]);
     expect(result.candidates).toEqual([]);
@@ -324,7 +343,9 @@ describe('candidate discovery', () => {
       sourceName: '2호',
       sourceIdentifier: '2호',
       eligibilityBasis: 'table_item' as const,
-      evidence: [{ resourceKey: tableUnit.resources[0].key, quote: '2호' }],
+      evidence: [
+        { sourceId: getCandidateSources(tableUnit)[0].sourceId, quote: '2호' },
+      ],
     };
     const ctxUnit = plan.units.at(-1)!;
     const contextCandidate = {
@@ -334,7 +355,10 @@ describe('candidate discovery', () => {
       recordKind: 'layer' as const,
       eligibilityBasis: 'explicit_context_unit' as const,
       evidence: [
-        { resourceKey: ctxUnit.resources[0].key, quote: '우물 상부 폐기층' },
+        {
+          sourceId: getCandidateSources(ctxUnit)[0].sourceId,
+          quote: '우물 상부 폐기층',
+        },
       ],
     };
     const result = await assembleCandidateDiscovery(plan, [
@@ -357,5 +381,122 @@ describe('candidate discovery', () => {
         ])
       ).issues[0].reason,
     ).toContain('no body input');
+  });
+  test('presents verbatim source text with unique selectors and constrains model choices to those selectors', () => {
+    const unit = prepare().units[0];
+    const before = structuredClone(unit);
+    const request = createCandidateDiscoveryRequest(unit);
+    const payload = JSON.parse(request.userPrompt);
+    expect(unit).toEqual(before);
+    expect(
+      payload.selectableSources.map(
+        (source: { sourceId: string; text: string }) => [
+          source.sourceId,
+          source.text,
+        ],
+      ),
+    ).toEqual([
+      ['id:a', '1호 우물'],
+      ['id:b', '우물의 독립 본문이다.'],
+    ]);
+    expect(payload.readOnlyContext).toEqual(
+      unit.context.map((block) => ({ text: block.text })),
+    );
+    const schema = createCandidateDiscoverySchema(unit);
+    expect(
+      schema.safeParse({ candidates: [proposal(unit)], exclusions: [] })
+        .success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({
+        candidates: [
+          {
+            ...proposal(unit),
+            evidence: [{ sourceId: 'id:not-in-unit', quote: '1호 우물' }],
+          },
+        ],
+        exclusions: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        candidates: [],
+        exclusions: [{ sourceId: 'path:context-only', reason: 'outside' }],
+      }).success,
+    ).toBe(false);
+    const duplicate = structuredClone(unit);
+    duplicate.resources[1].resourceId = duplicate.resources[0].resourceId;
+    expect(
+      getCandidateSources(duplicate).map((source) => source.sourceId),
+    ).toEqual(duplicate.resources.map((resource) => `path:${resource.key}`));
+    const tableUnit = prepare().units.find((u) => u.table)!;
+    const cell = JSON.parse(
+      createCandidateDiscoveryRequest(tableUnit).userPrompt,
+    ).selectableSources[0];
+    expect(cell.sourceId).toBe(`path:${tableUnit.resources[0].key}`);
+    expect(cell.tableCell).toMatchObject({
+      tableId: 't',
+      rowIndex: 0,
+      columnIndex: 0,
+      rowSpan: 1,
+      colSpan: 1,
+    });
+    expect(() =>
+      createCandidateDiscoverySchema({ ...unit, resources: [] }),
+    ).toThrow('no selectable sources');
+  });
+  test('rejects a quote paired with the adjacent heading and never relocates or rewrites the model response', async () => {
+    const doc = input();
+    doc.chapters[0].textBlocks = [
+      { id: 'txt-522', text: '29. 옹기 단경호', pdfPageNo: 124 },
+      {
+        id: 'txt-523',
+        sourceRef: '#/texts/2870',
+        text: '우물 상부 폐기층에서 출토된 옹기 단경호편이다.',
+        pdfPageNo: 124,
+      },
+    ];
+    const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+      scopeChapterId: 'root',
+      inputSha256: 'h',
+      maxTextChars: 1000,
+      tableRowsPerUnit: 1,
+    });
+    const unit = plan.units[0];
+    const layer: CandidateDiscoveryResponse['candidates'][number] = {
+      recordKind: 'layer',
+      sourceName: '우물 상부 폐기층',
+      sourceIdentifier: null,
+      eligibilityBasis: 'explicit_context_unit',
+      reason: '명시된 출토 맥락',
+      evidence: [
+        {
+          sourceId: 'id:txt-522',
+          quote: '우물 상부 폐기층에서 출토된 옹기 단경호편',
+        },
+      ],
+    };
+    const response = { candidates: [layer], exclusions: [] };
+    const saved = audit(unit, response);
+    const before = structuredClone(saved);
+    const rejected = await assembleCandidateDiscovery(plan, [saved]);
+    expect(rejected.candidates).toEqual([]);
+    expect(rejected.issues[0].reason).toContain('exact input quote');
+    expect(saved).toEqual(before);
+    const selected = {
+      ...layer,
+      evidence: [{ ...layer.evidence[0], sourceId: 'id:txt-523' }],
+    };
+    const accepted = await assembleCandidateDiscovery(plan, [
+      audit(unit, { candidates: [selected], exclusions: [] }),
+    ]);
+    expect(accepted.issues).toEqual([]);
+    expect(accepted.candidates[0].evidence[0]).toMatchObject({
+      sourceId: 'id:txt-523',
+      resourceId: 'txt-523',
+      resourceKey: unit.resources[1].key,
+      sourceRefs: ['#/texts/2870'],
+      quote: layer.evidence[0].quote,
+    });
   });
 });
