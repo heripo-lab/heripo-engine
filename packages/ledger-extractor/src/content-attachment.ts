@@ -22,7 +22,7 @@ import { createContentAttachmentDecisionInput } from './content-attachment-decis
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v15';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v16';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -273,10 +273,15 @@ const TABLE_RELATION_SYSTEM_PROMPT_V14 =
 TABLE RELATION REMARKS DESCRIBE BOTH PARTICIPANTS: Apply the all-target coverage rule to original table-cell phrases as well as body sentences. Identify the row owner from the original identifier cell, headers and chapter context. If a remark explicitly states that this object overlaps, adjoins, cuts or otherwise has a direct archaeological/spatial relationship with another identified registry candidate, assign the SAME unchanged remark E ref to BOTH the row owner and the explicitly named counterpart in ONE assignments item. For example, a remark 'overlaps Pit B' in Pit A's row describes BOTH existing pits; a reciprocal remark in Pit B's row is a separate original E ref and must be assessed separately. Do not restrict a relation remark to its row owner merely because it appears in that row. This shares explicit original evidence; it does not infer a new relation structure or create a candidate. Resolve the counterpart using its original identifier together with table/chapter/period evidence, not a number alone. If counterpart identity is uncertain, retain the confirmed row-owner assignment and use the SAME E ref for genuinely unresolved alternatives; do not guess or share with every same-number candidate.
 CELL-LOCAL SHARING BOUNDARY: Sharing a relation remark does NOT share the owner's number, shape, dimensions, material or other neighboring cells with the counterpart. Evaluate each fixed E ref independently; keep those ordinary property cells on the object they actually describe. Never propagate the entire row, merge reciprocal remarks, synthesize a sentence from cells, rewrite original text, infer attributes/parents/relations/media links, or spread sharing through related objects. A counterpart merely used as a comparison or reasoning premise still follows the existing direct-description boundary. Before returning, inspect every explicit relation remark for all identified participants and inspect adjacent shape/measurement cells for accidental propagation. Keep all existing findspot/foundation sharing, layer-identity uncertainty, heading preservation and mention-scoped non-registration rules unchanged.`;
 
-const SYSTEM_PROMPT =
+const TYPE_SUMMARY_SYSTEM_PROMPT_V15 =
   TABLE_RELATION_SYSTEM_PROMPT_V14 +
   `
 TYPE-LEVEL FINDS SUMMARIES DO NOT IDENTIFY INDIVIDUAL ARTIFACTS: A body or table remark listing finds by type, such as 'bowls, lids, etc.', describes the identified owning feature/layer's finds inventory. Preserve that unchanged E ref on that feature/layer. Do NOT additionally assign it to individually registered artifacts merely because their type names, chapter, period and findspot match the summary, even if the supplied registry has only one matching artifact of each type. Registry uniqueness does not prove that a type summary denotes those particular specimens or that the registry exhausts all finds. Require original evidence linking the summary to the individual object, such as an explicit artifact identifier, direct cross-reference/coreference, or another clear individual-identifying link; an identifier is not universally required. Keep an individually anchored artifact account, identified from its own heading/body context, distinct from a general type inventory: its explicit findspot still shares with the identified artifact and context under existing rules. The absence of an individual link in a type summary alone is not a reason to invent an unresolved item for those artifacts. Do not use 'etc.' to add other artifacts. This boundary also applies to the v14 table-sharing instructions: explicit object-to-object relation remarks with identified individual participants still share with both participants, while a type-level inventory does not establish individual participants. Keep reciprocal relation excerpts separate and preserve all existing ordinary-cell ownership, shape/measurement boundaries, heading, layer-identity and mention-scoped registration rules. Never correct source text, remove targets from a saved response, automatically reassign candidates, or create relation structures.`;
+
+const SYSTEM_PROMPT =
+  TYPE_SUMMARY_SYSTEM_PROMPT_V15 +
+  `
+LOCAL SETS AND SHIFTING SUBJECTS WITHIN ONE EXCERPT: Resolve expressions such as 'the remaining', 'the others', 'among them', '나머지' and '그중' against the nearest explicit bounded set established by the supplied original discourse. Respect local paragraph focus, narrowing and exclusions. Do not widen that set merely because an earlier table, section or the registry lists more objects. For example, an earlier table lists Buildings A-D, but the current paragraph discusses Buildings B-D; 'Building B is interpreted as a dwelling, while the remaining buildings are interpreted as storehouses.' directly describes B, C and D, not A. Select ALL resolved participants for the SAME unchanged E ref in ONE assignments item. Review every coordinated, contrasted or subsequent clause of each sentence for a change of subject, including subjects identified by references rather than repeated names. Do not stop after the first named subject. A later clause that directly describes the remaining objects' own function or state is not merely a supporting premise for the first object. Preserve all original uncertainty wording. Keeping one fixed sentence ID does not limit it to one target; do not split, shorten, combine or rewrite the excerpt to express clause-specific assignments. Sharing the full sentence does not assign every clause's property to every target, propagate neighboring sentences/cells or add objects outside the resolved local set. If the antecedent set or a participant genuinely cannot be resolved, retain confirmed targets and report only the plausible unresolved alternatives on the SAME E ref with the missing evidence; do not guess. A generic type inventory and matching registry entries alone do not establish a bounded set of individual artifacts; keep the existing type-summary boundary. Preserve existing table-cell ownership, explicit relation sharing, heading, layer-identity and mention-scoped registration rules. Return only the existing ID-selection schema; never repair source text or a saved response, infer attributes/relations or automatically reassign targets.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -507,7 +512,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v12'
     | 'content-attachment.v13'
     | 'content-attachment.v14'
-    | 'content-attachment.v15' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v15'
+    | 'content-attachment.v16' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -542,7 +548,9 @@ export function createContentAttachmentRequest(
                               ? REGISTRATION_SYSTEM_PROMPT_V13
                               : promptVersion === 'content-attachment.v14'
                                 ? TABLE_RELATION_SYSTEM_PROMPT_V14
-                                : SYSTEM_PROMPT,
+                                : promptVersion === 'content-attachment.v15'
+                                  ? TYPE_SUMMARY_SYSTEM_PROMPT_V15
+                                  : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -555,7 +563,8 @@ export function createContentAttachmentRequest(
           }
         : promptVersion === 'content-attachment.v13' ||
             promptVersion === 'content-attachment.v14' ||
-            promptVersion === 'content-attachment.v15'
+            promptVersion === 'content-attachment.v15' ||
+            promptVersion === 'content-attachment.v16'
           ? createContentAttachmentDecisionInput(plan, unit).payload
           : promptVersion === 'content-attachment.v9' ||
               promptVersion === 'content-attachment.v10' ||
@@ -644,6 +653,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v12' &&
       audit.promptVersion !== 'content-attachment.v13' &&
       audit.promptVersion !== 'content-attachment.v14' &&
+      audit.promptVersion !== 'content-attachment.v15' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -657,11 +667,13 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v12' ||
       audit.promptVersion === 'content-attachment.v13' ||
       audit.promptVersion === 'content-attachment.v14' ||
-      audit.promptVersion === 'content-attachment.v15';
+      audit.promptVersion === 'content-attachment.v15' ||
+      audit.promptVersion === 'content-attachment.v16';
     const selectionInput = selection
       ? audit.promptVersion === 'content-attachment.v13' ||
         audit.promptVersion === 'content-attachment.v14' ||
-        audit.promptVersion === 'content-attachment.v15'
+        audit.promptVersion === 'content-attachment.v15' ||
+        audit.promptVersion === 'content-attachment.v16'
         ? createContentAttachmentDecisionInput(plan, unit)
         : createContentAttachmentSelectionInput(plan, unit)
       : null;
@@ -705,6 +717,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v12' ||
       audit.promptVersion === 'content-attachment.v13' ||
       audit.promptVersion === 'content-attachment.v14' ||
+      audit.promptVersion === 'content-attachment.v15' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -926,7 +939,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v12' ||
           audit.promptVersion === 'content-attachment.v13' ||
           audit.promptVersion === 'content-attachment.v14' ||
-          audit.promptVersion === 'content-attachment.v15'
+          audit.promptVersion === 'content-attachment.v15' ||
+          audit.promptVersion === 'content-attachment.v16'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
