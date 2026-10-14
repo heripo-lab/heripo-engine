@@ -91,6 +91,7 @@ const proposal = (
 ): CandidateDiscoveryResponse['candidates'][number] => ({
   recordKind: 'feature',
   sourceName: '우물',
+  identifierSourceId: null,
   sourceIdentifier: '1호',
   eligibilityBasis: 'independent_body',
   reason: '독립 설명',
@@ -123,7 +124,7 @@ describe('candidate discovery', () => {
       1, 1, 1, 1, 1, 1,
     ]);
     expect(plan.units[1].context.map((c) => c.text)).toContain('1호 우물');
-    expect(plan.units[3].table?.headerRows).toEqual([['호수'], ['2호']]);
+    expect(plan.units[3].table?.headerRows).toEqual(doc.tables[0].grid);
     expect(plan.units[4].resources[0]).toMatchObject({
       kind: 'tableCell',
       rowIndex: 1,
@@ -342,6 +343,7 @@ describe('candidate discovery', () => {
     const tableCandidate = {
       ...p,
       sourceName: '2호',
+      identifierSourceId: getCandidateSources(tableUnit)[0].sourceId,
       sourceIdentifier: '2호',
       eligibilityBasis: 'table_item' as const,
       evidence: [
@@ -521,6 +523,7 @@ describe('discovery retries and preserved source fragments', () => {
     const badProposal = {
       ...proposal(tableUnit),
       sourceName: '우물 2호',
+      identifierSourceId: getCandidateSources(tableUnit)[0].sourceId,
       sourceIdentifier: '2호',
       eligibilityBasis: 'table_item' as const,
       evidence: [
@@ -631,5 +634,200 @@ describe('discovery retries and preserved source fragments', () => {
     expect(repaired.response.candidates[0].evidence[1].quote).toBe(
       '전체적으로 시유가 이루어졌다.',
     );
+  });
+});
+
+describe('original table identifiers and chapter continuations', () => {
+  test('retains merged header cells and rejects mismatched, missing and partial table identifiers without repairing responses', async () => {
+    const doc = input();
+    doc.tables[0].caption = { fullText: '수혈 속성표' };
+    doc.tables[0].grid = [
+      [
+        { text: '번호', rowSpan: 2, colSpan: 1, isHeader: true },
+        { text: '규모', rowSpan: 1, colSpan: 3, isHeader: true },
+      ],
+      [{ text: '길이', rowSpan: 1, colSpan: 1, isHeader: true }],
+      [
+        { text: '35', rowSpan: 1, colSpan: 1, isHeader: false },
+        { text: '46', rowSpan: 1, colSpan: 1, isHeader: false },
+        { text: '미상', rowSpan: 1, colSpan: 1, isHeader: false },
+      ],
+    ];
+    const before = structuredClone(doc);
+    const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+      scopeChapterId: 'root',
+      inputSha256: 'hash',
+      maxTextChars: 8000,
+      tableRowsPerUnit: 12,
+    });
+    const unit = plan.units.find((u) => u.table)!;
+    expect(
+      JSON.parse(createCandidateDiscoveryRequest(unit).userPrompt).table
+        .headerRows,
+    ).toEqual(doc.tables[0].grid.slice(0, 2));
+    const sources = getCandidateSources(unit);
+    const cell = sources.find((s) => s.resource.data.text === '35')!;
+    const last = sources.find((s) => s.resource.data.text === '46')!;
+    const named = sources.find((s) => s.resource.data.text === '미상')!;
+    const p = {
+      ...proposal(unit),
+      sourceName: '수혈',
+      sourceIdentifier: '35',
+      identifierSourceId: cell.sourceId,
+      eligibilityBasis: 'table_item' as const,
+      evidence: [{ sourceId: cell.sourceId, quote: '35' }],
+    };
+    const variants = [
+      p,
+      { ...p, sourceIdentifier: '3' },
+      { ...p, sourceIdentifier: null, identifierSourceId: null },
+      { ...p, identifierSourceId: 'outside' },
+      { ...p, identifierSourceId: sources[0].sourceId },
+      { ...p, identifierSourceId: last.sourceId },
+      {
+        ...p,
+        evidence: [{ sourceId: last.sourceId, quote: '46' }, ...p.evidence],
+      },
+      {
+        ...p,
+        evidence: [
+          { sourceId: cell.sourceId, quote: '3' },
+          { sourceId: cell.sourceId, quote: '35' },
+        ],
+      },
+      {
+        ...p,
+        identifierSourceId: null,
+        sourceIdentifier: null,
+        evidence: [{ sourceId: named.sourceId, quote: '미상' }],
+      },
+    ];
+    const raw = audit(unit, { candidates: variants, exclusions: [] });
+    const rawBefore = structuredClone(raw);
+    const result = await assembleCandidateDiscovery(plan, [raw]);
+    expect(result.candidates.map((c) => c.sourceIdentifier)).toEqual([
+      '35',
+      null,
+    ]);
+    expect(result.issues).toHaveLength(7);
+    expect(raw).toEqual(rawBefore);
+    expect(doc).toEqual(before);
+    expect(
+      createCandidateDiscoverySchema(unit).safeParse({
+        candidates: [{ ...p, identifierSourceId: 'outside' }],
+        exclusions: [],
+      }).success,
+    ).toBe(false);
+  });
+
+  test('keeps a sibling object description together through the next actual chapter title with original locations', () => {
+    const doc = input();
+    doc.chapters = [
+      chapter({
+        textBlocks: [],
+        tableIds: [],
+        children: [
+          chapter({
+            id: 'building',
+            originTitle: '1) 건물지',
+            textBlocks: [
+              { id: 'h', text: '(5) 4호 건물지', pdfPageNo: 121 },
+              {
+                id: 'b',
+                text: '4호 건물지는 위치와 조사 방법이 서술된다.',
+                pdfPageNo: 121,
+              },
+            ],
+          }),
+          chapter({
+            id: 'well',
+            originTitle: '2) 우물',
+            textBlocks: [
+              {
+                id: 'continuation',
+                sourceRef: '#/texts/2826',
+                text: '조사 결과 4호 건물지의 규모는 435cm이다.',
+                pdfPageNo: 122,
+              },
+              { id: 'well-heading', text: '2) 우물 (도면 80)', pdfPageNo: 122 },
+              {
+                id: 'well-body',
+                text: '우물은 조사대상지에 있다.',
+                pdfPageNo: 122,
+              },
+            ],
+          }),
+          chapter({
+            id: 'other',
+            originTitle: '3) 기타',
+            textBlocks: [{ text: '제목을 찾을 수 없는 본문', pdfPageNo: 123 }],
+          }),
+        ],
+      }),
+    ];
+    const before = structuredClone(doc);
+    const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+      scopeChapterId: 'root',
+      inputSha256: 'hash',
+      maxTextChars: 8000,
+      tableRowsPerUnit: 12,
+    });
+    expect(plan.units[0].resources.map((r) => r.resourceId)).toEqual([
+      'h',
+      'b',
+      'continuation',
+    ]);
+    expect(plan.units[0].resources[2]).toMatchObject({
+      key: '/chapters/0/children/1/textBlocks/0',
+      chapterIds: ['well'],
+      sourceRefs: ['#/texts/2826'],
+      pdfPageNo: 122,
+    });
+    expect(plan.units[1].resources.map((r) => r.resourceId)).toEqual([
+      'well-heading',
+      'well-body',
+    ]);
+    expect(plan.units[2].resources[0].data.text).toBe(
+      '제목을 찾을 수 없는 본문',
+    );
+    expect(doc).toEqual(before);
+  });
+
+  test('replaces only selected input units while preserving historical v5 audits and checking retry bindings', async () => {
+    const plan = prepare();
+    const audits = plan.units.map((u) => ({
+      ...audit(u, { candidates: [], exclusions: [] }),
+      ...createCandidateDiscoveryRequest(u, 'candidate-discovery.v5'),
+    }));
+    const updated = structuredClone(plan);
+    updated.units[0].context.push({ key: 'extra', text: '추가 원문 문맥' });
+    updated.units[1].context.push({ key: 'unselected', text: '보존 대상' });
+    const before = structuredClone(audits);
+    const retry = await prepareCandidateDiscoveryRetry(plan, audits, {
+      unitIds: [plan.units[0].unitId],
+      updatedPlan: updated,
+    });
+    expect(retry.plan.units[0]).toEqual(updated.units[0]);
+    expect(retry.plan.units[1]).toEqual(plan.units[1]);
+    expect(retry.retainedAudits).toEqual(audits.slice(1));
+    expect(audits).toEqual(before);
+    for (const options of [
+      { unitIds: ['missing'] },
+      {
+        unitIds: [plan.units[0].unitId],
+        updatedPlan: { ...updated, inputSha256: 'other' },
+      },
+      {
+        unitIds: [plan.units[0].unitId],
+        updatedPlan: { ...updated, scopeChapterId: 'other' },
+      },
+      {
+        unitIds: [plan.units[0].unitId],
+        updatedPlan: { ...updated, units: [] },
+      },
+    ])
+      await expect(
+        prepareCandidateDiscoveryRetry(plan, audits, options),
+      ).rejects.toThrow('matching original');
   });
 });

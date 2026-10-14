@@ -1,3 +1,4 @@
+import type { ProcessedTableCell } from '@heripo/model';
 import type { ExtendedTokenUsage } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
@@ -9,7 +10,7 @@ import type {
 import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';
 
-export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v5';
+export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v6';
 
 const kindSchema = z.enum([
   'site',
@@ -44,6 +45,7 @@ function responseSchema(sourceId: z.ZodType<string>) {
           .describe(
             'Exact object identifier copied from original evidence, separately from sourceName. Do not add missing suffixes or use a section ordinal.',
           ),
+        identifierSourceId: sourceId.nullable().optional(),
         eligibilityBasis: basisSchema,
         reason: z.string().min(1),
         evidence: z
@@ -74,7 +76,11 @@ export interface CandidateDiscoveryUnit {
   unitId: string;
   chapterId: string;
   chapterPath: Array<{ id: string; originTitle: string }>;
-  table: { id: string; caption: string | null; headerRows: string[][] } | null;
+  table: {
+    id: string;
+    caption: string | null;
+    headerRows: string[][] | ProcessedTableCell[][];
+  } | null;
   resources: InputResource[];
   /** Read-only adjacent context cannot anchor candidates in this unit. */
   context: Array<{ key: string; text: string }>;
@@ -170,6 +176,33 @@ export function prepareCandidateDiscovery(
     (r) => r.key === root.key || r.key.startsWith(`${root.key}/children/`),
   );
   const units: CandidateDiscoveryUnit[] = [];
+  const textByChapter = new Map(
+    scoped.map((chapter) => [
+      chapter.resourceId!,
+      index.resources.filter(
+        (r): r is Extract<DocumentResource, { kind: 'text' }> =>
+          r.kind === 'text' && r.chapterIds.includes(chapter.resourceId!),
+      ),
+    ]),
+  );
+  // Preserve original resources while assigning leading continuation blocks to the preceding sibling.
+  for (let i = 1; i < scoped.length; i++) {
+    const previous = scoped[i - 1];
+    const current = scoped[i];
+    if (
+      previous.key.slice(0, previous.key.lastIndexOf('/')) !==
+      current.key.slice(0, current.key.lastIndexOf('/'))
+    )
+      continue;
+    const texts = textByChapter.get(current.resourceId!)!;
+    const heading = texts.findIndex((r) =>
+      r.data.text.startsWith(current.data.originTitle),
+    );
+    if (heading > 0 && current.data.originTitle.length > 0) {
+      textByChapter.get(previous.resourceId!)!.push(...texts.slice(0, heading));
+      textByChapter.set(current.resourceId!, texts.slice(heading));
+    }
+  }
   for (const chapter of scoped) {
     const chapterId = chapter.resourceId!;
     const chapterPath = chapters
@@ -178,10 +211,7 @@ export function prepareCandidateDiscovery(
           r.key === chapter.key || chapter.key.startsWith(`${r.key}/children/`),
       )
       .map((r) => ({ id: r.resourceId!, originTitle: r.data.originTitle }));
-    const texts = index.resources.filter(
-      (r): r is Extract<DocumentResource, { kind: 'text' }> =>
-        r.kind === 'text' && r.chapterIds.includes(chapterId),
-    );
+    const texts = textByChapter.get(chapterId)!;
     let start = 0;
     while (start < texts.length) {
       let end = start;
@@ -237,9 +267,7 @@ export function prepareCandidateDiscovery(
           table: {
             id: table.resourceId!,
             caption: table.data.caption?.fullText ?? null,
-            headerRows: table.data.grid
-              .slice(0, 2)
-              .map((r) => r.map((c) => c.text)),
+            headerRows: table.data.grid.slice(0, 2),
           },
           resources: cells.filter(
             (c) =>
@@ -282,7 +310,7 @@ Rules:
 - Record significant exclusions (e.g. past campaigns or tempting passing mentions) with selectable sourceId values and reasons; do not list every non-object sentence.
 Do not correct source spellings or numbering; preserve original forms and explain uncertainties in reason.`;
 
-const SYSTEM_PROMPT = SYSTEM_PROMPT_V4.replace(
+const SYSTEM_PROMPT_V5 = SYSTEM_PROMPT_V4.replace(
   "- Use sourceName verbatim from a supplied title, resource or context. Copy sourceIdentifier exactly when present; do not turn a section ordinal like '2) 우물' into object number 2. For a table number cell, use the original number with an attested contextual object name; never invent a numbered name.",
   `- Keep sourceName and sourceIdentifier SEPARATE. sourceName is an unchanged, contiguous object-name phrase copied from ONE supplied title, resource or context; sourceIdentifier is the unchanged identifying number/code copied from its source. Exclude the object identifier and section ordinal from sourceName; select the unnumbered name substring already present in the source. Never build sourceName by combining the contextual object type with the identifier, even if that combined label sounds natural. Do not add a missing suffix such as 호 or No. Do not copy a section ordinal as the object identifier.
 - For example, if context says "6) 수혈" or a caption says "조선시대 수혈 속성표" and a table cell contains "1호", return sourceName "수혈" and sourceIdentifier "1호", with the cell's exact quote "1호". If the cell contains "11", use sourceName "수혈" and sourceIdentifier "11". Do NOT return sourceName "수혈 1호", "수혈 11", or an invented "11호". Likewise, for heading "83. 백자 접시편", copy sourceName "백자 접시편" and sourceIdentifier "83" separately. Every name must occur verbatim as a contiguous substring of one supplied source, title or context.`,
@@ -291,6 +319,14 @@ const SYSTEM_PROMPT = SYSTEM_PROMPT_V4.replace(
   `- Preserve block and page boundaries in evidence. A sentence or even a word can be split across sources. Return a separate sourceId/quote pair for EACH original block fragment; incomplete words and sentences are allowed and must stay incomplete. If block A ends with "전" and block B begins "체적으로 시유가 이루어졌다.", quote "전" from A and "체적으로 시유가 이루어졌다." from B separately. Never quote "전체적으로 시유가 이루어졌다." as belonging to B, concatenate fragments, restore missing characters, normalize whitespace or rewrite grammar. Context explains continuity but never changes a block's original text.
 - Before returning each evidence pair,`,
 );
+
+const SYSTEM_PROMPT =
+  SYSTEM_PROMPT_V5 +
+  `
+- Table headerRows retain the original cell objects, including rowSpan, colSpan and isHeader. Use these spans to understand repeated left/right column groups; do not treat compressed header-array indexes as physical body-column coordinates. Body rowIndex/columnIndex are original grid indexes.
+- For EVERY numbered table candidate, select identifierSourceId from the actual identifying number cell for THAT object. Copy its ENTIRE text exactly into sourceIdentifier and use that SAME sourceId and entire text as the FIRST evidence pair. Do not count, increment, interpolate, borrow another row's number or derive the identifier from rowIndex, columnIndex, or output order. If a row contains left number "11" and right number "35", the two identifiers are "11" and "35"; the next row's "12" does not identify the right-hand object. A visible number "46" is not an unnumbered item. Use null only when no identifier is present. For body candidates, identifierSourceId is null and the existing identifier-bearing evidence rule applies.
+- Chapter titles supplied as metadata do not always coincide with text ownership in preprocessing. Code transfers original leading continuation blocks before the next sibling's actual title to the preceding chapter's selectable sources. These blocks retain their original IDs, paths, page numbers and wording. Evaluate ALL selectable body blocks, including an object's opening description and continuation. A dedicated title plus its own location/investigation paragraph qualifies as independent_body even if more details continue later. Do not claim the body is absent when those selectable paragraphs exist. Never require the complete description to fit on one page.
+`;
 
 /** Bind selectors to exact input resources; duplicate or missing IDs use their input path. */
 export function getCandidateSources(unit: CandidateDiscoveryUnit) {
@@ -316,13 +352,23 @@ export function createCandidateDiscoverySchema(unit: CandidateDiscoveryUnit) {
   const ids = getCandidateSources(unit).map((source) => source.sourceId);
   if (ids.length === 0)
     throw new Error('Discovery unit has no selectable sources');
-  return responseSchema(
-    z
-      .enum(ids as [string, ...string[]])
-      .describe(
-        'Copy the sourceId paired with the exact source text in selectableSources.',
-      ),
-  );
+  const selector = z
+    .enum(ids as [string, ...string[]])
+    .describe(
+      'Copy the sourceId paired with the exact source text in selectableSources.',
+    );
+  const base = responseSchema(selector);
+  return base.extend({
+    candidates: base.shape.candidates.element
+      .extend({
+        identifierSourceId: selector
+          .nullable()
+          .describe(
+            'For a numbered table item, select its exact number cell sourceId. Copy that cell text unchanged into sourceIdentifier and the first evidence quote. Use null for body candidates or genuinely unnumbered table items.',
+          ),
+      })
+      .array(),
+  });
 }
 
 /** Build the exact model input independently of execution, preserving source strings. */
@@ -330,7 +376,8 @@ export function createCandidateDiscoveryRequest(
   unit: CandidateDiscoveryUnit,
   promptVersion:
     | typeof CANDIDATE_DISCOVERY_PROMPT_VERSION
-    | 'candidate-discovery.v4' = CANDIDATE_DISCOVERY_PROMPT_VERSION,
+    | 'candidate-discovery.v4'
+    | 'candidate-discovery.v5' = CANDIDATE_DISCOVERY_PROMPT_VERSION,
 ) {
   const selectableSources = getCandidateSources(unit).map(
     ({ sourceId, resource }) => ({
@@ -359,7 +406,9 @@ export function createCandidateDiscoveryRequest(
     systemPrompt:
       promptVersion === 'candidate-discovery.v4'
         ? SYSTEM_PROMPT_V4
-        : SYSTEM_PROMPT,
+        : promptVersion === 'candidate-discovery.v5'
+          ? SYSTEM_PROMPT_V5
+          : SYSTEM_PROMPT,
     userPrompt: JSON.stringify({
       unitId: unit.unitId,
       chapterId: unit.chapterId,
@@ -430,7 +479,9 @@ export async function assembleCandidateDiscovery(
       unit,
       audit.promptVersion === 'candidate-discovery.v4'
         ? 'candidate-discovery.v4'
-        : CANDIDATE_DISCOVERY_PROMPT_VERSION,
+        : audit.promptVersion === 'candidate-discovery.v5'
+          ? 'candidate-discovery.v5'
+          : CANDIDATE_DISCOVERY_PROMPT_VERSION,
     );
     if (
       audit.promptVersion !== expected.promptVersion ||
@@ -501,6 +552,16 @@ export async function assembleCandidateDiscovery(
         ...unit.chapterPath.map((c) => c.originTitle),
         unit.table?.caption ?? '',
       ];
+      const identifierCell = sources.find(
+        (source) => source.sourceId === proposal.identifierSourceId,
+      );
+      const firstCell = sources.find(
+        (source) => source.sourceId === proposal.evidence[0].sourceId,
+      )?.resource;
+      const strictTableIdentifier =
+        audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION &&
+        unit.table !== null &&
+        proposal.eligibilityBasis === 'table_item';
       let invalid = '';
       if (evidence.length !== proposal.evidence.length)
         invalid = 'Evidence does not match an exact input quote in this unit';
@@ -511,6 +572,20 @@ export async function assembleCandidateDiscovery(
         !evidence.some((e) => e.quote.includes(proposal.sourceIdentifier!))
       )
         invalid = 'Source identifier is not present in the quoted evidence';
+      else if (
+        strictTableIdentifier &&
+        (proposal.sourceIdentifier !== null ||
+          (firstCell?.kind === 'tableCell' &&
+            /^\d+(?:호)?$/u.test(firstCell.data.text))) &&
+        (!identifierCell ||
+          identifierCell.resource.kind !== 'tableCell' ||
+          identifierCell.resource.data.isHeader ||
+          proposal.sourceIdentifier !== identifierCell.resource.data.text ||
+          proposal.evidence[0].sourceId !== proposal.identifierSourceId ||
+          proposal.evidence[0].quote !== identifierCell.resource.data.text)
+      )
+        invalid =
+          'Table identifier must equal the selected original number cell and first evidence';
       else if (
         ['feature', 'artifact'].includes(proposal.recordKind) &&
         proposal.eligibilityBasis === 'explicit_context_unit'
@@ -582,21 +657,47 @@ export async function assembleCandidateDiscovery(
 export async function prepareCandidateDiscoveryRetry(
   plan: CandidateDiscoveryPlan,
   audits: CandidateDiscoveryAudit[],
+  options: { unitIds?: string[]; updatedPlan?: CandidateDiscoveryPlan } = {},
 ) {
   const previous = await assembleCandidateDiscovery(plan, audits);
   if (previous.completedUnitIds.length !== plan.units.length) {
     throw new Error('Retry requires a complete, replayable discovery snapshot');
   }
   const retryUnitIds = [
-    ...new Set(previous.issues.map((issue) => issue.unitId)),
+    ...new Set([
+      ...previous.issues.map((issue) => issue.unitId),
+      ...(options.unitIds ?? []),
+    ]),
   ];
   if (!retryUnitIds.length) throw new Error('No discovery issues to retry');
+  const updated = options.updatedPlan ?? plan;
+  if (
+    updated.inputSha256 !== plan.inputSha256 ||
+    updated.scopeChapterId !== plan.scopeChapterId ||
+    retryUnitIds.some(
+      (id) =>
+        !plan.units.some((u) => u.unitId === id) ||
+        !updated.units.some((u) => u.unitId === id),
+    )
+  )
+    throw new Error(
+      'Retry units require matching original input, scope and unit IDs',
+    );
+  const nextPlan = {
+    ...plan,
+    units: plan.units.map((unit) =>
+      retryUnitIds.includes(unit.unitId)
+        ? updated.units.find((u) => u.unitId === unit.unitId)!
+        : unit,
+    ),
+  };
   const retainedAudits = audits.filter(
     (audit) => !retryUnitIds.includes(audit.unitId),
   );
   return {
+    plan: nextPlan,
     retryUnitIds,
     retainedAudits,
-    result: await assembleCandidateDiscovery(plan, retainedAudits),
+    result: await assembleCandidateDiscovery(nextPlan, retainedAudits),
   };
 }

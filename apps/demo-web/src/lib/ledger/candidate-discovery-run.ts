@@ -30,6 +30,7 @@ export interface CandidateDiscoveryRunSettings {
   maxRetries: number;
   deduplicationOnly?: boolean;
   retryFailedUnits?: boolean;
+  retryUnitIds?: string[];
 }
 export interface CandidateDiscoveryRun {
   runId: string;
@@ -134,7 +135,7 @@ export async function startCandidateDiscovery(
     );
   }
   const sourceDirectory = reuse ? join(rootFor(taskId), existing!.runId) : null;
-  const plan = sourceDirectory
+  let plan = sourceDirectory
     ? (readJson(join(sourceDirectory, 'plan.json')) as typeof freshPlan)
     : freshPlan;
   const savedAudits: CandidateDiscoveryAudit[] = sourceDirectory
@@ -154,10 +155,16 @@ export async function startCandidateDiscovery(
     );
   }
   const retry = settings.retryFailedUnits
-    ? await prepareCandidateDiscoveryRetry(plan, savedAudits)
+    ? await prepareCandidateDiscoveryRetry(plan, savedAudits, {
+        unitIds: settings.retryUnitIds,
+        updatedPlan: freshPlan,
+      })
     : null;
   const retainedAudits = retry?.retainedAudits ?? savedAudits;
-  if (retry) initialResult = retry.result;
+  if (retry) {
+    plan = retry.plan;
+    initialResult = retry.result;
+  }
   const model = createModel(settings.modelId);
   const runId = randomUUID();
   const directory = join(rootFor(taskId), runId);
