@@ -480,3 +480,7 @@ PORT=3001 pnpm dev
 ---
 
 **heripo lab** | [GitHub](https://github.com/heripo-lab) | [heripo engine](https://github.com/heripo-lab/heripo-engine)
+
+후보 추출이 모두 끝나면 로컬 실행기가 LLM으로 전체 후보의 중복을 한 번에 검토합니다. 통합 제안 화면에서 통합 전후 개수, 합친 묶음, 모든 원래 후보의 원문·출처, 불확실한 동일성을 확인합니다. 원래 추출 후보도 별도로 확인할 수 있습니다. 실행 전 `deduplication-request.json`, 분할 검사 전 `deduplication-audit.json`을 저장하고 감사 기록 다운로드에 포함합니다. 분할 검사가 실패해도 추출 결과와 감사 기록은 보존됩니다.
+
+“이 추출본으로 중복만 다시 검토”로 후보 추출 없이 통합 단계만 재실행할 수 있습니다. 새 실행은 최초 추출 감사 파일을 바이트 그대로 복사하고, 재현 결과를 검증하고, `discoverySourceRunId`와 새 통합 감사 기록을 남깁니다. 이전 실행은 보존합니다.

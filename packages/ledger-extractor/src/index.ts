@@ -53,3 +53,16 @@ export type {
   LedgerExtractorLogger,
   LedgerExtractorOptions,
 } from './types';
+
+export {
+  createCandidateDeduplicationRequest,
+  deduplicateCandidates,
+  assembleCandidateDeduplication,
+  getCandidateGroupMembers,
+  CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
+} from './candidate-deduplication';
+export type {
+  CandidateDeduplicationAudit,
+  CandidateDeduplicationResult,
+  CandidateGroup,
+} from './candidate-deduplication';

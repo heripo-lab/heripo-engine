@@ -1,11 +1,15 @@
 import type {
+  CandidateDeduplicationResult,
   CandidateDiscoveryAudit,
   CandidateDiscoveryResult,
 } from '@heripo/ledger-extractor';
 
 import {
+  assembleCandidateDeduplication,
   assembleCandidateDiscovery,
   buildDocumentResourceIndex,
+  createCandidateDeduplicationRequest,
+  deduplicateCandidates,
   discoverCandidateUnit,
   prepareCandidateDiscovery,
 } from '@heripo/ledger-extractor';
@@ -23,10 +27,14 @@ export interface CandidateDiscoveryRunSettings {
   maxTextChars: number;
   tableRowsPerUnit: number;
   maxRetries: number;
+  deduplicationOnly?: boolean;
 }
 export interface CandidateDiscoveryRun {
   runId: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  stage?: 'discovery' | 'deduplication';
+  discoverySourceRunId?: string;
+  deduplication?: CandidateDeduplicationResult;
   createdAt: string;
   completedAt: string | null;
   settings: CandidateDiscoveryRunSettings;
@@ -74,7 +82,15 @@ export function getCandidateDiscoveryAudit(
     )
     .filter(existsSync)
     .map(readJson);
-  return { run, plan, audits };
+  const deduplicationPath = join(root, 'deduplication-audit.json');
+  return {
+    run,
+    plan,
+    audits,
+    deduplicationAudit: existsSync(deduplicationPath)
+      ? readJson(deduplicationPath)
+      : null,
+  };
 }
 
 export function cancelCandidateDiscovery(taskId: string): void {
@@ -93,10 +109,42 @@ export async function startCandidateDiscovery(
   const index = buildDocumentResourceIndex(
     parseLedgerInputText(raw.toString('utf8')),
   );
-  const plan = prepareCandidateDiscovery(index, {
+  const freshPlan = prepareCandidateDiscovery(index, {
     ...settings,
     inputSha256: createHash('sha256').update(raw).digest('hex'),
   });
+  const reuse = settings.deduplicationOnly === true;
+  if (
+    reuse &&
+    (!existing ||
+      existing.completedUnits !== existing.totalUnits ||
+      existing.result.inputSha256 !== freshPlan.inputSha256 ||
+      existing.result.scopeChapterId !== settings.scopeChapterId)
+  ) {
+    throw new Error(
+      'A complete discovery snapshot for the same input and scope is required',
+    );
+  }
+  const sourceDirectory = reuse ? join(rootFor(taskId), existing!.runId) : null;
+  const plan = sourceDirectory
+    ? (readJson(join(sourceDirectory, 'plan.json')) as typeof freshPlan)
+    : freshPlan;
+  const savedAudits: CandidateDiscoveryAudit[] = sourceDirectory
+    ? plan.units.map((_, i) =>
+        readJson(
+          join(sourceDirectory, `unit-${String(i).padStart(4, '0')}.json`),
+        ),
+      )
+    : [];
+  const initialResult = await assembleCandidateDiscovery(plan, savedAudits);
+  if (
+    reuse &&
+    JSON.stringify(initialResult) !== JSON.stringify(existing!.result)
+  ) {
+    throw new Error(
+      'Saved discovery audit no longer reproduces the original snapshot',
+    );
+  }
   const model = createModel(settings.modelId);
   const runId = randomUUID();
   const directory = join(rootFor(taskId), runId);
@@ -105,14 +153,30 @@ export async function startCandidateDiscovery(
   const run: CandidateDiscoveryRun = {
     runId,
     status: 'running',
+    stage: reuse ? 'deduplication' : 'discovery',
+    ...(reuse
+      ? {
+          discoverySourceRunId:
+            existing!.discoverySourceRunId ?? existing!.runId,
+        }
+      : {}),
     createdAt: new Date().toISOString(),
     completedAt: null,
     settings,
-    completedUnits: 0,
+    completedUnits: initialResult.completedUnitIds.length,
     totalUnits: plan.units.length,
     error: null,
-    result: await assembleCandidateDiscovery(plan, []),
+    result: initialResult,
   };
+  if (sourceDirectory) {
+    for (const [i] of plan.units.entries()) {
+      const name = `unit-${String(i).padStart(4, '0')}.json`;
+      writeFileSync(
+        join(directory, name),
+        readFileSync(join(sourceDirectory, name)),
+      );
+    }
+  }
   const controller = new AbortController();
   controllers.set(runId, controller);
   const save = () =>
@@ -123,10 +187,11 @@ export async function startCandidateDiscovery(
     JSON.stringify({ runId }),
   );
   void (async () => {
-    const audits: CandidateDiscoveryAudit[] = [];
+    const audits: CandidateDiscoveryAudit[] = [...savedAudits];
     try {
       for (const [i, unit] of plan.units.entries()) {
         controller.signal.throwIfAborted();
+        if (reuse) continue;
         const audit = await discoverCandidateUnit(unit, {
           model,
           maxRetries: settings.maxRetries,
@@ -141,12 +206,45 @@ export async function startCandidateDiscovery(
         run.completedUnits = run.result.completedUnitIds.length;
         save();
       }
+      run.stage = 'deduplication';
+      save();
+      controller.signal.throwIfAborted();
+      if (run.result.candidates.length) {
+        const request = createCandidateDeduplicationRequest(plan, run.result);
+        writeFileSync(
+          join(directory, 'deduplication-request.json'),
+          JSON.stringify(request, null, 2),
+        );
+        const audit = await deduplicateCandidates(plan, run.result, {
+          model,
+          maxRetries: settings.maxRetries,
+          abortSignal: controller.signal,
+        });
+        writeFileSync(
+          join(directory, 'deduplication-audit.json'),
+          JSON.stringify(audit, null, 2),
+        );
+        run.deduplication = assembleCandidateDeduplication(
+          plan,
+          run.result,
+          audit,
+        );
+        if (run.deduplication.issues.length)
+          throw new Error('Deduplication partition failed validation');
+      } else {
+        run.deduplication = {
+          version: 'ledger-candidate-groups.v1',
+          groups: [],
+          issues: [],
+          uncertainMatches: [],
+        };
+      }
       run.status = 'completed';
     } catch (error) {
       run.status = controller.signal.aborted ? 'cancelled' : 'failed';
       run.error = controller.signal.aborted
         ? 'Cancelled; saved results are retained.'
-        : 'Model execution failed; saved results are retained.';
+        : 'Model execution or validation failed; saved results are retained.';
       console.error('Ledger candidate discovery stopped:', error);
     } finally {
       run.completedAt = new Date().toISOString();

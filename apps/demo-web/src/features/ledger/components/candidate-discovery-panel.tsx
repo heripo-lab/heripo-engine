@@ -13,6 +13,7 @@ import {
 
 import { useCandidateDiscovery } from '../hooks/use-candidate-discovery';
 import { useDocumentResourceIndex } from '../hooks/use-document-resource-index';
+import { CandidateDeduplicationPanel } from './candidate-deduplication-panel';
 
 const KIND_LABELS: Record<string, string> = {
   site: '유적',
@@ -85,11 +86,12 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>다음 단계 · 조사내용에서 객체 후보 제안</CardTitle>
+        <CardTitle>조사내용 객체 후보 추출과 전체 중복 통합</CardTitle>
         <CardDescription>
           선택한 장과 하위 장의 본문·표를 검사합니다. 원문 인용을 확인한 후보만
-          목록에 담고, 모든 후보는 사람 검토 대기로 남깁니다. 부모·속성·매체
-          연결과 원장 등록은 다음 결정 사항입니다.
+          목록에 담은 뒤 LLM이 전체 후보를 검토해 중복을 묶습니다. 모든 후보는
+          사람 검토 대기로 남깁니다. 부모·속성·매체 연결과 원장 등록은 다음 결정
+          사항입니다.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -186,6 +188,21 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
           >
             {run ? '새 실행으로 후보 다시 추출' : '조사내용 후보 추출 실행'}
           </Button>
+          {run && run.completedUnits === run.totalUnits && !running && (
+            <Button
+              variant="outline"
+              disabled={start.isPending || !modelId}
+              onClick={() =>
+                start.mutate({
+                  ...run.settings,
+                  modelId,
+                  deduplicationOnly: true,
+                })
+              }
+            >
+              이 추출본으로 중복만 다시 검토
+            </Button>
+          )}
           {running && (
             <Button
               variant="outline"
@@ -220,9 +237,12 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
               aria-live="polite"
             >
               <p>
-                {STATUS_LABELS[run.status]} · {run.completedUnits}/
-                {run.totalUnits} 묶음 · 후보 {run.result.candidates.length}개 ·
-                자동 검사 문제 {run.result.issues.length}개
+                {running && run.stage === 'deduplication'
+                  ? '전체 후보 중복 통합 중'
+                  : STATUS_LABELS[run.status]}{' '}
+                · {run.completedUnits}/{run.totalUnits} 묶음 · 후보{' '}
+                {run.result.candidates.length}개 · 자동 검사 문제{' '}
+                {run.result.issues.length}개
               </p>
               <p>
                 {run.result.scopeTitle} ({run.result.scopeChapterId}) · 모델{' '}
@@ -230,6 +250,8 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
               </p>
               <p className="font-mono text-xs break-all">
                 실행 {run.runId} · 입력 {run.result.inputSha256}
+                {run.discoverySourceRunId &&
+                  ` · 최초 추출 실행 ${run.discoverySourceRunId}`}
               </p>
               <p className="text-muted-foreground text-xs">
                 검사 입력 {run.result.inspectedResourceCount}개. 묶음 처리가
@@ -238,138 +260,151 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
               </p>
               {run.error && <p role="alert">{run.error}</p>}
             </div>
-            <div className="flex flex-wrap gap-3">
-              <input
-                aria-label="객체 후보 검색"
-                className="bg-background rounded border p-2 text-sm"
-                value={filter}
-                onChange={(e) => {
-                  setFilter(e.target.value);
-                  setSelectedId('');
-                }}
-                placeholder="후보 이름 · 번호 · 장 검색"
+            {run.deduplication && (
+              <CandidateDeduplicationPanel
+                result={run.deduplication}
+                candidates={run.result.candidates}
+                index={indexData?.index}
               />
-              <select
-                aria-label="객체 후보 종류"
-                className="bg-background rounded border p-2 text-sm"
-                value={kind}
-                onChange={(e) => {
-                  setKind(e.target.value);
-                  setSelectedId('');
-                }}
-              >
-                <option value="">
-                  전체 종류 ({run.result.candidates.length})
-                </option>
-                {Object.entries(KIND_LABELS).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label} (
-                    {
-                      run.result.candidates.filter((c) => c.recordKind === k)
-                        .length
-                    }
-                    )
+            )}
+            <details open={!run.deduplication}>
+              <summary className="cursor-pointer text-sm">
+                통합 전 원래 후보 {run.result.candidates.length}개와 추출 검사
+                보기
+              </summary>
+              <div className="flex flex-wrap gap-3">
+                <input
+                  aria-label="객체 후보 검색"
+                  className="bg-background rounded border p-2 text-sm"
+                  value={filter}
+                  onChange={(e) => {
+                    setFilter(e.target.value);
+                    setSelectedId('');
+                  }}
+                  placeholder="후보 이름 · 번호 · 장 검색"
+                />
+                <select
+                  aria-label="객체 후보 종류"
+                  className="bg-background rounded border p-2 text-sm"
+                  value={kind}
+                  onChange={(e) => {
+                    setKind(e.target.value);
+                    setSelectedId('');
+                  }}
+                >
+                  <option value="">
+                    전체 종류 ({run.result.candidates.length})
                   </option>
-                ))}
-              </select>
-              <p className="self-center text-sm">
-                표시 {candidates.length}개 · 모두 미확정 후보
-              </p>
-            </div>
-            <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-              <div className="max-h-[680px] space-y-1 overflow-auto rounded border p-2">
-                {candidates.map((c) => (
-                  <button
-                    key={c.candidateId}
-                    type="button"
-                    aria-pressed={selected?.candidateId === c.candidateId}
-                    className={`w-full rounded border p-3 text-left text-sm ${selected?.candidateId === c.candidateId ? 'border-primary bg-muted' : 'hover:bg-muted/50 border-transparent'}`}
-                    onClick={() => setSelectedId(c.candidateId)}
-                  >
-                    <p className="font-medium">
-                      {KIND_LABELS[c.recordKind]} ·{' '}
-                      {c.sourceIdentifier ? `${c.sourceIdentifier} · ` : ''}
-                      {c.sourceName}
+                  {Object.entries(KIND_LABELS).map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label} (
+                      {
+                        run.result.candidates.filter((c) => c.recordKind === k)
+                          .length
+                      }
+                      )
+                    </option>
+                  ))}
+                </select>
+                <p className="self-center text-sm">
+                  표시 {candidates.length}개 · 모두 미확정 후보
+                </p>
+              </div>
+              <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                <div className="max-h-[680px] space-y-1 overflow-auto rounded border p-2">
+                  {candidates.map((c) => (
+                    <button
+                      key={c.candidateId}
+                      type="button"
+                      aria-pressed={selected?.candidateId === c.candidateId}
+                      className={`w-full rounded border p-3 text-left text-sm ${selected?.candidateId === c.candidateId ? 'border-primary bg-muted' : 'hover:bg-muted/50 border-transparent'}`}
+                      onClick={() => setSelectedId(c.candidateId)}
+                    >
+                      <p className="font-medium">
+                        {KIND_LABELS[c.recordKind]} ·{' '}
+                        {c.sourceIdentifier ? `${c.sourceIdentifier} · ` : ''}
+                        {c.sourceName}
+                      </p>
+                      <p className="text-muted-foreground mt-1 text-xs">
+                        {BASIS_LABELS[c.eligibilityBasis]} · {c.chapterId} · PDF{' '}
+                        {c.evidence[0].pdfPageNo}
+                      </p>
+                    </button>
+                  ))}
+                  {!candidates.length && (
+                    <p className="p-3 text-sm">아직 표시할 후보가 없습니다.</p>
+                  )}
+                </div>
+                {selected && (
+                  <div className="min-w-0 space-y-4 rounded border p-4 text-sm">
+                    <h3 className="font-semibold">
+                      {KIND_LABELS[selected.recordKind]} ·{' '}
+                      {selected.sourceIdentifier
+                        ? `${selected.sourceIdentifier} · `
+                        : ''}
+                      {selected.sourceName}
+                    </h3>
+                    <p>{selected.reason}</p>
+                    <p className="text-muted-foreground">
+                      등록 근거 제안: {BASIS_LABELS[selected.eligibilityBasis]}{' '}
+                      · 검토 대기
                     </p>
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      {BASIS_LABELS[c.eligibilityBasis]} · {c.chapterId} · PDF{' '}
-                      {c.evidence[0].pdfPageNo}
-                    </p>
-                  </button>
-                ))}
-                {!candidates.length && (
-                  <p className="p-3 text-sm">아직 표시할 후보가 없습니다.</p>
+                    {selected.evidence.map((e, i) => {
+                      const resource = indexData?.index.resources.find(
+                        (r) => r.key === e.resourceKey,
+                      );
+                      const range = e.logicalPageRange;
+                      return (
+                        <div
+                          key={`${e.resourceKey}-${i}`}
+                          className="space-y-2 border-t pt-3"
+                        >
+                          <p className="text-xs">
+                            {e.resourceId ?? e.resourceKey} · PDF {e.pdfPageNo}{' '}
+                            · 논리{' '}
+                            {range
+                              ? `${range.startPageNo}${range.endPageNo === range.startPageNo ? '' : `~${range.endPageNo}`}`
+                              : '미상'}
+                          </p>
+                          <blockquote className="bg-muted/40 rounded border-l-2 p-3 leading-6 whitespace-pre-wrap">
+                            {e.quote}
+                          </blockquote>
+                          <p className="font-mono text-xs break-all">
+                            {e.sourceRefs.join(' ; ') || 'sourceRef 없음'} ·
+                            문자 [{e.charStart}, {e.charEnd})
+                          </p>
+                          {resource && (
+                            <details>
+                              <summary className="cursor-pointer text-xs">
+                                전처리 원문 전체 확인
+                              </summary>
+                              <pre className="bg-muted/40 mt-2 max-h-64 overflow-auto rounded p-3 text-xs whitespace-pre-wrap">
+                                {JSON.stringify(resource, null, 2)}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-              {selected && (
-                <div className="min-w-0 space-y-4 rounded border p-4 text-sm">
-                  <h3 className="font-semibold">
-                    {KIND_LABELS[selected.recordKind]} ·{' '}
-                    {selected.sourceIdentifier
-                      ? `${selected.sourceIdentifier} · `
-                      : ''}
-                    {selected.sourceName}
-                  </h3>
-                  <p>{selected.reason}</p>
-                  <p className="text-muted-foreground">
-                    등록 근거 제안: {BASIS_LABELS[selected.eligibilityBasis]} ·
-                    검토 대기
-                  </p>
-                  {selected.evidence.map((e, i) => {
-                    const resource = indexData?.index.resources.find(
-                      (r) => r.key === e.resourceKey,
-                    );
-                    const range = e.logicalPageRange;
-                    return (
-                      <div
-                        key={`${e.resourceKey}-${i}`}
-                        className="space-y-2 border-t pt-3"
-                      >
-                        <p className="text-xs">
-                          {e.resourceId ?? e.resourceKey} · PDF {e.pdfPageNo} ·
-                          논리{' '}
-                          {range
-                            ? `${range.startPageNo}${range.endPageNo === range.startPageNo ? '' : `~${range.endPageNo}`}`
-                            : '미상'}
-                        </p>
-                        <blockquote className="bg-muted/40 rounded border-l-2 p-3 leading-6 whitespace-pre-wrap">
-                          {e.quote}
-                        </blockquote>
-                        <p className="font-mono text-xs break-all">
-                          {e.sourceRefs.join(' ; ') || 'sourceRef 없음'} · 문자
-                          [{e.charStart}, {e.charEnd})
-                        </p>
-                        {resource && (
-                          <details>
-                            <summary className="cursor-pointer text-xs">
-                              전처리 원문 전체 확인
-                            </summary>
-                            <pre className="bg-muted/40 mt-2 max-h-64 overflow-auto rounded p-3 text-xs whitespace-pre-wrap">
-                              {JSON.stringify(resource, null, 2)}
-                            </pre>
-                          </details>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <details>
-              <summary className="cursor-pointer text-sm">
-                자동 검사 문제 ({run.result.issues.length}) · 제외 설명 (
-                {run.result.exclusions.length})
-              </summary>
-              <pre className="bg-muted/40 mt-2 max-h-80 overflow-auto p-3 text-xs whitespace-pre-wrap">
-                {JSON.stringify(
-                  {
-                    issues: run.result.issues,
-                    exclusions: run.result.exclusions,
-                  },
-                  null,
-                  2,
-                )}
-              </pre>
+              <details>
+                <summary className="cursor-pointer text-sm">
+                  자동 검사 문제 ({run.result.issues.length}) · 제외 설명 (
+                  {run.result.exclusions.length})
+                </summary>
+                <pre className="bg-muted/40 mt-2 max-h-80 overflow-auto p-3 text-xs whitespace-pre-wrap">
+                  {JSON.stringify(
+                    {
+                      issues: run.result.issues,
+                      exclusions: run.result.exclusions,
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </details>
             </details>
           </>
         )}
