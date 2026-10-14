@@ -7,6 +7,7 @@ import type {
   ContentAttachmentAudit,
   ContentAttachmentResponse,
 } from './content-attachment';
+import type { ContentRegistrationDecision } from './content-attachment-decisions';
 
 import { LLMCaller } from '@heripo/shared';
 import { describe, expect, test, vi } from 'vitest';
@@ -193,6 +194,57 @@ const ignore = (plan: Awaited<ReturnType<typeof prepare>>, i: number) =>
   }));
 
 describe('bounded content attachment', () => {
+  test('snapshots caller-confirmed mention decisions without sharing mutable caller state', async () => {
+    const f = fixture();
+    const original = await prepare();
+    const source = original.units
+      .flatMap((u) => u.sources)
+      .find((s) => s.resource.resourceId === 'a')!;
+    const r = source.resource;
+    const decisions: ContentRegistrationDecision[] = [
+      {
+        decisionId: 'author-scope',
+        inputSha256: f.options.inputSha256,
+        decision: 'not_independent_record',
+        basis: 'no_independent_body_or_table_item',
+        authority: 'author_confirmed',
+        evidence: {
+          sourceId: source.sourceId,
+          resourceKey: r.key,
+          resourceId: r.resourceId,
+          sourceRefs: r.sourceRefs,
+          pdfPageNo: r.pdfPageNo,
+          logicalPageRange: r.logicalPageRange,
+          charStart: 0,
+          charEnd: 2,
+          quote: r.data.text.slice(0, 2),
+        },
+        provenance: {
+          reference: 'author-confirmation',
+          text: 'Confirmed decision',
+        },
+      },
+    ];
+    const plan = await prepareContentAttachment(
+      f.index,
+      f.dp,
+      f.discovery,
+      f.groups,
+      { ...f.options, registrationDecisions: decisions },
+    );
+    expect(plan.registrationDecisions).toEqual(decisions);
+    decisions[0].provenance.text = 'Caller mutation';
+    expect(plan.registrationDecisions![0].provenance.text).toBe(
+      'Confirmed decision',
+    );
+    const unit = plan.units.find((u) =>
+      u.sources.some((s) => s.sourceId === source.sourceId),
+    )!;
+    expect(
+      JSON.parse(createContentAttachmentRequest(plan, unit).userPrompt).current
+        .registrationDecisions,
+    ).toHaveLength(1);
+  });
   test('plans from the first physical page, retains gaps, whole table rows, original spans and signed logical pages without mutating inputs', async () => {
     const f = fixture(),
       before = structuredClone(f);
