@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v3';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v4';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -147,11 +147,19 @@ Compact input encoding: columns defines each candidate row [ref, kind, context, 
 current.sources follows sourceColumns: ref is the selectable sourceId (S1, S2, ...); tableCell is null for body text or [tableRef, actualRowIndex, actualGridColumnIndex]. Return these S refs unchanged in fragments and ignoredSources. Never output storage paths, original IDs, hashes, page coordinates or calculated offsets. Code maps references back to the original snapshot.
 current.tables grids follow tableCellColumns. A non-null sourceRef selects text from current.sources; otherwise contextText contains original read-only cell text. Spans and isHeader preserve the original merged-cell layout; never expand or renumber cells. Table captions and current.readOnlyContext are context only. Choose literal passage fragments from selectable sources; code checks them and attaches provenance. The whole current work unit is fixed; do not advance.`;
 
-const SYSTEM_PROMPT = COMPACT_SYSTEM_PROMPT_V2.replace(
+const SENTENCE_SYSTEM_PROMPT_V3 = COMPACT_SYSTEM_PROMPT_V2.replace(
   "Use complete original sentences for body excerpts where available. Keep author uncertainty, interpretation and conflicting accounts. Split a paragraph into relevant sentences; do not attach an object's entire description to another candidate merely mentioned in its first sentence. If a sentence clearly concerns multiple candidates, list ALL those candidateRefs. This is different from ambiguous identity: put an ambiguous passage in unresolved, with alternatives (or an empty list for a potentially missing candidate), rather than attaching it to every possible target.",
   `BODY EXCERPT UNIT: Each assignments or unresolved item must contain exactly ONE original sentence, even when consecutive sentences concern the same candidate. A paragraph with four sentences requires four separate items; never return that paragraph as one quote or bundle those sentences into multiple fragments of one item. Keep sentence-ending punctuation, author uncertainty, interpretation and conflicting accounts unchanged. A sentence split across selectable blocks uses separate unchanged fragments in one item. An incomplete boundary fragment stays incomplete in its own item; do not borrow read-only context or reconstruct the missing part. Eligible non-sentence phrases, table items and standalone measurements remain separate items; never bundle a heading, a body paragraph and measurements into one excerpt.
 CANDIDATE COVERAGE PER SENTENCE: After separating sentences, inspect the full fixed registry for every candidate clearly described by that sentence. An explicit findspot/depositional-context sentence describes both an identified artifact and its identified layer or feature: include ALL those candidateRefs in the SAME item. For example, for 'Vessel X was recovered from fill Y. Its rim is everted.', attach the first sentence to the existing vessel and fill candidates; attach the second only to the vessel. Do not propagate later morphology, manufacture or measurement sentences to the context candidate merely mentioned in the opening sentence. Do not infer links to every ancestor or attach ambiguous alternatives to all candidates; retain uncertain identity in unresolved. This rule is generic across reports, names and numbers.
 BEFORE RETURNING: Check that no body item bundles multiple sentences and that every explicit named findspot/context has been considered against the registry for shared assignment. Do not choose just one primary candidate when the sentence clearly describes multiple candidates.`,
+);
+
+const SYSTEM_PROMPT = SENTENCE_SYSTEM_PROMPT_V3.replace(
+  'Return each original source block fragment separately in fragments, preserving incomplete words and original whitespace. A body excerpt may use multiple consecutive block fragments; never concatenate or repair their strings.',
+  `SOURCE CONTAINERS VS EXCERPT UNITS: A source block is an addressable container, not an excerpt unit. Reuse its same sourceId in as many separate sentence items as needed. Preserving source blocks means keeping each chosen substring attached to its original sourceId, not copying the whole block. Never treat a multi-sentence block as one fragment because it starts or ends mid-sentence.
+For a block beginning at a page/work-unit boundary, put ONLY its leading incomplete sentence fragment, through that fragment's own sentence-ending punctuation, in one item. Resume sentence selection immediately after it: every following complete sentence MUST be a separate item with the SAME sourceId, even for the same candidate. A trailing incomplete sentence fragment also gets its own item. Do not extend a boundary fragment to include later complete sentences and do not restore missing words from read-only context.
+Example: a boundary block containing 'and turns outward. The wall is stone. The cavity is round.' yields THREE items, with exact quotes 'and turns outward.', 'The wall is stone.', and 'The cavity is round.'. All three reuse that block's supplied sourceId. The first remains incomplete in context; the other two remain independent complete sentences. Sentence endings are not decimal points in numbers or measurements.
+Only when ONE sentence crosses selectable source blocks may one item contain several fragments; each fragment must remain an unchanged substring of its own original block. Never concatenate these strings or include another sentence in that item.`,
 );
 
 async function digest(value: string) {
@@ -365,7 +373,8 @@ export function createContentAttachmentRequest(
   promptVersion:
     | 'content-attachment.v1'
     | 'content-attachment.v2'
-    | 'content-attachment.v3' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v3'
+    | 'content-attachment.v4' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -376,7 +385,9 @@ export function createContentAttachmentRequest(
       ? LEGACY_SYSTEM_PROMPT
       : promptVersion === 'content-attachment.v2'
         ? COMPACT_SYSTEM_PROMPT_V2
-        : SYSTEM_PROMPT,
+        : promptVersion === 'content-attachment.v3'
+          ? SENTENCE_SYSTEM_PROMPT_V3
+          : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -453,6 +464,7 @@ export function assembleContentAttachment(
     if (
       audit.promptVersion !== 'content-attachment.v1' &&
       audit.promptVersion !== 'content-attachment.v2' &&
+      audit.promptVersion !== 'content-attachment.v3' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');

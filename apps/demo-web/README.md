@@ -498,3 +498,5 @@ Session-scoped `GET/POST /api/tasks/[taskId]/content-attachment` accepts only `{
 The content-attachment panel now sends compact v2 judgment input and shows actual input/output/cache token counts. Each prepared run saves `first-unit-code-map.json` separately from the transmitted `first-unit-request.json`; the execution guard and audit download include the map. Original IDs and locations stay in saved code-side artifacts. New runs preserve all historical requests/responses and execute only the same first unit.
 
 New content-attachment calls use prompt v3 for sentence-level excerpts and explicit shared findspot/context assignments. Compact user input and source mapping are unchanged; historical v1/v2 audits still replay without modifying their raw responses.
+
+New content-attachment calls use prompt v4 to distinguish source-block provenance from sentence-level excerpts at page boundaries. Compact input, selectors and response assembly stay unchanged; previous v1/v2/v3 audits remain replayable.
