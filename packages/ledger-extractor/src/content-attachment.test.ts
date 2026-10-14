@@ -712,6 +712,71 @@ describe('bounded content attachment', () => {
       assembleContentAttachment(p, [legacy, raw]).completedUnitIds,
     ).toHaveLength(2);
   });
+  test('keeps sentence decisions separate, shares only the explicit context sentence and replays historical compact audits', async () => {
+    const p = await prepare();
+    const unit = p.units[2];
+    unit.sources[0].resource.data.text =
+      '壺は埋土から出土した。口縁は外反する。';
+    const response: ContentAttachmentResponse = {
+      assignments: [
+        {
+          candidateRefs: ['R1', 'R2'],
+          fragments: [{ sourceId: 'S1', quote: '壺は埋土から出土した。' }],
+          reason: '出土文脈を共有',
+        },
+        {
+          candidateRefs: ['R1'],
+          fragments: [{ sourceId: 'S1', quote: '口縁は外反する。' }],
+          reason: '形態のみ',
+        },
+      ],
+      unresolved: [],
+      ignoredSources: unit.sources
+        .slice(1)
+        .map((_, i) => ({ sourceId: `S${i + 2}`, reason: '対象外' })),
+    };
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      response,
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+    };
+    const before = structuredClone(raw);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.contents[0].excerpts.map((e) => e.fragments)).toEqual([
+      ['壺は埋土から出土した。'],
+      ['口縁は外反する。'],
+    ]);
+    expect(result.contents[1].excerpts.map((e) => e.fragments)).toEqual([
+      ['壺は埋土から出土した。'],
+    ]);
+    expect(
+      result.contents[0].excerpts[1].occurrences[0].evidence[0].charStart,
+    ).toBe('壺は埋土から出土した。'.length);
+    expect(raw).toEqual(before);
+    const current = createContentAttachmentRequest(p, unit);
+    const historical = createContentAttachmentRequest(
+      p,
+      unit,
+      'content-attachment.v2',
+    );
+    expect(current.promptVersion).toBe('content-attachment.v3');
+    expect(current.systemPrompt).toContain('exactly ONE original sentence');
+    expect(current.systemPrompt).toContain(
+      'include ALL those candidateRefs in the SAME item',
+    );
+    expect(current.userPrompt).toBe(historical.userPrompt);
+    expect(current.systemPrompt).not.toBe(historical.systemPrompt);
+    const v2 = { ...raw, ...historical };
+    expect(assembleContentAttachment(p, [v2])).toEqual(result);
+    expect(
+      assembleContentAttachment(p, [
+        { ...raw, promptVersion: 'content-attachment.v2' },
+      ]).issues[0].reason,
+    ).toContain('Audit does not match');
+  });
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
     const response = {
