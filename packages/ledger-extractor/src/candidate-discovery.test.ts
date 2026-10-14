@@ -17,6 +17,7 @@ import {
   discoverCandidateUnit,
   getCandidateSources,
   prepareCandidateDiscovery,
+  prepareCandidateDiscoveryRetry,
 } from './candidate-discovery';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -498,5 +499,137 @@ describe('candidate discovery', () => {
       sourceRefs: ['#/texts/2870'],
       quote: layer.evidence[0].quote,
     });
+  });
+});
+
+describe('discovery retries and preserved source fragments', () => {
+  test('retries only failed units and replays mixed prompt versions without rewriting retained audits', async () => {
+    const plan = prepare();
+    const tableUnit = plan.units.find(
+      (u) => u.table && u.resources.some((r) => r.data.text === '2호'),
+    )!;
+    const oldAudit = {
+      ...audit(plan.units[0], {
+        candidates: [proposal(plan.units[0])],
+        exclusions: [],
+      }),
+      ...createCandidateDiscoveryRequest(
+        plan.units[0],
+        'candidate-discovery.v4',
+      ),
+    };
+    const badProposal = {
+      ...proposal(tableUnit),
+      sourceName: '우물 2호',
+      sourceIdentifier: '2호',
+      eligibilityBasis: 'table_item' as const,
+      evidence: [
+        { sourceId: getCandidateSources(tableUnit)[0].sourceId, quote: '2호' },
+      ],
+    };
+    const audits = plan.units.map((u) =>
+      u === plan.units[0]
+        ? oldAudit
+        : audit(u, {
+            candidates: u === tableUnit ? [badProposal] : [],
+            exclusions: [],
+          }),
+    );
+    const before = structuredClone(audits);
+    const retry = await prepareCandidateDiscoveryRetry(plan, audits);
+    expect(retry.retryUnitIds).toEqual([tableUnit.unitId]);
+    expect(retry.retainedAudits).toEqual(
+      audits.filter((a) => a.unitId !== tableUnit.unitId),
+    );
+    expect(retry.result.completedUnitIds).toHaveLength(plan.units.length - 1);
+    const replacement = audit(tableUnit, {
+      candidates: [{ ...badProposal, sourceName: '우물' }],
+      exclusions: [],
+    });
+    const result = await assembleCandidateDiscovery(plan, [
+      ...retry.retainedAudits,
+      replacement,
+    ]);
+    expect(result.completedUnitIds).toHaveLength(plan.units.length);
+    expect(result.issues).toEqual([]);
+    expect(result.candidates.map((c) => c.sourceName)).toEqual([
+      '우물',
+      '우물',
+    ]);
+    expect(result.candidates[1].sourceIdentifier).toBe('2호');
+    expect(audits).toEqual(before);
+    const tampered = { ...oldAudit, systemPrompt: replacement.systemPrompt };
+    expect(
+      (await assembleCandidateDiscovery(plan, [tampered])).issues[0].reason,
+    ).toContain('does not match');
+    await expect(
+      prepareCandidateDiscoveryRetry(plan, [oldAudit]),
+    ).rejects.toThrow('complete, replayable');
+    await expect(
+      prepareCandidateDiscoveryRetry(
+        plan,
+        plan.units.map((u) => audit(u, { candidates: [], exclusions: [] })),
+      ),
+    ).rejects.toThrow('No discovery issues');
+  });
+
+  test('preserves split words in separate blocks and rejects a repaired cross-block quote', async () => {
+    const doc = input();
+    doc.chapters[0].textBlocks = [
+      { id: 'heading', text: '83. 백자 접시편', pdfPageNo: 116 },
+      { id: 'end', text: '유약은 백청색을 띠고 전', pdfPageNo: 116 },
+      { id: 'start', text: '체적으로 시유가 이루어졌다.', pdfPageNo: 117 },
+    ];
+    const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+      scopeChapterId: 'root',
+      inputSha256: 'hash',
+      maxTextChars: 8000,
+      tableRowsPerUnit: 12,
+    });
+    const unit = plan.units[0];
+    const p = {
+      ...proposal(unit),
+      recordKind: 'artifact' as const,
+      sourceName: '백자 접시편',
+      sourceIdentifier: '83',
+      evidence: [
+        { sourceId: 'id:heading', quote: '83. 백자 접시편' },
+        { sourceId: 'id:end', quote: '전' },
+        { sourceId: 'id:start', quote: '체적으로 시유가 이루어졌다.' },
+      ],
+    };
+    const raw = audit(unit, { candidates: [p], exclusions: [] });
+    const before = structuredClone(raw);
+    const result = await assembleCandidateDiscovery(plan, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(
+      result.candidates[0].evidence.map((e) => ({
+        quote: e.quote,
+        pdfPageNo: e.pdfPageNo,
+      })),
+    ).toEqual([
+      { quote: '83. 백자 접시편', pdfPageNo: 116 },
+      { quote: '전', pdfPageNo: 116 },
+      { quote: '체적으로 시유가 이루어졌다.', pdfPageNo: 117 },
+    ]);
+    const repaired = audit(unit, {
+      candidates: [
+        {
+          ...p,
+          evidence: [
+            p.evidence[0],
+            { sourceId: 'id:start', quote: '전체적으로 시유가 이루어졌다.' },
+          ],
+        },
+      ],
+      exclusions: [],
+    });
+    expect(
+      (await assembleCandidateDiscovery(plan, [repaired])).candidates,
+    ).toEqual([]);
+    expect(raw).toEqual(before);
+    expect(repaired.response.candidates[0].evidence[1].quote).toBe(
+      '전체적으로 시유가 이루어졌다.',
+    );
   });
 });

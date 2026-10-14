@@ -519,3 +519,5 @@ heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 
 **heripo lab** | [GitHub](https://github.com/heripo-lab) | [heripo engine](https://github.com/heripo-lab/heripo-engine)
 
 조사내용 후보 추출 후에는 별도 LLM 단계에서 전체 후보의 중복을 검토합니다. 통합 제안은 모든 원래 후보와 원문·출처를 보존하며 사람이 검토할 수 있습니다.
+
+조사내용 추출에서 문제가 난 묶음만 재실행하고 나머지 원래 응답을 보존한 뒤 전체 후보 중복 통합을 다시 수행할 수 있습니다.

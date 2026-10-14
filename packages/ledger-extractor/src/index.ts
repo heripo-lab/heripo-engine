@@ -23,6 +23,7 @@
 export { LedgerExtractor } from './ledger-extractor';
 export {
   prepareCandidateDiscovery,
+  prepareCandidateDiscoveryRetry,
   discoverCandidateUnit,
   assembleCandidateDiscovery,
   CANDIDATE_DISCOVERY_PROMPT_VERSION,

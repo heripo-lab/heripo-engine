@@ -160,3 +160,9 @@ After every discovery unit completes, `deduplicateCandidates(plan, discovery, op
 The returned `CandidateDeduplicationResult` contains proposed groups referencing original candidate IDs. `getCandidateGroupMembers` retrieves every original occurrence, including unchanged names, quotes, offsets and source references. Original discovery results and model audits remain immutable; grouping does not rewrite source text, register final records or perform attribute/parent extraction. Group identity decisions still require human review.
 
 The duplicate-review prompt distinguishes archaeological overlap/superposition (including Korean `중복`) from multiple records of one object. Reciprocal overlap notes and separately measured numbered features do not establish identity.
+
+### Selective discovery retry
+
+Discovery prompt v5 separates an unnumbered verbatim `sourceName` from the verbatim `sourceIdentifier`. It prohibits composing a name from context plus a number, adding suffixes, or restoring words split across source blocks/pages. Evidence fragments remain separate exact substrings, even when incomplete. Validation stays strict and never repairs model output.
+
+`prepareCandidateDiscoveryRetry(plan, audits)` requires a complete replayable snapshot, selects only units with recorded validation issues and returns `retryUnitIds`, unchanged `retainedAudits` and their partial `result`. Run those selected units again, then assemble all retained/new audits and perform whole-pool duplicate review. Saved discovery v4 and v5 audits are checked against their respective exact prompts and current original unit input; unsupported or edited audit bindings remain issues.

@@ -523,3 +523,5 @@ This project uses the following open-source projects:
 **heripo lab** | [GitHub](https://github.com/heripo-lab) | [heripo engine](https://github.com/heripo-lab/heripo-engine)
 
 Investigation candidate discovery now includes a separate whole-pool LLM duplicate review. Proposed groups preserve every original candidate and source occurrence for human inspection.
+
+Failed investigation-discovery units can be retried selectively while preserving successful original responses, followed by a new whole-pool duplicate review.
