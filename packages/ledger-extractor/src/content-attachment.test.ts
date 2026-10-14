@@ -776,7 +776,7 @@ describe('bounded content attachment', () => {
       unit,
       'content-attachment.v2',
     );
-    expect(current.promptVersion).toBe('content-attachment.v7');
+    expect(current.promptVersion).toBe('content-attachment.v8');
     expect(current.systemPrompt).toContain('exactly ONE original sentence');
     expect(current.systemPrompt).toContain(
       'include ALL those candidateRefs in the SAME item',
@@ -1198,6 +1198,99 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [{ ...incomplete, ...v6 }]).issues,
     ).toEqual(currentIssues);
+  });
+  test('preserves owner words without expanding model-selected targets and retains direct sharing and strict v7 replay', async () => {
+    const p = await prepare(),
+      unit = p.units[0];
+    const quotes = [
+      'Feature A upper fill yielded sherds.',
+      'Jar X was recovered from Feature A upper fill.',
+      'Jar X was recovered from Feature A.',
+      'Feature A was cut into Layer B.',
+    ];
+    unit.sources[0].resource.data.text = quotes.join(' ');
+    const template = p.registry[0];
+    p.registry = ['Feature A', 'Feature A upper fill', 'Jar X', 'Layer B'].map(
+      (name, i) => ({
+        ...structuredClone(template),
+        ref: `R${i + 1}`,
+        groupId: `g${i + 1}`,
+        recordKind: i === 0 ? 'feature' : i === 2 ? 'artifact' : 'layer',
+        mentions: [
+          {
+            ...structuredClone(template.mentions[0]),
+            candidateId: `candidate-${i}`,
+            sourceName: name,
+          },
+        ],
+      }),
+    );
+    const refs = [['R2'], ['R3', 'R2'], ['R3', 'R1'], ['R1', 'R4']];
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+      response: {
+        ...empty(),
+        assignments: quotes.map((quote, i) => ({
+          candidateRefs: refs[i],
+          fragments: [{ sourceId: 'S1', quote }],
+          reason: 'Directly described targets',
+        })),
+      },
+    };
+    const before = structuredClone([p, raw]);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.unresolved).toEqual([]);
+    expect(result.completedUnitIds).toEqual([unit.unitId]);
+    expect(
+      result.contents
+        .find((c) => c.registryRef === 'R1')!
+        .excerpts.map((e) => e.fragments),
+    ).toEqual([[quotes[2]], [quotes[3]]]);
+    expect(
+      result.contents
+        .find((c) => c.registryRef === 'R2')!
+        .excerpts.map((e) => e.fragments),
+    ).toEqual([[quotes[0]], [quotes[1]]]);
+    expect(
+      result.contents
+        .find((c) => c.registryRef === 'R3')!
+        .excerpts.map((e) => e.fragments),
+    ).toEqual([[quotes[1]], [quotes[2]]]);
+    expect(
+      result.contents.find((c) => c.registryRef === 'R4')!.excerpts[0]
+        .fragments,
+    ).toEqual([quotes[3]]);
+    expect([p, raw]).toEqual(before);
+    const v7 = createContentAttachmentRequest(p, unit, 'content-attachment.v7');
+    expect(raw.systemPrompt.startsWith(v7.systemPrompt + '\n')).toBe(true);
+    expect(v7.systemPrompt).not.toContain(
+      'NESTED OWNER NAMES DO NOT PROPAGATE EXCERPTS',
+    );
+    expect(raw.systemPrompt).toContain('Preserve the full original sentence');
+    expect(raw.systemPrompt).toContain(
+      'without guessing individual artifacts or adding the owner feature',
+    );
+    expect(raw.userPrompt).toBe(v7.userPrompt);
+    expect(assembleContentAttachment(p, [{ ...raw, ...v7 }])).toEqual(result);
+    const missingSentence = structuredClone(raw);
+    missingSentence.response.assignments.shift();
+    const currentIssues = assembleContentAttachment(p, [
+      missingSentence,
+    ]).issues;
+    expect(currentIssues[0].reason).toContain('Unaccounted text:');
+    expect(
+      assembleContentAttachment(p, [{ ...missingSentence, ...v7 }]).issues,
+    ).toEqual(currentIssues);
+    const missingField = structuredClone(raw);
+    delete missingField.response.ignoredPassages;
+    expect(
+      assembleContentAttachment(p, [{ ...missingField, ...v7 }]).issues[0]
+        .reason,
+    ).toBe('Invalid attachment response schema');
   });
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
