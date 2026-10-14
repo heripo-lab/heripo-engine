@@ -533,3 +533,5 @@ Whole-pool layer deduplication can connect unnumbered local occurrences to repor
 Ledger content attachment now prepares a fixed registry and a physical-page sweep plan. The local demo exposes the exact first-unit input and runs only that unit, preserving literal body/table passages, every source occurrence and unresolved decisions for review.
 
 Content attachment v2 keeps the complete candidate pool in compact rows with shared chapter contexts. Storage IDs, source locations and snapshot hashes stay in a code-only map; the local demo reports the first call’s actual token usage.
+
+Content-attachment prompt v3 requests one body sentence per decision and shared assignment to every clearly identified object/context candidate, retaining historical prompt audits and unchanged source text.

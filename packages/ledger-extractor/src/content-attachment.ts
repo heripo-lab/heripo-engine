@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v2';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v3';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -140,12 +140,19 @@ Exclude previous campaigns, regional archaeological background, comparisons and 
 Every selectable source must be accounted for in assignments, unresolved, or ignoredSources. Inspect the entire supplied source even when only a relevant fragment is quoted. Do not mark a source ignored if it also contributes an assignment or unresolved passage. The work unit is fixed by code; do not schedule another page or claim the whole report or human review is complete.
 Choose sourceId from the exact source whose text contains the unchanged quote. Do not calculate IDs or borrow neighboring source IDs. Select an unambiguous passage; code will reject an inexact or multiply occurring quote. Tables and body text cannot be mixed inside one excerpt. Never repair a response after the fact.`;
 
-const SYSTEM_PROMPT =
+const COMPACT_SYSTEM_PROMPT_V2 =
   LEGACY_SYSTEM_PROMPT +
   `
 Compact input encoding: columns defines each candidate row [ref, kind, context, name, number, quotes]. Repeated ref rows describe the SAME fixed candidate, with every original mention retained. contexts maps short context references to unchanged chapter-title paths. All candidates are included. uncertainties uses candidate refs.
 current.sources follows sourceColumns: ref is the selectable sourceId (S1, S2, ...); tableCell is null for body text or [tableRef, actualRowIndex, actualGridColumnIndex]. Return these S refs unchanged in fragments and ignoredSources. Never output storage paths, original IDs, hashes, page coordinates or calculated offsets. Code maps references back to the original snapshot.
 current.tables grids follow tableCellColumns. A non-null sourceRef selects text from current.sources; otherwise contextText contains original read-only cell text. Spans and isHeader preserve the original merged-cell layout; never expand or renumber cells. Table captions and current.readOnlyContext are context only. Choose literal passage fragments from selectable sources; code checks them and attaches provenance. The whole current work unit is fixed; do not advance.`;
+
+const SYSTEM_PROMPT = COMPACT_SYSTEM_PROMPT_V2.replace(
+  "Use complete original sentences for body excerpts where available. Keep author uncertainty, interpretation and conflicting accounts. Split a paragraph into relevant sentences; do not attach an object's entire description to another candidate merely mentioned in its first sentence. If a sentence clearly concerns multiple candidates, list ALL those candidateRefs. This is different from ambiguous identity: put an ambiguous passage in unresolved, with alternatives (or an empty list for a potentially missing candidate), rather than attaching it to every possible target.",
+  `BODY EXCERPT UNIT: Each assignments or unresolved item must contain exactly ONE original sentence, even when consecutive sentences concern the same candidate. A paragraph with four sentences requires four separate items; never return that paragraph as one quote or bundle those sentences into multiple fragments of one item. Keep sentence-ending punctuation, author uncertainty, interpretation and conflicting accounts unchanged. A sentence split across selectable blocks uses separate unchanged fragments in one item. An incomplete boundary fragment stays incomplete in its own item; do not borrow read-only context or reconstruct the missing part. Eligible non-sentence phrases, table items and standalone measurements remain separate items; never bundle a heading, a body paragraph and measurements into one excerpt.
+CANDIDATE COVERAGE PER SENTENCE: After separating sentences, inspect the full fixed registry for every candidate clearly described by that sentence. An explicit findspot/depositional-context sentence describes both an identified artifact and its identified layer or feature: include ALL those candidateRefs in the SAME item. For example, for 'Vessel X was recovered from fill Y. Its rim is everted.', attach the first sentence to the existing vessel and fill candidates; attach the second only to the vessel. Do not propagate later morphology, manufacture or measurement sentences to the context candidate merely mentioned in the opening sentence. Do not infer links to every ancestor or attach ambiguous alternatives to all candidates; retain uncertain identity in unresolved. This rule is generic across reports, names and numbers.
+BEFORE RETURNING: Check that no body item bundles multiple sentences and that every explicit named findspot/context has been considered against the registry for shared assignment. Do not choose just one primary candidate when the sentence clearly describes multiple candidates.`,
+);
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -357,14 +364,19 @@ export function createContentAttachmentRequest(
   unit: AttachmentUnit,
   promptVersion:
     | 'content-attachment.v1'
-    | 'content-attachment.v2' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v2'
+    | 'content-attachment.v3' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
   const legacy = promptVersion === 'content-attachment.v1';
   return {
     promptVersion,
-    systemPrompt: legacy ? LEGACY_SYSTEM_PROMPT : SYSTEM_PROMPT,
+    systemPrompt: legacy
+      ? LEGACY_SYSTEM_PROMPT
+      : promptVersion === 'content-attachment.v2'
+        ? COMPACT_SYSTEM_PROMPT_V2
+        : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -440,6 +452,7 @@ export function assembleContentAttachment(
     }
     if (
       audit.promptVersion !== 'content-attachment.v1' &&
+      audit.promptVersion !== 'content-attachment.v2' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
