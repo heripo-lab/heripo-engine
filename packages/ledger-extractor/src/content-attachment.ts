@@ -22,7 +22,7 @@ import { createContentAttachmentDecisionInput } from './content-attachment-decis
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v13';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v14';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -262,10 +262,16 @@ const NUMBERED_HEADING_SYSTEM_PROMPT_V12 =
   `
 REGISTERED NUMBERED ARTIFACT HEADINGS ARE NOT GENERIC: A selectable standalone heading whose number AND object name match an already registered artifact in the supplied chapter/body context is that artifact's identity evidence. Assign its ENTIRE fixed E ref to the matching artifact, including the number, name and parenthetical figure/photo references. Calling it an 'artifact-number heading' or saying that it has only the object's number/name does not make it a generic category title. For example, '17. Bowl (Fig. 8, Photo 22)' with the matching registered bowl and supporting body belongs to that bowl; it must not be ignored while neighboring equivalent artifact headings are retained. If several actual candidate identities remain indistinguishable, use unresolved with the plausible refs and an identity reason, not ignored. Before returning, compare EVERY ignored heading with the registry's original artifact numbers/names and chapter context. Code reports an issue when an ignored standalone heading literally matches a registered artifact's number/name in that chapter; it does not rewrite the response or assign it for you. Keep the shared-findspot, partial-layer-uncertainty, direct-description and nested-owner rules unchanged.`;
 
-const SYSTEM_PROMPT =
+const REGISTRATION_SYSTEM_PROMPT_V13 =
   NUMBERED_HEADING_SYSTEM_PROMPT_V12 +
   `
 MENTION-SCOPED REGISTRATION DECISIONS: current.registrationDecisions contains confirmed eligibility decisions about only the specified mention in the specified excerptRef. A not_independent_record decision means that mention intentionally has no separate record because it lacks an independent body account or original table item. Preserve the unchanged excerpt on any identified registry objects it describes; do not add an empty-candidate unresolved item merely because this decided mention has no registry ref. Do not ignore the whole excerpt or treat the decision as an instruction to assign a particular candidate. It applies neither to other objects in that sentence nor to all objects with the same name elsewhere. These decisions concern registration eligibility, not identity among existing candidates: preserve genuine unresolved alternatives for registered layers and keep their confirmed feature/layer assignments on the SAME E ref. A potential missing-candidate concern requires supplied original evidence of independent eligibility, not just a noun absent from the registry; do not reopen a confirmed non-registration solely for that absence. Decision refs, original mention ranges, authority and provenance are bound by code and retained in the audit. Return the existing ID-only response schema without rewriting text, inventing decision fields or repairing prior responses.`;
+
+const SYSTEM_PROMPT =
+  REGISTRATION_SYSTEM_PROMPT_V13 +
+  `
+TABLE RELATION REMARKS DESCRIBE BOTH PARTICIPANTS: Apply the all-target coverage rule to original table-cell phrases as well as body sentences. Identify the row owner from the original identifier cell, headers and chapter context. If a remark explicitly states that this object overlaps, adjoins, cuts or otherwise has a direct archaeological/spatial relationship with another identified registry candidate, assign the SAME unchanged remark E ref to BOTH the row owner and the explicitly named counterpart in ONE assignments item. For example, a remark 'overlaps Pit B' in Pit A's row describes BOTH existing pits; a reciprocal remark in Pit B's row is a separate original E ref and must be assessed separately. Do not restrict a relation remark to its row owner merely because it appears in that row. This shares explicit original evidence; it does not infer a new relation structure or create a candidate. Resolve the counterpart using its original identifier together with table/chapter/period evidence, not a number alone. If counterpart identity is uncertain, retain the confirmed row-owner assignment and use the SAME E ref for genuinely unresolved alternatives; do not guess or share with every same-number candidate.
+CELL-LOCAL SHARING BOUNDARY: Sharing a relation remark does NOT share the owner's number, shape, dimensions, material or other neighboring cells with the counterpart. Evaluate each fixed E ref independently; keep those ordinary property cells on the object they actually describe. Never propagate the entire row, merge reciprocal remarks, synthesize a sentence from cells, rewrite original text, infer attributes/parents/relations/media links, or spread sharing through related objects. A counterpart merely used as a comparison or reasoning premise still follows the existing direct-description boundary. Before returning, inspect every explicit relation remark for all identified participants and inspect adjacent shape/measurement cells for accidental propagation. Keep all existing findspot/foundation sharing, layer-identity uncertainty, heading preservation and mention-scoped non-registration rules unchanged.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -494,7 +500,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v10'
     | 'content-attachment.v11'
     | 'content-attachment.v12'
-    | 'content-attachment.v13' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v13'
+    | 'content-attachment.v14' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -525,7 +532,9 @@ export function createContentAttachmentRequest(
                           ? DESCRIPTION_SYSTEM_PROMPT_V11
                           : promptVersion === 'content-attachment.v12'
                             ? NUMBERED_HEADING_SYSTEM_PROMPT_V12
-                            : SYSTEM_PROMPT,
+                            : promptVersion === 'content-attachment.v13'
+                              ? REGISTRATION_SYSTEM_PROMPT_V13
+                              : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -536,7 +545,8 @@ export function createContentAttachmentRequest(
             registryUncertainties: plan.registryUncertainties,
             unit,
           }
-        : promptVersion === 'content-attachment.v13'
+        : promptVersion === 'content-attachment.v13' ||
+            promptVersion === 'content-attachment.v14'
           ? createContentAttachmentDecisionInput(plan, unit).payload
           : promptVersion === 'content-attachment.v9' ||
               promptVersion === 'content-attachment.v10' ||
@@ -623,6 +633,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v10' &&
       audit.promptVersion !== 'content-attachment.v11' &&
       audit.promptVersion !== 'content-attachment.v12' &&
+      audit.promptVersion !== 'content-attachment.v13' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -634,9 +645,11 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v10' ||
       audit.promptVersion === 'content-attachment.v11' ||
       audit.promptVersion === 'content-attachment.v12' ||
-      audit.promptVersion === 'content-attachment.v13';
+      audit.promptVersion === 'content-attachment.v13' ||
+      audit.promptVersion === 'content-attachment.v14';
     const selectionInput = selection
-      ? audit.promptVersion === 'content-attachment.v13'
+      ? audit.promptVersion === 'content-attachment.v13' ||
+        audit.promptVersion === 'content-attachment.v14'
         ? createContentAttachmentDecisionInput(plan, unit)
         : createContentAttachmentSelectionInput(plan, unit)
       : null;
@@ -678,6 +691,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v10' ||
       audit.promptVersion === 'content-attachment.v11' ||
       audit.promptVersion === 'content-attachment.v12' ||
+      audit.promptVersion === 'content-attachment.v13' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -897,7 +911,8 @@ export function assembleContentAttachment(
         });
         if (
           audit.promptVersion === 'content-attachment.v12' ||
-          audit.promptVersion === 'content-attachment.v13'
+          audit.promptVersion === 'content-attachment.v13' ||
+          audit.promptVersion === 'content-attachment.v14'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
