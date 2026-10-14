@@ -280,6 +280,8 @@ DocumentProcessor processes documents through a 5-stage pipeline:
 - PDF page to document logical page mapping
 - Handle page number mismatches due to scanning errors
 
+Physical PDF pages start at 1; logical pages count continuously relative to body page 1. Front matter can use negative values and zero, which are preserved in automatic mapping, reviewed inputs, TOC entries, and chapter assignment. Extraction failures are tracked separately from valid logical zero. If known page patterns cannot resolve a missing number, parsing throws `PageRangeParseError` rather than outputting logical zero for an unknown page.
+
 ### 3. TOC Extraction (5-Stage Pipeline)
 
 #### Stage 1: TocFinder (Rule-Based)

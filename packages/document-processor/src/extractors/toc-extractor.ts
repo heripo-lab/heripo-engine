@@ -22,7 +22,7 @@ const DEFAULT_MAX_VALIDATION_RETRIES = 3;
  */
 const VALIDATION_CODE_DESCRIPTIONS: Record<string, string> = {
   V001: 'Page numbers must be in non-decreasing order within the same level. A decrease usually means a hierarchy or page number error.',
-  V002: 'Page number is out of valid range (must be >= 1 and <= total pages).',
+  V002: 'Page number must be an integer within the configured logical page range.',
   V003: 'Title is empty or contains only whitespace.',
   V004: 'Title exceeds the maximum allowed length.',
   V005: 'Child page number is before parent page number. Children must start on or after the parent page.',
@@ -41,7 +41,7 @@ function buildTocEntrySchema(maxDepth: number): z.ZodObject<any> {
   const base = {
     title: z.string().describe('Chapter or section title'),
     level: z.number().int().min(1).describe('Hierarchy depth (1 = top level)'),
-    pageNo: z.number().int().min(1).describe('Starting page number'),
+    pageNo: z.number().int().describe('Starting logical page number'),
   };
 
   if (maxDepth <= 0) {

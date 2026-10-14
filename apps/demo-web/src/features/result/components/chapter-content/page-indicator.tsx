@@ -42,7 +42,7 @@ export function PageIndicator({
       >
         <FileText className="h-4 w-4" />
         PDF {pdfPageNo}
-        {documentPage && documentPage !== pdfPageNo && (
+        {documentPage !== undefined && documentPage !== pdfPageNo && (
           <span className="text-muted-foreground">
             ({documentPage}
             {pageRange.endPageNo !== pageRange.startPageNo &&
@@ -52,7 +52,7 @@ export function PageIndicator({
         )}
         <Eye className="text-muted-foreground ml-1 h-3 w-3" />
       </Button>
-      {documentPage && (
+      {documentPage !== undefined && (
         <Badge variant="secondary" className="text-xs">
           Document Page {documentPage}
           {pageRange.endPageNo !== pageRange.startPageNo &&

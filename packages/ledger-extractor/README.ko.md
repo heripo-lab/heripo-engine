@@ -47,6 +47,8 @@ const preview = await extractor.extract(document);
 
 ## 입력 계약
 
+`pageRangeMap`의 키와 `pdfPageNo`는 1 이상의 정수입니다. 논리 페이지인 `startPageNo`, `endPageNo`, `Chapter.pageNo`는 본문 1쪽 기준의 음수·0·양의 정수를 허용하며 소수는 거부합니다.
+
 - 입력은 단일 `ProcessedDocument` JSON입니다(`packages/model/src/types/processed-document.ts` 참고). ZIP, manifest, 이미지 파일 묶음은 받지 않습니다.
 - `ProcessedImage.path`에는 로컬 파일 경로나 B2 object key가 아니라 `heripo-web` export 스크립트가 생성한 **완전한 public CDN URL**이 들어와야 합니다. 이 URL은 그대로 소비되며, fetch·서명·변환하지 않습니다.
 - 입력 문서를 변경(mutate)하지 않습니다.
