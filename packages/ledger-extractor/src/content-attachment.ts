@@ -20,7 +20,7 @@ import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v10';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v11';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -237,7 +237,7 @@ LAYER IDENTITY: Common names such as topsoil (표토층), fill or sandy soil do 
 HEADINGS AND SCOPE: Preserve an excerpt identifying an ALREADY REGISTERED object by its number/name, supported by its independent body account or substantive table item, including its punctuation and figure/photo references. Ignore generic report/contents/category headings. Exclude previous campaigns, regional background, comparisons and cited objects from this investigation's records. Ambiguous identities belong in unresolved. Captions, images and footnotes are outside this stage.
 Table excerpts are indivisible original cell phrases; current.tables preserves actual grid indexes, spans and isHeader. Its sourceRef points to a selectable E ref; contextText is read-only when no E ref exists. Use the full row/header context to identify each cell's target without synthesizing sentences from cells. current.readOnlyContext may explain identity but cannot be selected. Before returning, check every E ref is accounted for, sharing has direct evidence, and ambiguity remains explicit. Completion is not human review.`;
 
-const SYSTEM_PROMPT =
+const SHARING_SYSTEM_PROMPT_V10 =
   SELECTION_SYSTEM_PROMPT_V9 +
   `
 CANDIDATE COVERAGE PER SENTENCE: For EVERY fixed E ref, inspect the full fixed registry for every candidate clearly described by that sentence, not just its main subject. An explicit findspot/depositional-context sentence describes both an identified artifact and its identified layer or feature: include ALL those candidateRefs in the SAME assignments item. For example, for 'Vessel X was recovered from fill Y. Its rim is everted.', assign the first E ref to the existing vessel and fill candidates; assign the second only to the vessel. Do not propagate later morphology, manufacture or measurement sentences to the context candidate merely mentioned in the opening sentence. Do not infer links to every ancestor or attach ambiguous alternatives to all candidates; retain uncertain identity in unresolved. This rule is generic across reports, names and numbers.
@@ -246,6 +246,12 @@ COMMON LAYER NAMES AND PARTIAL UNCERTAINTY: A common name such as topsoil (표�
 Uncertainty about one layer must not discard confirmed descriptions in the same sentence: return an assignments item for the clearly identified feature and any independently identified layer, plus an unresolved item reusing the SAME E ref for the ambiguous layer alternatives ONLY. For example, if a structure is revealed after removing topsoil and an identified modern deposit, retain the structure/modern-deposit assignment and separately report the indistinguishable topsoil candidates as unresolved. Removal/exposure is an explicitly described stratigraphic role; a layer does not need its own standalone description in that sentence to qualify. Establish its identity from the supplied overall definitions and local evidence. Do not omit its confirmed assignment or unresolved alternatives merely because it was removed to expose a feature. Keep the fixed E ref unchanged in both categories; never isolate a soil name, return a quote or rewrite its text. Preserve construction-foundation sharing when original definitions and local evidence DO establish identity, even without a local layer number.
 NESTED OWNER BOUNDARY: These context rules do not propagate to an owner named ONLY inside a layer designation. Add a feature when the sentence separately describes its role, state or involvement, including its use as the direct findspot, construction on an identified foundation layer, or exposure of its structure. Confirmed assignments alongside ambiguous layer alternatives still apply when those roles are directly described. Do not put an otherwise identified owner in unresolved merely because it is omitted as an excerpt target; unresolved is for genuine identity uncertainty.
 BEFORE RETURNING: Check EVERY E ref against the full registry for all explicitly described findspots, construction foundations and removed/exposing layers. Do not choose just one primary candidate when the sentence clearly describes multiple candidates. Review every shared layer candidate for evidence beyond a common name; preserve independently confirmed targets AND unresolved layer alternatives on the SAME E ref when needed. Accounting for an E ref once does not complete this candidate-coverage review. Return only the fixed ID selection schema; never quote, repair, split or combine original text.`;
+
+const SYSTEM_PROMPT =
+  SHARING_SYSTEM_PROMPT_V10 +
+  `
+DIRECT DESCRIPTION VS REASONING CONTEXT: Checking every candidate does not mean assigning every candidate mentioned. A candidate named ONLY as a comparison, surrounding landmark or supporting premise for a judgment about another object is not an additional excerpt target unless the SAME excerpt also describes that candidate itself: its own state, property, spatial relationship or direct archaeological role. For example, 'Building A is interpreted as facing southeast based on the arrangement of surrounding ditches and buildings.' describes Building A; mentioning those surrounding objects as the basis of the interpretation does not by itself describe them as additional targets, even if they can be identified. Do not create unresolved items for known supporting objects merely because they are not excerpt targets. Identity uncertainty and descriptive relevance are separate decisions. Preserve genuine shared descriptions: explicit findspots, construction foundations and removal/exposure describe the objects' direct archaeological roles and retain identified targets plus ambiguous layer alternatives on the SAME E ref. Apply this boundary to ALL-target coverage instructions; do not propagate an interpretation to its supporting objects.
+IDENTIFIABLE OBJECT HEADINGS WITHOUT UNIQUE NUMBERS: A registered object's heading does not require a unique object number or non-null registry number. Identify it using its original name together with chapter context and its independent body account or substantive table evidence. Section enumeration such as '2)' is not necessarily an object identifier, and a missing unique number alone is never a reason to ignore the heading. For example, '2) Pond (Fig. 12, Photos 20-25)' belongs to the already registered unnumbered pond when the matching chapter and following body identify that pond. Preserve the ENTIRE fixed heading E ref, including enumeration, name, punctuation and figure/photo references, as a separate phrase; never repair it or create a new candidate. Generic category headings such as 'Features' or 'Artifacts' remain ignored. If the heading's object identity truly cannot be resolved from the supplied evidence, keep it unresolved instead of excluding it solely for lacking a number. Before returning, review every ignored heading for an identifiable registered object and every shared target for a description beyond its use as a supporting premise.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -465,7 +471,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v7'
     | 'content-attachment.v8'
     | 'content-attachment.v9'
-    | 'content-attachment.v10' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v10'
+    | 'content-attachment.v11' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -490,7 +497,9 @@ export function createContentAttachmentRequest(
                     ? OWNER_SYSTEM_PROMPT_V8
                     : promptVersion === 'content-attachment.v9'
                       ? SELECTION_SYSTEM_PROMPT_V9
-                      : SYSTEM_PROMPT,
+                      : promptVersion === 'content-attachment.v10'
+                        ? SHARING_SYSTEM_PROMPT_V10
+                        : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -502,7 +511,8 @@ export function createContentAttachmentRequest(
             unit,
           }
         : promptVersion === 'content-attachment.v9' ||
-            promptVersion === 'content-attachment.v10'
+            promptVersion === 'content-attachment.v10' ||
+            promptVersion === 'content-attachment.v11'
           ? createContentAttachmentSelectionInput(plan, unit).payload
           : createContentAttachmentInput(plan, unit).payload,
     ),
@@ -581,6 +591,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v7' &&
       audit.promptVersion !== 'content-attachment.v8' &&
       audit.promptVersion !== 'content-attachment.v9' &&
+      audit.promptVersion !== 'content-attachment.v10' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -589,7 +600,8 @@ export function assembleContentAttachment(
     const legacy = audit.promptVersion === 'content-attachment.v1';
     const selection =
       audit.promptVersion === 'content-attachment.v9' ||
-      audit.promptVersion === 'content-attachment.v10';
+      audit.promptVersion === 'content-attachment.v10' ||
+      audit.promptVersion === 'content-attachment.v11';
     const selectionInput = selection
       ? createContentAttachmentSelectionInput(plan, unit)
       : null;
@@ -628,6 +640,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v7' ||
       audit.promptVersion === 'content-attachment.v8' ||
       audit.promptVersion === 'content-attachment.v9' ||
+      audit.promptVersion === 'content-attachment.v10' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
