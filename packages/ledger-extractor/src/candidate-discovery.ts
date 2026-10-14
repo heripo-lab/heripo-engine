@@ -9,7 +9,7 @@ import type {
 import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';
 
-export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v1';
+export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v2';
 
 const kindSchema = z.enum([
   'site',
@@ -239,8 +239,10 @@ const SYSTEM_PROMPT = `You propose archaeological ledger object candidates from 
 Rules:
 - Only objects investigated or found in THIS investigation. Exclude previous campaigns, background, regional archaeology, comparisons and cited examples even inside the selected chapter.
 - Kinds are site, area, trench, layer, feature, artifact, shipwreck, unknown. Do not invent more kinds or subtype fields.
-- A feature or artifact requires its own independently allocated body description OR a distinct item in a substantive original table. A heading alone, passing mention, quantity-only mention, photograph, drawing, caption or index never qualifies. Do not create every component named in a feature description as a separate object.
-- An explicit named context unit such as a trench or layer may be proposed with explicit_context_unit. Preserve author's uncertainty. No new scholarly interpretation.
+- Apply the independent-body-or-table requirement ONLY to feature and artifact candidates: each requires its own independently allocated body description OR a distinct item in a substantive original table. A heading alone, passing mention, quantity-only mention, photograph, drawing, caption or index does not qualify a feature or artifact. Do not create every component named in a feature description as a separate feature or artifact.
+- Do NOT apply that feature/artifact requirement to layer candidates. Include explicitly identified stratigraphic units as layer candidates with explicit_context_unit, even when they have no separate heading, dedicated paragraph or table row. In particular, extract a layer explicitly named as the findspot or depositional context of artifacts within a feature description or individual artifact account. Anchor it to an exact quote naming that layer.
+- Evaluate the layer and the artifacts mentioned in the same sentence separately. Rejecting a collective artifact mention because the artifacts have individual accounts must NOT discard an explicitly identified layer in that sentence. A layer is a stratigraphic context, not an extra artifact-group candidate. Identifying a layer candidate is required here even though parent relations are deferred to a later stage.
+- Other explicit named context units, such as trenches, may be proposed with explicit_context_unit. Preserve author's uncertainty. Do not invent a layer from an unnamed fill, a generic soil/material word or an inferred relationship. No new scholarly interpretation.
 - Use sourceName verbatim from a supplied title, resource or context. Copy sourceIdentifier exactly when present; do not turn a section ordinal like '2) 우물' into object number 2. For a table number cell, use the original number with an attested contextual object name; never invent a numbered name.
 - A table can have two or more independent objects per row. Preserve actual grid indexes; do not expand merged cells. Check the whole row and headers, not only the first column.
 - Grouped objects without individual accounts remain one candidate; never generate N objects from a count or range. If individual accounts exist for that same group, propose only individuals, with uncertainty if identity is unclear.
