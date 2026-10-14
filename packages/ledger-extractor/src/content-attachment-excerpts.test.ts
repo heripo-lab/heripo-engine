@@ -199,12 +199,23 @@ describe('immutable content excerpt selection', () => {
     expect(result.contents).toEqual([]);
     expect(result.ignoredPassages).toHaveLength(input.codeMap.excerpts.length);
     expect([plan, raw]).toEqual(before);
-    const historical = {
-      ...raw,
-      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v11'),
-      codeMap: createContentAttachmentSelectionInput(plan, unit).codeMap,
-    };
-    expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
+    for (const version of [
+      'content-attachment.v11',
+      'content-attachment.v12',
+      'content-attachment.v13',
+    ] as const) {
+      const historical = {
+        ...raw,
+        ...createContentAttachmentRequest(plan, unit, version),
+        codeMap:
+          version === 'content-attachment.v13'
+            ? createContentAttachmentDecisionInput(plan, unit).codeMap
+            : createContentAttachmentSelectionInput(plan, unit).codeMap,
+      };
+      expect(assembleContentAttachment(plan, [historical]).issues).toEqual(
+        version === 'content-attachment.v11' ? [] : result.issues,
+      );
+    }
     const ambiguous = audit(plan, {
       ...empty(),
       unresolved: headings.map((e) => ({
@@ -272,20 +283,28 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v13');
+    expect(raw.promptVersion).toBe('content-attachment.v14');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
       'content-attachment.v10',
       'content-attachment.v11',
       'content-attachment.v12',
+      'content-attachment.v13',
     ] as const) {
       const historical = {
         ...raw,
         ...createContentAttachmentRequest(plan, unit, version),
-        codeMap: createContentAttachmentSelectionInput(plan, unit).codeMap,
+        codeMap:
+          version === 'content-attachment.v13'
+            ? createContentAttachmentDecisionInput(plan, unit).codeMap
+            : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
-      expect(historical.userPrompt).toBe(JSON.stringify(input.payload));
+      expect(historical.userPrompt).toBe(
+        version === 'content-attachment.v13'
+          ? raw.userPrompt
+          : JSON.stringify(input.payload),
+      );
       expect(raw.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
       expect(assembleContentAttachment(plan, [historical])).toEqual(result);
       expect(
