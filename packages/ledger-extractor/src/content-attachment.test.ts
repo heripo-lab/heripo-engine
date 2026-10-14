@@ -776,7 +776,7 @@ describe('bounded content attachment', () => {
       unit,
       'content-attachment.v2',
     );
-    expect(current.promptVersion).toBe('content-attachment.v6');
+    expect(current.promptVersion).toBe('content-attachment.v7');
     expect(current.systemPrompt).toContain('exactly ONE original sentence');
     expect(current.systemPrompt).toContain(
       'include ALL those candidateRefs in the SAME item',
@@ -1100,6 +1100,104 @@ describe('bounded content attachment', () => {
     expect(assembleContentAttachment(p, [missingField]).issues[0].reason).toBe(
       'Invalid attachment response schema',
     );
+  });
+  test('retains confirmed sentence assignments alongside ambiguous layer alternatives and preserves strict v6 replay', async () => {
+    const p = await prepare(),
+      unit = p.units[0];
+    const direction = 'The structure faces east.';
+    const removal =
+      'Topsoil and the modern deposit were removed to reveal the structure.';
+    const foundation = 'The structure was founded on weathered bedrock.';
+    unit.sources[0].resource.data.text = [direction, removal, foundation].join(
+      ' ',
+    );
+    const template = p.registry[0];
+    p.registry = [
+      'Structure',
+      'Topsoil',
+      'Topsoil',
+      'Modern deposit',
+      'Natural ground',
+    ].map((name, i) => ({
+      ...structuredClone(template),
+      ref: `R${i + 1}`,
+      groupId: `g${i + 1}`,
+      recordKind: i === 0 ? 'feature' : 'layer',
+      mentions: [
+        {
+          ...structuredClone(template.mentions[0]),
+          candidateId: `candidate-${i}`,
+          sourceName: name,
+        },
+      ],
+    }));
+    const response: ContentAttachmentResponse = {
+      assignments: [
+        {
+          candidateRefs: ['R1'],
+          fragments: [{ sourceId: 'S1', quote: direction }],
+          reason: 'Direction',
+        },
+        {
+          candidateRefs: ['R1', 'R4'],
+          fragments: [{ sourceId: 'S1', quote: removal }],
+          reason: 'Confirmed feature and deposit',
+        },
+        {
+          candidateRefs: ['R1', 'R5'],
+          fragments: [{ sourceId: 'S1', quote: foundation }],
+          reason: 'Identified construction foundation',
+        },
+      ],
+      unresolved: [
+        {
+          candidateRefs: ['R2', 'R3'],
+          fragments: [{ sourceId: 'S1', quote: removal }],
+          reason: 'Topsoil name alone cannot distinguish the existing layers',
+        },
+      ],
+      ignoredPassages: [],
+      ignoredSources: [],
+    };
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      response,
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+    };
+    const before = structuredClone([p, raw]);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.completedUnitIds).toEqual([unit.unitId]);
+    expect(result.contents.map((c) => c.registryRef)).toEqual([
+      'R1',
+      'R4',
+      'R5',
+    ]);
+    expect(result.contents[0].excerpts.map((e) => e.fragments)).toEqual([
+      [direction],
+      [removal],
+      [foundation],
+    ]);
+    expect(result.unresolved[0].candidateRefs).toEqual(['R2', 'R3']);
+    expect(result.unresolved[0].evidence).toEqual(
+      result.contents[1].excerpts[0].occurrences[0].evidence,
+    );
+    expect([p, raw]).toEqual(before);
+    const v6 = createContentAttachmentRequest(p, unit, 'content-attachment.v6');
+    expect(raw.systemPrompt.startsWith(v6.systemPrompt + '\n')).toBe(true);
+    expect(raw.systemPrompt).toContain('plausible alternative layer refs');
+    expect(raw.systemPrompt).toContain('ambiguous layer alternatives ONLY');
+    expect(raw.userPrompt).toBe(v6.userPrompt);
+    expect(assembleContentAttachment(p, [{ ...raw, ...v6 }])).toEqual(result);
+    const incomplete = structuredClone(raw);
+    incomplete.response.assignments.shift();
+    const currentIssues = assembleContentAttachment(p, [incomplete]).issues;
+    expect(currentIssues[0].reason).toContain('Unaccounted text:');
+    expect(
+      assembleContentAttachment(p, [{ ...incomplete, ...v6 }]).issues,
+    ).toEqual(currentIssues);
   });
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();

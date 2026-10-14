@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v6';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v7';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -184,12 +184,18 @@ const HEADING_SYSTEM_PROMPT_V5 = BOUNDARY_SYSTEM_PROMPT_V4.replace(
   `HEADING ELIGIBILITY: Ignore generic report titles, contents entries and section/category headings that merely organize the document and do not identify a particular registry object (for example, 'Artifacts'). Preserve a selectable text heading that identifies an ALREADY REGISTERED object by its number and name, supported by that object's independent body account or substantive table item: assign the ENTIRE unchanged heading to that object as its own non-sentence phrase item. Include original punctuation and parenthetical figure/photo references; retaining those words does not create media links or assign captions/images. Do not bundle the heading with the following body sentences or measurements. This is identity evidence for an existing object, not permission to create a candidate from a heading alone. Use the heading's number, name and chapter/body context together; if identity is ambiguous, retain the heading in unresolved instead of dropping it or guessing. Do not exclude an eligible object-identifying heading merely because it is not a complete sentence.`,
 );
 
-const SYSTEM_PROMPT =
+const COVERAGE_SYSTEM_PROMPT_V6 =
   HEADING_SYSTEM_PROMPT_V5 +
   `
 EXHAUSTIVE PASSAGE ACCOUNTING: Read every selectable body block and table cell from beginning to end. Return every body sentence and boundary fragment as its own assignments or unresolved item, including direction, orientation, uncertainty and interpretation. Do not silently skip a sentence between retained sentences. Before returning, compare your decisions against the entire literal source text: all non-whitespace characters must be covered by assignments, unresolved, ignoredPassages or whole-source ignoredSources. This is text coverage, not permission to combine several sentences into one item. Code reports uncovered original ranges; it never fills them in.
 Use ignoredSources ONLY when the ENTIRE source is excluded. For an excluded passage within an otherwise used source, return ignoredPassages with exact fragments [{sourceId, quote}] and a reason. Keep each excluded sentence or eligible phrase separate; do not overlap excluded passages with assignments or unresolved. Return ignoredPassages: [] when none. Account for excluded punctuation as part of its original passage; only whitespace between passages may remain uncovered. If relevant identity is uncertain, preserve the original passage in unresolved instead of excluding it or guessing.
 FEATURE CONSTRUCTION CONTEXT: Shared assignment also applies when an identified feature is explicitly cut into, founded on or constructed on an identified existing layer or natural ground. Such a sentence describes BOTH the feature and its construction-context layer. Compare the layer's literal names and anchors with the document's overall stratigraphic definitions, location, material and stratigraphic role; a layer number need not occur in the current sentence. For example, if an existing natural-ground layer is defined as weathered bedrock at this location, 'The well was cut into weathered bedrock (natural ground).' belongs to BOTH the well and that layer in one item. Do not limit sharing to artifact findspots or choose only the main grammatical subject. Do not attach later construction details to that layer unless those sentences also clearly describe it. A generic soil name alone is insufficient; if identity remains uncertain, preserve that uncertainty without assigning every possible layer. Before returning, check every explicit construction foundation as well as every findspot against the full registry.`;
+
+const SYSTEM_PROMPT =
+  COVERAGE_SYSTEM_PROMPT_V6 +
+  `
+COMMON LAYER NAMES AND PARTIAL UNCERTAINTY: A common name such as topsoil (표토층), fill or sandy soil describes a type; it does not by itself identify one registered layer. Require an evidence chain linking the local occurrence to that candidate through explicit identifiers, overall layer definitions, location, material, stratigraphic role or stated continuity. This applies even if only one candidate has that name. If several DISTINCT candidate refs match only the common name and the supplied evidence does not distinguish them, put the passage in unresolved with the plausible alternative layer refs and explain what identity evidence is missing. Never select the first matching candidate, prefer a chapter merely because it contains the same word, or assign all alternatives as confirmed sharing. Multiple rows with the SAME ref are aliases/mentions of one candidate, not competing layers.
+Uncertainty about one layer must not discard confirmed descriptions in the same sentence: return an assignments item for the clearly identified feature and any independently identified layer, plus an unresolved item reusing the SAME exact sentence fragments for the ambiguous layer alternatives ONLY. For example, if a structure is revealed after removing topsoil and an identified modern deposit, retain the structure/modern-deposit assignment and separately report the indistinguishable topsoil candidates as unresolved. Do not shorten or rewrite the sentence to isolate the ambiguous name. Preserve construction-foundation sharing when original definitions and local evidence DO establish identity, even without a local layer number. Before returning, review every shared layer candidate for evidence beyond a common name and retain unresolved identity instead of guessing.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -405,7 +411,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v3'
     | 'content-attachment.v4'
     | 'content-attachment.v5'
-    | 'content-attachment.v6' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v6'
+    | 'content-attachment.v7' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -422,7 +429,9 @@ export function createContentAttachmentRequest(
             ? BOUNDARY_SYSTEM_PROMPT_V4
             : promptVersion === 'content-attachment.v5'
               ? HEADING_SYSTEM_PROMPT_V5
-              : SYSTEM_PROMPT,
+              : promptVersion === 'content-attachment.v6'
+                ? COVERAGE_SYSTEM_PROMPT_V6
+                : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -504,6 +513,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v3' &&
       audit.promptVersion !== 'content-attachment.v4' &&
       audit.promptVersion !== 'content-attachment.v5' &&
+      audit.promptVersion !== 'content-attachment.v6' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -538,6 +548,7 @@ export function assembleContentAttachment(
       continue;
     }
     const fullCoverage =
+      audit.promptVersion === 'content-attachment.v6' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = (
       fullCoverage
