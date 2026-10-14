@@ -97,6 +97,52 @@ function createValidDocument(): ProcessedDocument {
 }
 
 describe('parseProcessedDocument', () => {
+  test.each([-10, -1, 0, 1, 301])(
+    'preserves signed logical page %s',
+    (pageNo) => {
+      const input = createValidDocument();
+      input.pageRangeMap[1] = { startPageNo: pageNo, endPageNo: pageNo };
+      input.chapters[0].pageNo = pageNo;
+      const output = parseProcessedDocument(input);
+      expect(output.pageRangeMap[1]).toEqual(input.pageRangeMap[1]);
+      expect(output.chapters[0].pageNo).toBe(pageNo);
+    },
+  );
+
+  test.each([0.5, NaN, Infinity, -Infinity])(
+    'rejects non-integer logical page %s',
+    (pageNo) => {
+      const input = createValidDocument();
+      input.pageRangeMap[1].startPageNo = pageNo;
+      expect(() => parseProcessedDocument(input)).toThrow(
+        ProcessedDocumentValidationError,
+      );
+      input.pageRangeMap[1].startPageNo = -1;
+      input.pageRangeMap[1].endPageNo = pageNo;
+      expect(() => parseProcessedDocument(input)).toThrow(
+        ProcessedDocumentValidationError,
+      );
+      input.pageRangeMap[1].endPageNo = 0;
+      input.chapters[0].pageNo = pageNo;
+      expect(() => parseProcessedDocument(input)).toThrow(
+        ProcessedDocumentValidationError,
+      );
+    },
+  );
+
+  test.each([0, -1, 1.5])('rejects invalid physical PDF page %s', (pageNo) => {
+    const input = createValidDocument();
+    input.pageRangeMap = { [pageNo]: { startPageNo: -1, endPageNo: 0 } };
+    expect(() => parseProcessedDocument(input)).toThrow(
+      ProcessedDocumentValidationError,
+    );
+    input.pageRangeMap = { 1: { startPageNo: -1, endPageNo: 0 } };
+    input.images[0].pdfPageNo = pageNo;
+    expect(() => parseProcessedDocument(input)).toThrow(
+      ProcessedDocumentValidationError,
+    );
+  });
+
   test('returns a typed document for valid input', () => {
     const input = createValidDocument();
 

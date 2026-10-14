@@ -23,6 +23,17 @@ vi.mock('@heripo/shared', () => ({
 vi.mock('./toc-validator');
 
 describe('TocEntrySchema', () => {
+  test.each([-2, -1, 0, 1])('accepts signed logical page %s', (pageNo) => {
+    expect(
+      TocEntrySchema.safeParse({
+        title: 'Section',
+        level: 1,
+        pageNo,
+        children: [],
+      }).success,
+    ).toBe(true);
+  });
+
   test('validates valid TOC entry structure', () => {
     const validEntry = {
       title: 'Chapter 1',
@@ -92,11 +103,11 @@ describe('TocEntrySchema', () => {
     expect(result.success).toBe(false);
   });
 
-  test('rejects invalid pageNo (less than 1)', () => {
+  test('rejects fractional pageNo', () => {
     const invalidEntry = {
       title: 'Chapter 1',
       level: 1,
-      pageNo: 0,
+      pageNo: 0.5,
       children: [],
     };
 

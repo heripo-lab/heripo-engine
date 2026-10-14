@@ -15,7 +15,7 @@ export interface TocEntry {
   level: number;
 
   /**
-   * Starting page number
+   * Starting logical page number (signed integer, relative to body page 1)
    */
   pageNo: number;
 

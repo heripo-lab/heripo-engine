@@ -64,6 +64,8 @@ To use all features freely, run locally:
 
 The library enables structural review and table correction by default, while the demo form starts with `reviewAssistanceEnabled: false` and `tableCorrectionEnabled: false`. Initial text/table-cell OCR correction still runs. When structural review is enabled, the worker passes `forceAutoApply: true`, applying valid commands automatically. There is no manual approval queue.
 
+The result viewer distinguishes physical PDF pages (starting at 1) from logical pages relative to body page 1. Negative logical pages and zero are displayed and resolve to their corresponding PDF pages.
+
 ## Prerequisites
 
 ### PDF Parser Requirements

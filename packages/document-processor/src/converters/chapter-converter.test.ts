@@ -34,6 +34,66 @@ describe('ChapterConverter', () => {
   });
 
   describe('convert', () => {
+    test('does not assign unmapped content before the first known logical page', () => {
+      const chapters = converter.convert(
+        [{ title: 'Body', level: 1, pageNo: 110 }],
+        [createTextItem('Unmapped content', 2)],
+        { 1: { startPageNo: 100, endPageNo: 100 } },
+        [{ id: 'unmapped-image', pdfPageNo: 2, path: '/image.png' }],
+        [createTable('unmapped-table', 2)],
+        [{ id: 'unmapped-note', pdfPageNo: 2, text: 'Note' }],
+      );
+      expect(
+        chapters.every(
+          (chapter) =>
+            chapter.textBlocks.length === 0 &&
+            chapter.imageIds.length === 0 &&
+            chapter.tableIds.length === 0 &&
+            chapter.footnoteIds.length === 0,
+        ),
+      ).toBe(true);
+    });
+
+    test('assigns negative logical chapters and front matter without dropping content', () => {
+      const chapters = converter.convert(
+        [
+          { title: 'Preface', level: 1, pageNo: -2 },
+          { title: 'Contents', level: 1, pageNo: 0 },
+          { title: 'Body', level: 1, pageNo: 1 },
+        ],
+        [
+          createTextItem('Cover', 1),
+          createTextItem('Preface text', 2),
+          createTextItem('Contents text', 4),
+          createTextItem('Body text', 5),
+        ],
+        {
+          1: { startPageNo: -3, endPageNo: -3 },
+          2: { startPageNo: -2, endPageNo: -2 },
+          3: { startPageNo: -1, endPageNo: -1 },
+          4: { startPageNo: 0, endPageNo: 0 },
+          5: { startPageNo: 1, endPageNo: 1 },
+        },
+        [{ id: 'cover-image', pdfPageNo: 1, path: '/cover.png' }],
+        [createTable('preface-table', 2)],
+        [{ id: 'contents-note', pdfPageNo: 4, text: 'Note' }],
+      );
+      expect(chapters.map((chapter) => chapter.pageNo)).toEqual([-3, -2, 0, 1]);
+      expect(
+        chapters.map((chapter) =>
+          chapter.textBlocks.map((block) => block.text),
+        ),
+      ).toEqual([
+        ['Cover'],
+        ['Preface text'],
+        ['Contents text'],
+        ['Body text'],
+      ]);
+      expect(chapters[0].imageIds).toEqual(['cover-image']);
+      expect(chapters[1].tableIds).toEqual(['preface-table']);
+      expect(chapters[2].footnoteIds).toEqual(['contents-note']);
+    });
+
     test('should convert flat TocEntry[] to Chapter[]', () => {
       const tocEntries: TocEntry[] = [
         { title: 'Chapter 1', level: 1, pageNo: 1 },
@@ -679,12 +739,7 @@ describe('ChapterConverter', () => {
       expect(chapters[2].footnoteIds).toEqual(['ftn-003', 'ftn-004']);
     });
 
-    test('should skip resources on pages that do not match any chapter range', () => {
-      // Chapter starts at page 10, so Front Matter covers pages 1-9.
-      // Resources on page 0 (before Front Matter) won't match any range
-      // because Front Matter starts at page 1 and no chapter covers page 0.
-      // We achieve "unmapped" by using a pageRangeMap that maps a PDF page
-      // to actual page 0, which is before Front Matter's startPage of 1.
+    test('retains resources at logical zero in front matter', () => {
       const tocEntries: TocEntry[] = [
         { title: 'Chapter 1', level: 1, pageNo: 10 },
       ];
@@ -709,8 +764,6 @@ describe('ChapterConverter', () => {
         { id: 'ftn-matched', text: 'Matched footnote', pdfPageNo: 12 },
       ];
 
-      // PDF page 50 maps to actual page 0, which falls outside all ranges
-      // (Front Matter: [1, 9], Chapter 1: [10, MAX])
       const pageRangeMap: Record<number, PageRange> = {
         50: { startPageNo: 0, endPageNo: 0 },
         12: { startPageNo: 12, endPageNo: 12 },
@@ -725,23 +778,19 @@ describe('ChapterConverter', () => {
         footnotes,
       );
 
-      // chapters[0] = Front Matter (pages 1-9), chapters[1] = Chapter 1 (pages 10+)
-
-      // Unmatched resources (page 0) should be silently skipped
       const allTextBlocks = chapters.flatMap((c) => c.textBlocks);
-      expect(allTextBlocks).toHaveLength(1);
-      expect(allTextBlocks[0].text).toBe('Valid text');
+      expect(allTextBlocks).toHaveLength(2);
+      expect(chapters[0].textBlocks[0].text).toBe('Unmapped text');
+      expect(chapters[0].pageNo).toBe(0);
 
-      // Only matched image should be linked
-      expect(chapters[0].imageIds).toHaveLength(0);
+      // Both front matter and body resources remain linked.
+      expect(chapters[0].imageIds).toEqual(['img-unmatched']);
       expect(chapters[1].imageIds).toEqual(['img-matched']);
 
-      // Only matched table should be linked
-      expect(chapters[0].tableIds).toHaveLength(0);
+      expect(chapters[0].tableIds).toEqual(['tbl-unmatched']);
       expect(chapters[1].tableIds).toEqual(['tbl-matched']);
 
-      // Only matched footnote should be linked
-      expect(chapters[0].footnoteIds).toHaveLength(0);
+      expect(chapters[0].footnoteIds).toEqual(['ftn-unmatched']);
       expect(chapters[1].footnoteIds).toEqual(['ftn-matched']);
     });
 
