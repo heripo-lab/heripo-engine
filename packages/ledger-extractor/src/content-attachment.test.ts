@@ -762,13 +762,20 @@ describe('bounded content attachment', () => {
       unit,
       'content-attachment.v2',
     );
-    expect(current.promptVersion).toBe('content-attachment.v3');
+    expect(current.promptVersion).toBe('content-attachment.v4');
     expect(current.systemPrompt).toContain('exactly ONE original sentence');
     expect(current.systemPrompt).toContain(
       'include ALL those candidateRefs in the SAME item',
     );
     expect(current.userPrompt).toBe(historical.userPrompt);
     expect(current.systemPrompt).not.toBe(historical.systemPrompt);
+    const v3 = createContentAttachmentRequest(p, unit, 'content-attachment.v3');
+    expect(current.userPrompt).toBe(v3.userPrompt);
+    expect(v3.systemPrompt).not.toContain('SOURCE CONTAINERS VS EXCERPT UNITS');
+    expect(current.systemPrompt).toContain(
+      'SOURCE CONTAINERS VS EXCERPT UNITS',
+    );
+    expect(assembleContentAttachment(p, [{ ...raw, ...v3 }])).toEqual(result);
     const v2 = { ...raw, ...historical };
     expect(assembleContentAttachment(p, [v2])).toEqual(result);
     expect(
@@ -776,6 +783,63 @@ describe('bounded content attachment', () => {
         { ...raw, promptVersion: 'content-attachment.v2' },
       ]).issues[0].reason,
     ).toContain('Audit does not match');
+  });
+  test('retains a leading boundary fragment and two following sentence decisions under the same source without merging or restoring them', async () => {
+    const p = await prepare();
+    const unit = p.units[2];
+    const quotes = [
+      'その一部である。',
+      '壁は石組みである。',
+      '内面は円形である。',
+    ];
+    const original = quotes.join('');
+    unit.sources[0].resource.data.text = original;
+    const response: ContentAttachmentResponse = {
+      assignments: quotes.map((quote) => ({
+        candidateRefs: ['R1'],
+        fragments: [{ sourceId: 'S1', quote }],
+        reason: '原文の一部',
+      })),
+      unresolved: [],
+      ignoredSources: unit.sources
+        .slice(1)
+        .map((_, i) => ({ sourceId: `S${i + 2}`, reason: '対象外' })),
+    };
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      response,
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+    };
+    const before = structuredClone(raw);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.contents[0].excerpts.map((e) => e.fragments)).toEqual(
+      quotes.map((q) => [q]),
+    );
+    expect(
+      result.contents[0].excerpts.map(
+        (e) => e.occurrences[0].evidence[0].charStart,
+      ),
+    ).toEqual([0, quotes[0].length, quotes[0].length + quotes[1].length]);
+    expect(
+      result.contents[0].excerpts.every(
+        (e) =>
+          e.occurrences[0].evidence[0].sourceId === unit.sources[0].sourceId,
+      ),
+    ).toBe(true);
+    expect(unit.sources[0].resource.data.text).toBe(original);
+    expect(raw).toEqual(before);
+    expect(raw.systemPrompt).toContain(
+      'put ONLY its leading incomplete sentence fragment',
+    );
+    expect(raw.systemPrompt).toContain(
+      'every following complete sentence MUST be a separate item',
+    );
+    expect(raw.systemPrompt).not.toContain(
+      'Return each original source block fragment separately in fragments',
+    );
   });
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();

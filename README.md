@@ -535,3 +535,5 @@ Ledger content attachment now prepares a fixed registry and a physical-page swee
 Content attachment v2 keeps the complete candidate pool in compact rows with shared chapter contexts. Storage IDs, source locations and snapshot hashes stay in a code-only map; the local demo reports the first call’s actual token usage.
 
 Content-attachment prompt v3 requests one body sentence per decision and shared assignment to every clearly identified object/context candidate, retaining historical prompt audits and unchanged source text.
+
+Content-attachment prompt v4 distinguishes source containers from sentence excerpts, keeping only a leading boundary fragment incomplete and separating the following sentences without changing source text or stored responses.
