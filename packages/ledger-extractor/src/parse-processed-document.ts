@@ -15,8 +15,8 @@ const captionSchema = z.object({
 });
 
 const pageRangeSchema = z.object({
-  startPageNo: z.number(),
-  endPageNo: z.number(),
+  startPageNo: z.number().int(),
+  endPageNo: z.number().int(),
 });
 
 const processedDocumentSourceSchema = z.object({
@@ -30,7 +30,7 @@ const textBlockSchema = z.object({
   id: z.string().optional(),
   sourceRef: z.string().optional(),
   text: z.string(),
-  pdfPageNo: z.number(),
+  pdfPageNo: z.number().int().positive(),
 });
 
 const chapterSchema: z.ZodType<Chapter> = z.lazy(() =>
@@ -38,7 +38,7 @@ const chapterSchema: z.ZodType<Chapter> = z.lazy(() =>
     id: z.string(),
     originTitle: z.string(),
     title: z.string(),
-    pageNo: z.number(),
+    pageNo: z.number().int(),
     level: z.number(),
     sourceRefs: z.array(z.string()).optional(),
     textBlocks: z.array(textBlockSchema),
@@ -54,7 +54,7 @@ const processedImageSchema = z.object({
   sourceRef: z.string().optional(),
   captionSourceRefs: z.array(z.string()).optional(),
   caption: captionSchema.optional(),
-  pdfPageNo: z.number(),
+  pdfPageNo: z.number().int().positive(),
   path: z.string(),
 });
 
@@ -70,7 +70,7 @@ const processedTableSchema = z.object({
   sourceRef: z.string().optional(),
   captionSourceRefs: z.array(z.string()).optional(),
   caption: captionSchema.optional(),
-  pdfPageNo: z.number(),
+  pdfPageNo: z.number().int().positive(),
   numRows: z.number(),
   numCols: z.number(),
   grid: z.array(z.array(processedTableCellSchema)),
@@ -80,14 +80,14 @@ const processedFootnoteSchema = z.object({
   id: z.string(),
   sourceRef: z.string().optional(),
   text: z.string(),
-  pdfPageNo: z.number(),
+  pdfPageNo: z.number().int().positive(),
 });
 
 const processedDocumentSchema = z.object({
   reportId: z.string(),
   schemaVersion: z.string().optional(),
   source: processedDocumentSourceSchema.optional(),
-  pageRangeMap: z.record(z.string().regex(/^\d+$/), pageRangeSchema),
+  pageRangeMap: z.record(z.string().regex(/^[1-9]\d*$/), pageRangeSchema),
   chapters: z.array(chapterSchema),
   images: z.array(processedImageSchema),
   tables: z.array(processedTableSchema),

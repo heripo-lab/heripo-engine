@@ -64,6 +64,8 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 
 라이브러리는 구조 검토와 표 보정을 기본 활성화하지만, 데모 폼은 `reviewAssistanceEnabled: false`, `tableCorrectionEnabled: false`로 시작합니다. 초기 텍스트·표 셀 OCR 보정은 계속 수행합니다. 구조 검토를 활성화하면 worker가 `forceAutoApply: true`를 전달하므로 유효한 명령은 자동 적용됩니다. 수동 승인 대기열은 없습니다.
 
+결과 화면은 PDF 물리 페이지(1부터 시작)와 본문 1쪽 기준의 논리 페이지를 구분합니다. 논리 페이지의 음수·0도 표시하고 해당 PDF 페이지로 이동할 수 있습니다.
+
 ## 사전 요구사항
 
 ### PDF Parser 요구사항

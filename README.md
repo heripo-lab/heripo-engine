@@ -103,6 +103,8 @@ Raw Data Extraction → Archaeological Data Ledger → Archaeological Data Stand
 | **Ontology**            | Domain-specific semantic models and knowledge graphs                                                          |
 | **DB Storage**          | Independent storage and utilization for each pipeline stage                                                   |
 
+Physical PDF pages start at 1. Logical pages count continuously relative to body page 1, with negative values and zero for preceding pages.
+
 **Current Implementation (v0.1.x):**
 
 - ✅ PDF parsing and OCR (Docling SDK)

@@ -324,7 +324,7 @@ describe('PageRangeParser', () => {
       expect(result.usage[0].totalTokens).toBe(165);
     });
 
-    test('returns fallback map with 0,0 when pattern detection exhausts all retries', async () => {
+    test('throws when no logical numbering can be determined', async () => {
       const doc = createMockDocument(10);
 
       mockCallVision.mockResolvedValue({
@@ -347,15 +347,10 @@ describe('PageRangeParser', () => {
         usedFallback: false,
       });
 
-      const result = await parser.parse(doc);
+      await expect(parser.parse(doc)).rejects.toThrow(
+        'Could not determine a logical page number',
+      );
 
-      // All pages should be mapped to 0,0 (failed)
-      for (let i = 1; i <= 10; i++) {
-        expect(result.pageRangeMap[i]).toEqual({
-          startPageNo: 0,
-          endPageNo: 0,
-        });
-      }
       // Should have terminated early after 3 consecutive all-null attempts
       expect(mockCallVision).toHaveBeenCalledTimes(3);
       expect(logger.warn).toHaveBeenCalledWith(
@@ -388,11 +383,12 @@ describe('PageRangeParser', () => {
         usedFallback: false,
       });
 
-      const result = await parser.parse(doc);
+      await expect(parser.parse(doc)).rejects.toThrow(
+        'Could not determine a logical page number',
+      );
 
       // Should stop after exactly 3 LLM calls (not 20)
       expect(mockCallVision).toHaveBeenCalledTimes(3);
-      expect(result.usage).toHaveLength(3);
     });
 
     test('resets consecutive all-null counter when non-null sample is found', async () => {
@@ -445,11 +441,12 @@ describe('PageRangeParser', () => {
         };
       });
 
-      const result = await parser.parse(doc);
+      await expect(parser.parse(doc)).rejects.toThrow(
+        'Could not determine a logical page number',
+      );
 
       // Counter resets at call 3, then needs 3 more all-null: calls 4, 5, 6
       expect(mockCallVision).toHaveBeenCalledTimes(6);
-      expect(result.pageRangeMap).toBeDefined();
     });
 
     test('uses accumulated samples for pattern detection after early termination', async () => {
@@ -519,7 +516,7 @@ describe('PageRangeParser', () => {
       // Early termination after 5 calls (2 with partial data + 3 all-null)
       expect(mockCallVision).toHaveBeenCalledTimes(5);
       // Accumulated samples from calls 1 and 2 should allow pattern detection
-      // Pages should NOT all be {0, 0} fallback
+      // A consistent pattern should resolve the complete map.
       const values = Object.values(result.pageRangeMap);
       const hasNonFallback = values.some(
         (v) => v.startPageNo !== 0 || v.endPageNo !== 0,
@@ -527,7 +524,7 @@ describe('PageRangeParser', () => {
       expect(hasNonFallback).toBe(true);
     });
 
-    test('falls back to 0,0 when retries exhausted with insufficient valid samples', async () => {
+    test('throws without inventing logical page zero when retries exhausted with insufficient valid samples', async () => {
       const doc = createMockDocument(10);
 
       const extractSampledPages = (options: any): number[] => {
@@ -568,20 +565,15 @@ describe('PageRangeParser', () => {
         };
       });
 
-      const result = await parser.parse(doc);
+      await expect(parser.parse(doc)).rejects.toThrow(
+        'Could not determine a logical page number',
+      );
 
       // All 20 attempts used (MAX_PATTERN_RETRIES=19, no early termination)
       expect(mockCallVision).toHaveBeenCalledTimes(20);
-      // Accumulated valid samples exist but pattern is inconsistent → fallback 0,0
-      for (let i = 1; i <= 10; i++) {
-        expect(result.pageRangeMap[i]).toEqual({
-          startPageNo: 0,
-          endPageNo: 0,
-        });
-      }
     });
 
-    test('falls back to 0,0 when accumulated samples have inconsistent pattern', async () => {
+    test('throws without inventing logical page zero when accumulated samples have inconsistent pattern', async () => {
       const doc = createMockDocument(10);
 
       const extractSampledPages = (options: any): number[] => {
@@ -643,16 +635,11 @@ describe('PageRangeParser', () => {
         };
       });
 
-      const result = await parser.parse(doc);
+      await expect(parser.parse(doc)).rejects.toThrow(
+        'Could not determine a logical page number',
+      );
 
-      // Accumulated samples exist but pattern is inconsistent → fallback 0,0
       expect(mockCallVision).toHaveBeenCalledTimes(5);
-      for (let i = 1; i <= 10; i++) {
-        expect(result.pageRangeMap[i]).toEqual({
-          startPageNo: 0,
-          endPageNo: 0,
-        });
-      }
     });
 
     test('throws when LLMCaller.callVision fails', async () => {
@@ -977,16 +964,16 @@ describe('PageRangeParser', () => {
   });
 
   describe('applyPattern', () => {
-    test('handles UNKNOWN pattern by setting pages to 0', () => {
+    test('keeps UNKNOWN pattern pages unresolved', () => {
       // PagePattern.UNKNOWN = 'UNKNOWN'
       const pattern = { pattern: 'UNKNOWN', offset: 0, increment: 1 };
       const pageNos = [1, 2, 3];
 
       const result = (parser as any).applyPattern(pageNos, pattern);
 
-      expect(result[1]).toEqual({ startPageNo: 0, endPageNo: 0 });
-      expect(result[2]).toEqual({ startPageNo: 0, endPageNo: 0 });
-      expect(result[3]).toEqual({ startPageNo: 0, endPageNo: 0 });
+      expect(result[1]).toBeNull();
+      expect(result[2]).toBeNull();
+      expect(result[3]).toBeNull();
     });
   });
 
@@ -996,7 +983,7 @@ describe('PageRangeParser', () => {
       // isDoubleSided = true when startPageNo != endPageNo
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
         1: { startPageNo: 100, endPageNo: 100 }, // Outlier
         // Double-sided normal sequence
@@ -1009,8 +996,8 @@ describe('PageRangeParser', () => {
 
       // Page 1: expected = 5 - (2-1)*2 = 5 - 2 = 3
       // 100 > 3 + 10 = 13? Yes, outlier
-      expect(pageRangeMap[1].startPageNo).toBe(0);
-      expect(pageRangeMap[2].startPageNo).toBe(5);
+      expect(pageRangeMap[1]).toBeNull();
+      expect(pageRangeMap[2]!.startPageNo).toBe(5);
     });
 
     test('detects and marks outlier pages as failed', () => {
@@ -1022,7 +1009,7 @@ describe('PageRangeParser', () => {
       // - Then have a valid sequence after
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
         // Outlier pages (do not form valid pattern with pages 4,5,6)
         1: { startPageNo: 100, endPageNo: 100 }, // Outlier: 100 > (10 + 10) = 20
@@ -1035,13 +1022,13 @@ describe('PageRangeParser', () => {
 
       (parser as any).detectAndHandleOutliers(pageRangeMap);
 
-      // Page 1 should be marked as outlier (set to 0)
+      // Page 1 should be marked unresolved.
       // expected for page 1: normalStartPageNo(10) - pdfDiff(2-1=1) = 9
       // 100 > 9 + 10 = 19? Yes, so outlier
-      expect(pageRangeMap[1].startPageNo).toBe(0);
+      expect(pageRangeMap[1]).toBeNull();
       // Normal pages should be unchanged
-      expect(pageRangeMap[2].startPageNo).toBe(10);
-      expect(pageRangeMap[3].startPageNo).toBe(11);
+      expect(pageRangeMap[2]!.startPageNo).toBe(10);
+      expect(pageRangeMap[3]!.startPageNo).toBe(11);
     });
 
     test('does not detect outliers when difference is within threshold', () => {
@@ -1049,7 +1036,7 @@ describe('PageRangeParser', () => {
       // If pageNo <= expectedPageNo + 10, no outlier
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
         1: { startPageNo: 15, endPageNo: 15 }, // Not outlier: expected=9, 15 <= 9+10=19
         2: { startPageNo: 10, endPageNo: 10 }, // Normal sequence start
@@ -1060,16 +1047,16 @@ describe('PageRangeParser', () => {
       (parser as any).detectAndHandleOutliers(pageRangeMap);
 
       // Page 1 should NOT be marked as outlier (15 <= 19)
-      expect(pageRangeMap[1].startPageNo).toBe(15);
+      expect(pageRangeMap[1]!.startPageNo).toBe(15);
     });
 
-    test('skips pages with pageNo === 0 when detecting outliers', () => {
-      // When pageNo === 0, the page should be skipped (continue statement at line 571)
+    test('skips unresolved pages when detecting outliers', () => {
+      // Unknown extraction values are distinct from valid zero.
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
-        1: { startPageNo: 0, endPageNo: 0 }, // pageNo === 0, should be skipped
+        1: null, // Unresolved pages are skipped
         2: { startPageNo: 10, endPageNo: 10 }, // Normal sequence start
         3: { startPageNo: 11, endPageNo: 11 }, // Normal sequence
         4: { startPageNo: 12, endPageNo: 12 }, // Normal sequence
@@ -1077,11 +1064,10 @@ describe('PageRangeParser', () => {
 
       (parser as any).detectAndHandleOutliers(pageRangeMap);
 
-      // Page 1 with pageNo=0 should remain unchanged (skipped, not processed as outlier)
-      expect(pageRangeMap[1].startPageNo).toBe(0);
-      expect(pageRangeMap[1].endPageNo).toBe(0);
+      // The unresolved page remains unchanged.
+      expect(pageRangeMap[1]).toBeNull();
       // Normal pages should be unchanged
-      expect(pageRangeMap[2].startPageNo).toBe(10);
+      expect(pageRangeMap[2]!.startPageNo).toBe(10);
     });
   });
 
@@ -1091,7 +1077,7 @@ describe('PageRangeParser', () => {
       // PDF page 3 (pageNo=50) -> PDF page 4 (pageNo=1) triggers drop
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
         1: { startPageNo: 48, endPageNo: 48 }, // Will be recalculated
         2: { startPageNo: 49, endPageNo: 49 }, // Will be recalculated
@@ -1104,20 +1090,20 @@ describe('PageRangeParser', () => {
 
       // Pages 1-3 should be recalculated based on drop point (page 4 = 1)
       // Single-page: expectedPageNo = currPageNo - distance
-      // Page 1: 1 - 3 = -2 -> 0
-      // Page 2: 1 - 2 = -1 -> 0
-      // Page 3: 1 - 1 = 0 -> 0
-      expect(pageRangeMap[1].startPageNo).toBe(0);
-      expect(pageRangeMap[2].startPageNo).toBe(0);
-      expect(pageRangeMap[3].startPageNo).toBe(0);
-      expect(pageRangeMap[4].startPageNo).toBe(1);
+      // Page 1: 1 - 3 = -2
+      // Page 2: 1 - 2 = -1
+      // Page 3: 1 - 1 = 0
+      expect(pageRangeMap[1]!.startPageNo).toBe(-2);
+      expect(pageRangeMap[2]!.startPageNo).toBe(-1);
+      expect(pageRangeMap[3]!.startPageNo).toBe(0);
+      expect(pageRangeMap[4]!.startPageNo).toBe(1);
     });
 
     test('detectAndHandleDrops recalculates single-page pattern with positive results', () => {
       // Create scenario where recalculation results in positive values
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
         1: { startPageNo: 50, endPageNo: 50 }, // Will be recalculated to 7
         2: { startPageNo: 51, endPageNo: 51 }, // Will be recalculated to 8
@@ -1128,17 +1114,17 @@ describe('PageRangeParser', () => {
 
       // Page 1: 10 - 2 = 8
       // Page 2: 10 - 1 = 9
-      expect(pageRangeMap[1].startPageNo).toBe(8);
-      expect(pageRangeMap[1].endPageNo).toBe(8);
-      expect(pageRangeMap[2].startPageNo).toBe(9);
-      expect(pageRangeMap[2].endPageNo).toBe(9);
+      expect(pageRangeMap[1]!.startPageNo).toBe(8);
+      expect(pageRangeMap[1]!.endPageNo).toBe(8);
+      expect(pageRangeMap[2]!.startPageNo).toBe(9);
+      expect(pageRangeMap[2]!.endPageNo).toBe(9);
     });
 
     test('detectAndHandleDrops handles double-sided recalculation with positive results', () => {
       // Double-sided drop scenario
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
         1: { startPageNo: 50, endPageNo: 51 }, // Will be recalculated
         2: { startPageNo: 52, endPageNo: 53 }, // Will be recalculated
@@ -1150,41 +1136,41 @@ describe('PageRangeParser', () => {
       // Double-sided: expectedStartPageNo = currPageNo - distance * 2
       // Page 1: 10 - 2*2 = 6, endPageNo = 7
       // Page 2: 10 - 1*2 = 8, endPageNo = 9
-      expect(pageRangeMap[1].startPageNo).toBe(6);
-      expect(pageRangeMap[1].endPageNo).toBe(7);
-      expect(pageRangeMap[2].startPageNo).toBe(8);
-      expect(pageRangeMap[2].endPageNo).toBe(9);
+      expect(pageRangeMap[1]!.startPageNo).toBe(6);
+      expect(pageRangeMap[1]!.endPageNo).toBe(7);
+      expect(pageRangeMap[2]!.startPageNo).toBe(8);
+      expect(pageRangeMap[2]!.endPageNo).toBe(9);
     });
 
     test('detectAndHandleDrops handles double-sided with negative recalculation', () => {
       // Double-sided where recalculation results in negative
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
-        1: { startPageNo: 50, endPageNo: 51 }, // Will be recalculated to negative -> 0
-        2: { startPageNo: 52, endPageNo: 53 }, // Will be recalculated to negative -> 0
+        1: { startPageNo: 50, endPageNo: 51 }, // Will be recalculated to negative
+        2: { startPageNo: 52, endPageNo: 53 }, // Will be recalculated to negative
         3: { startPageNo: 2, endPageNo: 3 }, // Drop point: double-sided (2-3)
       };
 
       (parser as any).detectAndHandleDrops(pageRangeMap);
 
       // Double-sided: expectedStartPageNo = currPageNo - distance * 2
-      // Page 1: 2 - 2*2 = -2 -> 0
-      // Page 2: 2 - 1*2 = 0 -> 0 (< 1)
-      expect(pageRangeMap[1].startPageNo).toBe(0);
-      expect(pageRangeMap[1].endPageNo).toBe(0);
-      expect(pageRangeMap[2].startPageNo).toBe(0);
-      expect(pageRangeMap[2].endPageNo).toBe(0);
+      // Page 1: 2 - 2*2 = -2
+      // Page 2: 2 - 1*2 = 0
+      expect(pageRangeMap[1]!.startPageNo).toBe(-2);
+      expect(pageRangeMap[1]!.endPageNo).toBe(-1);
+      expect(pageRangeMap[2]!.startPageNo).toBe(0);
+      expect(pageRangeMap[2]!.endPageNo).toBe(1);
     });
 
     test('backfillFailedPages fills pages using double-sided pattern', () => {
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
-        1: { startPageNo: 0, endPageNo: 0 }, // Failed - will be backfilled
-        2: { startPageNo: 0, endPageNo: 0 }, // Failed - will be backfilled
+        1: null, // Missing logical page
+        2: null, // Missing logical page
         3: { startPageNo: 5, endPageNo: 6 }, // Success - double-sided
         4: { startPageNo: 7, endPageNo: 8 }, // Success - double-sided
         5: { startPageNo: 9, endPageNo: 10 }, // Success - double-sided
@@ -1197,18 +1183,18 @@ describe('PageRangeParser', () => {
       // From page 3: 5 = 3 * 2 + offset => offset = -1
       // Page 1: 1 * 2 + (-1) = 1, endPageNo = 2
       // Page 2: 2 * 2 + (-1) = 3, endPageNo = 4
-      expect(pageRangeMap[1].startPageNo).toBe(1);
-      expect(pageRangeMap[1].endPageNo).toBe(2);
-      expect(pageRangeMap[2].startPageNo).toBe(3);
-      expect(pageRangeMap[2].endPageNo).toBe(4);
+      expect(pageRangeMap[1]!.startPageNo).toBe(1);
+      expect(pageRangeMap[1]!.endPageNo).toBe(2);
+      expect(pageRangeMap[2]!.startPageNo).toBe(3);
+      expect(pageRangeMap[2]!.endPageNo).toBe(4);
     });
 
-    test('backfillFailedPages skips when result would be negative', () => {
+    test('backfillFailedPages infers negative double-sided logical pages', () => {
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
-        1: { startPageNo: 0, endPageNo: 0 }, // Failed - would be negative
+        1: null, // Missing logical page
         2: { startPageNo: 1, endPageNo: 2 }, // Success - double-sided
         3: { startPageNo: 3, endPageNo: 4 }, // Success - double-sided
         4: { startPageNo: 5, endPageNo: 6 }, // Success - double-sided
@@ -1218,17 +1204,17 @@ describe('PageRangeParser', () => {
 
       // Page 1 backfill: 1 * 2 + offset
       // From page 2: 1 = 2 * 2 + offset => offset = -3
-      // Page 1: 1 * 2 + (-3) = -1 -> skip, stays 0
-      expect(pageRangeMap[1].startPageNo).toBe(0);
+      // Page 1: 1 * 2 + (-3) = -1
+      expect(pageRangeMap[1]!.startPageNo).toBe(-1);
     });
 
-    test('backfillFailedPages skips single-sided pages when result would be negative', () => {
+    test('backfillFailedPages infers negative and zero single-sided logical pages', () => {
       const pageRangeMap: Record<
         number,
-        { startPageNo: number; endPageNo: number }
+        { startPageNo: number; endPageNo: number } | null
       > = {
-        1: { startPageNo: 0, endPageNo: 0 }, // Failed - would be negative
-        2: { startPageNo: 0, endPageNo: 0 }, // Failed - would be negative
+        1: null, // Missing logical page
+        2: null, // Missing logical page
         3: { startPageNo: 1, endPageNo: 1 }, // Success - single-sided (offset = -2)
         4: { startPageNo: 2, endPageNo: 2 }, // Success - single-sided (offset = -2)
         5: { startPageNo: 3, endPageNo: 3 }, // Success - single-sided (offset = -2)
@@ -1238,16 +1224,99 @@ describe('PageRangeParser', () => {
 
       // Single-sided pattern detected (startPageNo === endPageNo)
       // Offsets: 1-3=-2, 2-4=-2, 3-5=-2 => avgOffset = -2
-      // Page 1: 1 + (-2) = -1 < 1 -> skip
-      // Page 2: 2 + (-2) = 0 < 1 -> skip
-      expect(pageRangeMap[1].startPageNo).toBe(0);
-      expect(pageRangeMap[1].endPageNo).toBe(0);
-      expect(pageRangeMap[2].startPageNo).toBe(0);
-      expect(pageRangeMap[2].endPageNo).toBe(0);
+      // Page 1: 1 + (-2) = -1
+      // Page 2: 2 + (-2) = 0
+      expect(pageRangeMap[1]!.startPageNo).toBe(-1);
+      expect(pageRangeMap[1]!.endPageNo).toBe(-1);
+      expect(pageRangeMap[2]!.startPageNo).toBe(0);
+      expect(pageRangeMap[2]!.endPageNo).toBe(0);
     });
   });
 
   describe('post-processing and backfill', () => {
+    test('infers leading pages from a single body-page anchor', async () => {
+      mockCallVision.mockResolvedValueOnce({
+        output: {
+          pages: [
+            { imageIndex: 0, startPageNo: null, endPageNo: null },
+            { imageIndex: 1, startPageNo: null, endPageNo: null },
+            { imageIndex: 2, startPageNo: 1, endPageNo: null },
+          ],
+        },
+        usage: {},
+        usedFallback: false,
+      });
+      const result = await parser.parse(createMockDocument(3));
+      expect(
+        Object.values(result.pageRangeMap).map((range) => range.startPageNo),
+      ).toEqual([-1, 0, 1]);
+    });
+
+    test('infers front matter backwards from body page one across size groups', async () => {
+      const doc = createMockDocument(5);
+      doc.pages['1'].size = { width: 600, height: 900 };
+      doc.pages['2'].size = { width: 600, height: 900 };
+      mockCallVision
+        .mockResolvedValueOnce({
+          output: {
+            pages: [
+              { imageIndex: 0, startPageNo: null, endPageNo: null },
+              { imageIndex: 1, startPageNo: null, endPageNo: null },
+            ],
+          },
+          usage: {},
+          usedFallback: false,
+        })
+        .mockResolvedValueOnce({
+          output: {
+            pages: [
+              { imageIndex: 0, startPageNo: 0, endPageNo: null },
+              { imageIndex: 1, startPageNo: 1, endPageNo: null },
+              { imageIndex: 2, startPageNo: 2, endPageNo: null },
+            ],
+          },
+          usage: {},
+          usedFallback: false,
+        });
+      const result = await parser.parse(doc);
+      expect(
+        Object.values(result.pageRangeMap).map((range) => range.startPageNo),
+      ).toEqual([-2, -1, 0, 1, 2]);
+    });
+
+    test('preserves valid zero instead of backfilling it from neighboring pages', () => {
+      const ranges = {
+        1: { startPageNo: 0, endPageNo: 0 },
+        2: { startPageNo: 10, endPageNo: 10 },
+        3: { startPageNo: 11, endPageNo: 11 },
+      };
+      (parser as any).backfillFailedPages(ranges);
+      expect(ranges[1]).toEqual({ startPageNo: 0, endPageNo: 0 });
+    });
+
+    test('uses negative and zero anchors to infer missing pages', () => {
+      const ranges = {
+        1: { startPageNo: -1, endPageNo: -1 },
+        2: { startPageNo: 0, endPageNo: 0 },
+        3: null,
+      };
+      (parser as any).backfillFailedPages(ranges);
+      expect(ranges[3]).toEqual({ startPageNo: 1, endPageNo: 1 });
+    });
+
+    test('reports an unresolved small group instead of returning zero', async () => {
+      mockCallVision.mockResolvedValueOnce({
+        output: {
+          pages: [{ imageIndex: 0, startPageNo: null, endPageNo: null }],
+        },
+        usage: {},
+        usedFallback: false,
+      });
+      await expect(parser.parse(createMockDocument(1))).rejects.toThrow(
+        'Could not determine a logical page number',
+      );
+    });
+
     test('handles large document with mixed page patterns', async () => {
       const doc = createMockDocument(20);
 
@@ -1288,15 +1357,15 @@ describe('PageRangeParser', () => {
       expect(result.usage).toHaveLength(1);
     });
 
-    test('handles negative page number normalization', async () => {
+    test('preserves negative and zero logical page numbers', async () => {
       const doc = createMockDocument(3);
 
       mockCallVision.mockResolvedValue({
         output: {
           pages: [
             { imageIndex: 0, startPageNo: -1, endPageNo: null },
-            { imageIndex: 1, startPageNo: 2, endPageNo: null },
-            { imageIndex: 2, startPageNo: 3, endPageNo: -2 },
+            { imageIndex: 1, startPageNo: 0, endPageNo: null },
+            { imageIndex: 2, startPageNo: 1, endPageNo: null },
           ],
         },
         usage: {
@@ -1313,9 +1382,12 @@ describe('PageRangeParser', () => {
 
       const result = await parser.parse(doc);
 
-      // Pages with negative numbers should be normalized to 0
-      expect(result.pageRangeMap[1]).toEqual({ startPageNo: 0, endPageNo: 0 });
-      expect(result.pageRangeMap[3]).toEqual({ startPageNo: 0, endPageNo: 0 });
+      // Logical pages are preserved through post-processing.
+      expect(result.pageRangeMap).toEqual({
+        1: { startPageNo: -1, endPageNo: -1 },
+        2: { startPageNo: 0, endPageNo: 0 },
+        3: { startPageNo: 1, endPageNo: 1 },
+      });
     });
 
     test('handles backfill with single-page pattern', async () => {
@@ -1330,12 +1402,12 @@ describe('PageRangeParser', () => {
           ? match[1].split(', ').map(Number)
           : [1, 2, 3];
 
-        // Return patterns: some pages with values, some with 0 (failed)
+        // Return patterns: some pages with values, some unresolved
         return {
           output: {
             pages: sampledPages.map((pageNo: number, idx: number) => ({
               imageIndex: idx,
-              startPageNo: pageNo === 2 ? 0 : pageNo + 10,
+              startPageNo: pageNo === 2 ? null : pageNo + 10,
               endPageNo: null,
             })),
           },
@@ -1370,7 +1442,7 @@ describe('PageRangeParser', () => {
           ? match[1].split(', ').map(Number)
           : [1, 2, 3];
 
-        // Return double-sided patterns with some 0s for backfill
+        // Return double-sided patterns with some missing values for backfill
         return {
           output: {
             pages: sampledPages.map((pageNo: number, idx: number) => {
@@ -1378,7 +1450,7 @@ describe('PageRangeParser', () => {
               const endPageNo = pageNo * 2;
               return {
                 imageIndex: idx,
-                startPageNo: pageNo === 2 ? 0 : startPageNo,
+                startPageNo: pageNo === 2 ? null : startPageNo,
                 endPageNo: pageNo === 2 ? null : endPageNo,
               };
             }),
@@ -1401,10 +1473,10 @@ describe('PageRangeParser', () => {
       expect(result.pageRangeMap).toBeDefined();
     });
 
-    test('skips backfill when not enough successful pages', async () => {
+    test('does not treat logical zero as extraction failure', async () => {
       const doc = createMockDocument(3);
 
-      // Mock to return all zeros (no successful pages)
+      // Zero is a valid extracted logical page.
       mockCallVision.mockResolvedValue({
         output: {
           pages: [
@@ -1427,11 +1499,9 @@ describe('PageRangeParser', () => {
 
       const result = await parser.parse(doc);
 
-      // Should return zero values, backfill should be skipped
+      // No missing-page inference should run for valid zeros.
       expect(result.pageRangeMap[1]).toEqual({ startPageNo: 0, endPageNo: 0 });
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Not enough successful pages'),
-      );
+      expect(logger.warn).not.toHaveBeenCalled();
     });
 
     test('handles successful pattern detection with consistent results', async () => {

@@ -100,26 +100,26 @@ describe('TocValidator', () => {
     });
 
     describe('V002: Page range', () => {
-      test('returns error for pageNo less than 1', () => {
-        const entries: TocEntry[] = [{ title: 'Chapter', level: 1, pageNo: 0 }];
-
-        const result = validator.validate(entries);
-
-        expect(result.valid).toBe(false);
-        expect(result.issues[0].code).toBe('V002');
-        expect(result.issues[0].message).toContain('must be >= 1');
+      test('accepts signed logical pages in increasing order', () => {
+        const entries: TocEntry[] = [-2, -1, 0, 1].map((pageNo) => ({
+          title: `Chapter ${pageNo}`,
+          level: 1,
+          pageNo,
+        }));
+        expect(validator.validate(entries).valid).toBe(true);
       });
 
-      test('returns error for negative pageNo', () => {
-        const entries: TocEntry[] = [
-          { title: 'Chapter', level: 1, pageNo: -5 },
-        ];
-
-        const result = validator.validate(entries);
-
-        expect(result.valid).toBe(false);
-        expect(result.issues[0].code).toBe('V002');
-      });
+      test.each([0.5, NaN, Infinity, -Infinity])(
+        'rejects non-integer logical page %s',
+        (pageNo) => {
+          const result = validator.validate([
+            { title: 'Chapter', level: 1, pageNo },
+          ]);
+          expect(result.valid).toBe(false);
+          expect(result.issues[0].code).toBe('V002');
+          expect(result.issues[0].message).toContain('must be an integer');
+        },
+      );
 
       test('returns error for pageNo exceeding totalPages', () => {
         const entries: TocEntry[] = [
