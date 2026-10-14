@@ -12,6 +12,7 @@ import {
   deduplicateCandidates,
   discoverCandidateUnit,
   prepareCandidateDiscovery,
+  prepareCandidateDiscoveryRetry,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -28,12 +29,15 @@ export interface CandidateDiscoveryRunSettings {
   tableRowsPerUnit: number;
   maxRetries: number;
   deduplicationOnly?: boolean;
+  retryFailedUnits?: boolean;
 }
 export interface CandidateDiscoveryRun {
   runId: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   stage?: 'discovery' | 'deduplication';
   discoverySourceRunId?: string;
+  reusedFromRunId?: string;
+  rerunUnitIds?: string[];
   deduplication?: CandidateDeduplicationResult;
   createdAt: string;
   completedAt: string | null;
@@ -113,7 +117,11 @@ export async function startCandidateDiscovery(
     ...settings,
     inputSha256: createHash('sha256').update(raw).digest('hex'),
   });
-  const reuse = settings.deduplicationOnly === true;
+  if (settings.deduplicationOnly && settings.retryFailedUnits) {
+    throw new Error('Choose either duplicate review or failed-unit retry');
+  }
+  const reuse =
+    settings.deduplicationOnly === true || settings.retryFailedUnits === true;
   if (
     reuse &&
     (!existing ||
@@ -136,7 +144,7 @@ export async function startCandidateDiscovery(
         ),
       )
     : [];
-  const initialResult = await assembleCandidateDiscovery(plan, savedAudits);
+  let initialResult = await assembleCandidateDiscovery(plan, savedAudits);
   if (
     reuse &&
     JSON.stringify(initialResult) !== JSON.stringify(existing!.result)
@@ -145,6 +153,11 @@ export async function startCandidateDiscovery(
       'Saved discovery audit no longer reproduces the original snapshot',
     );
   }
+  const retry = settings.retryFailedUnits
+    ? await prepareCandidateDiscoveryRetry(plan, savedAudits)
+    : null;
+  const retainedAudits = retry?.retainedAudits ?? savedAudits;
+  if (retry) initialResult = retry.result;
   const model = createModel(settings.modelId);
   const runId = randomUUID();
   const directory = join(rootFor(taskId), runId);
@@ -153,9 +166,11 @@ export async function startCandidateDiscovery(
   const run: CandidateDiscoveryRun = {
     runId,
     status: 'running',
-    stage: reuse ? 'deduplication' : 'discovery',
+    stage: reuse && !retry ? 'deduplication' : 'discovery',
+    ...(retry ? { rerunUnitIds: retry.retryUnitIds } : {}),
     ...(reuse
       ? {
+          reusedFromRunId: existing!.runId,
           discoverySourceRunId:
             existing!.discoverySourceRunId ?? existing!.runId,
         }
@@ -170,6 +185,8 @@ export async function startCandidateDiscovery(
   };
   if (sourceDirectory) {
     for (const [i] of plan.units.entries()) {
+      if (!retainedAudits.some((a) => a.unitId === plan.units[i].unitId))
+        continue;
       const name = `unit-${String(i).padStart(4, '0')}.json`;
       writeFileSync(
         join(directory, name),
@@ -187,11 +204,11 @@ export async function startCandidateDiscovery(
     JSON.stringify({ runId }),
   );
   void (async () => {
-    const audits: CandidateDiscoveryAudit[] = [...savedAudits];
+    const audits: CandidateDiscoveryAudit[] = [...retainedAudits];
     try {
       for (const [i, unit] of plan.units.entries()) {
         controller.signal.throwIfAborted();
-        if (reuse) continue;
+        if (audits.some((a) => a.unitId === unit.unitId)) continue;
         const audit = await discoverCandidateUnit(unit, {
           model,
           maxRetries: settings.maxRetries,

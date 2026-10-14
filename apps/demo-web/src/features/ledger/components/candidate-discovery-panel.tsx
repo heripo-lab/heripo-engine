@@ -197,12 +197,32 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                   ...run.settings,
                   modelId,
                   deduplicationOnly: true,
+                  retryFailedUnits: false,
                 })
               }
             >
               이 추출본으로 중복만 다시 검토
             </Button>
           )}
+          {run &&
+            run.completedUnits === run.totalUnits &&
+            run.result.issues.length > 0 &&
+            !running && (
+              <Button
+                variant="outline"
+                disabled={start.isPending || !modelId}
+                onClick={() =>
+                  start.mutate({
+                    ...run.settings,
+                    modelId,
+                    deduplicationOnly: false,
+                    retryFailedUnits: true,
+                  })
+                }
+              >
+                문제 난 묶음만 다시 추출 후 통합
+              </Button>
+            )}
           {running && (
             <Button
               variant="outline"
@@ -258,6 +278,13 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 끝났다는 뜻이며 후보의 누락 없음이나 사람 검수 완료를 보장하지
                 않습니다. 새 실행은 이전 실행을 덮어쓰지 않습니다.
               </p>
+              {run.rerunUnitIds && (
+                <p>
+                  문제 묶음 {run.rerunUnitIds.length}개 재실행 · 나머지{' '}
+                  {run.totalUnits - run.rerunUnitIds.length}개 응답 재사용 ·
+                  기준 실행 {run.reusedFromRunId}
+                </p>
+              )}
               {run.error && <p role="alert">{run.error}</p>}
             </div>
             {run.deduplication && (

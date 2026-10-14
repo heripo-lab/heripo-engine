@@ -27,6 +27,7 @@ const settingsSchema = z.object({
   tableRowsPerUnit: z.number().int().min(1).max(30),
   maxRetries: z.number().int().min(0).max(3),
   deduplicationOnly: z.boolean().optional(),
+  retryFailedUnits: z.boolean().optional(),
 });
 type Context = { params: Promise<{ taskId: string }> };
 
