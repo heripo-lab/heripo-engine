@@ -762,7 +762,7 @@ describe('bounded content attachment', () => {
       unit,
       'content-attachment.v2',
     );
-    expect(current.promptVersion).toBe('content-attachment.v4');
+    expect(current.promptVersion).toBe('content-attachment.v5');
     expect(current.systemPrompt).toContain('exactly ONE original sentence');
     expect(current.systemPrompt).toContain(
       'include ALL those candidateRefs in the SAME item',
@@ -840,6 +840,55 @@ describe('bounded content attachment', () => {
     expect(raw.systemPrompt).not.toContain(
       'Return each original source block fragment separately in fragments',
     );
+  });
+  test('preserves a registered object heading verbatim while ignoring a generic category and retains historical v4 replay', async () => {
+    const p = await prepare(),
+      unit = p.units[0];
+    const heading = '7. 土器 (図2、写真3)';
+    unit.sources[0].resource.data.text = heading;
+    const category = structuredClone(unit.sources[0]);
+    category.sourceId = 'path:/category';
+    category.resource.key = '/category';
+    category.resource.resourceId = 'category';
+    category.resource.data.text = '遺物';
+    unit.sources.push(category);
+    const response: ContentAttachmentResponse = {
+      assignments: [
+        {
+          candidateRefs: ['R1'],
+          fragments: [{ sourceId: 'S1', quote: heading }],
+          reason: '登録済み対象の番号と名称',
+        },
+      ],
+      unresolved: [],
+      ignoredSources: [{ sourceId: 'S2', reason: '分類見出し' }],
+    };
+    const raw: ContentAttachmentAudit = {
+      unitId: unit.unitId,
+      ...createContentAttachmentRequest(p, unit),
+      response,
+      usage,
+      codeMap: createContentAttachmentInput(p, unit).codeMap,
+    };
+    const before = structuredClone(raw);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.contents[0].excerpts[0].fragments).toEqual([heading]);
+    expect(result.ignoredSources[0].sourceId).toBe(category.sourceId);
+    expect(result.contents).toHaveLength(1);
+    expect(raw).toEqual(before);
+    const v4 = createContentAttachmentRequest(p, unit, 'content-attachment.v4');
+    expect(v4.userPrompt).toBe(raw.userPrompt);
+    expect(v4.systemPrompt).toContain(
+      'A title, contents entry or generic category alone',
+    );
+    expect(raw.systemPrompt).not.toContain(
+      'A title, contents entry or generic category alone',
+    );
+    expect(raw.systemPrompt).toContain('HEADING ELIGIBILITY');
+    expect(raw.systemPrompt).toContain('assign the ENTIRE unchanged heading');
+    expect(raw.systemPrompt).toContain('ALREADY REGISTERED');
+    expect(assembleContentAttachment(p, [{ ...raw, ...v4 }])).toEqual(result);
   });
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();

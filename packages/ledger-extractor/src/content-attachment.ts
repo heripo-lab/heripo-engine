@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v4';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v5';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -154,12 +154,17 @@ CANDIDATE COVERAGE PER SENTENCE: After separating sentences, inspect the full fi
 BEFORE RETURNING: Check that no body item bundles multiple sentences and that every explicit named findspot/context has been considered against the registry for shared assignment. Do not choose just one primary candidate when the sentence clearly describes multiple candidates.`,
 );
 
-const SYSTEM_PROMPT = SENTENCE_SYSTEM_PROMPT_V3.replace(
+const BOUNDARY_SYSTEM_PROMPT_V4 = SENTENCE_SYSTEM_PROMPT_V3.replace(
   'Return each original source block fragment separately in fragments, preserving incomplete words and original whitespace. A body excerpt may use multiple consecutive block fragments; never concatenate or repair their strings.',
   `SOURCE CONTAINERS VS EXCERPT UNITS: A source block is an addressable container, not an excerpt unit. Reuse its same sourceId in as many separate sentence items as needed. Preserving source blocks means keeping each chosen substring attached to its original sourceId, not copying the whole block. Never treat a multi-sentence block as one fragment because it starts or ends mid-sentence.
 For a block beginning at a page/work-unit boundary, put ONLY its leading incomplete sentence fragment, through that fragment's own sentence-ending punctuation, in one item. Resume sentence selection immediately after it: every following complete sentence MUST be a separate item with the SAME sourceId, even for the same candidate. A trailing incomplete sentence fragment also gets its own item. Do not extend a boundary fragment to include later complete sentences and do not restore missing words from read-only context.
 Example: a boundary block containing 'and turns outward. The wall is stone. The cavity is round.' yields THREE items, with exact quotes 'and turns outward.', 'The wall is stone.', and 'The cavity is round.'. All three reuse that block's supplied sourceId. The first remains incomplete in context; the other two remain independent complete sentences. Sentence endings are not decimal points in numbers or measurements.
 Only when ONE sentence crosses selectable source blocks may one item contain several fragments; each fragment must remain an unchanged substring of its own original block. Never concatenate these strings or include another sentence in that item.`,
+);
+
+const SYSTEM_PROMPT = BOUNDARY_SYSTEM_PROMPT_V4.replace(
+  'A title, contents entry or generic category alone is not a substantive object description.',
+  `HEADING ELIGIBILITY: Ignore generic report titles, contents entries and section/category headings that merely organize the document and do not identify a particular registry object (for example, 'Artifacts'). Preserve a selectable text heading that identifies an ALREADY REGISTERED object by its number and name, supported by that object's independent body account or substantive table item: assign the ENTIRE unchanged heading to that object as its own non-sentence phrase item. Include original punctuation and parenthetical figure/photo references; retaining those words does not create media links or assign captions/images. Do not bundle the heading with the following body sentences or measurements. This is identity evidence for an existing object, not permission to create a candidate from a heading alone. Use the heading's number, name and chapter/body context together; if identity is ambiguous, retain the heading in unresolved instead of dropping it or guessing. Do not exclude an eligible object-identifying heading merely because it is not a complete sentence.`,
 );
 
 async function digest(value: string) {
@@ -374,7 +379,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v1'
     | 'content-attachment.v2'
     | 'content-attachment.v3'
-    | 'content-attachment.v4' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v4'
+    | 'content-attachment.v5' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -387,7 +393,9 @@ export function createContentAttachmentRequest(
         ? COMPACT_SYSTEM_PROMPT_V2
         : promptVersion === 'content-attachment.v3'
           ? SENTENCE_SYSTEM_PROMPT_V3
-          : SYSTEM_PROMPT,
+          : promptVersion === 'content-attachment.v4'
+            ? BOUNDARY_SYSTEM_PROMPT_V4
+            : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -465,6 +473,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v1' &&
       audit.promptVersion !== 'content-attachment.v2' &&
       audit.promptVersion !== 'content-attachment.v3' &&
+      audit.promptVersion !== 'content-attachment.v4' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
