@@ -529,3 +529,5 @@ Failed investigation-discovery units can be retried selectively while preserving
 Candidate discovery preserves merged table headers and chapter continuation sources, checks table identifiers against their explicitly selected original cells, and supports retrying explicitly reviewed omissions alongside validation failures while retaining all other audits.
 
 Whole-pool layer deduplication can connect unnumbered local occurrences to report-defined layers through the supplied overall definition, location, material and stratigraphic context, preserving original candidate wording and identifiers.
+
+Ledger content attachment now prepares a fixed registry and a physical-page sweep plan. The local demo exposes the exact first-unit input and runs only that unit, preserving literal body/table passages, every source occurrence and unresolved decisions for review.

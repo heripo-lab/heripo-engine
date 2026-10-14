@@ -27,6 +27,7 @@ import {
 } from '~/components/ui/card';
 
 import { CandidateDiscoveryPanel } from './candidate-discovery-panel';
+import { ContentAttachmentPanel } from './content-attachment-panel';
 import { DocumentResourceInspector } from './document-resource-inspector';
 import { LedgerPreviewImage } from './ledger-preview-image';
 
@@ -146,6 +147,7 @@ export function LedgerValidationContent({
         </div>
 
         <CandidateDiscoveryPanel taskId={task.id} />
+        <ContentAttachmentPanel taskId={task.id} />
         <DocumentResourceInspector taskId={task.id} />
 
         <details className="space-y-6">
