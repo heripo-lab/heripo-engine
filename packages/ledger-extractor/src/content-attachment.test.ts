@@ -661,7 +661,7 @@ describe('bounded content attachment', () => {
     const p = await prepare();
     const raw: ContentAttachmentAudit = {
       unitId: p.units[1].unitId,
-      ...createContentAttachmentRequest(p, p.units[1]),
+      ...createContentAttachmentRequest(p, p.units[1], 'content-attachment.v8'),
       response: {
         assignments: [
           {
@@ -751,7 +751,7 @@ describe('bounded content attachment', () => {
     };
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       response,
       usage,
       codeMap: createContentAttachmentInput(p, unit).codeMap,
@@ -770,7 +770,11 @@ describe('bounded content attachment', () => {
       result.contents[0].excerpts[1].occurrences[0].evidence[0].charStart,
     ).toBe('壺は埋土から出土した。'.length);
     expect(raw).toEqual(before);
-    const current = createContentAttachmentRequest(p, unit);
+    const current = createContentAttachmentRequest(
+      p,
+      unit,
+      'content-attachment.v8',
+    );
     const historical = createContentAttachmentRequest(
       p,
       unit,
@@ -822,7 +826,7 @@ describe('bounded content attachment', () => {
     };
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       response,
       usage,
       codeMap: createContentAttachmentInput(p, unit).codeMap,
@@ -881,7 +885,7 @@ describe('bounded content attachment', () => {
     };
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       response,
       usage,
       codeMap: createContentAttachmentInput(p, unit).codeMap,
@@ -920,7 +924,7 @@ describe('bounded content attachment', () => {
     };
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       response,
       usage,
       codeMap: createContentAttachmentInput(p, unit).codeMap,
@@ -986,7 +990,7 @@ describe('bounded content attachment', () => {
     };
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       response,
       usage,
       codeMap: createContentAttachmentInput(p, unit).codeMap,
@@ -1048,7 +1052,7 @@ describe('bounded content attachment', () => {
     unit.sources[0].resource.data.text = '前。中央。後。';
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       response: {
         ...empty(),
         assignments: [
@@ -1075,7 +1079,7 @@ describe('bounded content attachment', () => {
     const cellRef = `S${cellIndex + 1}`;
     const tableAudit: ContentAttachmentAudit = {
       unitId: tableUnit.unitId,
-      ...createContentAttachmentRequest(p, tableUnit),
+      ...createContentAttachmentRequest(p, tableUnit, 'content-attachment.v8'),
       response: {
         ...empty(),
         assignments: [
@@ -1161,7 +1165,7 @@ describe('bounded content attachment', () => {
     };
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       response,
       usage,
       codeMap: createContentAttachmentInput(p, unit).codeMap,
@@ -1228,7 +1232,7 @@ describe('bounded content attachment', () => {
     const refs = [['R2'], ['R3', 'R2'], ['R3', 'R1'], ['R1', 'R4']];
     const raw: ContentAttachmentAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(p, unit),
+      ...createContentAttachmentRequest(p, unit, 'content-attachment.v8'),
       usage,
       codeMap: createContentAttachmentInput(p, unit).codeMap,
       response: {
@@ -1295,9 +1299,9 @@ describe('bounded content attachment', () => {
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
     const response = {
-      ...empty(),
-      ignoredPassages: [],
-      ignoredSources: [{ sourceId: 'S1', reason: '対象外' }],
+      assignments: [],
+      unresolved: [],
+      ignored: [{ excerptRef: 'E1', reason: '対象外' }],
     };
     vi.mocked(LLMCaller.call).mockResolvedValue({
       output: response,
@@ -1312,10 +1316,8 @@ describe('bounded content attachment', () => {
     expect(out.response).toEqual(response);
     const call = vi.mocked(LLMCaller.call).mock.calls[0][0];
     expect(call.schema.safeParse(response).success).toBe(true);
-    const withoutPartialExclusions = {
-      ...response,
-    } as ContentAttachmentResponse;
-    delete withoutPartialExclusions.ignoredPassages;
+    const withoutPartialExclusions: Partial<typeof response> = { ...response };
+    delete withoutPartialExclusions.ignored;
     expect(call.schema.safeParse(withoutPartialExclusions).success).toBe(false);
     expect(
       call.schema.safeParse({
@@ -1323,9 +1325,7 @@ describe('bounded content attachment', () => {
         assignments: [
           {
             candidateRefs: ['missing'],
-            fragments: [
-              { sourceId: p.units[0].sources[0].sourceId, quote: '報告書' },
-            ],
+            excerptRef: 'E1',
             reason: 'x',
           },
         ],
