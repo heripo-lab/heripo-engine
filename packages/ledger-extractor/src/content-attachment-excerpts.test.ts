@@ -147,6 +147,79 @@ function audit(
 }
 
 describe('immutable content excerpt selection', () => {
+  test('reports ignored literal artifact headings in their chapter without repairing responses or rejecting other text and ambiguous identities', () => {
+    const plan = fixture(
+      [
+        '7. Vessel (Fig. 4)',
+        '7. Vessel',
+        'Features',
+        '7. Vessel body description.',
+        '7. Vessel (Fig. 4). More.',
+        '7. Vessellet',
+        '7. Vessel (broken',
+        '8. Plate (Photo 5)',
+        '7. Vessel (Fig. 4)',
+      ],
+      true,
+    );
+    for (const [i, entry] of plan.registry.entries()) {
+      entry.recordKind = i === 4 ? 'feature' : 'artifact';
+      entry.mentions[0].sourceName = i === 3 ? 'Plate' : 'Vessel';
+      entry.mentions[0].sourceIdentifier =
+        i === 2 ? null : i === 3 ? '8.' : '7.';
+    }
+    plan.registry[1].mentions[0].chapterPath = [
+      { id: 'other', originTitle: 'Other' },
+    ];
+    plan.registry[3].mentions[0].chapterPath = [];
+    plan.registry.push({ ...plan.registry[0], ref: 'R6', groupId: 'other' });
+    const unit = plan.units[0];
+    const input = createContentAttachmentSelectionInput(plan, unit);
+    const raw = audit(plan, {
+      ...empty(),
+      ignored: input.codeMap.excerpts.map((e) => ({
+        excerptRef: e.ref,
+        reason: 'Generic heading',
+      })),
+    });
+    const before = structuredClone([plan, raw]);
+    const result = assembleContentAttachment(plan, [raw]);
+    const headings = input.codeMap.excerpts.filter((e) =>
+      ['txt-0', 'txt-1', 'txt-8'].includes(e.evidence[0].resourceId!),
+    );
+    expect(headings).toHaveLength(3);
+    expect(result.issues.map((i) => i.reason)).toEqual(
+      headings.map(
+        (e) =>
+          `Registered artifact heading cannot be ignored: ${e.ref} (R1, R6)`,
+      ),
+    );
+    expect(result.completedUnitIds).toEqual([]);
+    expect(result.contents).toEqual([]);
+    expect(result.ignoredPassages).toHaveLength(input.codeMap.excerpts.length);
+    expect([plan, raw]).toEqual(before);
+    const historical = {
+      ...raw,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v11'),
+    };
+    expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
+    const ambiguous = audit(plan, {
+      ...empty(),
+      unresolved: headings.map((e) => ({
+        excerptRef: e.ref,
+        candidateRefs: ['R1', 'R6'],
+        reason: 'Identical registered identities',
+      })),
+      ignored: raw.response.ignored.filter(
+        (e) => !headings.some((h) => h.ref === e.excerptRef),
+      ),
+    });
+    const unresolved = assembleContentAttachment(plan, [ambiguous]);
+    expect(unresolved.issues).toEqual([]);
+    expect(unresolved.completedUnitIds).toEqual([unit.unitId]);
+    expect(unresolved.unresolved).toHaveLength(3);
+    expect(unresolved.contents).toEqual([]);
+  });
   test('freezes four S6 sentences with decimals and an unclosed parenthesis, then resolves confirmed and uncertain IDs to unchanged original ranges', () => {
     const plan = fixture(),
       unit = plan.units[0];
@@ -197,11 +270,12 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v11');
+    expect(raw.promptVersion).toBe('content-attachment.v12');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
       'content-attachment.v10',
+      'content-attachment.v11',
     ] as const) {
       const historical = {
         ...raw,
