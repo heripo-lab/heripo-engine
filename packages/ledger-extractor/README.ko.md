@@ -126,3 +126,11 @@ Apache-2.0 — [LICENSE](../../LICENSE) 참고.
 `prepareCandidateDiscoveryRetry(plan, audits, { unitIds, updatedPlan })`는 제외 판단 등 사람이 검토한 묶음과 갱신된 입력도 받아 교체된 `plan`을 반환합니다. 선택하지 않은 묶음의 입력과 응답은 그대로 보존합니다. 기존 v4/v5 감사 기록은 당시 프롬프트로 재현하며 v6 검사를 소급 적용하지 않습니다.
 
 중복 통합 프롬프트 v3는 번호가 없는 층위도 전처리 입력의 전체 층위 정의·국지적 위치·지층 성격·층위 역할이 같은 대상을 가리키면 통합하도록 합니다. 판단 이유에 그 연결 근거를 명시하며, 일반적인 원지반·토질 명칭만 같은 경우나 별개 하위층은 구분합니다. PDF의 누락 문장을 복원하지 않고 전처리 입력만 사용하며, 원래 후보의 번호 유무와 발췌·출처는 그대로 보존합니다.
+
+## 본문·표 원문 배정 미리보기
+
+`prepareContentAttachment(index, discoveryPlan, discovery, groups, { inputSha256, candidateSnapshotId, pdfPageNumbers, maxUnitChars })`는 검증된 후보 분할을 고정 등록부로 만들고 모델 호출 없이 PDF 페이지 순회 계획을 생성합니다. 본문·표가 없는 쪽도 포함하도록 전처리 문서의 전체 PDF 페이지를 전달합니다. 본문 블록과 원래 표의 한 행은 쪼개지 않으며 `maxUnitChars`는 원문 문자 수의 완화된 한도입니다. 전체 프롬프트나 토큰의 엄격한 제한이 아닙니다. 병합 셀 구조·논리 페이지·장 경로를 보존하고, 이름 필터 없이 전체 등록부와 기존 동일성 불확실성을 제공합니다.
+
+`createContentAttachmentRequest(plan, plan.units[0])`로 실제 입력을 확인한 후 `attachContentUnit(plan, plan.units[0], { model, maxRetries })`로 한 묶음만 처리합니다. 영어 프롬프트는 `assignments`, `unresolved`, `ignoredSources`를 요구합니다. 명확히 여러 후보를 설명하는 원문은 모두에 연결하고 모호한 동일성은 미결로 남깁니다. 출처 블록·셀을 명시적으로 선택하고 블록 경계의 원문 조각은 별도로 보존합니다. 이미지·독립 캡션·각주·속성·부모·관계는 이번 범위 밖입니다.
+
+`assembleContentAttachment(plan, audits)`는 저장된 프롬프트·등록부/출처 참조·정확하고 유일한 원문 인용·조각 순서·자원별 처리 여부를 검사하며 응답을 보정하지 않습니다. 같은 후보의 문자 그대로 같은 조각 배열은 하나로 모으되 모든 등장 출처를 유지합니다. 잘못된 판단은 검사 문제로 남기며 처리 완료가 사람 검수나 의미상 정확성을 뜻하지 않습니다. 결과는 `not_reviewed`로 시작하고 API는 다음 묶음을 자동 호출하거나 새 후보를 등록하지 않습니다.

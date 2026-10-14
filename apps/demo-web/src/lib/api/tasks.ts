@@ -15,6 +15,7 @@ import type {
   CandidateDiscoveryRun,
   CandidateDiscoveryRunSettings,
 } from '~/lib/ledger/candidate-discovery-run';
+import type { ContentAttachmentRun } from '~/lib/ledger/content-attachment-run';
 
 import type { ProcessingOptions } from '~/features/upload';
 
@@ -288,4 +289,42 @@ export async function downloadTaskZip(taskId: string): Promise<Blob> {
   }
 
   return response.blob();
+}
+
+export async function fetchContentAttachment(taskId: string): Promise<{
+  run: ContentAttachmentRun | null;
+}> {
+  return handleResponse(await fetch(`/api/tasks/${taskId}/content-attachment`));
+}
+export async function prepareContentAttachmentPreview(
+  taskId: string,
+  maxUnitChars: number,
+): Promise<{
+  run: ContentAttachmentRun;
+}> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'prepare', maxUnitChars }),
+    }),
+  );
+}
+export async function runFirstContentAttachment(taskId: string): Promise<{
+  run: ContentAttachmentRun;
+}> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'run-first' }),
+    }),
+  );
+}
+export async function fetchContentAttachmentAudit(
+  taskId: string,
+): Promise<unknown> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment?audit=true`),
+  );
 }

@@ -67,3 +67,18 @@ export type {
   CandidateDeduplicationResult,
   CandidateGroup,
 } from './candidate-deduplication';
+
+export {
+  prepareContentAttachment,
+  createContentAttachmentRequest,
+  attachContentUnit,
+  assembleContentAttachment,
+  CONTENT_ATTACHMENT_PROMPT_VERSION,
+} from './content-attachment';
+export type {
+  ContentAttachmentPlan,
+  ContentAttachmentAudit,
+  ContentAttachmentResponse,
+  ContentAttachmentResult,
+  AttachmentUnit,
+} from './content-attachment';

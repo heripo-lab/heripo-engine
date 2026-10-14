@@ -1,4 +1,6 @@
 export const taskKeys = {
+  contentAttachment: (taskId: string) =>
+    ['tasks', 'detail', taskId, 'content-attachment'] as const,
   candidates: (taskId: string) =>
     ['tasks', 'detail', taskId, 'candidates'] as const,
   all: ['tasks'] as const,
