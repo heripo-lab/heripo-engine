@@ -18,6 +18,7 @@ import {
   createContentAttachmentRequest,
   prepareContentAttachment,
 } from './content-attachment';
+import { createContentAttachmentInput } from './content-attachment-input';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
 vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
@@ -176,7 +177,11 @@ const audit = (
   response: ContentAttachmentResponse,
 ): ContentAttachmentAudit => ({
   unitId: plan.units[i].unitId,
-  ...createContentAttachmentRequest(plan, plan.units[i]),
+  ...createContentAttachmentRequest(
+    plan,
+    plan.units[i],
+    'content-attachment.v1',
+  ),
   response,
   usage,
 });
@@ -555,9 +560,164 @@ describe('bounded content attachment', () => {
       assembleContentAttachment(p, [audit(p, 0, empty())]).issues[0].reason,
     ).toContain('Unaccounted');
   });
+  test('encodes all candidate mentions and literal quotes with shared contexts, short selectors and a lossless code map', async () => {
+    const p = await prepare();
+    const alias = structuredClone(p.registry[0].mentions[0]);
+    alias.candidateId = 'third-long-candidate-id';
+    alias.sourceName = '別名';
+    alias.sourceIdentifier = '7.';
+    alias.chapterPath = [{ id: 'different-chapter', originTitle: '調査' }];
+    alias.evidence = [
+      { ...alias.evidence[0], quote: '前半' },
+      { ...alias.evidence[0], quote: 'のまま' },
+    ];
+    p.registry[0].mentions.push(alias);
+    const before = structuredClone(p);
+    const { payload, codeMap } = createContentAttachmentInput(p, p.units[1]);
+    expect(payload.candidates).toHaveLength(3);
+    expect(payload.candidates.map((row) => row[0])).toEqual(['R1', 'R1', 'R2']);
+    expect(payload.candidates[1]).toEqual([
+      'R1',
+      'layer',
+      'C2',
+      '別名',
+      '7.',
+      ['前半', 'のまま'],
+    ]);
+    expect(payload.contexts).toEqual({ C1: ['調査'], C2: ['調査'] });
+    expect(payload.uncertainties[0].refs).toEqual(['R1', 'R2']);
+    expect(codeMap.candidateRows[1]).toMatchObject({
+      groupId: 'g1',
+      candidateId: alias.candidateId,
+      evidence: alias.evidence,
+    });
+    expect(codeMap.sources.map((s) => s.ref)).toEqual(
+      p.units[1].sources.map((_, i) => `S${i + 1}`),
+    );
+    expect(codeMap.sources.map((s) => s.source)).toEqual(p.units[1].sources);
+    expect(codeMap.contextPaths.C2).toEqual(alias.chapterPath);
+    expect(payload.current.sources[1][3]).toEqual(['T1', 0, 0]);
+    expect(payload.current.tables[0].grid[0][0]).toEqual([
+      'S2',
+      null,
+      2,
+      1,
+      true,
+    ]);
+    expect(payload.current.tables[0].caption).toBeNull();
+    const encoded = JSON.stringify(payload);
+    for (const hidden of [
+      'third-long-candidate-id',
+      '/chapters/',
+      '#/texts/',
+      'inputSha256',
+      'registrySha256',
+      'charStart',
+      'sourceRefs',
+      'resourceKey',
+      'groupId',
+    ])
+      expect(encoded).not.toContain(hidden);
+    expect(createContentAttachmentInput(p, p.units[1])).toEqual({
+      payload,
+      codeMap,
+    });
+    expect(p).toEqual(before);
+    expect(() =>
+      createContentAttachmentInput(p, { ...p.units[1], unitId: 'outside' }),
+    ).toThrow('Unknown');
+    const f = fixture();
+    f.doc.tables[0].caption = { fullText: '表の原文' };
+    const index = buildDocumentResourceIndex(f.doc);
+    const split = await prepareContentAttachment(
+      index,
+      f.dp,
+      f.discovery,
+      f.groups,
+      { ...f.options, maxUnitChars: 1 },
+    );
+    const headerUnit = split.units.find(
+      (u) => u.sources[0].resource.kind === 'tableCell',
+    )!;
+    const header = createContentAttachmentInput(split, headerUnit).payload;
+    expect(header.current.tables[0].caption).toBe('表の原文');
+    expect(header.current.tables[0].grid[1][0]).toEqual([
+      null,
+      '7',
+      1,
+      1,
+      false,
+    ]);
+  });
+  test('replays compact selectors to exact original provenance while preserving raw decisions and rejecting forged maps', async () => {
+    const p = await prepare();
+    const raw: ContentAttachmentAudit = {
+      unitId: p.units[1].unitId,
+      ...createContentAttachmentRequest(p, p.units[1]),
+      response: {
+        assignments: [
+          {
+            candidateRefs: ['R1', 'R2'],
+            fragments: [{ sourceId: 'S1', quote: '井戸と廃棄層。' }],
+            reason: '共有',
+          },
+        ],
+        unresolved: [],
+        ignoredSources: p.units[1].sources
+          .slice(1)
+          .map((_, i) => ({ sourceId: `S${i + 2}`, reason: '対象外' })),
+      },
+      usage,
+      codeMap: createContentAttachmentInput(p, p.units[1]).codeMap,
+    };
+    const before = structuredClone(raw);
+    const result = assembleContentAttachment(p, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.contents).toHaveLength(2);
+    expect(
+      result.contents[0].excerpts[0].occurrences[0].evidence[0],
+    ).toMatchObject({
+      sourceId: p.units[1].sources[0].sourceId,
+      sourceRefs: ['#/texts/1'],
+      charStart: 0,
+      charEnd: 7,
+    });
+    expect(result.ignoredSources[0].sourceId).toBe(
+      p.units[1].sources[1].sourceId,
+    );
+    expect(raw).toEqual(before);
+    for (const change of [
+      (a: ContentAttachmentAudit) => {
+        delete a.codeMap;
+      },
+      (a: ContentAttachmentAudit) => {
+        a.codeMap!.inputSha256 = 'other';
+      },
+      (a: ContentAttachmentAudit) => {
+        a.codeMap!.sources[0].source.resource.sourceRefs = ['changed'];
+      },
+    ]) {
+      const changed = structuredClone(raw);
+      change(changed);
+      expect(
+        assembleContentAttachment(p, [changed]).issues[0].reason,
+      ).toContain('code map');
+    }
+    const invalid = structuredClone(raw);
+    invalid.response.assignments[0].fragments[0].sourceId =
+      p.units[1].sources[0].sourceId;
+    expect(assembleContentAttachment(p, [invalid]).contents).toEqual([]);
+    const legacy = audit(p, 0, { ...empty(), ignoredSources: ignore(p, 0) });
+    expect(
+      assembleContentAttachment(p, [legacy, raw]).completedUnitIds,
+    ).toHaveLength(2);
+  });
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
-    const response = { ...empty(), ignoredSources: ignore(p, 0) };
+    const response = {
+      ...empty(),
+      ignoredSources: [{ sourceId: 'S1', reason: '対象外' }],
+    };
     vi.mocked(LLMCaller.call).mockResolvedValue({
       output: response,
       usage,

@@ -531,3 +531,5 @@ Candidate discovery preserves merged table headers and chapter continuation sour
 Whole-pool layer deduplication can connect unnumbered local occurrences to report-defined layers through the supplied overall definition, location, material and stratigraphic context, preserving original candidate wording and identifiers.
 
 Ledger content attachment now prepares a fixed registry and a physical-page sweep plan. The local demo exposes the exact first-unit input and runs only that unit, preserving literal body/table passages, every source occurrence and unresolved decisions for review.
+
+Content attachment v2 keeps the complete candidate pool in compact rows with shared chapter contexts. Storage IDs, source locations and snapshot hashes stay in a code-only map; the local demo reports the first call’s actual token usage.
