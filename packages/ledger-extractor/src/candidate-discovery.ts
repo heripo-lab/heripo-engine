@@ -9,7 +9,7 @@ import type {
 import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';
 
-export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v3';
+export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v4';
 
 const kindSchema = z.enum([
   'site',
@@ -259,6 +259,7 @@ Rules:
 - Evaluate the layer and the artifacts mentioned in the same sentence separately. Rejecting a collective artifact mention because the artifacts have individual accounts must NOT discard an explicitly identified layer in that sentence. A layer is a stratigraphic context, not an extra artifact-group candidate. Identifying a layer candidate is required here even though parent relations are deferred to a later stage.
 - Other explicit named context units, such as trenches, may be proposed with explicit_context_unit. Preserve author's uncertainty. Do not invent a layer from an unnamed fill, a generic soil/material word or an inferred relationship. No new scholarly interpretation.
 - Use sourceName verbatim from a supplied title, resource or context. Copy sourceIdentifier exactly when present; do not turn a section ordinal like '2) 우물' into object number 2. For a table number cell, use the original number with an attested contextual object name; never invent a numbered name.
+- If sourceIdentifier is not null, include at least one evidence quote containing that exact identifier. When the identifier is in an item heading and the description is in another block, select BOTH source IDs and quote each block separately. An unnumbered description alone cannot substantiate an identifier; never insert the identifier into the original description or its quote.
 - A table can have two or more independent objects per row. Preserve actual grid indexes; do not expand merged cells. Check the whole row and headers, not only the first column.
 - Grouped objects without individual accounts remain one candidate; never generate N objects from a count or range. If individual accounts exist for that same group, propose only individuals, with uncertainty if identity is unclear.
 - Return minimal exact quotes and sourceId evidence from selectable sources (not read-only context). The first evidence must precisely anchor the object's independent heading/body, identifying table cell, or named context unit. For a body candidate include evidence of its allocated description, not only its heading. Other evidence may point to the same unit's selectable sources.
