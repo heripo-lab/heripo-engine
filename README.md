@@ -525,3 +525,5 @@ This project uses the following open-source projects:
 Investigation candidate discovery now includes a separate whole-pool LLM duplicate review. Proposed groups preserve every original candidate and source occurrence for human inspection.
 
 Failed investigation-discovery units can be retried selectively while preserving successful original responses, followed by a new whole-pool duplicate review.
+
+Candidate discovery preserves merged table headers and chapter continuation sources, checks table identifiers against their explicitly selected original cells, and supports retrying explicitly reviewed omissions alongside validation failures while retaining all other audits.

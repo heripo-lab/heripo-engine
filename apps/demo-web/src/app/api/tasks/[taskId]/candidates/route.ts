@@ -28,6 +28,7 @@ const settingsSchema = z.object({
   maxRetries: z.number().int().min(0).max(3),
   deduplicationOnly: z.boolean().optional(),
   retryFailedUnits: z.boolean().optional(),
+  retryUnitIds: z.array(z.string().min(1)).max(100).optional(),
 });
 type Context = { params: Promise<{ taskId: string }> };
 
