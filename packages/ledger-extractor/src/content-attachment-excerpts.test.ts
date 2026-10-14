@@ -203,12 +203,14 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v11',
       'content-attachment.v12',
       'content-attachment.v13',
+      'content-attachment.v14',
     ] as const) {
       const historical = {
         ...raw,
         ...createContentAttachmentRequest(plan, unit, version),
         codeMap:
-          version === 'content-attachment.v13'
+          version === 'content-attachment.v13' ||
+          version === 'content-attachment.v14'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
@@ -283,7 +285,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v14');
+    expect(raw.promptVersion).toBe('content-attachment.v15');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
@@ -291,17 +293,20 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v11',
       'content-attachment.v12',
       'content-attachment.v13',
+      'content-attachment.v14',
     ] as const) {
       const historical = {
         ...raw,
         ...createContentAttachmentRequest(plan, unit, version),
         codeMap:
-          version === 'content-attachment.v13'
+          version === 'content-attachment.v13' ||
+          version === 'content-attachment.v14'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
       expect(historical.userPrompt).toBe(
-        version === 'content-attachment.v13'
+        version === 'content-attachment.v13' ||
+          version === 'content-attachment.v14'
           ? raw.userPrompt
           : JSON.stringify(input.payload),
       );

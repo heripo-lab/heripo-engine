@@ -22,7 +22,7 @@ import { createContentAttachmentDecisionInput } from './content-attachment-decis
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v14';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v15';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -267,11 +267,16 @@ const REGISTRATION_SYSTEM_PROMPT_V13 =
   `
 MENTION-SCOPED REGISTRATION DECISIONS: current.registrationDecisions contains confirmed eligibility decisions about only the specified mention in the specified excerptRef. A not_independent_record decision means that mention intentionally has no separate record because it lacks an independent body account or original table item. Preserve the unchanged excerpt on any identified registry objects it describes; do not add an empty-candidate unresolved item merely because this decided mention has no registry ref. Do not ignore the whole excerpt or treat the decision as an instruction to assign a particular candidate. It applies neither to other objects in that sentence nor to all objects with the same name elsewhere. These decisions concern registration eligibility, not identity among existing candidates: preserve genuine unresolved alternatives for registered layers and keep their confirmed feature/layer assignments on the SAME E ref. A potential missing-candidate concern requires supplied original evidence of independent eligibility, not just a noun absent from the registry; do not reopen a confirmed non-registration solely for that absence. Decision refs, original mention ranges, authority and provenance are bound by code and retained in the audit. Return the existing ID-only response schema without rewriting text, inventing decision fields or repairing prior responses.`;
 
-const SYSTEM_PROMPT =
+const TABLE_RELATION_SYSTEM_PROMPT_V14 =
   REGISTRATION_SYSTEM_PROMPT_V13 +
   `
 TABLE RELATION REMARKS DESCRIBE BOTH PARTICIPANTS: Apply the all-target coverage rule to original table-cell phrases as well as body sentences. Identify the row owner from the original identifier cell, headers and chapter context. If a remark explicitly states that this object overlaps, adjoins, cuts or otherwise has a direct archaeological/spatial relationship with another identified registry candidate, assign the SAME unchanged remark E ref to BOTH the row owner and the explicitly named counterpart in ONE assignments item. For example, a remark 'overlaps Pit B' in Pit A's row describes BOTH existing pits; a reciprocal remark in Pit B's row is a separate original E ref and must be assessed separately. Do not restrict a relation remark to its row owner merely because it appears in that row. This shares explicit original evidence; it does not infer a new relation structure or create a candidate. Resolve the counterpart using its original identifier together with table/chapter/period evidence, not a number alone. If counterpart identity is uncertain, retain the confirmed row-owner assignment and use the SAME E ref for genuinely unresolved alternatives; do not guess or share with every same-number candidate.
 CELL-LOCAL SHARING BOUNDARY: Sharing a relation remark does NOT share the owner's number, shape, dimensions, material or other neighboring cells with the counterpart. Evaluate each fixed E ref independently; keep those ordinary property cells on the object they actually describe. Never propagate the entire row, merge reciprocal remarks, synthesize a sentence from cells, rewrite original text, infer attributes/parents/relations/media links, or spread sharing through related objects. A counterpart merely used as a comparison or reasoning premise still follows the existing direct-description boundary. Before returning, inspect every explicit relation remark for all identified participants and inspect adjacent shape/measurement cells for accidental propagation. Keep all existing findspot/foundation sharing, layer-identity uncertainty, heading preservation and mention-scoped non-registration rules unchanged.`;
+
+const SYSTEM_PROMPT =
+  TABLE_RELATION_SYSTEM_PROMPT_V14 +
+  `
+TYPE-LEVEL FINDS SUMMARIES DO NOT IDENTIFY INDIVIDUAL ARTIFACTS: A body or table remark listing finds by type, such as 'bowls, lids, etc.', describes the identified owning feature/layer's finds inventory. Preserve that unchanged E ref on that feature/layer. Do NOT additionally assign it to individually registered artifacts merely because their type names, chapter, period and findspot match the summary, even if the supplied registry has only one matching artifact of each type. Registry uniqueness does not prove that a type summary denotes those particular specimens or that the registry exhausts all finds. Require original evidence linking the summary to the individual object, such as an explicit artifact identifier, direct cross-reference/coreference, or another clear individual-identifying link; an identifier is not universally required. Keep an individually anchored artifact account, identified from its own heading/body context, distinct from a general type inventory: its explicit findspot still shares with the identified artifact and context under existing rules. The absence of an individual link in a type summary alone is not a reason to invent an unresolved item for those artifacts. Do not use 'etc.' to add other artifacts. This boundary also applies to the v14 table-sharing instructions: explicit object-to-object relation remarks with identified individual participants still share with both participants, while a type-level inventory does not establish individual participants. Keep reciprocal relation excerpts separate and preserve all existing ordinary-cell ownership, shape/measurement boundaries, heading, layer-identity and mention-scoped registration rules. Never correct source text, remove targets from a saved response, automatically reassign candidates, or create relation structures.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -501,7 +506,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v11'
     | 'content-attachment.v12'
     | 'content-attachment.v13'
-    | 'content-attachment.v14' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v14'
+    | 'content-attachment.v15' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -534,7 +540,9 @@ export function createContentAttachmentRequest(
                             ? NUMBERED_HEADING_SYSTEM_PROMPT_V12
                             : promptVersion === 'content-attachment.v13'
                               ? REGISTRATION_SYSTEM_PROMPT_V13
-                              : SYSTEM_PROMPT,
+                              : promptVersion === 'content-attachment.v14'
+                                ? TABLE_RELATION_SYSTEM_PROMPT_V14
+                                : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -546,7 +554,8 @@ export function createContentAttachmentRequest(
             unit,
           }
         : promptVersion === 'content-attachment.v13' ||
-            promptVersion === 'content-attachment.v14'
+            promptVersion === 'content-attachment.v14' ||
+            promptVersion === 'content-attachment.v15'
           ? createContentAttachmentDecisionInput(plan, unit).payload
           : promptVersion === 'content-attachment.v9' ||
               promptVersion === 'content-attachment.v10' ||
@@ -634,6 +643,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v11' &&
       audit.promptVersion !== 'content-attachment.v12' &&
       audit.promptVersion !== 'content-attachment.v13' &&
+      audit.promptVersion !== 'content-attachment.v14' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -646,10 +656,12 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v11' ||
       audit.promptVersion === 'content-attachment.v12' ||
       audit.promptVersion === 'content-attachment.v13' ||
-      audit.promptVersion === 'content-attachment.v14';
+      audit.promptVersion === 'content-attachment.v14' ||
+      audit.promptVersion === 'content-attachment.v15';
     const selectionInput = selection
       ? audit.promptVersion === 'content-attachment.v13' ||
-        audit.promptVersion === 'content-attachment.v14'
+        audit.promptVersion === 'content-attachment.v14' ||
+        audit.promptVersion === 'content-attachment.v15'
         ? createContentAttachmentDecisionInput(plan, unit)
         : createContentAttachmentSelectionInput(plan, unit)
       : null;
@@ -692,6 +704,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v11' ||
       audit.promptVersion === 'content-attachment.v12' ||
       audit.promptVersion === 'content-attachment.v13' ||
+      audit.promptVersion === 'content-attachment.v14' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -912,7 +925,8 @@ export function assembleContentAttachment(
         if (
           audit.promptVersion === 'content-attachment.v12' ||
           audit.promptVersion === 'content-attachment.v13' ||
-          audit.promptVersion === 'content-attachment.v14'
+          audit.promptVersion === 'content-attachment.v14' ||
+          audit.promptVersion === 'content-attachment.v15'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
