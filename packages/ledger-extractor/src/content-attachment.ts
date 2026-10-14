@@ -23,7 +23,7 @@ import { createContentAttachmentSelectionInput } from './content-attachment-exce
 import { createContentAttachmentInput } from './content-attachment-input';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v19';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v20';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -295,11 +295,17 @@ const TABLE_CONSISTENCY_SYSTEM_PROMPT_V18 =
 NEAREST EXPLICIT SUBSET TAKES PRIORITY: Resolve omitted subjects, 'all' and 'the remaining' in reading order. A nearer explicit subset in the immediately preceding sentence or clause supersedes an older broader set from a section, table or registry. First locate that nearest set, then apply the current sentence's named subject and exclusions inside it. For example, 'Units A-D are listed. Units B-D occupy one enclosure. Unit B served as a dwelling, while the remaining units served as stores.' describes B, C and D only; A must not re-enter through the older inventory. A wider scope requires an explicit original reset or expansion, not a change of clause or the availability of extra candidates. Preserve all directly described participants of the unchanged sentence, including those described before an exception or narrowing clause. Keep the existing implicit-subject boundary and do not add related objects outside the resolved set.
 TABLE DATA ASSIGNMENT AND HEADER EXCLUSION: A selectable nonblank data cell describing an identified row owner belongs in assignments with that owner. Identifier, dimensions, shape, bay count, internal facility and remark cells remain original evidence even when they are short, numeric or a dash. Identifying the owner in the reason while placing that cell in ignored is inconsistent; include the owner's R ref in candidateRefs instead. Genuine ambiguity remains unresolved. Keep explicit relation-remark sharing with identified counterparts, without propagating ordinary neighboring cells. General column labels such as 'number', 'dimensions', 'remarks', '호수', '규모' and '비고' belong in ignored, not assignments or unresolved; never insert a placeholder R ref. Read the actual grid and row/header context; source isHeader flags alone may not identify every general column label. Keep actual registered-object headings distinct from these generic labels. Before returning, compare every ignored data cell with its identifiable row owner and every assigned header with its reason. Code reports missing assignments for uniquely anchored rows and general-header exclusion violations without adding targets, repairing responses or changing source text. Return the existing ID-only schema.`;
 
-const SYSTEM_PROMPT =
+const ABBREVIATED_REMARK_SYSTEM_PROMPT_V19 =
   TABLE_CONSISTENCY_SYSTEM_PROMPT_V18 +
   `
 ABBREVIATED COUNTERPARTS IN TABLE REMARKS: A relation counterpart need not repeat its full registry name or identifier inside the cell. Resolve original shortened terms such as 'ditch' or '구' using the supplied body descriptions, table caption, chapter/period context, location and archaeological role. An explicitly named counterpart includes an abbreviated mention whose identity is established by that original evidence. A generic term alone is insufficient; do not choose among unrelated or indistinguishable candidates by name alone. When the body identifies the enclosing ditch and a building-row remark states 'outside the ditch', assign the SAME unchanged remark to BOTH the identified row owner and that ditch. A row owner is a required target, not an exclusive one. The nearest-subset rules resolve implicit subjects and 'all/remaining'; they do not remove an additional counterpart directly mentioned by a relation remark. If identity genuinely remains ambiguous, keep the confirmed row owner in assignments and plausible counterpart alternatives in unresolved on the SAME E ref.
 PRESERVE THE REFERENT OF STATE WORDING: Read the original cell's named object and predicate before applying row context. For a remark such as 'ditch partly destroyed' or '구 일부 파괴', do not turn the described ditch damage into 'the building was partly destroyed' merely because the row belongs to a building. When original context identifies the ditch, share the unchanged remark with the row owner and that ditch. Preserve the object's abbreviated wording, scope such as 'partly', and any uncertainty. Do not invent the damaging agent, causal direction or chronology; assigning a phrase to both participants is not new relation/attribute extraction. Reasons must follow the original referent rather than substituting the row owner for a named counterpart. Review each relational/state remark for its resolved participants after ensuring the owner is assigned. This sharing applies only to that original E ref: do not copy the owner's identifier, shape, dimensions, facilities or neighboring excerpts to the counterpart. Keep generic headers ignored and retain all existing local-set, type-summary, layer-identity and mention-scoped registration boundaries. Return only the existing ID-selection schema without rewriting source text, correcting a saved response or automatically adding targets.`;
+
+const SYSTEM_PROMPT =
+  ABBREVIATED_REMARK_SYSTEM_PROMPT_V19 +
+  `
+GENERIC TYPE AND COLLECTION HEADINGS ARE NOT INDIVIDUAL OBJECT HEADINGS: A section heading naming a type or a collection of separately registered objects remains a generic category/collection heading. Put it in ignored; do not distribute it to the individual candidates merely because the following body or table discusses those candidates, the type matches their names, or all members can be identified. Section enumeration is not an object identifier. For example, '1) Post-built buildings' introduces a category even when the following table lists Buildings A-D; it is not each building's own heading. Preserve an actual registered object's own identifiable heading under the existing rules, including an unnumbered object or an independently registered aggregate record. Do not create a new group record or treat the generic type heading as an identity alias for each member. A reason saying only that a section discusses those objects is insufficient to assign its heading to them.
+EXPLICIT EXCEPTION OBJECTS STILL RECEIVE THEIR ORIGINAL SENTENCE: Distinguish the objects to which a positive predicate applies from the objects whose direct description is preserved by the whole excerpt. For 'Except for Building A, the buildings were constructed inside Ditch B.', assign the SAME unchanged sentence to the identified buildings, including explicitly excepted A, and identified ditch B: the sentence states A's exception status as well as the other buildings' construction context. Excluding A from the positive 'inside' predicate does not exclude A from receiving that original evidence. Preserve the exception/negation wording and do not attribute the positive predicate to A, infer A's exact location, or invent attributes/relations. This rule requires an explicitly described exception participant; it does not add unmentioned members of an older broader set to 'all/remaining'. Resolve later implicit references within the narrowed discourse set; do not propagate the exception participant to neighboring sentences. Keep each original E ref intact, with all directly described confirmed targets in one assignments item and genuine identity alternatives in unresolved. Preserve abbreviated relation sharing, state referents, ordinary table-cell ownership, generic-header exclusion and all existing boundaries. Return the existing ID-only schema without source/response repair or deterministic target reassignment.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -534,7 +540,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v16'
     | 'content-attachment.v17'
     | 'content-attachment.v18'
-    | 'content-attachment.v19' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v19'
+    | 'content-attachment.v20' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -578,7 +585,10 @@ export function createContentAttachmentRequest(
                                       : promptVersion ===
                                           'content-attachment.v18'
                                         ? TABLE_CONSISTENCY_SYSTEM_PROMPT_V18
-                                        : SYSTEM_PROMPT,
+                                        : promptVersion ===
+                                            'content-attachment.v19'
+                                          ? ABBREVIATED_REMARK_SYSTEM_PROMPT_V19
+                                          : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -595,7 +605,8 @@ export function createContentAttachmentRequest(
             promptVersion === 'content-attachment.v16' ||
             promptVersion === 'content-attachment.v17' ||
             promptVersion === 'content-attachment.v18' ||
-            promptVersion === 'content-attachment.v19'
+            promptVersion === 'content-attachment.v19' ||
+            promptVersion === 'content-attachment.v20'
           ? createContentAttachmentDecisionInput(plan, unit).payload
           : promptVersion === 'content-attachment.v9' ||
               promptVersion === 'content-attachment.v10' ||
@@ -688,6 +699,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v16' &&
       audit.promptVersion !== 'content-attachment.v17' &&
       audit.promptVersion !== 'content-attachment.v18' &&
+      audit.promptVersion !== 'content-attachment.v19' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -705,7 +717,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v16' ||
       audit.promptVersion === 'content-attachment.v17' ||
       audit.promptVersion === 'content-attachment.v18' ||
-      audit.promptVersion === 'content-attachment.v19';
+      audit.promptVersion === 'content-attachment.v19' ||
+      audit.promptVersion === 'content-attachment.v20';
     const selectionInput = selection
       ? audit.promptVersion === 'content-attachment.v13' ||
         audit.promptVersion === 'content-attachment.v14' ||
@@ -713,7 +726,8 @@ export function assembleContentAttachment(
         audit.promptVersion === 'content-attachment.v16' ||
         audit.promptVersion === 'content-attachment.v17' ||
         audit.promptVersion === 'content-attachment.v18' ||
-        audit.promptVersion === 'content-attachment.v19'
+        audit.promptVersion === 'content-attachment.v19' ||
+        audit.promptVersion === 'content-attachment.v20'
         ? createContentAttachmentDecisionInput(plan, unit)
         : createContentAttachmentSelectionInput(plan, unit)
       : null;
@@ -761,6 +775,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v16' ||
       audit.promptVersion === 'content-attachment.v17' ||
       audit.promptVersion === 'content-attachment.v18' ||
+      audit.promptVersion === 'content-attachment.v19' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -986,7 +1001,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v16' ||
           audit.promptVersion === 'content-attachment.v17' ||
           audit.promptVersion === 'content-attachment.v18' ||
-          audit.promptVersion === 'content-attachment.v19'
+          audit.promptVersion === 'content-attachment.v19' ||
+          audit.promptVersion === 'content-attachment.v20'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1068,7 +1084,8 @@ export function assembleContentAttachment(
     }
     if (
       audit.promptVersion === 'content-attachment.v18' ||
-      audit.promptVersion === 'content-attachment.v19'
+      audit.promptVersion === 'content-attachment.v19' ||
+      audit.promptVersion === 'content-attachment.v20'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
