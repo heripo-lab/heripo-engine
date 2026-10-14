@@ -148,12 +148,21 @@ export function ContentAttachmentPanel({ taskId }: { taskId: string }) {
             )}
             <details>
               <summary className="cursor-pointer text-sm">
-                실제 프롬프트·고정 등록부·인접 문맥
+                실제 축약 프롬프트·전체 후보·인접 문맥
               </summary>
               <pre className="max-h-80 overflow-auto text-xs whitespace-pre-wrap">
                 {JSON.stringify(run.firstRequest, null, 2)}
               </pre>
             </details>
+            {run.modelUsage && (
+              <p className="text-sm">
+                실제 입력 {run.modelUsage.inputTokens.toLocaleString()}토큰 ·
+                출력 {run.modelUsage.outputTokens.toLocaleString()}토큰 · 캐시
+                읽기 {(run.modelUsage.cachedInputTokens ?? 0).toLocaleString()}{' '}
+                · 캐시 쓰기{' '}
+                {(run.modelUsage.cacheWriteTokens ?? 0).toLocaleString()}
+              </p>
+            )}
             {run.modelResponse && (
               <details open>
                 <summary className="cursor-pointer text-sm">

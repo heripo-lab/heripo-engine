@@ -82,3 +82,5 @@ export type {
   ContentAttachmentResult,
   AttachmentUnit,
 } from './content-attachment';
+
+export { createContentAttachmentInput } from './content-attachment-input';

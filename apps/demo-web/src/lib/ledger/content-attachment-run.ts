@@ -10,6 +10,7 @@ import {
   assembleContentAttachment,
   attachContentUnit,
   buildDocumentResourceIndex,
+  createContentAttachmentInput,
   createContentAttachmentRequest,
   prepareContentAttachment,
 } from '@heripo/ledger-extractor';
@@ -48,6 +49,7 @@ export interface ContentAttachmentRun {
   settings: { modelId: string; maxRetries: number; maxUnitChars: number };
   result: ContentAttachmentResult;
   modelResponse?: ContentAttachmentAudit['response'];
+  modelUsage?: ContentAttachmentAudit['usage'];
   error: string | null;
   fullSweepExecuted: false;
 }
@@ -91,6 +93,9 @@ export function getContentAttachmentAudit(
     plan: read(join(dir, 'plan.json')),
     candidateSnapshot: read(join(dir, 'candidate-snapshot.json')),
     audit: existsSync(audit) ? read(audit) : null,
+    codeMap: existsSync(join(dir, 'first-unit-code-map.json'))
+      ? read(join(dir, 'first-unit-code-map.json'))
+      : null,
   };
 }
 /** Prepare a separate immutable candidate snapshot; this function makes no model calls. */
@@ -157,6 +162,15 @@ export async function prepareContentAttachmentRun(
     join(dir, 'first-unit-request.json'),
     JSON.stringify(firstRequest, null, 2),
   );
+  if (firstUnit)
+    writeFileSync(
+      join(dir, 'first-unit-code-map.json'),
+      JSON.stringify(
+        createContentAttachmentInput(plan, firstUnit).codeMap,
+        null,
+        2,
+      ),
+    );
   const run: ContentAttachmentRun = {
     runId,
     status: 'prepared',
@@ -203,6 +217,11 @@ export function startFirstContentAttachment(
   const request = createContentAttachmentRequest(plan, plan.units[0]);
   if (JSON.stringify(request) !== JSON.stringify(run.firstRequest))
     throw new Error('First-unit request changed');
+  if (
+    JSON.stringify(read(join(dir, 'first-unit-code-map.json'))) !==
+    JSON.stringify(createContentAttachmentInput(plan, plan.units[0]).codeMap)
+  )
+    throw new Error('First-unit code map changed');
   const model = createModel(run.settings.modelId);
   run.status = 'running';
   running.add(run.runId);
@@ -219,6 +238,7 @@ export function startFirstContentAttachment(
         JSON.stringify(audit, null, 2),
       );
       run.modelResponse = audit.response;
+      run.modelUsage = audit.usage;
       run.result = assembleContentAttachment(plan, [audit]);
       run.status = run.result.issues.length
         ? 'first_unit_issues'
