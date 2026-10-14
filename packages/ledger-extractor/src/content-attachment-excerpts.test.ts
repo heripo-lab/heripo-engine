@@ -206,6 +206,7 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v14',
       'content-attachment.v15',
       'content-attachment.v16',
+      'content-attachment.v17',
     ] as const) {
       const historical = {
         ...raw,
@@ -214,7 +215,8 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v13' ||
           version === 'content-attachment.v14' ||
           version === 'content-attachment.v15' ||
-          version === 'content-attachment.v16'
+          version === 'content-attachment.v16' ||
+          version === 'content-attachment.v17'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
@@ -238,6 +240,177 @@ describe('immutable content excerpt selection', () => {
     expect(unresolved.completedUnitIds).toEqual([unit.unitId]);
     expect(unresolved.unresolved).toHaveLength(3);
     expect(unresolved.contents).toEqual([]);
+  });
+  test('requires identified table owners and ignores generic headers without rewriting current or historical responses', () => {
+    const plan = fixture(['Text.'], true);
+    const unit = plan.units[0];
+    const table = unit.tables[0].data;
+    table.caption = { fullText: 'Well inventory' };
+    table.grid[0][0].text = '호수';
+    table.grid[0][1].text = '규모(단위 : cm)';
+    table.grid[0].forEach((cell) => {
+      cell.isHeader = false;
+    });
+    plan.registry[0].mentions[0].sourceIdentifier = ' 7 ';
+    const valid = audit(plan, {
+      ...empty(),
+      assignments: ['E1', 'E4', 'E5'].map((excerptRef) => ({
+        excerptRef,
+        candidateRefs: ['R1'],
+        reason: 'Identified row or body',
+      })),
+      ignored: ['E2', 'E3'].map((excerptRef) => ({
+        excerptRef,
+        reason: 'Column label',
+      })),
+    });
+    expect(assembleContentAttachment(plan, [valid]).issues).toEqual([]);
+    const raw = audit(plan, {
+      ...empty(),
+      assignments: [
+        { excerptRef: 'E2', candidateRefs: ['R2'], reason: 'Column label' },
+      ],
+      ignored: ['E1', 'E3', 'E4', 'E5'].map((excerptRef) => ({
+        excerptRef,
+        reason: 'Row item',
+      })),
+    });
+    const before = structuredClone([plan, raw]);
+    const result = assembleContentAttachment(plan, [raw]);
+    expect(result.issues.map((e) => e.reason)).toEqual([
+      'Generic table header must be ignored: E2',
+      'Identified table-row cell must include R1: E4',
+      'Identified table-row cell must include R1: E5',
+    ]);
+    expect(result.completedUnitIds).toEqual([]);
+    expect(result.contents.map((c) => c.registryRef)).toEqual(['R2']);
+    expect(result.ignoredPassages).toHaveLength(4);
+    expect([plan, raw]).toEqual(before);
+    const historical = {
+      ...raw,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v17'),
+    };
+    expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
+    const ambiguousHeader = structuredClone(valid);
+    ambiguousHeader.response.ignored.pop();
+    ambiguousHeader.response.unresolved.push({
+      excerptRef: 'E3',
+      candidateRefs: ['R2'],
+      reason: 'Header',
+    });
+    expect(
+      assembleContentAttachment(plan, [ambiguousHeader]).issues.map(
+        (e) => e.reason,
+      ),
+    ).toEqual(['Generic table header must be ignored: E3']);
+    const wrongOwner = structuredClone(valid);
+    wrongOwner.response.assignments[2].candidateRefs = ['R2'];
+    expect(
+      assembleContentAttachment(plan, [wrongOwner]).issues.map((e) => e.reason),
+    ).toEqual(['Identified table-row cell must include R1: E5']);
+    const partial = structuredClone(plan);
+    partial.units[0].sources = partial.units[0].sources.filter(
+      (source) => source.resource.kind === 'text',
+    );
+    expect(
+      assembleContentAttachment(partial, [
+        audit(partial, {
+          ...empty(),
+          ignored: [{ excerptRef: 'E1', reason: 'Body' }],
+        }),
+      ]).issues,
+    ).toEqual([]);
+  });
+  test('bounds table checks by exact identifiers, literal caption names or original row anchors and never guesses ambiguous owners', () => {
+    const run = (
+      change: (p: ContentAttachmentPlan) => void,
+      assigned = 'E5',
+    ) => {
+      const plan = fixture(['Text.'], true);
+      const table = plan.units[0].tables[0].data;
+      table.grid[0][0].text = 'Number';
+      table.grid[0][1].text = 'Unrecognized column';
+      plan.registry[0].mentions[0].sourceIdentifier = ' 7 ';
+      change(plan);
+      const input = createContentAttachmentDecisionInput(plan, plan.units[0]);
+      const raw = audit(plan, {
+        ...empty(),
+        assignments: [
+          {
+            excerptRef: assigned,
+            candidateRefs: ['R2'],
+            reason: 'Original decision',
+          },
+        ],
+        ignored: input.codeMap.excerpts
+          .filter((e) => e.ref !== assigned)
+          .map((e) => ({ excerptRef: e.ref, reason: 'Original exclusion' })),
+      });
+      return assembleContentAttachment(plan, [raw]).issues.map((e) => e.reason);
+    };
+    expect(run(() => {})).toEqual([]);
+    expect(
+      run((p) => {
+        p.units[0].tables[0].data.caption = { fullText: 'Other objects' };
+      }),
+    ).toEqual([]);
+    expect(
+      run((p) => {
+        p.registry[0].mentions[0].sourceName = '';
+        p.units[0].tables[0].data.caption = { fullText: 'Well inventory' };
+      }),
+    ).toEqual([]);
+    expect(
+      run((p) => {
+        p.units[0].tables[0].data.caption = { fullText: 'Well inventory' };
+        p.registry[0].mentions[0].sourceIdentifier = '7';
+      }),
+    ).toEqual([]);
+    expect(
+      run((p) => {
+        p.units[0].tables[0].data.caption = { fullText: 'Well inventory' };
+        p.registry[1].mentions[0].sourceName = 'Well';
+        p.registry[1].mentions[0].sourceIdentifier = ' 7 ';
+      }),
+    ).toEqual([]);
+    expect(
+      run((p) => {
+        const selected = createContentAttachmentDecisionInput(p, p.units[0]);
+        p.registry[0].mentions[0].evidence = selected.codeMap.excerpts.find(
+          (e) => e.ref === 'E4',
+        )!.evidence;
+      }),
+    ).toEqual([
+      'Identified table-row cell must include R1: E4',
+      'Identified table-row cell must include R1: E5',
+    ]);
+    expect(
+      run((p) => {
+        const selected = createContentAttachmentDecisionInput(p, p.units[0]);
+        p.registry[0].mentions[0].evidence = structuredClone(
+          selected.codeMap.excerpts.find((e) => e.ref === 'E4')!.evidence,
+        );
+        p.registry[0].mentions[0].evidence[0].resourceKey =
+          '/tables/0/grid/10/0';
+      }),
+    ).toEqual([]);
+    expect(run(() => {}, 'E2')).toEqual([
+      'Generic table header must be ignored: E2',
+    ]);
+    expect(
+      run((p) => {
+        p.units[0].tables[0].data.grid[0][0].isHeader = false;
+      }, 'E2'),
+    ).toEqual([]);
+    expect(
+      run((p) => {
+        p.units[0].tables[0].data.caption = { fullText: 'Well inventory' };
+        p.units[0].tables[0].data.grid[1][2].text = 'Name';
+      }),
+    ).toEqual([
+      'Identified table-row cell must include R1: E4',
+      'Identified table-row cell must include R1: E5',
+    ]);
   });
   test('freezes four S6 sentences with decimals and an unclosed parenthesis, then resolves confirmed and uncertain IDs to unchanged original ranges', () => {
     const plan = fixture(),
@@ -289,7 +462,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v17');
+    expect(raw.promptVersion).toBe('content-attachment.v18');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
@@ -300,6 +473,7 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v14',
       'content-attachment.v15',
       'content-attachment.v16',
+      'content-attachment.v17',
     ] as const) {
       const historical = {
         ...raw,
@@ -308,7 +482,8 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v13' ||
           version === 'content-attachment.v14' ||
           version === 'content-attachment.v15' ||
-          version === 'content-attachment.v16'
+          version === 'content-attachment.v16' ||
+          version === 'content-attachment.v17'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
@@ -316,7 +491,8 @@ describe('immutable content excerpt selection', () => {
         version === 'content-attachment.v13' ||
           version === 'content-attachment.v14' ||
           version === 'content-attachment.v15' ||
-          version === 'content-attachment.v16'
+          version === 'content-attachment.v16' ||
+          version === 'content-attachment.v17'
           ? raw.userPrompt
           : JSON.stringify(input.payload),
       );
