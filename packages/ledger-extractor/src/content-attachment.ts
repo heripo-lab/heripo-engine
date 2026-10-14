@@ -8,6 +8,7 @@ import type {
   CandidateEvidence,
   LedgerObjectCandidate,
 } from './candidate-discovery';
+import type { ContentRegistrationDecision } from './content-attachment-decisions';
 import type {
   DocumentResource,
   DocumentResourceIndex,
@@ -17,10 +18,11 @@ import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';
 
 import { createCandidateDeduplicationRequest } from './candidate-deduplication';
+import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v12';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v13';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -60,6 +62,7 @@ export interface ContentAttachmentPlan {
   registrySha256: string;
   registry: AttachmentRegistryEntry[];
   registryUncertainties: CandidateDeduplicationResult['uncertainMatches'];
+  registrationDecisions?: ContentRegistrationDecision[];
   pages: Array<{
     pdfPageNo: number;
     unitIds: string[];
@@ -139,7 +142,8 @@ export interface ContentAttachmentAudit<Response = ContentAttachmentResponse> {
   /** Code-only binding; never forwarded to the model. Legacy v1 audits omit it. */
   codeMap?:
     | ReturnType<typeof createContentAttachmentInput>['codeMap']
-    | ReturnType<typeof createContentAttachmentSelectionInput>['codeMap'];
+    | ReturnType<typeof createContentAttachmentSelectionInput>['codeMap']
+    | ReturnType<typeof createContentAttachmentDecisionInput>['codeMap'];
 }
 export interface AttachedExcerpt {
   kind: 'body' | 'table_item';
@@ -253,10 +257,15 @@ const DESCRIPTION_SYSTEM_PROMPT_V11 =
 DIRECT DESCRIPTION VS REASONING CONTEXT: Checking every candidate does not mean assigning every candidate mentioned. A candidate named ONLY as a comparison, surrounding landmark or supporting premise for a judgment about another object is not an additional excerpt target unless the SAME excerpt also describes that candidate itself: its own state, property, spatial relationship or direct archaeological role. For example, 'Building A is interpreted as facing southeast based on the arrangement of surrounding ditches and buildings.' describes Building A; mentioning those surrounding objects as the basis of the interpretation does not by itself describe them as additional targets, even if they can be identified. Do not create unresolved items for known supporting objects merely because they are not excerpt targets. Identity uncertainty and descriptive relevance are separate decisions. Preserve genuine shared descriptions: explicit findspots, construction foundations and removal/exposure describe the objects' direct archaeological roles and retain identified targets plus ambiguous layer alternatives on the SAME E ref. Apply this boundary to ALL-target coverage instructions; do not propagate an interpretation to its supporting objects.
 IDENTIFIABLE OBJECT HEADINGS WITHOUT UNIQUE NUMBERS: A registered object's heading does not require a unique object number or non-null registry number. Identify it using its original name together with chapter context and its independent body account or substantive table evidence. Section enumeration such as '2)' is not necessarily an object identifier, and a missing unique number alone is never a reason to ignore the heading. For example, '2) Pond (Fig. 12, Photos 20-25)' belongs to the already registered unnumbered pond when the matching chapter and following body identify that pond. Preserve the ENTIRE fixed heading E ref, including enumeration, name, punctuation and figure/photo references, as a separate phrase; never repair it or create a new candidate. Generic category headings such as 'Features' or 'Artifacts' remain ignored. If the heading's object identity truly cannot be resolved from the supplied evidence, keep it unresolved instead of excluding it solely for lacking a number. Before returning, review every ignored heading for an identifiable registered object and every shared target for a description beyond its use as a supporting premise.`;
 
-const SYSTEM_PROMPT =
+const NUMBERED_HEADING_SYSTEM_PROMPT_V12 =
   DESCRIPTION_SYSTEM_PROMPT_V11 +
   `
 REGISTERED NUMBERED ARTIFACT HEADINGS ARE NOT GENERIC: A selectable standalone heading whose number AND object name match an already registered artifact in the supplied chapter/body context is that artifact's identity evidence. Assign its ENTIRE fixed E ref to the matching artifact, including the number, name and parenthetical figure/photo references. Calling it an 'artifact-number heading' or saying that it has only the object's number/name does not make it a generic category title. For example, '17. Bowl (Fig. 8, Photo 22)' with the matching registered bowl and supporting body belongs to that bowl; it must not be ignored while neighboring equivalent artifact headings are retained. If several actual candidate identities remain indistinguishable, use unresolved with the plausible refs and an identity reason, not ignored. Before returning, compare EVERY ignored heading with the registry's original artifact numbers/names and chapter context. Code reports an issue when an ignored standalone heading literally matches a registered artifact's number/name in that chapter; it does not rewrite the response or assign it for you. Keep the shared-findspot, partial-layer-uncertainty, direct-description and nested-owner rules unchanged.`;
+
+const SYSTEM_PROMPT =
+  NUMBERED_HEADING_SYSTEM_PROMPT_V12 +
+  `
+MENTION-SCOPED REGISTRATION DECISIONS: current.registrationDecisions contains confirmed eligibility decisions about only the specified mention in the specified excerptRef. A not_independent_record decision means that mention intentionally has no separate record because it lacks an independent body account or original table item. Preserve the unchanged excerpt on any identified registry objects it describes; do not add an empty-candidate unresolved item merely because this decided mention has no registry ref. Do not ignore the whole excerpt or treat the decision as an instruction to assign a particular candidate. It applies neither to other objects in that sentence nor to all objects with the same name elsewhere. These decisions concern registration eligibility, not identity among existing candidates: preserve genuine unresolved alternatives for registered layers and keep their confirmed feature/layer assignments on the SAME E ref. A potential missing-candidate concern requires supplied original evidence of independent eligibility, not just a noun absent from the registry; do not reopen a confirmed non-registration solely for that absence. Decision refs, original mention ranges, authority and provenance are bound by code and retained in the audit. Return the existing ID-only response schema without rewriting text, inventing decision fields or repairing prior responses.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -278,6 +287,7 @@ export async function prepareContentAttachment(
     candidateSnapshotId: string;
     pdfPageNumbers: number[];
     maxUnitChars: number;
+    registrationDecisions?: ContentRegistrationDecision[];
   },
 ): Promise<ContentAttachmentPlan> {
   createCandidateDeduplicationRequest(discoveryPlan, discovery);
@@ -459,6 +469,11 @@ export async function prepareContentAttachment(
     ),
     registry,
     registryUncertainties: groups.uncertainMatches,
+    ...(options.registrationDecisions
+      ? {
+          registrationDecisions: structuredClone(options.registrationDecisions),
+        }
+      : {}),
     pages,
     units,
   };
@@ -478,7 +493,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v9'
     | 'content-attachment.v10'
     | 'content-attachment.v11'
-    | 'content-attachment.v12' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v12'
+    | 'content-attachment.v13' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -507,7 +523,9 @@ export function createContentAttachmentRequest(
                         ? SHARING_SYSTEM_PROMPT_V10
                         : promptVersion === 'content-attachment.v11'
                           ? DESCRIPTION_SYSTEM_PROMPT_V11
-                          : SYSTEM_PROMPT,
+                          : promptVersion === 'content-attachment.v12'
+                            ? NUMBERED_HEADING_SYSTEM_PROMPT_V12
+                            : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -518,12 +536,14 @@ export function createContentAttachmentRequest(
             registryUncertainties: plan.registryUncertainties,
             unit,
           }
-        : promptVersion === 'content-attachment.v9' ||
-            promptVersion === 'content-attachment.v10' ||
-            promptVersion === 'content-attachment.v11' ||
-            promptVersion === 'content-attachment.v12'
-          ? createContentAttachmentSelectionInput(plan, unit).payload
-          : createContentAttachmentInput(plan, unit).payload,
+        : promptVersion === 'content-attachment.v13'
+          ? createContentAttachmentDecisionInput(plan, unit).payload
+          : promptVersion === 'content-attachment.v9' ||
+              promptVersion === 'content-attachment.v10' ||
+              promptVersion === 'content-attachment.v11' ||
+              promptVersion === 'content-attachment.v12'
+            ? createContentAttachmentSelectionInput(plan, unit).payload
+            : createContentAttachmentInput(plan, unit).payload,
     ),
   };
 }
@@ -537,7 +557,7 @@ export async function attachContentUnit(
   },
 ): Promise<ContentAttachmentSelectionAudit> {
   if (!unit.sources.length) throw new Error('No selectable attachment sources');
-  const input = createContentAttachmentSelectionInput(plan, unit);
+  const input = createContentAttachmentDecisionInput(plan, unit);
   const ids = input.codeMap.excerpts.map((e) => e.ref);
   if (!ids.length) throw new Error('No selectable attachment sources');
   const request = createContentAttachmentRequest(plan, unit);
@@ -602,6 +622,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v9' &&
       audit.promptVersion !== 'content-attachment.v10' &&
       audit.promptVersion !== 'content-attachment.v11' &&
+      audit.promptVersion !== 'content-attachment.v12' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -612,9 +633,12 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v9' ||
       audit.promptVersion === 'content-attachment.v10' ||
       audit.promptVersion === 'content-attachment.v11' ||
-      audit.promptVersion === 'content-attachment.v12';
+      audit.promptVersion === 'content-attachment.v12' ||
+      audit.promptVersion === 'content-attachment.v13';
     const selectionInput = selection
-      ? createContentAttachmentSelectionInput(plan, unit)
+      ? audit.promptVersion === 'content-attachment.v13'
+        ? createContentAttachmentDecisionInput(plan, unit)
+        : createContentAttachmentSelectionInput(plan, unit)
       : null;
     if (
       !legacy &&
@@ -653,6 +677,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v9' ||
       audit.promptVersion === 'content-attachment.v10' ||
       audit.promptVersion === 'content-attachment.v11' ||
+      audit.promptVersion === 'content-attachment.v12' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -870,7 +895,10 @@ export function assembleContentAttachment(
           evidence,
           reason: ignored.reason,
         });
-        if (audit.promptVersion === 'content-attachment.v12') {
+        if (
+          audit.promptVersion === 'content-attachment.v12' ||
+          audit.promptVersion === 'content-attachment.v13'
+        ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
           )!.resource;

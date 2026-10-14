@@ -3,6 +3,7 @@ import type {
   ContentAttachmentPlan,
   ContentAttachmentResult,
   ContentAttachmentSelectionAudit,
+  ContentRegistrationDecision,
 } from '@heripo/ledger-extractor';
 
 import {
@@ -11,8 +12,8 @@ import {
   assembleContentAttachment,
   attachContentUnit,
   buildDocumentResourceIndex,
+  createContentAttachmentDecisionInput,
   createContentAttachmentRequest,
-  createContentAttachmentSelectionInput,
   prepareContentAttachment,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
@@ -104,7 +105,10 @@ export function getContentAttachmentAudit(
 /** Prepare a separate immutable candidate snapshot; this function makes no model calls. */
 export async function prepareContentAttachmentRun(
   taskId: string,
-  options: { maxUnitChars: number },
+  options: {
+    maxUnitChars: number;
+    registrationDecisions?: ContentRegistrationDecision[];
+  },
 ): Promise<ContentAttachmentRun> {
   const existing = getContentAttachmentRun(taskId);
   if (existing?.status === 'running')
@@ -146,6 +150,7 @@ export async function prepareContentAttachmentRun(
       candidateSnapshotId: source.runId,
       pdfPageNumbers: Object.keys(document.pageRangeMap).map(Number),
       maxUnitChars: options.maxUnitChars,
+      registrationDecisions: options.registrationDecisions,
     },
   );
   const runId = randomUUID();
@@ -169,7 +174,7 @@ export async function prepareContentAttachmentRun(
     writeFileSync(
       join(dir, 'first-unit-code-map.json'),
       JSON.stringify(
-        createContentAttachmentSelectionInput(plan, firstUnit).codeMap,
+        createContentAttachmentDecisionInput(plan, firstUnit).codeMap,
         null,
         2,
       ),
@@ -223,7 +228,7 @@ export function startFirstContentAttachment(
   if (
     JSON.stringify(read(join(dir, 'first-unit-code-map.json'))) !==
     JSON.stringify(
-      createContentAttachmentSelectionInput(plan, plan.units[0]).codeMap,
+      createContentAttachmentDecisionInput(plan, plan.units[0]).codeMap,
     )
   )
     throw new Error('First-unit code map changed');

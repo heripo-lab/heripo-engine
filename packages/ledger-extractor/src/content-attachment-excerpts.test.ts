@@ -13,6 +13,7 @@ import {
   attachContentUnit,
   createContentAttachmentRequest,
 } from './content-attachment';
+import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -132,7 +133,7 @@ function audit(
   return {
     unitId: plan.units[0].unitId,
     ...createContentAttachmentRequest(plan, plan.units[0]),
-    codeMap: createContentAttachmentSelectionInput(plan, plan.units[0]).codeMap,
+    codeMap: createContentAttachmentDecisionInput(plan, plan.units[0]).codeMap,
     response,
     usage: {
       component: 'test',
@@ -201,6 +202,7 @@ describe('immutable content excerpt selection', () => {
     const historical = {
       ...raw,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v11'),
+      codeMap: createContentAttachmentSelectionInput(plan, unit).codeMap,
     };
     expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
     const ambiguous = audit(plan, {
@@ -270,18 +272,20 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v12');
+    expect(raw.promptVersion).toBe('content-attachment.v13');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
       'content-attachment.v10',
       'content-attachment.v11',
+      'content-attachment.v12',
     ] as const) {
       const historical = {
         ...raw,
         ...createContentAttachmentRequest(plan, unit, version),
+        codeMap: createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
-      expect(historical.userPrompt).toBe(raw.userPrompt);
+      expect(historical.userPrompt).toBe(JSON.stringify(input.payload));
       expect(raw.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
       expect(assembleContentAttachment(plan, [historical])).toEqual(result);
       expect(
