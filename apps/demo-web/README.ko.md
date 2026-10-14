@@ -227,6 +227,8 @@ pnpm dev
 - `ProcessedImage.path`에는 `heripo-web` export 스크립트가 생성한 완전한 public CDN URL이 들어와야 하며, 데모는 이 URL을 그대로 사용할 뿐 fetch하거나 재서명하지 않습니다.
 - 테스트용 JSON은 `heripo-web` export 스크립트로 생성하거나, 완료된 Raw Data Extraction 작업의 결과 JSON export로 만들 수 있습니다.
 
+검증 페이지에서 **S0 전체 문서 자원 조회**도 제공합니다. 장·텍스트·이미지·표·실제 grid 셀·각주 전체를 원문/ID/sourceRef 부분 일치, 종류, 직접 소속 장, PDF 페이지, 음수·0을 포함한 논리 페이지로 조회하고 원문 전체와 자원 JSON을 확인할 수 있습니다. 입력 파일 SHA-256을 포함한 색인 JSON도 내려받을 수 있습니다. 세션 접근을 확인하는 `GET /api/tasks/[taskId]/resource-index`가 보관된 입력으로 색인을 재구성하므로 기존 완료 작업도 재업로드 없이 사용할 수 있습니다. LLM 호출이나 원장 객체 등록은 수행하지 않으며 기존 요약 미리보기는 접힌 영역에 남깁니다.
+
 ## 업로드와 저장 파일
 
 최대 PDF 크기는 2 GiB입니다. 5 MiB 이상은 서명된 업로드 세션과 10 MiB 청크 업로드를 사용하므로 `UPLOAD_SESSION_SECRET`이 필요합니다. 브라우저는 최대 3개 청크를 동시에 업로드하고 실패를 재시도합니다. 업로드 취소와 처리 중 작업 취소도 지원합니다.

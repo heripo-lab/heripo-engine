@@ -1,4 +1,7 @@
-import type { LedgerExtractionPreview } from '@heripo/ledger-extractor';
+import type {
+  DocumentResourceIndex,
+  LedgerExtractionPreview,
+} from '@heripo/ledger-extractor';
 import type {
   Chapter,
   PageRange,
@@ -153,6 +156,18 @@ export async function fetchTaskResult(
 ): Promise<TaskResultResponse> {
   const response = await fetch(`/api/tasks/${taskId}/result`);
   return handleResponse<TaskResultResponse>(response);
+}
+
+export interface DocumentResourceIndexResponse {
+  inputSha256: string;
+  index: DocumentResourceIndex;
+}
+
+export async function fetchDocumentResourceIndex(
+  taskId: string,
+): Promise<DocumentResourceIndexResponse> {
+  const response = await fetch(`/api/tasks/${taskId}/resource-index`);
+  return handleResponse<DocumentResourceIndexResponse>(response);
 }
 
 export interface CreateTaskInput {
