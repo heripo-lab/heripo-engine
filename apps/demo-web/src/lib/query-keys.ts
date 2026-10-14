@@ -1,4 +1,6 @@
 export const taskKeys = {
+  candidates: (taskId: string) =>
+    ['tasks', 'detail', taskId, 'candidates'] as const,
   all: ['tasks'] as const,
   lists: () => [...taskKeys.all, 'list'] as const,
   list: (filters: { limit?: number; offset?: number; status?: string }) =>

@@ -11,6 +11,11 @@ import type {
   TokenUsageReport,
 } from '@heripo/model';
 
+import type {
+  CandidateDiscoveryRun,
+  CandidateDiscoveryRunSettings,
+} from '~/lib/ledger/candidate-discovery-run';
+
 import type { ProcessingOptions } from '~/features/upload';
 
 export type TaskStatus =
@@ -161,6 +166,41 @@ export async function fetchTaskResult(
 export interface DocumentResourceIndexResponse {
   inputSha256: string;
   index: DocumentResourceIndex;
+}
+
+export async function fetchCandidateDiscovery(
+  taskId: string,
+): Promise<{ run: CandidateDiscoveryRun | null }> {
+  return handleResponse(await fetch(`/api/tasks/${taskId}/candidates`));
+}
+
+export async function startCandidateDiscoveryRun(
+  taskId: string,
+  settings: CandidateDiscoveryRunSettings,
+): Promise<{ run: CandidateDiscoveryRun }> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/candidates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }),
+  );
+}
+
+export async function cancelCandidateDiscoveryRun(
+  taskId: string,
+): Promise<{ success: boolean }> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/candidates`, { method: 'DELETE' }),
+  );
+}
+
+export async function fetchCandidateDiscoveryAudit(
+  taskId: string,
+): Promise<unknown> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/candidates?audit=true`),
+  );
 }
 
 export async function fetchDocumentResourceIndex(

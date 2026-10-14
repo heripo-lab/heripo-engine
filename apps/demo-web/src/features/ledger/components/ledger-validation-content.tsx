@@ -26,6 +26,7 @@ import {
   CardTitle,
 } from '~/components/ui/card';
 
+import { CandidateDiscoveryPanel } from './candidate-discovery-panel';
 import { DocumentResourceInspector } from './document-resource-inspector';
 import { LedgerPreviewImage } from './ledger-preview-image';
 
@@ -90,7 +91,7 @@ export function LedgerValidationContent({
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
-              S0 · 전체 문서 자원 확인
+              원장 개발 · 자원 색인과 객체 후보 검토
             </h1>
             <p className="text-muted-foreground mt-1">
               {task.originalFilename} · reportId:{' '}
@@ -100,9 +101,8 @@ export function LedgerValidationContent({
               </span>
             </p>
             <p className="text-muted-foreground mt-1 text-sm">
-              전처리 데이터 전체를 색인하고 출처를 확인하는 단계입니다. 다음
-              단계의 조사 범위 판정과 원장 객체 후보 등록은 아직 실행하지
-              않습니다.
+              전처리 자원을 확인하고, 선택한 조사내용 범위에서 원장 객체 후보를
+              제안받아 검토합니다.
             </p>
           </div>
           <Button variant="outline" onClick={handleExportJson}>
@@ -145,6 +145,7 @@ export function LedgerValidationContent({
           />
         </div>
 
+        <CandidateDiscoveryPanel taskId={task.id} />
         <DocumentResourceInspector taskId={task.id} />
 
         <details className="space-y-6">

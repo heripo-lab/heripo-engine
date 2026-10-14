@@ -440,10 +440,16 @@ importers:
       '@heripo/model':
         specifier: workspace:*
         version: link:../model
+      ai:
+        specifier: 'catalog:'
+        version: 7.0.127(zod@4.6.5)
       zod:
         specifier: 'catalog:'
         version: 4.6.5
     devDependencies:
+      '@heripo/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@heripo/tsconfig':
         specifier: workspace:*
         version: link:../../tools/tsconfig
