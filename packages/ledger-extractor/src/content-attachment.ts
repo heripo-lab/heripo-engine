@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentInput } from './content-attachment-input';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v7';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v8';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -191,11 +191,17 @@ EXHAUSTIVE PASSAGE ACCOUNTING: Read every selectable body block and table cell f
 Use ignoredSources ONLY when the ENTIRE source is excluded. For an excluded passage within an otherwise used source, return ignoredPassages with exact fragments [{sourceId, quote}] and a reason. Keep each excluded sentence or eligible phrase separate; do not overlap excluded passages with assignments or unresolved. Return ignoredPassages: [] when none. Account for excluded punctuation as part of its original passage; only whitespace between passages may remain uncovered. If relevant identity is uncertain, preserve the original passage in unresolved instead of excluding it or guessing.
 FEATURE CONSTRUCTION CONTEXT: Shared assignment also applies when an identified feature is explicitly cut into, founded on or constructed on an identified existing layer or natural ground. Such a sentence describes BOTH the feature and its construction-context layer. Compare the layer's literal names and anchors with the document's overall stratigraphic definitions, location, material and stratigraphic role; a layer number need not occur in the current sentence. For example, if an existing natural-ground layer is defined as weathered bedrock at this location, 'The well was cut into weathered bedrock (natural ground).' belongs to BOTH the well and that layer in one item. Do not limit sharing to artifact findspots or choose only the main grammatical subject. Do not attach later construction details to that layer unless those sentences also clearly describe it. A generic soil name alone is insufficient; if identity remains uncertain, preserve that uncertainty without assigning every possible layer. Before returning, check every explicit construction foundation as well as every findspot against the full registry.`;
 
-const SYSTEM_PROMPT =
+const LAYER_IDENTITY_SYSTEM_PROMPT_V7 =
   COVERAGE_SYSTEM_PROMPT_V6 +
   `
 COMMON LAYER NAMES AND PARTIAL UNCERTAINTY: A common name such as topsoil (표토층), fill or sandy soil describes a type; it does not by itself identify one registered layer. Require an evidence chain linking the local occurrence to that candidate through explicit identifiers, overall layer definitions, location, material, stratigraphic role or stated continuity. This applies even if only one candidate has that name. If several DISTINCT candidate refs match only the common name and the supplied evidence does not distinguish them, put the passage in unresolved with the plausible alternative layer refs and explain what identity evidence is missing. Never select the first matching candidate, prefer a chapter merely because it contains the same word, or assign all alternatives as confirmed sharing. Multiple rows with the SAME ref are aliases/mentions of one candidate, not competing layers.
 Uncertainty about one layer must not discard confirmed descriptions in the same sentence: return an assignments item for the clearly identified feature and any independently identified layer, plus an unresolved item reusing the SAME exact sentence fragments for the ambiguous layer alternatives ONLY. For example, if a structure is revealed after removing topsoil and an identified modern deposit, retain the structure/modern-deposit assignment and separately report the indistinguishable topsoil candidates as unresolved. Do not shorten or rewrite the sentence to isolate the ambiguous name. Preserve construction-foundation sharing when original definitions and local evidence DO establish identity, even without a local layer number. Before returning, review every shared layer candidate for evidence beyond a common name and retain unresolved identity instead of guessing.`;
+
+const SYSTEM_PROMPT =
+  LAYER_IDENTITY_SYSTEM_PROMPT_V7 +
+  `
+NESTED OWNER NAMES DO NOT PROPAGATE EXCERPTS: A feature name occurring ONLY inside a layer designation (for example, 'Feature A upper fill' or 'fill of Feature A') identifies the layer's owner; it does not by itself make the feature an additional excerpt target. Do not add that owner or other ancestors merely because the layer belongs to them, even when the owner name is explicit. 'Jar X was recovered from the upper fill of Feature A.' belongs to the identified jar and fill layer ONLY. A general finds summary from that layer belongs to the layer, without guessing individual artifacts or adding the owner feature. Preserve the full original sentence; do not remove the owner words from its quote.
+Add the feature when the sentence separately describes its role, state or involvement, including its use as the direct findspot, construction on an identified foundation layer, or exposure of its structure. Thus 'Jar X was recovered from Feature A.' shares with the jar and feature, and 'Feature A was cut into Layer B.' shares with the feature and layer. Construction-foundation sharing and confirmed assignments alongside ambiguous layer alternatives still apply when those roles are directly described. Do not put an otherwise identified owner in unresolved merely because it is omitted as an excerpt target; unresolved is for genuine identity uncertainty. Before returning, check every shared feature ref for a role beyond its name nested in another candidate's layer designation.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -412,7 +418,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v4'
     | 'content-attachment.v5'
     | 'content-attachment.v6'
-    | 'content-attachment.v7' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v7'
+    | 'content-attachment.v8' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -431,7 +438,9 @@ export function createContentAttachmentRequest(
               ? HEADING_SYSTEM_PROMPT_V5
               : promptVersion === 'content-attachment.v6'
                 ? COVERAGE_SYSTEM_PROMPT_V6
-                : SYSTEM_PROMPT,
+                : promptVersion === 'content-attachment.v7'
+                  ? LAYER_IDENTITY_SYSTEM_PROMPT_V7
+                  : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -514,6 +523,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v4' &&
       audit.promptVersion !== 'content-attachment.v5' &&
       audit.promptVersion !== 'content-attachment.v6' &&
+      audit.promptVersion !== 'content-attachment.v7' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -549,6 +559,7 @@ export function assembleContentAttachment(
     }
     const fullCoverage =
       audit.promptVersion === 'content-attachment.v6' ||
+      audit.promptVersion === 'content-attachment.v7' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = (
       fullCoverage
