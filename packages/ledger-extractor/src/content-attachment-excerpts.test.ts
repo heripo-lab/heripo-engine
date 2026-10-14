@@ -197,8 +197,20 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v9');
+    expect(raw.promptVersion).toBe('content-attachment.v10');
     expect(raw.systemPrompt).toContain('Never return quotes');
+    const historical = {
+      ...raw,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v9'),
+    };
+    expect(historical.userPrompt).toBe(raw.userPrompt);
+    expect(raw.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
+    expect(assembleContentAttachment(plan, [historical])).toEqual(result);
+    expect(
+      assembleContentAttachment(plan, [
+        { ...historical, systemPrompt: raw.systemPrompt },
+      ]).issues[0].reason,
+    ).toContain('Audit does not match');
     const forged = structuredClone(raw);
     (forged.codeMap as typeof input.codeMap).excerpts[0].evidence[0].charEnd++;
     expect(
