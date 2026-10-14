@@ -271,6 +271,12 @@ Do not add individual artifacts or invent uncertainty merely because their types
 
 ### Local sets and changing sentence subjects (prompt v16)
 
-Current requests keep the v15 input, fixed E refs, maps, response schema and validation. English instructions resolve “the remaining”, “the others” and similar references within the nearest explicit bounded discourse set, respecting local paragraph focus and exclusions rather than expanding to every object in an earlier table or section. Review every clause for a changed subject; when different resolved candidates are directly described in one sentence, select all of them on the same original E ref.
+V16 requests keep the v15 input, fixed E refs, maps, response schema and validation. English instructions resolve “the remaining”, “the others” and similar references within the nearest explicit bounded discourse set, respecting local paragraph focus and exclusions rather than expanding to every object in an earlier table or section. Review every clause for a changed subject; when different resolved candidates are directly described in one sentence, select all of them on the same original E ref.
 
 Preserve the full sentence and uncertainty wording without splitting or rewriting. Sharing a sentence does not copy each clause's properties to every participant or propagate adjacent cells/sentences. Keep confirmed targets and genuine unresolved alternatives when the local set cannot be resolved. Generic type inventories alone still cannot identify individual artifacts. No deterministic semantic reassignment, response repair or new relation/attribute extraction is introduced. V1–v15 keep their exact historical requests, maps and checks.
+
+### Implicit subjects and universal references (prompt v17)
+
+V17 keeps the v16 input, fixed E refs, maps, response schema and checks. An omitted subject or “all”, “they” and similar references inherit the nearest explicitly established bounded discourse set. Original text must explicitly reset, narrow or expand the set; shared period, chapter, location, category or association alone cannot enlarge it. Review every clause and retain members directly described by an earlier clause even when a later universal expression refers to a smaller subset.
+
+Keep local “remaining” references, table-cell ownership and explicit relation sharing unchanged. Preserve original text and raw responses without deterministic semantic reassignment. V1–v16 retain their exact historical requests, maps and checks.
