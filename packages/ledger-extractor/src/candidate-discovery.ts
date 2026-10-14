@@ -9,7 +9,7 @@ import type {
 import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';
 
-export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v2';
+export const CANDIDATE_DISCOVERY_PROMPT_VERSION = 'candidate-discovery.v3';
 
 const kindSchema = z.enum([
   'site',
@@ -26,25 +26,34 @@ const basisSchema = z.enum([
   'table_item',
   'explicit_context_unit',
 ]);
-const evidenceSchema = z.object({
-  resourceKey: z.string(),
-  quote: z.string().min(1),
-});
-export const candidateDiscoveryResponseSchema = z.object({
-  candidates: z.array(
-    z.object({
-      recordKind: kindSchema,
-      sourceName: z.string().min(1),
-      sourceIdentifier: z.string().min(1).nullable(),
-      eligibilityBasis: basisSchema,
-      reason: z.string().min(1),
-      evidence: z.array(evidenceSchema).min(1),
-    }),
-  ),
-  exclusions: z.array(
-    z.object({ resourceKey: z.string(), reason: z.string() }),
-  ),
-});
+function responseSchema(sourceId: z.ZodType<string>) {
+  return z.object({
+    candidates: z.array(
+      z.object({
+        recordKind: kindSchema,
+        sourceName: z.string().min(1),
+        sourceIdentifier: z.string().min(1).nullable(),
+        eligibilityBasis: basisSchema,
+        reason: z.string().min(1),
+        evidence: z
+          .array(
+            z.object({
+              sourceId,
+              quote: z
+                .string()
+                .min(1)
+                .describe(
+                  'An exact substring of the text belonging to this selected sourceId, never a neighboring source.',
+                ),
+            }),
+          )
+          .min(1),
+      }),
+    ),
+    exclusions: z.array(z.object({ sourceId, reason: z.string() })),
+  });
+}
+export const candidateDiscoveryResponseSchema = responseSchema(z.string());
 export type CandidateDiscoveryResponse = z.infer<
   typeof candidateDiscoveryResponseSchema
 >;
@@ -66,6 +75,7 @@ export interface CandidateDiscoveryPlan {
   units: CandidateDiscoveryUnit[];
 }
 export interface CandidateEvidence {
+  sourceId: string;
   resourceKey: string;
   resourceId: string | null;
   sourceRefs: string[];
@@ -107,7 +117,12 @@ export interface CandidateDiscoveryResult {
   scopeTitle: string;
   candidates: LedgerObjectCandidate[];
   issues: CandidateDiscoveryIssue[];
-  exclusions: Array<{ unitId: string; resourceKey: string; reason: string }>;
+  exclusions: Array<{
+    unitId: string;
+    sourceId: string;
+    resourceKey: string;
+    reason: string;
+  }>;
   completedUnitIds: string[];
   totalUnits: number;
   /** Coverage refers to submitted input resources, not proven semantic completeness. */
@@ -246,18 +261,83 @@ Rules:
 - Use sourceName verbatim from a supplied title, resource or context. Copy sourceIdentifier exactly when present; do not turn a section ordinal like '2) 우물' into object number 2. For a table number cell, use the original number with an attested contextual object name; never invent a numbered name.
 - A table can have two or more independent objects per row. Preserve actual grid indexes; do not expand merged cells. Check the whole row and headers, not only the first column.
 - Grouped objects without individual accounts remain one candidate; never generate N objects from a count or range. If individual accounts exist for that same group, propose only individuals, with uncertainty if identity is unclear.
-- Return minimal exact quotes and resourceKey evidence from resources (not context). The first evidence must precisely anchor the object's independent heading/body, identifying table cell, or named context unit. For a body candidate include evidence of its allocated description, not only its heading. Other evidence may point to the same unit's resources.
+- Return minimal exact quotes and sourceId evidence from selectable sources (not read-only context). The first evidence must precisely anchor the object's independent heading/body, identifying table cell, or named context unit. For a body candidate include evidence of its allocated description, not only its heading. Other evidence may point to the same unit's selectable sources.
 - Context helps interpret boundaries across chunks/chapters but cannot anchor new candidates. Do not copy the previous object's trailing paragraph into a new object's evidence.
 - Do not infer parents, attributes or media assignments in this stage. All candidates remain proposed for human review. Do not silently merge objects by name or number. Do not create a generic category/group candidate on top of separately described members.
-- Record significant exclusions (e.g. past campaigns or tempting passing mentions) with input resource keys and reasons; do not list every non-object sentence.
+- Select evidence in this order: locate the exact quote inside one supplied source object's text, then copy the sourceId from THAT SAME object. Do not derive a sourceId from array positions, PDF page numbers, nearby headings, or a neighboring block. A heading and its following description are different sources; if the quote is in the description, select the description's sourceId.
+- Before returning each evidence pair, check that the quote is an unchanged substring of the selected source's text. If no source contains the proposed quote, do not invent, normalize or repair the quote. Select a genuinely attested passage or omit the unsupported proposal.
+- sourceId is a code-supplied selector, not a sourceRef or a JSON pointer to calculate. Choose only from the supplied selectable source IDs. Each ID selects exactly one original text block or actual table cell. Do not select read-only context for evidence or exclusions.
+- Record significant exclusions (e.g. past campaigns or tempting passing mentions) with selectable sourceId values and reasons; do not list every non-object sentence.
 Do not correct source spellings or numbering; preserve original forms and explain uncertainties in reason.`;
 
-/** Build the exact model input independently of execution. */
+/** Bind selectors to exact input resources; duplicate or missing IDs use their input path. */
+export function getCandidateSources(unit: CandidateDiscoveryUnit) {
+  const counts = new Map<string, number>();
+  for (const resource of unit.resources) {
+    if (resource.resourceId !== null)
+      counts.set(
+        resource.resourceId,
+        (counts.get(resource.resourceId) ?? 0) + 1,
+      );
+  }
+  return unit.resources.map((resource) => ({
+    sourceId:
+      resource.resourceId !== null && counts.get(resource.resourceId) === 1
+        ? `id:${resource.resourceId}`
+        : `path:${resource.key}`,
+    resource,
+  }));
+}
+
+/** Constrain model selection to the current unit, excluding adjacent read-only context. */
+export function createCandidateDiscoverySchema(unit: CandidateDiscoveryUnit) {
+  const ids = getCandidateSources(unit).map((source) => source.sourceId);
+  if (ids.length === 0)
+    throw new Error('Discovery unit has no selectable sources');
+  return responseSchema(
+    z
+      .enum(ids as [string, ...string[]])
+      .describe(
+        'Copy the sourceId paired with the exact source text in selectableSources.',
+      ),
+  );
+}
+
+/** Build the exact model input independently of execution, preserving source strings. */
 export function createCandidateDiscoveryRequest(unit: CandidateDiscoveryUnit) {
+  const selectableSources = getCandidateSources(unit).map(
+    ({ sourceId, resource }) => ({
+      sourceId,
+      kind: resource.kind,
+      resourceId: resource.resourceId,
+      pdfPageNo: resource.pdfPageNo,
+      logicalPageRange: resource.logicalPageRange,
+      sourceRefs: resource.sourceRefs,
+      text: resource.data.text,
+      tableCell:
+        resource.kind === 'tableCell'
+          ? {
+              tableId: resource.tableId,
+              rowIndex: resource.rowIndex,
+              columnIndex: resource.columnIndex,
+              rowSpan: resource.data.rowSpan,
+              colSpan: resource.data.colSpan,
+              isHeader: resource.data.isHeader,
+            }
+          : null,
+    }),
+  );
   return {
     promptVersion: CANDIDATE_DISCOVERY_PROMPT_VERSION,
     systemPrompt: SYSTEM_PROMPT,
-    userPrompt: JSON.stringify(unit),
+    userPrompt: JSON.stringify({
+      unitId: unit.unitId,
+      chapterId: unit.chapterId,
+      chapterPath: unit.chapterPath,
+      table: unit.table,
+      selectableSources,
+      readOnlyContext: unit.context.map((block) => ({ text: block.text })),
+    }),
   };
 }
 
@@ -272,7 +352,7 @@ export async function discoverCandidateUnit(
 ): Promise<CandidateDiscoveryAudit> {
   const { userPrompt } = createCandidateDiscoveryRequest(unit);
   const { output, usage } = await LLMCaller.call({
-    schema: candidateDiscoveryResponseSchema,
+    schema: createCandidateDiscoverySchema(unit),
     systemPrompt: SYSTEM_PROMPT,
     userPrompt,
     primaryModel: options.model,
@@ -341,9 +421,18 @@ export async function assembleCandidateDiscovery(
     }
     completedUnitIds.push(unit.unitId);
     inspectedResourceCount += unit.resources.length;
+    const sources = getCandidateSources(unit);
     for (const exclusion of parsed.data.exclusions) {
-      if (unit.resources.some((r) => r.key === exclusion.resourceKey))
-        exclusions.push({ unitId: unit.unitId, ...exclusion });
+      const selected = sources.find(
+        (source) => source.sourceId === exclusion.sourceId,
+      );
+      if (selected)
+        exclusions.push({
+          unitId: unit.unitId,
+          sourceId: exclusion.sourceId,
+          resourceKey: selected.resource.key,
+          reason: exclusion.reason,
+        });
       else
         issues.push({
           unitId: unit.unitId,
@@ -354,12 +443,13 @@ export async function assembleCandidateDiscovery(
     for (const [candidateIndex, proposal] of parsed.data.candidates.entries()) {
       const evidence: CandidateEvidence[] = [];
       for (const pointer of proposal.evidence) {
-        const resource = unit.resources.find(
-          (r) => r.key === pointer.resourceKey,
-        );
+        const resource = sources.find(
+          (source) => source.sourceId === pointer.sourceId,
+        )?.resource;
         const start = resource?.data.text.indexOf(pointer.quote) ?? -1;
         if (!resource || start < 0) break;
         evidence.push({
+          sourceId: pointer.sourceId,
           resourceKey: resource.key,
           resourceId: resource.resourceId,
           sourceRefs: resource.sourceRefs,
