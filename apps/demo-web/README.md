@@ -500,3 +500,5 @@ The content-attachment panel now sends compact v2 judgment input and shows actua
 New content-attachment calls use prompt v3 for sentence-level excerpts and explicit shared findspot/context assignments. Compact user input and source mapping are unchanged; historical v1/v2 audits still replay without modifying their raw responses.
 
 New content-attachment calls use prompt v4 to distinguish source-block provenance from sentence-level excerpts at page boundaries. Compact input, selectors and response assembly stay unchanged; previous v1/v2/v3 audits remain replayable.
+
+New content-attachment calls use prompt v5 to preserve supported numbered object headings separately from body sentences and ignore generic category headings. Compact input, source maps and response assembly are unchanged; historical v1–v4 audits remain replayable.
