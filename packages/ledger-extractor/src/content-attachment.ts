@@ -23,7 +23,7 @@ import { createContentAttachmentSelectionInput } from './content-attachment-exce
 import { createContentAttachmentInput } from './content-attachment-input';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v18';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v19';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -289,11 +289,17 @@ const IMPLICIT_SUBJECT_SYSTEM_PROMPT_V17 =
   `
 IMPLICIT SUBJECTS AND UNIVERSAL REFERENCES: An omitted subject or an expression such as 'all', 'they', 'these', '모두' or '전부' inherits the nearest explicitly established bounded set in the supplied original discourse. Carry that set across sentence boundaries unless the original text explicitly resets, narrows or expands it. Mere presence in the same period, chapter, area, category or registry, or association with a member, does not add an object to that set. For example, 'Structures A-C and pits D-E were investigated. They occur throughout the area; except for the pits on the slope, all cluster on the terrace.' describes only A-E, even if a neighboring ditch F appears elsewhere in the same chapter. The pit clause still directly describes D-E, so select all directly described members across the SAME unchanged sentence E ref; the later 'all' clause does not erase the pit targets. Resolve the clause-specific subset without extending the antecedent set. Require explicit original evidence before adding any object outside the established set. Continue resolving 'the remaining' within the local narrowed set and reviewing every clause for its own subjects. If the original antecedent or its membership is genuinely uncertain, preserve confirmed targets and report only plausible unresolved alternatives with the missing evidence; do not guess or widen by association. Preserve existing table-cell ownership and explicit relation sharing, registered-object headings, layer identity, registration decisions and type-summary boundaries. Return only the existing ID-selection schema; do not rewrite source text, repair responses or perform deterministic semantic reassignment.`;
 
-const SYSTEM_PROMPT =
+const TABLE_CONSISTENCY_SYSTEM_PROMPT_V18 =
   IMPLICIT_SUBJECT_SYSTEM_PROMPT_V17 +
   `
 NEAREST EXPLICIT SUBSET TAKES PRIORITY: Resolve omitted subjects, 'all' and 'the remaining' in reading order. A nearer explicit subset in the immediately preceding sentence or clause supersedes an older broader set from a section, table or registry. First locate that nearest set, then apply the current sentence's named subject and exclusions inside it. For example, 'Units A-D are listed. Units B-D occupy one enclosure. Unit B served as a dwelling, while the remaining units served as stores.' describes B, C and D only; A must not re-enter through the older inventory. A wider scope requires an explicit original reset or expansion, not a change of clause or the availability of extra candidates. Preserve all directly described participants of the unchanged sentence, including those described before an exception or narrowing clause. Keep the existing implicit-subject boundary and do not add related objects outside the resolved set.
 TABLE DATA ASSIGNMENT AND HEADER EXCLUSION: A selectable nonblank data cell describing an identified row owner belongs in assignments with that owner. Identifier, dimensions, shape, bay count, internal facility and remark cells remain original evidence even when they are short, numeric or a dash. Identifying the owner in the reason while placing that cell in ignored is inconsistent; include the owner's R ref in candidateRefs instead. Genuine ambiguity remains unresolved. Keep explicit relation-remark sharing with identified counterparts, without propagating ordinary neighboring cells. General column labels such as 'number', 'dimensions', 'remarks', '호수', '규모' and '비고' belong in ignored, not assignments or unresolved; never insert a placeholder R ref. Read the actual grid and row/header context; source isHeader flags alone may not identify every general column label. Keep actual registered-object headings distinct from these generic labels. Before returning, compare every ignored data cell with its identifiable row owner and every assigned header with its reason. Code reports missing assignments for uniquely anchored rows and general-header exclusion violations without adding targets, repairing responses or changing source text. Return the existing ID-only schema.`;
+
+const SYSTEM_PROMPT =
+  TABLE_CONSISTENCY_SYSTEM_PROMPT_V18 +
+  `
+ABBREVIATED COUNTERPARTS IN TABLE REMARKS: A relation counterpart need not repeat its full registry name or identifier inside the cell. Resolve original shortened terms such as 'ditch' or '구' using the supplied body descriptions, table caption, chapter/period context, location and archaeological role. An explicitly named counterpart includes an abbreviated mention whose identity is established by that original evidence. A generic term alone is insufficient; do not choose among unrelated or indistinguishable candidates by name alone. When the body identifies the enclosing ditch and a building-row remark states 'outside the ditch', assign the SAME unchanged remark to BOTH the identified row owner and that ditch. A row owner is a required target, not an exclusive one. The nearest-subset rules resolve implicit subjects and 'all/remaining'; they do not remove an additional counterpart directly mentioned by a relation remark. If identity genuinely remains ambiguous, keep the confirmed row owner in assignments and plausible counterpart alternatives in unresolved on the SAME E ref.
+PRESERVE THE REFERENT OF STATE WORDING: Read the original cell's named object and predicate before applying row context. For a remark such as 'ditch partly destroyed' or '구 일부 파괴', do not turn the described ditch damage into 'the building was partly destroyed' merely because the row belongs to a building. When original context identifies the ditch, share the unchanged remark with the row owner and that ditch. Preserve the object's abbreviated wording, scope such as 'partly', and any uncertainty. Do not invent the damaging agent, causal direction or chronology; assigning a phrase to both participants is not new relation/attribute extraction. Reasons must follow the original referent rather than substituting the row owner for a named counterpart. Review each relational/state remark for its resolved participants after ensuring the owner is assigned. This sharing applies only to that original E ref: do not copy the owner's identifier, shape, dimensions, facilities or neighboring excerpts to the counterpart. Keep generic headers ignored and retain all existing local-set, type-summary, layer-identity and mention-scoped registration boundaries. Return only the existing ID-selection schema without rewriting source text, correcting a saved response or automatically adding targets.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -527,7 +533,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v15'
     | 'content-attachment.v16'
     | 'content-attachment.v17'
-    | 'content-attachment.v18' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v18'
+    | 'content-attachment.v19' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -568,7 +575,10 @@ export function createContentAttachmentRequest(
                                     ? LOCAL_SET_SYSTEM_PROMPT_V16
                                     : promptVersion === 'content-attachment.v17'
                                       ? IMPLICIT_SUBJECT_SYSTEM_PROMPT_V17
-                                      : SYSTEM_PROMPT,
+                                      : promptVersion ===
+                                          'content-attachment.v18'
+                                        ? TABLE_CONSISTENCY_SYSTEM_PROMPT_V18
+                                        : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -584,7 +594,8 @@ export function createContentAttachmentRequest(
             promptVersion === 'content-attachment.v15' ||
             promptVersion === 'content-attachment.v16' ||
             promptVersion === 'content-attachment.v17' ||
-            promptVersion === 'content-attachment.v18'
+            promptVersion === 'content-attachment.v18' ||
+            promptVersion === 'content-attachment.v19'
           ? createContentAttachmentDecisionInput(plan, unit).payload
           : promptVersion === 'content-attachment.v9' ||
               promptVersion === 'content-attachment.v10' ||
@@ -676,6 +687,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v15' &&
       audit.promptVersion !== 'content-attachment.v16' &&
       audit.promptVersion !== 'content-attachment.v17' &&
+      audit.promptVersion !== 'content-attachment.v18' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -692,14 +704,16 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v15' ||
       audit.promptVersion === 'content-attachment.v16' ||
       audit.promptVersion === 'content-attachment.v17' ||
-      audit.promptVersion === 'content-attachment.v18';
+      audit.promptVersion === 'content-attachment.v18' ||
+      audit.promptVersion === 'content-attachment.v19';
     const selectionInput = selection
       ? audit.promptVersion === 'content-attachment.v13' ||
         audit.promptVersion === 'content-attachment.v14' ||
         audit.promptVersion === 'content-attachment.v15' ||
         audit.promptVersion === 'content-attachment.v16' ||
         audit.promptVersion === 'content-attachment.v17' ||
-        audit.promptVersion === 'content-attachment.v18'
+        audit.promptVersion === 'content-attachment.v18' ||
+        audit.promptVersion === 'content-attachment.v19'
         ? createContentAttachmentDecisionInput(plan, unit)
         : createContentAttachmentSelectionInput(plan, unit)
       : null;
@@ -746,6 +760,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v15' ||
       audit.promptVersion === 'content-attachment.v16' ||
       audit.promptVersion === 'content-attachment.v17' ||
+      audit.promptVersion === 'content-attachment.v18' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -970,7 +985,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v15' ||
           audit.promptVersion === 'content-attachment.v16' ||
           audit.promptVersion === 'content-attachment.v17' ||
-          audit.promptVersion === 'content-attachment.v18'
+          audit.promptVersion === 'content-attachment.v18' ||
+          audit.promptVersion === 'content-attachment.v19'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1050,7 +1066,10 @@ export function assembleContentAttachment(
         gap(text.length);
       }
     }
-    if (audit.promptVersion === 'content-attachment.v18') {
+    if (
+      audit.promptVersion === 'content-attachment.v18' ||
+      audit.promptVersion === 'content-attachment.v19'
+    ) {
       for (const reason of validateContentAttachmentTables(
         plan,
         unit,
