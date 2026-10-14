@@ -13,7 +13,7 @@
 
 `@heripo/ledger-extractor` is the first vertical slice of the ledger extraction stage in the heripo data pipeline. It takes a `ProcessedDocument` (produced by `@heripo/document-processor`) and summarizes it into a `LedgerExtractionPreview` — aggregated counts plus a few representative samples — proving the data arrived at the ledger stage intact.
 
-> **Preview only**: this package does NOT implement actual ledger extraction yet. There are no LLM calls, no ledger domain schema, no standardization, and no database storage. Those are follow-up work.
+> **Preview only**: this package does NOT implement actual ledger extraction yet. The preview and S0 APIs make no LLM calls. The separate candidate-discovery API uses a caller-selected model to propose source-backed objects for review; the final ledger domain schema, standardization and database storage remain follow-up work.
 
 ## Table of Contents
 
@@ -118,6 +118,36 @@ const source = queryDocumentResources(index, { sourceRef: '#/texts/5616' });
 The index preserves source strings and direct chapter assignments, including unassigned media and multiple assignments. Caption references resolve to their image or table. Cell references use the parent table reference and zero-based indexes into the actual grid; merged shadows are not expanded. Missing IDs/references/page mappings remain missing. Chapter PDF pages are not inferred from their logical start pages. Resources retain storage traversal order, not a reconstructed PDF reading order. The JSON pointer `key` locates an occurrence in this exact input snapshot; it is not a cross-version ledger ID. Keep the input file hash alongside exported indexes.
 
 S0 provides source lookup only. It does not classify investigation scope or register archaeological objects. `LedgerExtractor.extract()` retains its existing bounded preview response.
+
+## Investigation object candidates
+
+The next stage proposes candidates from an explicitly selected chapter subtree. It keeps the existing preview and S0 APIs separate:
+
+```typescript
+import {
+  assembleCandidateDiscovery,
+  discoverCandidateUnit,
+  prepareCandidateDiscovery,
+} from '@heripo/ledger-extractor';
+
+const plan = prepareCandidateDiscovery(index, {
+  scopeChapterId: 'investigation-chapter-id',
+  inputSha256: 'sha256-of-original-input-file',
+  maxTextChars: 8000,
+  tableRowsPerUnit: 12,
+});
+const audits = [];
+for (const unit of plan.units) {
+  audits.push(await discoverCandidateUnit(unit, { model, maxRetries: 0 }));
+}
+const result = await assembleCandidateDiscovery(plan, audits);
+```
+
+Code fixes the subtree, body-block batches, actual table-cell batches and adjacent read-only context. A long indivisible text block can exceed `maxTextChars`. Each call uses `LLMCaller`, structured response validation and caller-supplied retry/cancellation settings. Full prompts, prompt version, responses and token usage are returned for caller-managed checkpoints and replay. Calls are sequential in the demo; no autonomous searching or report-wide enrichment occurs here.
+
+The eight candidate kinds are site, area, trench, layer, feature, artifact, shipwreck and unknown. Features and artifacts require an independent body account or a distinct substantive table item. Prior investigations, passing mentions and media-only accounts are excluded by the model instructions. Code verifies exact evidence quotes, source names, identifiers, resource boundaries and basic eligibility types; it cannot prove the model's archaeological interpretation or completeness. All results remain `proposed`. Invalid proposals and duplicate anchors become visible issues, while the original model response remains in the audit. Exact duplicate anchors are not counted twice; equal names or numbers at different anchors are not silently merged. Candidate IDs derive from the input hash, kind and first quoted source span, so they are snapshot-local proposals rather than final cross-version record IDs.
+
+Reassemble saved audits with `assembleCandidateDiscovery()` without another model call. This stage does not set parents, extract attributes, assign media or register final ledger records.
 
 ## License
 

@@ -381,7 +381,7 @@ Current version: **v0.1.x** (Initial Release)
 
 ### v0.2.x - Immutable Ledger
 
-S0 source inspection is available in `@heripo/ledger-extractor` and the demo: index the complete processed document and look up resources with their original provenance before object extraction.
+S0 source inspection and bounded investigation-object candidate proposals are available in `@heripo/ledger-extractor` and the demo. Inspect source-backed proposals before registering final ledger records.
 
 - Universal data model design covering global archaeology
 - Archaeological concept extraction (features, artifacts, strata, excavation units)

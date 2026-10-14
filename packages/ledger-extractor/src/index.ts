@@ -6,7 +6,8 @@
  * Takes a ProcessedDocument (produced by `@heripo/document-processor`) and
  * summarizes it into a LedgerExtractionPreview: aggregated counts and a few
  * representative samples. This is the first vertical slice of the ledger
- * extraction stage — the actual ledger domain schema, LLM-based extraction,
+ * extraction stage. Separate APIs provide a complete resource index and bounded,
+ * source-backed LLM candidate proposals. The final ledger domain schema,
  * standardization, and storage are follow-up work.
  *
  * ## Key Features
@@ -14,11 +15,26 @@
  * - Recursive chapter/text-block aggregation
  * - Table grid cell aggregation
  * - Bounded samples (chapter titles, text blocks, image URLs, tables)
+ * - Whole-document source lookup and investigation candidate review
  *
  * @packageDocumentation
  */
 
 export { LedgerExtractor } from './ledger-extractor';
+export {
+  prepareCandidateDiscovery,
+  discoverCandidateUnit,
+  assembleCandidateDiscovery,
+  CANDIDATE_DISCOVERY_PROMPT_VERSION,
+} from './candidate-discovery';
+export type {
+  CandidateDiscoveryPlan,
+  CandidateDiscoveryUnit,
+  CandidateDiscoveryAudit,
+  CandidateDiscoveryResult,
+  CandidateEvidence,
+  LedgerObjectCandidate,
+} from './candidate-discovery';
 export {
   buildDocumentResourceIndex,
   queryDocumentResources,
