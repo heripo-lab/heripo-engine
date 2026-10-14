@@ -152,3 +152,11 @@ Reassemble saved audits with `assembleCandidateDiscovery()` without another mode
 ## License
 
 Apache-2.0 — see [LICENSE](../../LICENSE).
+
+### Whole-pool duplicate review
+
+After every discovery unit completes, `deduplicateCandidates(plan, discovery, options)` submits the entire validated candidate pool in one structured LLM call, including chapter paths, original body blocks, relevant table rows/headers and adjacent context. `createCandidateDeduplicationRequest` exposes the exact request before execution. `assembleCandidateDeduplication` checks its saved audit against the full input and requires a complete, disjoint partition. Unknown, missing, repeated or mixed-kind assignments invalidate the entire partition; code never repairs model assignments. Uncertain identities remain separate with explicit review notes.
+
+The returned `CandidateDeduplicationResult` contains proposed groups referencing original candidate IDs. `getCandidateGroupMembers` retrieves every original occurrence, including unchanged names, quotes, offsets and source references. Original discovery results and model audits remain immutable; grouping does not rewrite source text, register final records or perform attribute/parent extraction. Group identity decisions still require human review.
+
+The duplicate-review prompt distinguishes archaeological overlap/superposition (including Korean `중복`) from multiple records of one object. Reciprocal overlap notes and separately measured numbered features do not establish identity.

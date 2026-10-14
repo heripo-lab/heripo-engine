@@ -106,3 +106,11 @@ const result = await assembleCandidateDiscovery(plan, audits);
 ## 라이선스
 
 Apache-2.0 — [LICENSE](../../LICENSE) 참고.
+
+### 전체 후보 중복 검토
+
+모든 탐색 묶음이 끝난 뒤 `deduplicateCandidates(plan, discovery, options)`가 검증된 전체 후보를 하나의 구조화된 LLM 호출로 검토합니다. 장 경로, 원문 본문, 관련 표 행·머리글과 인접 문맥을 함께 제공합니다. `createCandidateDeduplicationRequest`로 실행 전 입력을 확인할 수 있습니다. `assembleCandidateDeduplication`은 저장된 감사 기록이 전체 입력과 일치하고 모든 후보가 정확히 하나의 묶음에 속하는지 검사합니다. 알 수 없는 후보, 누락, 중복 배정, 서로 다른 종류의 통합이 있으면 묶음 전체를 적용하지 않습니다. 불확실한 동일성은 합치지 않고 검토 사항으로 남깁니다.
+
+`CandidateDeduplicationResult`의 묶음은 원래 후보 ID를 참조합니다. `getCandidateGroupMembers`로 각 후보의 원래 이름·발췌·문자 위치·출처를 그대로 확인합니다. 최초 추출 결과와 모델 감사 기록을 보존하며, 통합은 원문 수정이나 최종 등록·속성·부모 추출을 수행하지 않습니다. 동일 대상 판단은 사람 검토가 필요합니다.
+
+통합 프롬프트는 고고학적 중복·선후·절단 관계와 동일 대상의 반복 기록을 구별합니다. 서로 중복된다는 비고나 번호·규모가 각각 있는 유구를 같은 대상으로 취급하지 않습니다.

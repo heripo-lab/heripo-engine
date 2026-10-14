@@ -480,3 +480,7 @@ For project-wide information not covered in this package, see the [root README](
 ---
 
 **heripo lab** | [GitHub](https://github.com/heripo-lab) | [heripo engine](https://github.com/heripo-lab/heripo-engine)
+
+After discovery completes, the local runner performs one whole-pool LLM duplicate review. The proposed-group panel shows original/combined counts, merged groups, every member's unchanged evidence and uncertain identity pairs. Raw discovery candidates remain available separately. The runner checkpoints `deduplication-request.json` before execution and `deduplication-audit.json` before validating the partition; the audit download includes both discovery and duplicate-review responses. Invalid partitions fail the run while retaining all discovery results and audits.
+
+Use “이 추출본으로 중복만 다시 검토” to rerun duplicate review without calling discovery again. A new run copies the original discovery audit files byte-for-byte, replays and verifies the snapshot, records `discoverySourceRunId`, and saves a new duplicate-review audit. Prior runs remain unchanged.
