@@ -131,10 +131,13 @@ function fixture(texts = [s6.join(' ')], table = false): ContentAttachmentPlan {
 function audit(
   plan: ContentAttachmentPlan,
   response: ContentAttachmentSelectionResponse,
+  version:
+    | 'content-attachment.v34'
+    | 'content-attachment.v35' = 'content-attachment.v35',
 ): ContentAttachmentSelectionAudit {
   return {
     unitId: plan.units[0].unitId,
-    ...createContentAttachmentRequest(plan, plan.units[0]),
+    ...createContentAttachmentRequest(plan, plan.units[0], version),
     codeMap: createContentAttachmentBodyBlockInput(plan, plan.units[0]).codeMap,
     response,
     usage: {
@@ -148,6 +151,11 @@ function audit(
     },
   };
 }
+
+const legacyAudit = (
+  plan: ContentAttachmentPlan,
+  response: ContentAttachmentSelectionResponse,
+) => audit(plan, response, 'content-attachment.v34');
 
 describe('immutable content excerpt selection', () => {
   test('preserves qualified set evidence on selected members and replays v25 without changing its input or repairing responses', () => {
@@ -464,7 +472,7 @@ describe('immutable content excerpt selection', () => {
       cell.isHeader = false;
     });
     plan.registry[0].mentions[0].sourceIdentifier = ' 7 ';
-    const valid = audit(plan, {
+    const valid = legacyAudit(plan, {
       ...empty(),
       assignments: ['E1', 'E4', 'E5'].map((excerptRef) => ({
         excerptRef,
@@ -477,7 +485,7 @@ describe('immutable content excerpt selection', () => {
       })),
     });
     expect(assembleContentAttachment(plan, [valid]).issues).toEqual([]);
-    const raw = audit(plan, {
+    const raw = legacyAudit(plan, {
       ...empty(),
       assignments: [
         { excerptRef: 'E2', candidateRefs: ['R2'], reason: 'Column label' },
@@ -555,7 +563,7 @@ describe('immutable content excerpt selection', () => {
     );
     expect(
       assembleContentAttachment(partial, [
-        audit(partial, {
+        legacyAudit(partial, {
           ...empty(),
           ignored: [{ excerptRef: 'E1', reason: 'Body' }],
         }),
@@ -574,7 +582,7 @@ describe('immutable content excerpt selection', () => {
       plan.registry[0].mentions[0].sourceIdentifier = ' 7 ';
       change(plan);
       const input = createContentAttachmentDecisionInput(plan, plan.units[0]);
-      const raw = audit(plan, {
+      const raw = legacyAudit(plan, {
         ...empty(),
         assignments: [
           {
@@ -703,7 +711,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v34');
+    expect(raw.promptVersion).toBe('content-attachment.v35');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',

@@ -497,7 +497,7 @@ describe('original selectable body block input', () => {
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
     const request = createContentAttachmentRequest(plan, unit);
-    expect(request.promptVersion).toBe('content-attachment.v34');
+    expect(request.promptVersion).toBe('content-attachment.v35');
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',

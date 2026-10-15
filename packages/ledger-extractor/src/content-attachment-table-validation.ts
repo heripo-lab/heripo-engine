@@ -5,6 +5,8 @@ import type {
   ContentAttachmentSelectionResponse,
 } from './content-attachment';
 
+import { originalIdentifierCellOwners } from './content-attachment-table-owners';
+
 // Match only explicit column labels; object headings are not generic headers.
 const genericLabels = new Set([
   '호수',
@@ -41,6 +43,7 @@ export function validateContentAttachmentTables(
   unit: AttachmentUnit,
   excerpts: Array<{ ref: string; evidence: CandidateEvidence[] }>,
   response: ContentAttachmentSelectionResponse,
+  identifierAnchorsOnly = false,
 ): string[] {
   const issues: string[] = [];
   const assigned = new Map(
@@ -48,21 +51,26 @@ export function validateContentAttachmentTables(
   );
   const ignored = new Set(response.ignored.map((a) => a.excerptRef));
   for (const table of unit.tables) {
-    const owners = table.data.grid.map((row, rowIndex) => {
-      const matches = plan.registry.filter((candidate) =>
-        candidate.mentions.some(
-          (mention) =>
-            !!mention.sourceIdentifier &&
-            row.some((cell) => cell.text === mention.sourceIdentifier) &&
-            (mention.evidence.some((e) =>
-              e.resourceKey.startsWith(`${table.key}/grid/${rowIndex}/`),
-            ) ||
-              (!!mention.sourceName &&
-                !!table.data.caption?.fullText.includes(mention.sourceName))),
-        ),
-      );
-      return matches.length === 1 ? matches[0].ref : null;
-    });
+    const owners = identifierAnchorsOnly
+      ? originalIdentifierCellOwners(plan, table)
+      : table.data.grid.map((row, rowIndex) => {
+          const matches = plan.registry.filter((candidate) =>
+            candidate.mentions.some(
+              (mention) =>
+                !!mention.sourceIdentifier &&
+                row.some((cell) => cell.text === mention.sourceIdentifier) &&
+                (mention.evidence.some((e) =>
+                  e.resourceKey.startsWith(`${table.key}/grid/${rowIndex}/`),
+                ) ||
+                  (!!mention.sourceName &&
+                    !!table.data.caption?.fullText.includes(
+                      mention.sourceName,
+                    ))),
+            ),
+          );
+          const owner = matches.length === 1 ? matches[0].ref : null;
+          return row.map(() => owner);
+        });
     table.data.grid.forEach((row, rowIndex) => {
       row.forEach((cell, columnIndex) => {
         const key = `${table.key}/grid/${rowIndex}/${columnIndex}`;
@@ -70,7 +78,7 @@ export function validateContentAttachmentTables(
           e.evidence.some((f) => f.resourceKey === key),
         );
         if (!excerpt) return;
-        const owner = owners[rowIndex];
+        const owner = owners[rowIndex][columnIndex];
         if (owner) {
           if (!assigned.get(excerpt.ref)?.includes(owner))
             issues.push(
@@ -85,7 +93,8 @@ export function validateContentAttachmentTables(
         if (
           genericLabels.has(label) &&
           (cell.isHeader ||
-            (rowIndex === 0 && owners.some((ref) => ref !== null))) &&
+            (rowIndex === 0 &&
+              owners.some((row) => row.some((ref) => ref !== null)))) &&
           !ignored.has(excerpt.ref)
         )
           issues.push(`Generic table header must be ignored: ${excerpt.ref}`);
