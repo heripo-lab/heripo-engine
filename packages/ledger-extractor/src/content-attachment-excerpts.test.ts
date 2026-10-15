@@ -232,6 +232,24 @@ describe('immutable content excerpt selection', () => {
       'INFERRED COLLECTIVES REQUIRE',
     );
     expect(assembleContentAttachment(plan, [previousRows])).toEqual(result);
+    const previousCollective = {
+      ...raw,
+      ...createContentAttachmentRequest(
+        plan,
+        plan.units[0],
+        'content-attachment.v28',
+      ),
+    };
+    expect(previousCollective.userPrompt).toBe(raw.userPrompt);
+    expect(raw.systemPrompt.startsWith(previousCollective.systemPrompt)).toBe(
+      true,
+    );
+    expect(previousCollective.systemPrompt).not.toContain(
+      'LOCATION-REFERENCE-ONLY OBJECTS',
+    );
+    expect(assembleContentAttachment(plan, [previousCollective])).toEqual(
+      result,
+    );
     expect([plan, raw]).toEqual(before);
   });
 
@@ -394,6 +412,7 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v25',
       'content-attachment.v26',
       'content-attachment.v27',
+      'content-attachment.v28',
     ] as const) {
       const previousTableAudit = {
         ...raw,
@@ -401,7 +420,8 @@ describe('immutable content excerpt selection', () => {
         codeMap:
           version === 'content-attachment.v25' ||
           version === 'content-attachment.v26' ||
-          version === 'content-attachment.v27'
+          version === 'content-attachment.v27' ||
+          version === 'content-attachment.v28'
             ? createContentAttachmentTableAnchorInput(plan, unit).codeMap
             : createContentAttachmentDecisionInput(plan, unit).codeMap,
       };
@@ -590,7 +610,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v28');
+    expect(raw.promptVersion).toBe('content-attachment.v29');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
