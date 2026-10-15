@@ -497,7 +497,7 @@ describe('original selectable body block input', () => {
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
     const request = createContentAttachmentRequest(plan, unit);
-    expect(request.promptVersion).toBe('content-attachment.v36');
+    expect(request.promptVersion).toBe('content-attachment.v37');
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',
@@ -570,6 +570,7 @@ describe('original selectable body block input', () => {
     for (const version of [
       'content-attachment.v34',
       'content-attachment.v35',
+      'content-attachment.v36',
     ] as const) {
       const historical = createContentAttachmentRequest(plan, unit, version);
       expect(historical.userPrompt).toBe(request.userPrompt);
@@ -577,8 +578,13 @@ describe('original selectable body block input', () => {
         true,
       );
       expect(historical.systemPrompt).not.toContain(
-        'SURVEY AREA LAYOUT AND IDENTIFIED TRENCHES',
+        'NONREGISTERED ANTECEDENTS GOVERN SUBSEQUENT DESCRIPTIONS',
       );
+      expect(
+        historical.systemPrompt.includes(
+          'SURVEY AREA LAYOUT AND IDENTIFIED TRENCHES',
+        ),
+      ).toBe(version === 'content-attachment.v36');
       expect(
         assembleContentAttachment(plan, [{ ...raw, ...historical }]),
       ).toEqual(result);
