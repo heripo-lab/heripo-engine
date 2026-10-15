@@ -28,7 +28,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v31';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v32';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -375,11 +375,17 @@ const VERIFIED_INVENTORY_SYSTEM_PROMPT_V30 =
 SURVEY SCOPE AND VERIFIED INVENTORY MEMBERS ARE NOT ALTERNATIVE TARGETS: A substantive survey-results excerpt can directly describe both a registered survey area and an identified inventory of investigated features. Selecting the area does not replace or exhaust the feature targets. Assess the inventory's bounded membership from the original investigation scope, the body-to-table reference, the original table rows and each candidate's anchors. When these link the registered feature members to THAT investigation inventory, assign the unchanged E ref to all those directly described members, even when the sentence lists types, periods and aggregate quantities instead of repeating individual identifiers. Also select the area only if it is independently described under the existing rules; do not automatically propagate evidence to ancestors.
 For example, a survey account defines its current area, reports the features found, and points to an original trench table whose occurrence cells identify the registered feature members. Preserve that factual inventory excerpt on those verified members even if it also describes the area. Do not downgrade this evidenced inventory to an ungrounded type summary or require a single summary owner. This does not identify individual artifacts from a type-only finds summary, establish membership from matching names/period/location alone, equate a newly inferred collective with nearby records, or share with location-only references. Distinguish the trench set from the feature inventory; neither automatically inherits the other's targets. Preserve aggregate qualifiers and any differing row counts as original context without asserting that every member has every listed property, resolving object identity, extracting attributes or correcting counts. Before returning, recheck area-only inventory assignments against the supplied original membership evidence. Retain every justified member and complete table-row assignment; code never adds or removes semantic targets or repairs source/response text.`;
 
-const SYSTEM_PROMPT =
+const SUPPORTING_CONTEXT_SYSTEM_PROMPT_V31 =
   VERIFIED_INVENTORY_SYSTEM_PROMPT_V30 +
   `
 READ-ONLY BODY AND SUPPORTING TABLE CONTEXT: current.readOnlyContext rows follow readOnlyContextColumns [ref, contexts, text]. B refs preserve separate original body blocks around this unit, including a preceding inventory definition, incomplete subject or qualifier. Read them in their original order without rewriting or selecting them. supportingTables supplies original headers/spans and chapter contexts; supportingRows follows supportingRowColumns [ref, table, row, cells], with each cell [original column, unchanged text]. supportingAnchors follows supportingAnchorColumns [candidate, row, column] and binds a registered candidate's original quote to that nonselectable row/cell. Shared Q/M references avoid repeating full tables and long source IDs. These are exact source bindings, not claims that two tables continue each other or form one collective.
 Use the explicit body definition, current body/table reference, original row numbers, header structure and candidate anchors together to assess the bounded set and its members across pages. A current-table anchor is not required when the supporting original row identifies a member, but shared chapter/type, consecutive numbering or registry availability alone does not prove collective membership. Preserve genuine scope changes, contradictory counts, qualifications and alternatives. If a fragment starts with 'or' after a preceding qualified subject and alternative layer, use that original context without completing the fragment, treating the alternative as universal, or assigning its property to every member. Only current.excerpts E refs are selectable; never output B/Q/M refs, supporting cells or other-page text as new excerpts. Retain all existing sharing, row completeness and uncertainty rules; code never infers semantic targets or repairs source/response text.`;
+
+const SYSTEM_PROMPT =
+  SUPPORTING_CONTEXT_SYSTEM_PROMPT_V31 +
+  `
+USING A PURE TABLE POINTER AS CONTEXT DOES NOT MAKE IT AN ASSIGNMENT: Decide excerpt eligibility separately from identifying its possible subjects. A sentence such as 'The pits’ shapes and dimensions are presented in Table 9.' only tells where information can be found; it states no shape, dimension, state or other substantive object fact. You may use its table reference with original headers, rows and candidate anchors to resolve a neighboring substantive sentence's bounded membership. Still put the pointer E ref itself in ignored, even when that membership is completely known. Neither supplying supporting rows nor establishing the exact set turns that pointer into a description of the set. This exclusion has priority over all-target sharing, established-inventory follow-ups and the v31 instruction to use body/table references as identity context. Preserve actual descriptions such as 'Pit J is circular and 1.5 m wide (Table 9).' under the existing rules. Before returning, recheck every assigned table-reference sentence whose reason merely says it introduces, guides or points to a table. Retain original E text and ID; never copy table values into it or repair the response in code.
+ALTERNATIVE CONSTRUCTION LAYERS ARE NOT AUTOMATICALLY AMBIGUOUS CANDIDATE IDENTITIES: Distinguish the identity of a literally named layer from uncertainty about which individual members were constructed in which layer. A preceding read-only block may say 'Most pits were cut into red clay', and the current fragment 'or dark clay (Layer V).' may identify a different, registered layer through its explicit designation and original candidate evidence. Preserve the current E ref on that independently identified layer and its directly described established feature set. Do not remove the identified layer or put both known layer candidates in unresolved merely because the source offers alternative substrates, uses 'most' or does not identify each member's substrate. Attaching unchanged qualified evidence does not assert that all members used the named layer or extract a property/relationship. A different layer named ONLY in read-only context is not automatically another target of the current fragment. Keep the source fragments separate without completing them. Use unresolved for genuinely indistinguishable candidate identities, conflicting definitions or missing identity evidence, including common soil names, not as a substitute for preserving a clear layer mention. Retain existing partial-uncertainty handling where real identity uncertainty remains, all current-table assignments, and exact E/R selection without source/response correction.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -622,7 +628,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v28'
     | 'content-attachment.v29'
     | 'content-attachment.v30'
-    | 'content-attachment.v31' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v31'
+    | 'content-attachment.v32' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -702,9 +709,13 @@ export function createContentAttachmentRequest(
                                                               : promptVersion ===
                                                                   'content-attachment.v30'
                                                                 ? VERIFIED_INVENTORY_SYSTEM_PROMPT_V30
-                                                                : SYSTEM_PROMPT,
+                                                                : promptVersion ===
+                                                                    'content-attachment.v31'
+                                                                  ? SUPPORTING_CONTEXT_SYSTEM_PROMPT_V31
+                                                                  : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
-      promptVersion === 'content-attachment.v31'
+      promptVersion === 'content-attachment.v31' ||
+        promptVersion === 'content-attachment.v32'
         ? createContentAttachmentContextInput(plan, unit).payload
         : promptVersion === 'content-attachment.v25' ||
             promptVersion === 'content-attachment.v26' ||
@@ -841,6 +852,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v28' &&
       audit.promptVersion !== 'content-attachment.v29' &&
       audit.promptVersion !== 'content-attachment.v30' &&
+      audit.promptVersion !== 'content-attachment.v31' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -870,9 +882,11 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v28' ||
       audit.promptVersion === 'content-attachment.v29' ||
       audit.promptVersion === 'content-attachment.v30' ||
-      audit.promptVersion === 'content-attachment.v31';
+      audit.promptVersion === 'content-attachment.v31' ||
+      audit.promptVersion === 'content-attachment.v32';
     const selectionInput =
-      audit.promptVersion === 'content-attachment.v31'
+      audit.promptVersion === 'content-attachment.v31' ||
+      audit.promptVersion === 'content-attachment.v32'
         ? createContentAttachmentContextInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v25' ||
             audit.promptVersion === 'content-attachment.v26' ||
@@ -953,6 +967,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v28' ||
       audit.promptVersion === 'content-attachment.v29' ||
       audit.promptVersion === 'content-attachment.v30' ||
+      audit.promptVersion === 'content-attachment.v31' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1190,7 +1205,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v28' ||
           audit.promptVersion === 'content-attachment.v29' ||
           audit.promptVersion === 'content-attachment.v30' ||
-          audit.promptVersion === 'content-attachment.v31'
+          audit.promptVersion === 'content-attachment.v31' ||
+          audit.promptVersion === 'content-attachment.v32'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1284,7 +1300,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v28' ||
       audit.promptVersion === 'content-attachment.v29' ||
       audit.promptVersion === 'content-attachment.v30' ||
-      audit.promptVersion === 'content-attachment.v31'
+      audit.promptVersion === 'content-attachment.v31' ||
+      audit.promptVersion === 'content-attachment.v32'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,

@@ -414,6 +414,17 @@ describe('read-only original body and table context', () => {
       'READ-ONLY BODY AND SUPPORTING TABLE',
     );
     expect(raw.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
+    const previousContext = {
+      ...raw,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v31'),
+    };
+    expect(previousContext.userPrompt).toBe(raw.userPrompt);
+    expect(previousContext.codeMap).toEqual(raw.codeMap);
+    expect(assembleContentAttachment(plan, [previousContext])).toEqual(result);
+    expect(raw.systemPrompt.startsWith(previousContext.systemPrompt)).toBe(
+      true,
+    );
+
     const forged = structuredClone(raw);
     (forged.codeMap as typeof input.codeMap).supportingRows[0].rowIndex = 99;
     expect(
