@@ -23,7 +23,7 @@ import { createContentAttachmentSelectionInput } from './content-attachment-exce
 import { createContentAttachmentInput } from './content-attachment-input';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v22';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v23';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -314,10 +314,16 @@ BODY COLLECTIVES REQUIRE ORIGINAL MEMBERSHIP LINKS: A body sentence naming a gro
 Assign the collective description to individual candidates only when original evidence links them to THAT collective: an explicit member list, an unambiguous same-group reference to already established members, or a clear location/enclosure/layout definition establishing the relevant membership. Numbers/full names need not recur in every sentence, but each assigned member must have that evidence chain. A shared chapter, approximate location, elevation or nearby relation between some candidates alone does not prove that every candidate belongs to the collective. Do not infer missing members or expand a subset to the registry inventory. Preserve valid sharing for explicitly identified bounded sets, including local 'all/remaining' references, and for identified individual counterparts such as an abbreviated ditch.
 When a collective's individual membership is not established, retain the full unchanged sentence on its confirmed owner/other independently identified participants without distributing it to unlinked individuals. Mere existence of same-type candidates is not a reason to invent unresolved alternatives for all of them or an empty missing-group concern. Keep genuinely grounded identity alternatives unresolved under existing rules; do not create a new collective record. An independently registered collective record can still receive its own identified description. Apply this membership boundary to all-target coverage and direct-relation sharing across body and table text. Preserve original exception wording, identified titles, sentence IDs, layer sharing/uncertainty, ordinary-cell ownership, header exclusion and mention-scoped registration decisions. Return only the existing ID-selection schema; do not repair source or responses, infer new attributes/relations or deterministically reassign targets.`;
 
-const SYSTEM_PROMPT =
+const HEADING_PRIORITY_SYSTEM_PROMPT_V22 =
   COLLECTIVE_MEMBERSHIP_SYSTEM_PROMPT_V21 +
   `
 REGISTERED INDIVIDUAL ARTIFACT HEADINGS TAKE PRIORITY OVER GENERIC EXCLUSION: Before applying any generic type/collection heading or table-header exclusion, check whether the fixed heading identifies an already registered individual artifact through its original number, name and chapter/body evidence. If it does, you MUST put its ENTIRE unchanged E ref in assignments with that artifact's R ref. This preservation rule takes priority over generic-heading exclusion. The following body being available as separate excerpts, already assigned or more descriptive NEVER makes the artifact's own heading redundant or ignorable. A heading is independent identity evidence even when it contains only the object's number/name and figure/photo references; preserve it separately from the body, without merging or rewriting either. For example, '17. Bowl (Fig. 8)' and its separately excerpted body both belong to the identified registered bowl. 'Artifacts' or a category heading introducing multiple objects remains ignored; a type name inside an individually identified artifact heading does not make that heading generic. If actual candidate identity is unresolved, keep the heading in unresolved rather than ignored. Before returning, recheck every ignored heading against the registry and body: a reason acknowledging an identified registered artifact's own heading requires assignment, not exclusion because its body is separate. Keep all existing source-ID, layer-sharing, nested-owner, uncertainty, collective-membership and table-cell boundaries unchanged. Return only the existing ID-selection schema; never repair source/response text or automatically reassign targets.`;
+
+const SYSTEM_PROMPT =
+  HEADING_PRIORITY_SYSTEM_PROMPT_V22 +
+  `
+PURE TABLE-NAVIGATION EXCERPTS ARE EXCLUDED: Before selecting candidate targets, distinguish a substantive object description from a body sentence that ONLY directs the reader to a table. Put a pure table-navigation E ref in ignored when it states no substantive fact about an object's identity, state, property, context, relationship or archaeological interpretation. For example, 'The feature inventory is provided in Table 4.' is navigation only. Identifying the table's rows or the candidates covered by that table does not make this pointer a description of those objects; do not assign it to the table members or invent unresolved targets for it. This exclusion takes priority over all-target coverage and collective/member sharing for that pure pointer ONLY.
+A table reference does not make a substantive sentence navigation-only. For example, 'Pit A is circular and 2 m wide (Table 4).' remains assigned to its identified subject. If the SAME fixed E ref contains both an actual object description and a table reference, preserve the ENTIRE unchanged E ref, including the reference, with its directly described identified candidates under existing sharing/uncertainty rules. Never remove the reference, split the fixed excerpt or replace its text with table data. Keep substantive table-cell assignments, relation-remark sharing, generic-header/category exclusion and registered-object heading preservation unchanged; an identified object's own heading is identity evidence, not a pure table-navigation sentence. Account for the ignored E ref with a reason explaining its lack of substantive object description. Return only the existing ID-selection schema without source/response repair or deterministic target reassignment.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -555,7 +561,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v19'
     | 'content-attachment.v20'
     | 'content-attachment.v21'
-    | 'content-attachment.v22' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v22'
+    | 'content-attachment.v23' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -608,7 +615,10 @@ export function createContentAttachmentRequest(
                                             : promptVersion ===
                                                 'content-attachment.v21'
                                               ? COLLECTIVE_MEMBERSHIP_SYSTEM_PROMPT_V21
-                                              : SYSTEM_PROMPT,
+                                              : promptVersion ===
+                                                  'content-attachment.v22'
+                                                ? HEADING_PRIORITY_SYSTEM_PROMPT_V22
+                                                : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       legacy
         ? {
@@ -628,7 +638,8 @@ export function createContentAttachmentRequest(
             promptVersion === 'content-attachment.v19' ||
             promptVersion === 'content-attachment.v20' ||
             promptVersion === 'content-attachment.v21' ||
-            promptVersion === 'content-attachment.v22'
+            promptVersion === 'content-attachment.v22' ||
+            promptVersion === 'content-attachment.v23'
           ? createContentAttachmentDecisionInput(plan, unit).payload
           : promptVersion === 'content-attachment.v9' ||
               promptVersion === 'content-attachment.v10' ||
@@ -724,6 +735,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v19' &&
       audit.promptVersion !== 'content-attachment.v20' &&
       audit.promptVersion !== 'content-attachment.v21' &&
+      audit.promptVersion !== 'content-attachment.v22' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -744,7 +756,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v19' ||
       audit.promptVersion === 'content-attachment.v20' ||
       audit.promptVersion === 'content-attachment.v21' ||
-      audit.promptVersion === 'content-attachment.v22';
+      audit.promptVersion === 'content-attachment.v22' ||
+      audit.promptVersion === 'content-attachment.v23';
     const selectionInput = selection
       ? audit.promptVersion === 'content-attachment.v13' ||
         audit.promptVersion === 'content-attachment.v14' ||
@@ -755,7 +768,8 @@ export function assembleContentAttachment(
         audit.promptVersion === 'content-attachment.v19' ||
         audit.promptVersion === 'content-attachment.v20' ||
         audit.promptVersion === 'content-attachment.v21' ||
-        audit.promptVersion === 'content-attachment.v22'
+        audit.promptVersion === 'content-attachment.v22' ||
+        audit.promptVersion === 'content-attachment.v23'
         ? createContentAttachmentDecisionInput(plan, unit)
         : createContentAttachmentSelectionInput(plan, unit)
       : null;
@@ -806,6 +820,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v19' ||
       audit.promptVersion === 'content-attachment.v20' ||
       audit.promptVersion === 'content-attachment.v21' ||
+      audit.promptVersion === 'content-attachment.v22' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1034,7 +1049,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v19' ||
           audit.promptVersion === 'content-attachment.v20' ||
           audit.promptVersion === 'content-attachment.v21' ||
-          audit.promptVersion === 'content-attachment.v22'
+          audit.promptVersion === 'content-attachment.v22' ||
+          audit.promptVersion === 'content-attachment.v23'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1119,7 +1135,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v19' ||
       audit.promptVersion === 'content-attachment.v20' ||
       audit.promptVersion === 'content-attachment.v21' ||
-      audit.promptVersion === 'content-attachment.v22'
+      audit.promptVersion === 'content-attachment.v22' ||
+      audit.promptVersion === 'content-attachment.v23'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
