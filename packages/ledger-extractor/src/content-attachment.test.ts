@@ -1361,9 +1361,7 @@ describe('bounded content attachment', () => {
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
     const response = {
-      assignments: [],
-      unresolved: [],
-      ignored: [{ excerptRef: 'E1', reason: '対象外' }],
+      decisions: { E1: { status: 'ignored' as const, reason: '対象外' } },
     };
     vi.mocked(LLMCaller.call).mockResolvedValue({
       output: response,
@@ -1403,22 +1401,38 @@ describe('bounded content attachment', () => {
     expect(createAuditedModel).toHaveBeenCalledWith(model, onAttempt);
     expect(out.callAttempts).toBe(attempts);
     expect(LLMCaller.call).toHaveBeenCalledTimes(1);
-    expect(out.response).toEqual(response);
+    expect(out.rawResponse).toBe(response);
+    expect(out.response).toEqual({
+      assignments: [],
+      unresolved: [],
+      ignored: [{ excerptRef: 'E1', reason: '対象外' }],
+    });
+    const before = structuredClone(out);
+    expect(assembleContentAttachment(p, [out]).issues).toEqual([]);
+    expect(out).toEqual(before);
+    const withoutRaw = structuredClone(out);
+    delete withoutRaw.rawResponse;
+    expect(
+      assembleContentAttachment(p, [withoutRaw]).issues[0].reason,
+    ).toContain('required excerpt');
+    const changedProjection = structuredClone(out);
+    changedProjection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [changedProjection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const call = vi.mocked(LLMCaller.call).mock.calls[0][0];
     expect(call.schema.safeParse(response).success).toBe(true);
-    const withoutPartialExclusions: Partial<typeof response> = { ...response };
-    delete withoutPartialExclusions.ignored;
-    expect(call.schema.safeParse(withoutPartialExclusions).success).toBe(false);
+    expect(call.schema.safeParse({ decisions: {} }).success).toBe(false);
     expect(
       call.schema.safeParse({
-        ...response,
-        assignments: [
-          {
+        decisions: {
+          E1: {
+            status: 'assigned',
             candidateRefs: ['missing'],
-            excerptRef: 'E1',
             reason: 'x',
+            unresolved: null,
           },
-        ],
+        },
       }).success,
     ).toBe(false);
     vi.mocked(LLMCaller.call).mockRejectedValue(new Error('model failed'));

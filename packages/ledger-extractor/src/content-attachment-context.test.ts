@@ -496,8 +496,19 @@ describe('original selectable body block input', () => {
     const { plan, unit } = fixture();
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
-    const request = createContentAttachmentRequest(plan, unit);
+    const request = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v41',
+    );
     expect(request.promptVersion).toBe('content-attachment.v41');
+    const latest = createContentAttachmentRequest(plan, unit);
+    expect(latest.promptVersion).toBe('content-attachment.v42');
+    expect(latest.userPrompt).toBe(request.userPrompt);
+    expect(latest.systemPrompt.startsWith(request.systemPrompt)).toBe(true);
+    expect(request.systemPrompt).not.toContain(
+      'REQUIRED PER-E OUTPUT CONTRACT',
+    );
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',

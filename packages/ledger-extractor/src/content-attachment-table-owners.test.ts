@@ -143,7 +143,7 @@ test('requires the original trench owner alongside an inventory feature despite 
   const compiled = createContentAttachmentBodyBlockInput(plan, unit);
   const raw: ContentAttachmentSelectionAudit = {
     unitId: unit.unitId,
-    ...createContentAttachmentRequest(plan, unit),
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v41'),
     codeMap: compiled.codeMap,
     response: {
       assignments: compiled.codeMap.excerpts.slice(4).map((e) => ({
