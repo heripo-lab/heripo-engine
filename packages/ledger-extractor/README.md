@@ -312,3 +312,9 @@ Retain the original sentence on its identified owner and other independently ide
 V22 preserves an identified registered individual artifact's entire original heading even when its body is separately excerpted or already assigned. The object's number, name and chapter/body evidence establish its own heading; a type name inside it does not make it a generic category title. This preservation takes priority over generic type/collection heading and table-header exclusion. A reason recognizing that individual heading must select assignment rather than exclude it because the body is separate. Genuine identity ambiguity remains unresolved; general category headings remain ignored.
 
 Input, excerpt IDs, source maps, schema and existing heading/table validation remain unchanged. V1–v21 retain their exact historical requests and validation. Source text and raw responses are never repaired or automatically reassigned.
+
+### Pure table navigation and substantive descriptions (prompt v23)
+
+V23 excludes a body excerpt that only directs the reader to a table without making a substantive object statement. Identifying the referenced table's rows or registered members does not justify assigning that pointer to them or creating unresolved targets. This eligibility boundary takes priority over all-target coverage and collective sharing for the pure pointer only.
+
+Preserve an entire fixed excerpt that contains actual object description even when it also refers to a table. Do not strip the reference, split the excerpt or replace it with table data. Identifiable object headings remain identity evidence; substantive table cells, relation sharing and generic header exclusion retain their existing rules. Input, source maps, schema and assembly validation are unchanged. V1–v22 retain their exact historical requests and checks; source text and raw responses are never repaired or automatically reassigned.
