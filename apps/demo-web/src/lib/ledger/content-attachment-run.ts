@@ -17,7 +17,13 @@ import {
   prepareContentAttachment,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'fs';
 import { join } from 'path';
 
 import { paths } from '../paths';
@@ -97,6 +103,10 @@ export function getContentAttachmentAudit(
     plan: read(join(dir, 'plan.json')),
     candidateSnapshot: read(join(dir, 'candidate-snapshot.json')),
     audit: existsSync(audit) ? read(audit) : null,
+    callAttempts: readdirSync(dir)
+      .filter((name) => /^first-unit-api-attempt-\d+\.json$/.test(name))
+      .map((name) => read(join(dir, name)))
+      .sort((a, b) => a.sequence - b.sequence),
     codeMap: existsSync(join(dir, 'first-unit-code-map.json'))
       ? read(join(dir, 'first-unit-code-map.json'))
       : null,
@@ -241,6 +251,12 @@ export function startFirstContentAttachment(
       const audit = await attachContentUnit(plan, plan.units[0], {
         model,
         maxRetries: run.settings.maxRetries,
+        onAttempt: (attempt) => {
+          writeFileSync(
+            join(dir, `first-unit-api-attempt-${attempt.sequence}.json`),
+            JSON.stringify(attempt, null, 2),
+          );
+        },
       });
       writeFileSync(
         join(dir, 'first-unit-audit.json'),

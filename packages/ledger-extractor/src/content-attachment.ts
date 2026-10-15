@@ -1,4 +1,4 @@
-import type { ExtendedTokenUsage } from '@heripo/shared';
+import type { ExtendedTokenUsage, LLMCallAttempt } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateDeduplicationResult } from './candidate-deduplication';
@@ -14,7 +14,7 @@ import type {
   DocumentResourceIndex,
 } from './document-resource-index';
 
-import { LLMCaller } from '@heripo/shared';
+import { LLMCaller, createAuditedModel } from '@heripo/shared';
 import { z } from 'zod';
 
 import { createCandidateDeduplicationRequest } from './candidate-deduplication';
@@ -141,6 +141,8 @@ export interface ContentAttachmentAudit<Response = ContentAttachmentResponse> {
   userPrompt: string;
   response: Response;
   usage: ExtendedTokenUsage;
+  /** Optional for historical audits; new calls retain every provider attempt. */
+  callAttempts?: LLMCallAttempt[];
   /** Code-only binding; never forwarded to the model. Legacy v1 audits omit it. */
   codeMap?:
     | ReturnType<typeof createContentAttachmentInput>['codeMap']
@@ -725,6 +727,7 @@ export async function attachContentUnit(
     model: LanguageModel;
     maxRetries: number;
     abortSignal?: AbortSignal;
+    onAttempt?: (attempt: LLMCallAttempt) => void | Promise<void>;
   },
 ): Promise<ContentAttachmentSelectionAudit> {
   if (!unit.sources.length) throw new Error('No selectable attachment sources');
@@ -733,13 +736,14 @@ export async function attachContentUnit(
   if (!ids.length) throw new Error('No selectable attachment sources');
   const request = createContentAttachmentRequest(plan, unit);
   const source = z.enum(ids as [string, ...string[]]);
+  const audited = createAuditedModel(options.model, options.onAttempt);
   const { output, usage } = await LLMCaller.call({
     ...request,
     schema: selectionSchema(
       source,
       z.enum(plan.registry.map((r) => r.ref) as [string, ...string[]]),
     ),
-    primaryModel: options.model,
+    primaryModel: audited.model,
     maxRetries: options.maxRetries,
     abortSignal: options.abortSignal,
     component: 'LedgerContentAttachment',
@@ -754,6 +758,7 @@ export async function attachContentUnit(
     ...request,
     response: output,
     usage,
+    callAttempts: audited.attempts,
     codeMap: input.codeMap,
   };
 }

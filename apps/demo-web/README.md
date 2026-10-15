@@ -502,3 +502,7 @@ New content-attachment calls use prompt v3 for sentence-level excerpts and expli
 New content-attachment calls use prompt v4 to distinguish source-block provenance from sentence-level excerpts at page boundaries. Compact input, selectors and response assembly stay unchanged; previous v1/v2/v3 audits remain replayable.
 
 New content-attachment calls use prompt v5 to preserve supported numbered object headings separately from body sentences and ignore generic category headings. Compact input, source maps and response assembly are unchanged; historical v1–v4 audits remain replayable.
+
+Content-attachment execution also checkpoints each provider invocation as `first-unit-api-attempt-<sequence>.json` before structured parsing can trigger another attempt. These files survive final failure; a successful `first-unit-audit.json` includes the same records in `callAttempts`. Records preserve complete SDK response bodies and provider termination metadata without changing the selected text or retry policy.
+
+The audit download also includes the checkpointed `callAttempts` when the final structured audit is absent after failure.

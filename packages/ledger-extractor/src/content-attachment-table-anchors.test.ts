@@ -16,7 +16,10 @@ import { createContentAttachmentDecisionInput } from './content-attachment-decis
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
+vi.mock('@heripo/shared', () => ({
+  LLMCaller: { call: vi.fn() },
+  createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
+}));
 
 function fixture() {
   const cell = (text: string, isHeader = false, rowSpan = 1, colSpan = 1) => ({
