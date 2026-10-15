@@ -93,3 +93,5 @@ export type { ContentRegistrationDecision } from './content-attachment-decisions
 export { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 
 export { createContentAttachmentContextInput } from './content-attachment-context';
+
+export { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';

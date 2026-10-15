@@ -13,7 +13,7 @@ import {
   attachContentUnit,
   createContentAttachmentRequest,
 } from './content-attachment';
-import { createContentAttachmentContextInput } from './content-attachment-context';
+import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
@@ -135,7 +135,7 @@ function audit(
   return {
     unitId: plan.units[0].unitId,
     ...createContentAttachmentRequest(plan, plan.units[0]),
-    codeMap: createContentAttachmentContextInput(plan, plan.units[0]).codeMap,
+    codeMap: createContentAttachmentBodyBlockInput(plan, plan.units[0]).codeMap,
     response,
     usage: {
       component: 'test',
@@ -703,7 +703,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v32');
+    expect(raw.promptVersion).toBe('content-attachment.v33');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',

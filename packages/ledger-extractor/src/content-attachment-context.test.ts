@@ -12,6 +12,7 @@ import {
   assembleContentAttachment,
   createContentAttachmentRequest,
 } from './content-attachment';
+import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import {
   adjacentAttachmentBody,
   createContentAttachmentContextInput,
@@ -373,7 +374,7 @@ describe('read-only original body and table context', () => {
     const headers = new Set(['E3', 'E4']);
     const raw: ContentAttachmentSelectionAudit = {
       unitId: unit.unitId,
-      ...createContentAttachmentRequest(plan, unit),
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v32'),
       codeMap: input.codeMap,
       response: {
         assignments: input.codeMap.excerpts
@@ -432,6 +433,134 @@ describe('read-only original body and table context', () => {
     ).toContain('code map');
     const selected = structuredClone(raw);
     selected.response.assignments[0].excerptRef = 'B1';
+    expect(
+      assembleContentAttachment(plan, [selected]).issues.some((i) =>
+        i.reason.includes('Unknown'),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('original selectable body block input', () => {
+  test('preserves distinct original blocks with identical text, skips whitespace and keeps table excerpts separate without changing source ranges', () => {
+    const { plan, unit } = fixture();
+    const original = unit.sources.find((s) => s.resource.kind === 'text')!;
+    const repeated = structuredClone(original);
+    repeated.sourceId = 'long-repeat-source';
+    repeated.resource.key = '/long-repeat-resource';
+    const blank = structuredClone(original);
+    blank.sourceId = 'blank';
+    blank.resource.key = '/blank-resource';
+    blank.resource.data.text = '  \n ';
+    unit.sources.push(repeated, blank);
+    const before = structuredClone(plan);
+    const old = createContentAttachmentContextInput(plan, unit);
+    const input = createContentAttachmentBodyBlockInput(plan, unit);
+    expect(input.payload.current.bodyBlockColumns).toEqual(['ref', 'excerpts']);
+    expect(input.payload.current.bodyBlocks).toEqual([
+      ['P1', ['E1', 'E2']],
+      ['P2', ['E7', 'E8']],
+    ]);
+    expect(input.codeMap.bodyBlocks).toEqual([
+      {
+        ref: 'P1',
+        sourceId: original.sourceId,
+        resourceKey: original.resource.key,
+        excerpts: ['E1', 'E2'],
+      },
+      {
+        ref: 'P2',
+        sourceId: repeated.sourceId,
+        resourceKey: repeated.resource.key,
+        excerpts: ['E7', 'E8'],
+      },
+    ]);
+    expect(input.codeMap.excerpts).toEqual(old.codeMap.excerpts);
+    const {
+      bodyBlockColumns: _columns,
+      bodyBlocks: _blocks,
+      ...current
+    } = input.payload.current;
+    expect(current).toEqual(old.payload.current);
+    expect(JSON.stringify(input.payload)).not.toContain('long-repeat');
+    expect(plan).toEqual(before);
+    const cells = unit.sources.filter((s) => s.resource.kind === 'tableCell');
+    unit.sources = cells;
+    expect(
+      createContentAttachmentBodyBlockInput(plan, unit).payload.current
+        .bodyBlocks,
+    ).toEqual([]);
+  });
+
+  test('replays v31 and v32 without block bindings and rejects forged or selected block references in v33', () => {
+    const { plan, unit } = fixture();
+    const current = createContentAttachmentBodyBlockInput(plan, unit);
+    const old = createContentAttachmentContextInput(plan, unit);
+    const request = createContentAttachmentRequest(plan, unit);
+    expect(request.promptVersion).toBe('content-attachment.v33');
+    expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
+    expect(request.systemPrompt).toContain(
+      'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',
+    );
+    const raw: ContentAttachmentSelectionAudit = {
+      unitId: unit.unitId,
+      ...request,
+      codeMap: current.codeMap,
+      response: {
+        assignments: ['E1', 'E2', 'E5', 'E6'].map((excerptRef) => ({
+          excerptRef,
+          candidateRefs: ['R1'],
+          reason: 'Model selection',
+        })),
+        unresolved: [],
+        ignored: ['E3', 'E4'].map((excerptRef) => ({
+          excerptRef,
+          reason: 'Header',
+        })),
+      },
+      usage: {
+        component: 'test',
+        phase: 'test',
+        model: 'primary',
+        modelName: 'mock',
+        inputTokens: 1,
+        outputTokens: 1,
+        totalTokens: 2,
+      },
+    };
+    const before = structuredClone(raw);
+    const result = assembleContentAttachment(plan, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(raw).toEqual(before);
+    for (const version of [
+      'content-attachment.v31',
+      'content-attachment.v32',
+    ] as const) {
+      const historicalRequest = createContentAttachmentRequest(
+        plan,
+        unit,
+        version,
+      );
+      expect(JSON.parse(historicalRequest.userPrompt)).toEqual(old.payload);
+      expect(historicalRequest.systemPrompt).not.toContain(
+        'ORIGINAL SELECTABLE BODY BLOCKS',
+      );
+      expect(
+        request.systemPrompt.startsWith(historicalRequest.systemPrompt),
+      ).toBe(true);
+      expect(
+        assembleContentAttachment(plan, [
+          { ...raw, ...historicalRequest, codeMap: old.codeMap },
+        ]),
+      ).toEqual(result);
+    }
+    const forged = structuredClone(raw);
+    (forged.codeMap as typeof current.codeMap).bodyBlocks[0].excerpts = ['E5'];
+    expect(
+      assembleContentAttachment(plan, [forged]).issues[0].reason,
+    ).toContain('code map');
+    const selected = structuredClone(raw);
+    selected.response.assignments[0].excerptRef = 'P1';
     expect(
       assembleContentAttachment(plan, [selected]).issues.some((i) =>
         i.reason.includes('Unknown'),
