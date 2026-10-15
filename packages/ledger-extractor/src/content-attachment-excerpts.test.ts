@@ -136,7 +136,8 @@ function audit(
     | 'content-attachment.v35'
     | 'content-attachment.v36'
     | 'content-attachment.v37'
-    | 'content-attachment.v38' = 'content-attachment.v38',
+    | 'content-attachment.v38'
+    | 'content-attachment.v39' = 'content-attachment.v39',
 ): ContentAttachmentSelectionAudit {
   return {
     unitId: plan.units[0].unitId,
@@ -714,7 +715,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v38');
+    expect(raw.promptVersion).toBe('content-attachment.v39');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',

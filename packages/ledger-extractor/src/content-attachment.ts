@@ -29,7 +29,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v38';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v39';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -419,11 +419,17 @@ const SUBJECT_CONTINUITY_SYSTEM_PROMPT_V37 =
 NONREGISTERED ANTECEDENTS GOVERN SUBSEQUENT DESCRIPTIONS UNTIL AN EXPLICIT SUBJECT CHANGE: Track the original descriptive subject separately from every candidate receiving a relation excerpt. When the text introduces an earlier-investigation, comparative or cited object, subsequent repeated generic nouns and omitted subjects continue describing THAT object until original wording explicitly returns to or introduces another subject. Assigning a preceding alignment/connection sentence to the registered current object does not change the subject of the next dimension, chronology or use-history sentence. For example, 'An older road found in a prior excavation lies beyond the current road. The road is wide. It was used twice. It may connect to the current road.' keeps the dimensions and use history with the older nonregistered road, while retaining the explicit relationship excerpts on the identified current road. Ignore complete counterpart-only descriptions with the scope reason; do not replace the absent older record with a matching current R ref or invent missing-candidate uncertainty. A later explicit 'the road found in this investigation' can change the descriptive subject. Same chapter, name, archaeological type, available registry records and neighboring assigned E refs cannot substitute for that original subject change. Preserve all directly stated relationship participants without transferring their neighbors' predicates.
 INTERPRET A BOUNDARY FRAGMENT WITH ITS SUPPLIED NEXT READ-ONLY CONTEXT BEFORE CLASSIFYING PARTICIPANTS: A fixed current E ref may stop before the predicate or before the noun following a phrase such as 'this investigation'. Read the immediately following original B block, together with the preceding discourse, to determine what that same unfinished sentence describes. If its continuation explicitly makes an identified current object a participant in a conditional archaeological connection or other direct relationship, preserve the unchanged current E fragment on that object. Do not classify the object as location-reference-only merely because the current fragment alone has not yet reached its relational predicate. A preceding clause may still describe a nonregistered counterpart's width or state; preserving the whole fragment as relation evidence does not make that counterpart's measurement a current-object property. Keep conditional and interpretive language unconfirmed. Conversely, complete nonregistered-object descriptions remain excluded even when a later sentence describes a relationship with the current object. Use B only for interpretation: never select B, append its text to E, complete or rewrite the fragment, extract a confirmed relation, or repair saved responses. Before returning, review relation-adjacent omitted-subject descriptions and boundary-fragment exclusions separately. Retain every existing table owner, bounded-set, heading, scope and genuine identity-uncertainty rule; code supplies bindings but never chooses semantic targets.`;
 
-const SYSTEM_PROMPT =
+const CLAUSE_SET_SYSTEM_PROMPT_V38 =
   SUBJECT_CONTINUITY_SYSTEM_PROMPT_V37 +
   `
 LATER INDIVIDUAL CLAUSES DO NOT ERASE EARLIER ESTABLISHED-SET DESCRIPTIONS: Resolve the described subjects of EVERY clause before selecting the targets of one fixed E ref. When an earlier clause substantively describes an already identified bounded investigation set, a later clause naming one particular member narrows that later clause only; it does not retroactively replace the earlier set. Preserve the union of all directly described, originally identified participants in ONE assignments item for the SAME unchanged E ref. For example, after original body/table anchors establish Pits J-M, 'Most yielded no finds or only tiny fragments that were not collected, whereas Pit L yielded several vessels that were collected.' belongs to J-M, including L. The first clause preserves the set's qualified finds/recovery pattern; the second adds the specifically described member without deleting the other members. Keep every quantifier, contrast, exception and uncertainty intact. This preserves original evidence, not an assertion that every member has every clause's positive property. Do not identify which members had no finds, transfer L's vessels to the others, split or rewrite the E ref, or broaden a genuinely narrower preceding subject set. Before returning a singular-only assignment for a mixed set/individual sentence, recheck its earlier clauses against the supplied original set definition and member anchors.
 FEATURE-SET FINDS EVIDENCE IS DISTINCT FROM INDIVIDUAL ARTIFACT IDENTITY: A qualified finds or collection summary can substantively describe an already identified feature/layer set and remain evidence on its verified members. The restriction against guessing individual artifacts from type-level finds summaries does NOT remove those independently established feature/layer subjects. Evaluate these two target categories separately: retain the directly described, originally identified feature/layer members, while assigning individually registered artifacts only when original evidence identifies those specimens beyond matching type names, chapter, period or findspot. In the preceding example, mentioning vessel types does not identify individual artifact records, but it also does not erase the earlier pit-set description. A later named feature is not the exclusive owner of the whole sentence when an earlier clause describes the established set. This does not establish an unknown collective's membership, add ancestors or location-only references, or propagate neighboring excerpts. Keep original table-owner assignments, pure-pointer exclusions, nonregistered-subject continuity, boundary-context interpretation, headings and genuine identity uncertainty unchanged. Code never supplies missing semantic targets or repairs source/response text.`;
+
+const SYSTEM_PROMPT =
+  CLAUSE_SET_SYSTEM_PROMPT_V38 +
+  `
+ROW OWNERS ARE REQUIRED, NOT EXCLUSIVE, TARGETS OF RELATION REMARKS: Original number-cell anchors establish the row owner; selecting that owner is the first required target, not completion of target coverage. For EVERY fixed relation-remark E ref, separately inspect the unchanged cell for explicitly named counterpart objects and resolve each through its original number/name cells, table, chapter and archaeological context. If those anchors identify both pits in a remark such as 'overlaps Pit S' in Pit Q's row, include BOTH Q and S in the SAME assignments item's candidateRefs. A reason saying only that the row records its pit's overlap does not justify an owner-only selection: the identified counterpart is directly described by that same relationship. Do not apply ordinary property-cell owner-only limits to a relation remark. Assess a reciprocal remark in S's row as a separate original E ref, again selecting both participants; one direction does not replace the other. Before returning, review every owner-only relation remark for a missing identified counterpart. Where identity genuinely remains ambiguous, retain the confirmed owner and use the SAME E ref for unresolved counterpart alternatives; do not guess, invent candidates or treat an absent target as resolved merely because the owner is known.
+KEEP RELATION SHARING WITHIN ITS ORIGINAL CELL: Adding the explicitly identified counterpart to a relationship remark does not add that counterpart to the owner's number, shape, length, width, depth or any neighboring property cell. Evaluate each original E ref independently using its own unchanged text and original row segment. Share only the relation cell with all identified participants, keep ordinary cells on their actual owner, and preserve reciprocal remarks separately without merging or rewriting them. This distinction does not weaken earlier established-set clauses within one sentence, qualified finds evidence, artifact-identity limits, pure-pointer/header exclusions, nonregistered subject continuity, boundary-context interpretation or genuine uncertainties. Keep all existing original E/R selection rules; code never adds semantic targets, repairs responses or corrects source text.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -673,7 +679,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v35'
     | 'content-attachment.v36'
     | 'content-attachment.v37'
-    | 'content-attachment.v38' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v38'
+    | 'content-attachment.v39' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -774,14 +781,18 @@ export function createContentAttachmentRequest(
                                                                             : promptVersion ===
                                                                                 'content-attachment.v37'
                                                                               ? SUBJECT_CONTINUITY_SYSTEM_PROMPT_V37
-                                                                              : SYSTEM_PROMPT,
+                                                                              : promptVersion ===
+                                                                                  'content-attachment.v38'
+                                                                                ? CLAUSE_SET_SYSTEM_PROMPT_V38
+                                                                                : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
         promptVersion === 'content-attachment.v35' ||
         promptVersion === 'content-attachment.v36' ||
         promptVersion === 'content-attachment.v37' ||
-        promptVersion === 'content-attachment.v38'
+        promptVersion === 'content-attachment.v38' ||
+        promptVersion === 'content-attachment.v39'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -928,6 +939,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v35' &&
       audit.promptVersion !== 'content-attachment.v36' &&
       audit.promptVersion !== 'content-attachment.v37' &&
+      audit.promptVersion !== 'content-attachment.v38' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -964,14 +976,16 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
       audit.promptVersion === 'content-attachment.v37' ||
-      audit.promptVersion === 'content-attachment.v38';
+      audit.promptVersion === 'content-attachment.v38' ||
+      audit.promptVersion === 'content-attachment.v39';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
       audit.promptVersion === 'content-attachment.v37' ||
-      audit.promptVersion === 'content-attachment.v38'
+      audit.promptVersion === 'content-attachment.v38' ||
+      audit.promptVersion === 'content-attachment.v39'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1062,6 +1076,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
       audit.promptVersion === 'content-attachment.v37' ||
+      audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1306,7 +1321,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v35' ||
           audit.promptVersion === 'content-attachment.v36' ||
           audit.promptVersion === 'content-attachment.v37' ||
-          audit.promptVersion === 'content-attachment.v38'
+          audit.promptVersion === 'content-attachment.v38' ||
+          audit.promptVersion === 'content-attachment.v39'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1407,7 +1423,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
       audit.promptVersion === 'content-attachment.v37' ||
-      audit.promptVersion === 'content-attachment.v38'
+      audit.promptVersion === 'content-attachment.v38' ||
+      audit.promptVersion === 'content-attachment.v39'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1417,7 +1434,8 @@ export function assembleContentAttachment(
         audit.promptVersion === 'content-attachment.v35' ||
           audit.promptVersion === 'content-attachment.v36' ||
           audit.promptVersion === 'content-attachment.v37' ||
-          audit.promptVersion === 'content-attachment.v38',
+          audit.promptVersion === 'content-attachment.v38' ||
+          audit.promptVersion === 'content-attachment.v39',
       ))
         issue(reason);
     }

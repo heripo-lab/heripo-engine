@@ -497,7 +497,7 @@ describe('original selectable body block input', () => {
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
     const request = createContentAttachmentRequest(plan, unit);
-    expect(request.promptVersion).toBe('content-attachment.v38');
+    expect(request.promptVersion).toBe('content-attachment.v39');
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',
@@ -603,6 +603,22 @@ describe('original selectable body block input', () => {
       'LATER INDIVIDUAL CLAUSES DO NOT ERASE EARLIER ESTABLISHED-SET DESCRIPTIONS',
     );
     expect(assembleContentAttachment(plan, [{ ...raw, ...v37 }])).toEqual(
+      result,
+    );
+    const v38 = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v38',
+    );
+    expect(v38.userPrompt).toBe(request.userPrompt);
+    expect(request.systemPrompt.startsWith(v38.systemPrompt)).toBe(true);
+    expect(v38.systemPrompt).toContain(
+      'LATER INDIVIDUAL CLAUSES DO NOT ERASE EARLIER ESTABLISHED-SET DESCRIPTIONS',
+    );
+    expect(v38.systemPrompt).not.toContain(
+      'ROW OWNERS ARE REQUIRED, NOT EXCLUSIVE, TARGETS OF RELATION REMARKS',
+    );
+    expect(assembleContentAttachment(plan, [{ ...raw, ...v38 }])).toEqual(
       result,
     );
     const forged = structuredClone(raw);
