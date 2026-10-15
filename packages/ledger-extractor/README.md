@@ -318,3 +318,9 @@ Input, excerpt IDs, source maps, schema and existing heading/table validation re
 V23 excludes a body excerpt that only directs the reader to a table without making a substantive object statement. Identifying the referenced table's rows or registered members does not justify assigning that pointer to them or creating unresolved targets. This eligibility boundary takes priority over all-target coverage and collective sharing for the pure pointer only.
 
 Preserve an entire fixed excerpt that contains actual object description even when it also refers to a table. Do not strip the reference, split the excerpt or replace it with table data. Identifiable object headings remain identity evidence; substantive table cells, relation sharing and generic header exclusion retain their existing rules. Input, source maps, schema and assembly validation are unchanged. V1–v22 retain their exact historical requests and checks; source text and raw responses are never repaired or automatically reassigned.
+
+### Local scope of navigation exclusion (prompt v24)
+
+V24 confines pure table-navigation exclusion to the pointer itself. Factual investigation inventories and distributions remain substantive descriptions; establish their bounded membership from original investigation scope, individual chapter accounts and tables before carrying it into implicit subjects. Do not require repeated identifiers when that evidence chain exists or expand an ungrounded type summary to every registry entry.
+
+Recheck original context for identified enclosure/ditch counterparts in inside/outside/damage descriptions, retaining their unchanged excerpts alongside the identified row owner or buildings. Navigation exclusion does not weaken relation sharing, alter ordinary property-cell ownership or resolve genuinely ambiguous identity. Inputs, maps, schema and validation are unchanged, and v1–v23 remain reproducible without source/response repair or automatic reassignment.
