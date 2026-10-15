@@ -338,6 +338,16 @@ test('rejects missing named range members in current assembly while retaining ex
     assembleContentAttachment(plan, [audit]),
   );
   expect(v46.systemPrompt).not.toContain('ESTABLISHED FEATURE GROUPS REMAIN');
+  const v47 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
+  };
+  expect(audit.systemPrompt.startsWith(v47.systemPrompt)).toBe(true);
+  expect(v47.userPrompt).toBe(audit.userPrompt);
+  expect(assembleContentAttachment(plan, [v47])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v47.systemPrompt).not.toContain('SET-LEVEL EVIDENCE ATTACHMENT');
   const forged = structuredClone(historical);
   forged.response.assignments[0].reason = 'Changed';
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
