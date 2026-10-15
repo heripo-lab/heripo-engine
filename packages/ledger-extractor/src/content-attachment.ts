@@ -26,6 +26,7 @@ import {
 } from './content-attachment-context';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
+import { validateContentAttachmentIdentifierRanges } from './content-attachment-identifier-ranges';
 import { createContentAttachmentInput } from './content-attachment-input';
 import {
   createContentAttachmentResponseSchema,
@@ -34,7 +35,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v44';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v45';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -462,11 +463,16 @@ const PREVIOUS_SCOPE_SYSTEM_PROMPT_V43 =
 CARRY PREVIOUS-INVESTIGATION SUBJECTS THROUGH CATEGORY FRAGMENTS AND THEIR NEXT CONTEXT: When the original discourse introduces a previous-investigation, comparative or cited subject, keep that subject for its following unfinished description until the source explicitly switches back. Read the supplied next read-only B block before interpreting a current E that ends inside a noun phrase, category label or inventory. For example, after an earlier excavation's domestic features are introduced, a fragment ending 'the domestic features include pit' followed by a read-only continuation 'dwellings and hearths ...' continues that earlier excavation's account; the word 'pit' does not identify the current registered pit set. Resolve the continued noun phrase and archaeological subject from both sides of the boundary without completing, merging or rewriting either original text. A page/block boundary, footnote/citation marker, repeated period label or restart of a generic category phrase is not an explicit subject reset.
 DO NOT JUMP BACK FROM AN EXCLUDED LOCAL SUBJECT TO AN EARLIER CURRENT INVENTORY: If preceding excerpts describe an intentionally nonregistered investigation or comparison and are ignored for that scope, review the adjacent boundary fragment together with them and its next B continuation. Do not attach that fragment to an earlier count-defined current set merely because the registry contains matching type names, numbering or period. The earlier current inventory remains available for its own discourse, but it does not override a subsequent explicit change to the local previous-investigation subject. Require original evidence explicitly returning to the current investigation, or a clause that directly describes an identified current participant or its relationship, before selecting current targets. Without that evidence, return the required E decision as ignored with its scope reason; required-key coverage permits a justified exclusion and never forces assignment or an invented missing-candidate uncertainty. Preserve genuine explicit returns and direct current-object relationship evidence under the existing rules. Keep every original E, all required decision keys, supported set sharing, table owners/counterparts, heading and pointer exclusions, and real identity uncertainties unchanged. B remains interpretation-only, not a selectable excerpt or replacement text; code never chooses semantic targets or repairs source/response text.`;
 
-const SYSTEM_PROMPT =
+const CONTEXTUAL_SYSTEM_PROMPT_V44 =
   PREVIOUS_SCOPE_SYSTEM_PROMPT_V43 +
   `
 RESOLVE DIFFERENT REGISTRY AND NARRATIVE NAMES THROUGH ORIGINAL IDENTITY EVIDENCE: A registered object's name may be shorter or broader than its narrative description. Use the supplied chapter/period, original numbered body accounts, current investigation inventory and substantive table rows together to determine whether both expressions identify the SAME existing object or bounded set. For example, registry entries called 'building' in the relevant period can be the 'post-built buildings' identified by that investigation's numbered body/table evidence. A different-period candidate with the exact longer name must not substitute for them, but its existence does not make the correctly scoped shorter-named candidates absent. Do not require literal name equality or rewrite either string. If the source establishes the identity, preserve the E on those registered candidates rather than claiming that no candidate exists. A substantive sentence explicitly naming identified current objects as the report's discussion subjects is preserved on those objects; this does not turn a generic category heading or pure table-navigation sentence into individual evidence. Resolve each named participant independently: uncertainty about a building group does not erase a clearly identified well or other co-described object. Keep confirmed targets and only genuine unresolved alternatives under the existing partial-uncertainty rule. Matching type, period or registry availability alone still cannot establish an otherwise ungrounded collective.
 THE IMMEDIATELY PRECEDING EXPLICIT SUBSET OVERRIDES AN EARLIER FULL SET FOR 'THE REMAINING': Before resolving 'the remaining', 'the others' or an omitted set subject, inspect the closest original explicit member list, including the preceding E in the SAME P block. If earlier body/table evidence lists Buildings A-D, the current sentence states 'Buildings B-D occupy the enclosure', and the next says 'B was a dwelling; the remaining buildings were storehouses', select B/C/D only. The earlier A-D inventory does not override the intervening B-D subset. Require an explicit source expansion or direct independent description before reintroducing A; a matching category name or the absence of a repeated range in the next sentence is not such an expansion. An earlier exception sentence can preserve evidence on an excluded object without making it a member of a later narrowed set. Determine membership from original text, not the union of candidates selected in earlier responses: an enclosing ditch co-described with B-D is not itself a building-set member. Retain every directly described clause participant within the supported subset, without transferring clause-specific properties or rewriting E. Before returning, separately recheck claims that no matching current candidate exists against original context and numbered body/table evidence, and recheck any 'remaining' assignment wider than its immediately preceding explicit subset. Preserve previous-investigation subject continuity, all required E keys, table-owner/relation sharing, heading/pointer exclusions and real identity uncertainty; code never supplies or repairs semantic targets.`;
+
+const SYSTEM_PROMPT =
+  CONTEXTUAL_SYSTEM_PROMPT_V44 +
+  `
+INCLUSIVE EXPLICIT IDENTIFIER RANGES: A numbered object range includes BOTH endpoints and every integer member between them. Resolve each member against the supplied fixed registry using its object type/name and original investigation context; never use R-ref arithmetic or registry order. For example, 'Trench 2 ~ Trench 5, Trench 8' describes trenches 2, 3, 4, 5 and 8, including trench 5. Select ALL uniquely identified members on the SAME unchanged E, alongside any other independently described targets. Before returning, enumerate the original range members and compare each one with the candidateRefs actually being returned; mentioning the complete range in the reason does not select a missing candidate. Apply this to body excerpts and table work/remark cells even without candidateTableAnchors in the current table. Keep the original cell/sentence and its range punctuation unchanged; enumeration is a target-coverage check, not source rewriting. Do not treat dimensions, dates, day counts, counts of objects or unlabeled numeric intervals as object identifiers. Do not cross investigation/period contexts, invent absent candidates, or resolve genuinely ambiguous members by picking the first match; preserve confirmed members with genuine partial uncertainty. Existing exclusions, relation sharing, row ownership, individual headings, bounded discourse sets and all required E keys remain in force. Code reports missing uniquely identifiable range members without adding assignments or repairing saved responses.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -722,7 +728,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v41'
     | 'content-attachment.v42'
     | 'content-attachment.v43'
-    | 'content-attachment.v44' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v44'
+    | 'content-attachment.v45' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -841,7 +848,10 @@ export function createContentAttachmentRequest(
                                                                                         : promptVersion ===
                                                                                             'content-attachment.v43'
                                                                                           ? PREVIOUS_SCOPE_SYSTEM_PROMPT_V43
-                                                                                          : SYSTEM_PROMPT,
+                                                                                          : promptVersion ===
+                                                                                              'content-attachment.v44'
+                                                                                            ? CONTEXTUAL_SYSTEM_PROMPT_V44
+                                                                                            : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
@@ -854,7 +864,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v41' ||
         promptVersion === 'content-attachment.v42' ||
         promptVersion === 'content-attachment.v43' ||
-        promptVersion === 'content-attachment.v44'
+        promptVersion === 'content-attachment.v44' ||
+        promptVersion === 'content-attachment.v45'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -1007,6 +1018,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v41' &&
       audit.promptVersion !== 'content-attachment.v42' &&
       audit.promptVersion !== 'content-attachment.v43' &&
+      audit.promptVersion !== 'content-attachment.v44' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1049,7 +1061,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v41' ||
       audit.promptVersion === 'content-attachment.v42' ||
       audit.promptVersion === 'content-attachment.v43' ||
-      audit.promptVersion === 'content-attachment.v44';
+      audit.promptVersion === 'content-attachment.v44' ||
+      audit.promptVersion === 'content-attachment.v45';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
@@ -1062,7 +1075,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v41' ||
       audit.promptVersion === 'content-attachment.v42' ||
       audit.promptVersion === 'content-attachment.v43' ||
-      audit.promptVersion === 'content-attachment.v44'
+      audit.promptVersion === 'content-attachment.v44' ||
+      audit.promptVersion === 'content-attachment.v45'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1159,10 +1173,12 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v41' ||
       audit.promptVersion === 'content-attachment.v42' ||
       audit.promptVersion === 'content-attachment.v43' ||
+      audit.promptVersion === 'content-attachment.v44' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
       audit.promptVersion === 'content-attachment.v43' ||
+      audit.promptVersion === 'content-attachment.v44' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = createContentAttachmentResponseSchema(
@@ -1427,7 +1443,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v41' ||
           audit.promptVersion === 'content-attachment.v42' ||
           audit.promptVersion === 'content-attachment.v43' ||
-          audit.promptVersion === 'content-attachment.v44'
+          audit.promptVersion === 'content-attachment.v44' ||
+          audit.promptVersion === 'content-attachment.v45'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1534,7 +1551,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v41' ||
       audit.promptVersion === 'content-attachment.v42' ||
       audit.promptVersion === 'content-attachment.v43' ||
-      audit.promptVersion === 'content-attachment.v44'
+      audit.promptVersion === 'content-attachment.v44' ||
+      audit.promptVersion === 'content-attachment.v45'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1550,7 +1568,16 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v41' ||
           audit.promptVersion === 'content-attachment.v42' ||
           audit.promptVersion === 'content-attachment.v43' ||
-          audit.promptVersion === 'content-attachment.v44',
+          audit.promptVersion === 'content-attachment.v44' ||
+          audit.promptVersion === 'content-attachment.v45',
+      ))
+        issue(reason);
+    }
+    if (audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION) {
+      for (const reason of validateContentAttachmentIdentifierRanges(
+        plan,
+        selectionInput!.codeMap.excerpts,
+        newData!,
       ))
         issue(reason);
     }
