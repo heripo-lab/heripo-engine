@@ -328,6 +328,11 @@ describe('mention-scoped registration decisions', () => {
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
     };
     expect(assembleContentAttachment(plan, [historical])).toEqual(result);
+    const v48 = {
+      ...audit,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v48'),
+    };
+    expect(assembleContentAttachment(plan, [v48])).toEqual(result);
   });
 
   test('rejects foreign, ambiguous, inexact or cross-sentence decisions before calling a model', async () => {
