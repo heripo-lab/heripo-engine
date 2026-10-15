@@ -17,3 +17,8 @@ export {
   type TokenUsage,
 } from './utils/llm-token-usage-aggregator';
 export { detectProvider, type ProviderType } from './utils/provider-detector';
+
+export {
+  createAuditedModel,
+  type LLMCallAttempt,
+} from './utils/llm-call-audit';

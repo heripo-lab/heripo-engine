@@ -13,7 +13,7 @@
 
 `@heripo/ledger-extractor` is the first vertical slice of the ledger extraction stage in the heripo data pipeline. It takes a `ProcessedDocument` (produced by `@heripo/document-processor`) and summarizes it into a `LedgerExtractionPreview` — aggregated counts plus a few representative samples — proving the data arrived at the ledger stage intact.
 
-> **Preview only**: this package does NOT implement actual ledger extraction yet. There are no LLM calls, no ledger domain schema, no standardization, and no database storage. Those are follow-up work.
+> **Preview only**: this package does NOT implement actual ledger extraction yet. The preview and S0 APIs make no LLM calls. The separate candidate-discovery API uses a caller-selected model to propose source-backed objects for review; the final ledger domain schema, standardization and database storage remain follow-up work.
 
 ## Table of Contents
 
@@ -99,6 +99,396 @@ Validates an unknown value and returns a typed `ProcessedDocument`. Throws `Proc
 
 Returns aggregated counts (`chapters`, `textBlocks`, `images`, `tables`, `tableCells`, `footnotes`) and samples (`chapterTitles`, `textBlocks`, `images`, `tables`).
 
+## S0: Whole-document resource index
+
+`buildDocumentResourceIndex(document)` indexes every chapter, text block, image, table, actual grid cell and footnote without LLM calls or I/O. `queryDocumentResources(index, query)` combines optional kind, direct chapter, exact resource ID, exact source reference, PDF page, signed logical page and literal substring filters with AND.
+
+```typescript
+import {
+  buildDocumentResourceIndex,
+  queryDocumentResources,
+} from '@heripo/ledger-extractor';
+
+const index = buildDocumentResourceIndex(document);
+const matches = queryDocumentResources(index, { text: '우물' });
+const page = queryDocumentResources(index, { pdfPageNo: 122 });
+const source = queryDocumentResources(index, { sourceRef: '#/texts/5616' });
+```
+
+The index preserves source strings and direct chapter assignments, including unassigned media and multiple assignments. Caption references resolve to their image or table. Cell references use the parent table reference and zero-based indexes into the actual grid; merged shadows are not expanded. Missing IDs/references/page mappings remain missing. Chapter PDF pages are not inferred from their logical start pages. Resources retain storage traversal order, not a reconstructed PDF reading order. The JSON pointer `key` locates an occurrence in this exact input snapshot; it is not a cross-version ledger ID. Keep the input file hash alongside exported indexes.
+
+S0 provides source lookup only. It does not classify investigation scope or register archaeological objects. `LedgerExtractor.extract()` retains its existing bounded preview response.
+
+## Investigation object candidates
+
+The next stage proposes candidates from an explicitly selected chapter subtree. It keeps the existing preview and S0 APIs separate:
+
+```typescript
+import {
+  assembleCandidateDiscovery,
+  discoverCandidateUnit,
+  prepareCandidateDiscovery,
+} from '@heripo/ledger-extractor';
+
+const plan = prepareCandidateDiscovery(index, {
+  scopeChapterId: 'investigation-chapter-id',
+  inputSha256: 'sha256-of-original-input-file',
+  maxTextChars: 8000,
+  tableRowsPerUnit: 12,
+});
+const audits = [];
+for (const unit of plan.units) {
+  audits.push(await discoverCandidateUnit(unit, { model, maxRetries: 0 }));
+}
+const result = await assembleCandidateDiscovery(plan, audits);
+```
+
+Code fixes the subtree, body-block batches, actual table-cell batches and adjacent read-only context. A long indivisible text block can exceed `maxTextChars`. Each call uses `LLMCaller`, structured response validation and caller-supplied retry/cancellation settings. Full prompts, prompt version, responses and token usage are returned for caller-managed checkpoints and replay. Starting with prompt v3, each verbatim source text is paired with a selectable `sourceId`; the model response schema constrains evidence and exclusions to those IDs. Unique input IDs are used directly with an `id:` prefix; missing or duplicate IDs use an exact input path with a `path:` prefix. Read-only adjacent context has no selectable ID. Code resolves only the chosen ID to its original resource and checks the quote there; it never relocates a quote to another block or rewrites the raw response. If an object identifier occurs in a separate heading, the model must select that heading and its exact identifier-bearing quote as additional evidence. Calls are sequential in the demo; no autonomous searching or report-wide enrichment occurs here.
+
+The eight candidate kinds are site, area, trench, layer, feature, artifact, shipwreck and unknown. Features and artifacts require an independent body account or a distinct substantive table item. This requirement does not apply to layers: explicitly identified stratigraphic units named as artifact findspots or depositional contexts are proposed as layers even without a separate heading, paragraph or table row. Omitting a collective artifact mention does not omit its explicit layer. Prompt instructions are written in English; source text and configured output languages retain their original language. Prior investigations, passing mentions and media-only accounts are excluded by the model instructions. Code verifies exact evidence quotes, source names, identifiers, resource boundaries and basic eligibility types; it cannot prove the model's archaeological interpretation or completeness. All results remain `proposed`. Invalid proposals and duplicate anchors become visible issues, while the original model response remains in the audit. Exact duplicate anchors are not counted twice; equal names or numbers at different anchors are not silently merged. Candidate IDs derive from the input hash, kind and first quoted source span, so they are snapshot-local proposals rather than final cross-version record IDs.
+
+Reassemble saved audits with `assembleCandidateDiscovery()` without another model call. This stage does not set parents, extract attributes, assign media or register final ledger records.
+
 ## License
 
 Apache-2.0 — see [LICENSE](../../LICENSE).
+
+### Whole-pool duplicate review
+
+After every discovery unit completes, `deduplicateCandidates(plan, discovery, options)` submits the entire validated candidate pool in one structured LLM call, including chapter paths, original body blocks, relevant table rows/headers and adjacent context. `createCandidateDeduplicationRequest` exposes the exact request before execution. `assembleCandidateDeduplication` checks its saved audit against the full input and requires a complete, disjoint partition. Unknown, missing, repeated or mixed-kind assignments invalidate the entire partition; code never repairs model assignments. Uncertain identities remain separate with explicit review notes. Deduplication prompt v3 also permits an unnumbered layer occurrence to merge with a report-defined layer when the supplied overall definition, local position, material and stratigraphic role jointly establish identity. Reasons must explain that evidence chain. Generic ground/soil names alone remain insufficient, and distinct subdivisions stay separate. Only the processed-document snapshot is evidence; omitted PDF wording is never reconstructed. Original candidate identifiers and evidence remain unchanged.
+
+The returned `CandidateDeduplicationResult` contains proposed groups referencing original candidate IDs. `getCandidateGroupMembers` retrieves every original occurrence, including unchanged names, quotes, offsets and source references. Original discovery results and model audits remain immutable; grouping does not rewrite source text, register final records or perform attribute/parent extraction. Group identity decisions still require human review.
+
+The duplicate-review prompt distinguishes archaeological overlap/superposition (including Korean `중복`) from multiple records of one object. Reciprocal overlap notes and separately measured numbered features do not establish identity.
+
+### Selective discovery retry
+
+Discovery prompt v5 separates an unnumbered verbatim `sourceName` from the verbatim `sourceIdentifier`. It prohibits composing a name from context plus a number, adding suffixes, or restoring words split across source blocks/pages. Evidence fragments remain separate exact substrings, even when incomplete. Validation stays strict and never repairs model output.
+
+`prepareCandidateDiscoveryRetry(plan, audits)` requires a complete replayable snapshot, selects only units with recorded validation issues and returns `retryUnitIds`, unchanged `retainedAudits` and their partial `result`. Run those selected units again, then assemble all retained/new audits and perform whole-pool duplicate review. Saved discovery v4 and v5 audits are checked against their respective exact prompts and current original unit input; unsupported or edited audit bindings remain issues.
+
+Discovery v6 preserves merged header cells (`text`, `rowSpan`, `colSpan`, `isHeader`) in `headerRows`. Numbered table proposals select `identifierSourceId`; the identifier and first evidence must equal the selected number cell's complete original text. Invalid responses remain issues, including a null identifier anchored to an explicit numeric cell. Code never replaces model values. Leading continuation blocks before an exact next-sibling chapter title are assigned to the preceding sibling's discovery input, retaining original resource paths, IDs, page numbers and chapter assignments in the index; unmatched boundaries stay unchanged.
+
+`prepareCandidateDiscoveryRetry(plan, audits, { unitIds, updatedPlan })` also accepts explicitly reviewed units (including semantic exclusions) and updated bounded inputs for those units. It returns the replacement `plan`; unselected units and audits remain unchanged. Historical v4/v5 prompts remain replayable without applying v6 validation retroactively.
+
+## Body/table content attachment preview
+
+`prepareContentAttachment(index, discoveryPlan, discovery, groups, { inputSha256, candidateSnapshotId, pdfPageNumbers, maxUnitChars })` freezes a validated candidate partition into a registry and plans a physical-page sweep without model calls. Supply the processed document's declared PDF pages, including pages with no body/table text. Whole body blocks and original table rows stay together; `maxUnitChars` is a soft source-text limit, not a total prompt/token limit. Original merged-cell grids, logical page ranges and chapter paths are retained. The plan includes every registry entry and inherited identity uncertainty; it does not select candidates by name matching.
+
+Inspect `createContentAttachmentRequest(plan, plan.units[0])`, then call `attachContentUnit(plan, plan.units[0], { model, maxRetries })` to process exactly one unit. The English prompt requests `assignments`, `unresolved`, `ignoredSources` and, from v6, `ignoredPassages`. Clear shared passages may reference multiple candidates; uncertain identities remain unresolved. Source blocks/cells are selected explicitly, and literal fragments remain separate across block boundaries. Images, standalone captions, footnotes, attributes, parents and relations are outside this increment.
+
+`assembleContentAttachment(plan, audits)` validates saved prompts, registry/source references, exact unambiguous quotes, fragment order and source coverage. It never repairs model text. Identical fragment arrays within a candidate share an excerpt while retaining every source occurrence. Invalid decisions produce issues; completion does not imply human review or semantic correctness. Results start as `not_reviewed`. The API makes no autonomous follow-up calls and does not register new candidates.
+
+### Compact judgment input (v2)
+
+`createContentAttachmentInput(plan, unit)` returns separate `payload` and `codeMap` objects. Only `payload` is serialized into the model request: shared chapter-title contexts, one fixed-column row per original candidate mention, all literal anchor quotes, existing uncertainty pairs, selectable body/cell text and necessary table structure. Repeated candidate refs retain every alias/mention of the same group. Table cells retain actual grid order and spans; selected cell text is sent once and referenced from its table grid. No semantic summaries, text normalization or candidate shortlists are generated.
+
+Short candidate/source/table/context references map deterministically to original IDs, evidence and locations in `codeMap`. Storage pointers, physical/logical pages, character offsets and snapshot hashes remain in this code-only record and the unchanged plan. The v2 audit stores that map alongside the raw response, and replay verifies the exact map before resolving `S` selectors to original provenance. Literal quote validation and output structure remain unchanged. Historical `content-attachment.v1` audits replay against their exact original prompt and input. The compact input shape remains current; prompt v3 below strengthens sentence decisions. This increment retains existing body blocks/table rows and excerpt selection rather than introducing new sentence segmentation.
+
+### Sentence-level shared passages (prompt v3)
+
+Each body assignment or unresolved item contains one original sentence, even when consecutive sentences share the same target. Incomplete boundary fragments remain unchanged and multi-block fragments belong to one sentence only. Eligible headings, measurement phrases and table items are not bundled with body paragraphs. A sentence explicitly describing an identified object and its named findspot/layer/feature is assigned to every clearly related registry candidate in one decision; subsequent morphology sentences belong only to the object they describe. Ambiguous alternatives remain unresolved.
+
+The model performs this semantic selection. Code does not split, rewrite or add assignments after the response, and automatic structural validation cannot establish sentence-level completeness or semantic correctness. Prompt v1 and v2 audits retain their exact original prompts and remain replayable; v3 changes the instructions without changing the compact user input, response schema or source mapping.
+
+### Source containers and boundary fragments (prompt v4)
+
+A source block identifies provenance and may supply multiple independent sentence excerpts under the same source selector. At a page/work-unit boundary, only the leading partial sentence remains incomplete in its own item; every following complete sentence is returned separately. A trailing partial sentence also stays separate. Multiple source fragments belong together only when they constitute one sentence across selectable blocks. The prompt explicitly distinguishes preserving original substrings from copying a whole block and does not repair missing words.
+
+Prompt v4 clarifies these instructions while keeping the compact input, source map, response schema and assembly unchanged. Saved v1/v2/v3 audits remain replayable against their exact prompts. Granularity is still a model decision rather than an automatic sentence-count validation or a postprocessing rewrite.
+
+### Registered object headings (prompt v5)
+
+Ignore generic report/section/category titles, but retain a selectable heading identifying an existing registry object by number and name when supported by its body account or substantive table item. Preserve the entire heading as a separate verbatim phrase, including punctuation and parenthetical figure/photo references. This neither creates candidates nor infers media links. Ambiguous identities remain unresolved. Sentence/boundary rules and explicit shared-context assignments remain unchanged. Prompt v1–v4 audits continue to replay with their exact original instructions; v5 changes only the heading policy in the model prompt.
+
+### Exhaustive passage coverage and construction foundations (prompt v6)
+
+Every sentence and boundary fragment must be returned separately, including orientation and interpretive statements. An explicit construction-context sentence is shared between a feature and its identified foundation layer or natural ground, using original layer definitions, location, material and role even when the local sentence lacks a layer number. Generic soil names alone do not establish identity; uncertain alternatives remain unresolved. Later construction sentences are not automatically propagated to the layer.
+
+A v6 response also requires `ignoredPassages`, an array of `{ fragments: [{ sourceId, quote }], reason }` for excluded passages within a partly used source. Whole-source exclusions still use `ignoredSources`. Assembly validates exact fragment provenance and rejects overlapping partial exclusions. It checks the union of assigned, unresolved and explicitly excluded ranges against every source and reports uncovered non-whitespace ranges with original offsets and text. A unit with gaps is not marked completed. No sentence splitter, source normalization, inferred assignment or response repair is performed. Coverage does not establish correct sentence boundaries, candidate identity or justified exclusions; human review remains separate.
+
+Saved v1–v5 audits retain their exact prompts and historical validation. The stricter schema and range accounting apply only to v6, so old responses are not rewritten or retroactively invalidated. Compact user input, fixed registry, work units and source maps remain unchanged. Calling one unit never schedules another call.
+
+### Common layer names and partial uncertainty (prompt v7)
+
+A common layer name such as topsoil, fill or sandy soil does not establish identity with a registry candidate. Require an evidence chain using original identifiers, overall definitions, location, material, stratigraphic role or explicit continuity. If distinct candidates match only the name and cannot be distinguished from the supplied evidence, return their plausible refs in `unresolved` with a reason rather than selecting one or confirming all alternatives. Repeated rows with the same ref remain mentions of one candidate, not competing layers.
+
+A sentence may retain confirmed feature/layer assignments and also appear verbatim in `unresolved` for its ambiguous layer alternatives only. This preserves known descriptions without inventing certainty about every layer mentioned. Sharing with an identified construction foundation remains valid even without a local layer number. This is a model instruction, not a deterministic name-based reassignment rule. Input, response schema, source mapping and assembly remain unchanged. Saved v6 prompts and strict range accounting remain replayable; v1–v5 retain their historical validation.
+
+### Nested layer owner names (prompt v8)
+
+An owner feature named only inside a layer designation does not become an excerpt target merely because the layer belongs to it. A findspot sentence such as an artifact recovered from a feature's upper fill is assigned to the artifact and identified fill; a general finds summary belongs to the layer without guessing individual artifacts. Keep the complete original quote, including owner words. A feature remains eligible when the sentence separately describes its involvement, state, construction foundation or role as the direct findspot. Omitting a known owner as a target does not itself create an identity uncertainty.
+
+This policy is expressed in the English model prompt without name-based filtering or postprocessing reassignment. The compact input, registry, source mapping, response schema and strict coverage checks remain unchanged. Historical v7 instructions and strict v6/v7 audit validation remain replayable, alongside the original v1–v5 behavior. Sentence boundaries, heading preservation, genuine identity uncertainty and direct artifact/layer sharing retain their existing rules.
+
+### Immutable sentence/phrase IDs (prompt v9)
+
+V9 introduced `createContentAttachmentSelectionInput(plan, unit)` and `attachContentUnit()` returns a `ContentAttachmentSelectionAudit`. The full registry, original source work unit and read-only context remain fixed. Code assigns E refs to original body sentence ranges and indivisible table-cell phrases; the model returns `assignments`, `unresolved` and `ignored` items containing `excerptRef`, candidate refs where applicable, and a reason. The strict response schema rejects quote strings, source IDs, offsets and unexpected fields. Confirmed targets and ambiguous layer alternatives may reuse the same E ref in their respective categories.
+
+Segmentation uses a fixed English ICU sentence segmenter with decimal handling, protects boundaries inside matched parentheses/brackets, and joins a leading numeric enumeration with its following heading. An unmatched opening bracket does not consume later sentences. Source text is never normalized or repaired; boundary fragments remain separate within their original blocks. The code-only map records each original range, source provenance, segmentation version and ICU fingerprint. Different segmentation/mapping fails audit binding rather than silently changing evidence. Whitespace-only sources have no selectable ID; an entirely blank work unit is rejected before a model call.
+
+Assembly resolves IDs directly to frozen original ranges, preserving repeated identical sentences as separate occurrences. It validates unknown/duplicate refs, missing excerpt decisions, invalid targets and conflicting exclusions, and retains the non-whitespace coverage check. Each E ref selects one fixed excerpt; the model cannot combine or rewrite its text. Every table cell retains its original grid location and spans; table rows/headers remain context. No automatic following unit or source/response repair is performed. Candidate identity and segmentation semantics still require human review.
+
+`createContentAttachmentInput` remains the legacy compact source-block input for v1–v8 audit replay. Those exact prompts, source maps and version-specific checks remain supported. V9 does not translate or overwrite saved historical responses; original audits and new selection audits can be replayed together. The demo saves the actual v9 request, raw ID-only response and selection map.
+
+### Restored shared-context review with fixed IDs (prompt v10)
+
+V10 retains the v9 input, excerpt IDs, source map, strict selection schema and assembly. It appends the detailed v8 policies for checking every sentence against the full registry, construction foundations, common layer identity and partial uncertainty. In particular, when removing topsoil and an identified modern deposit reveals a feature, retain the feature/modern-deposit assignment and record indistinguishable topsoil candidates in `unresolved` on the same E ref. A removed layer does not require a standalone description in that sentence; identity must still be established from the supplied definitions and local evidence. Never confirm a layer by its common name alone.
+
+This is an English prompt change without report-specific refs, automatic candidate reassignment or response repair. The nested-owner boundary still applies. Every ID being accounted for is a text-coverage check, not proof that all semantic targets or uncertainties were selected. V9 retains its exact historical prompt and remains replayable alongside v1–v8.
+
+### Direct descriptions and unnumbered object headings (prompt v11)
+
+V11 keeps the same fixed ID input and selection schema. A known candidate mentioned only as a comparison, landmark or premise for an interpretation of another object is not an additional target unless the excerpt also describes that candidate itself. This boundary does not remove sharing for explicit findspots, construction foundations or layer removal/exposure, including confirmed targets alongside ambiguous layer alternatives. Do not invent identity uncertainty merely because an identified supporting object is not an excerpt target.
+
+Preserve headings identifying an existing object through name, chapter and body/table evidence even when the registry number is null. Section enumeration is not necessarily an object identifier; missing unique numbers alone cannot justify exclusion. Keep the entire fixed heading, including punctuation and media references, while generic category headings remain excluded. Genuine identity uncertainty stays unresolved. These are English prompt clarifications without deterministic reassignment or source/response repair; v10 retains its exact prompt and replay behavior.
+
+### Numbered artifact heading exclusions (prompt v12)
+
+V12 requests explicitly forbid treating a heading matching a registered artifact's number and name as a generic title. Keep the whole fixed ID, including media references. If candidate identity is genuinely ambiguous, preserve it in `unresolved`. All existing sharing and direct-description rules remain in force; input, segmentation, source map and response schema are unchanged.
+
+V12 assembly reports an issue for an ignored standalone body heading that literally matches a numbered artifact mention in the same leaf chapter. The conservative check recognizes the exact `identifier + space + name`, optionally followed by one space and a balanced, single-line parenthesized reference. It requires the excerpt to cover its complete original block apart from outer whitespace. It does not normalize punctuation, infer title boundaries, match table cells or ordinary body sentences, or choose between duplicate identities. Violations remain in the raw response and excluded evidence; the unit is not marked completed. No automatic reassignment, repair or additional model call occurs. V1–v11 retain their exact historical prompts and validation, including the former absence of this check.
+
+### Mention-scoped registration decisions (prompt v13)
+
+V13 requests use `createContentAttachmentDecisionInput(plan, unit)`. Callers can supply optional `registrationDecisions` to `prepareContentAttachment` (and the demo preparation adapter); the plan snapshots them without modifying earlier plans. Each `ContentRegistrationDecision` records a unique ID, processed-input hash, exact `CandidateEvidence` mention range, `not_independent_record` decision, `no_independent_body_or_table_item` basis, `author_confirmed` authority and original confirmation reference/text. This first handoff supports confirmed author decisions; it does not infer eligibility decisions from absent candidates or turn source-block exclusions into mention decisions.
+
+Code validates the hash, original resource/provenance fields, literal substring and range before any model call. Only a decision contained in one selectable excerpt of the current unit is transmitted as a short D ref, E ref, mention, decision, basis and authority. Long decision IDs, exact offsets and confirmation provenance stay in the code-only map alongside the complete decision snapshot. Another occurrence of the same name does not inherit the decision. Cross-excerpt ranges and missing, ambiguous or stale bindings fail explicitly.
+
+The English prompt separates registration eligibility from identity uncertainty. Keep the original excerpt on any existing objects it describes; a deliberately unregistered mention alone does not warrant an empty-candidate uncertainty. Preserve genuine unresolved alternatives among registered candidates and their confirmed shared targets. The decision neither excludes the sentence nor forces a target. All candidates, fixed E refs and original text remain available, and the response schema stays unchanged. Assembly never filters a response or automatically repairs an assignment. V1–v12 retain their exact historical requests, code maps and validation, including audits created before the optional field existed.
+
+### Explicit table relation remarks (prompt v14)
+
+V14 requests keep the v13 input, selection map, schema and validation, and append English instructions for table relation remarks. When a cell explicitly describes an identified row owner's archaeological/spatial relationship with an identified counterpart, assign that same original E ref to both existing candidates. A reciprocal remark remains a separate source occurrence. Resolve the counterpart through the original identifier and table/chapter/period context; retain confirmed targets plus genuine identity uncertainty when needed.
+
+Sharing applies only to the relation cell. The owner's identifier, shape, dimensions, material and other neighboring cells remain on the objects they describe. Do not propagate a row, merge reciprocal excerpts, synthesize sentences or infer new relation structures. Existing direct-description, findspot/foundation, layer identity, heading and mention-scoped eligibility rules remain in force. This is prompt guidance, not deterministic semantic reassignment or response repair. V1–v13 preserve their exact historical prompts, input maps and validation.
+
+### Type summaries and individual artifacts (prompt v15)
+
+V15 requests append an English scope boundary to v14 without changing input, fixed E refs, source maps, response schemas or assembly checks. A general finds inventory in body text or a table belongs to its identified owning feature/layer. Matching artifact types, chapter, period and findspot, even with one registry candidate per type, do not establish that the summary identifies those individual specimens. Require an original individual-identifying link, such as an artifact identifier, direct cross-reference/coreference or other clear evidence. An identifier is not universally required; an individually anchored artifact account still shares its explicit findspot under existing rules.
+
+Do not add individual artifacts or invent uncertainty merely because their types appear in a general summary, and do not expand “etc.” into other candidates. Explicit relations between identified objects still share their original remark with both participants. Neighboring shape/dimension cells stay with their owners. This is prompt guidance without response filtering, deterministic reassignment or source repair. V1–v14 remain replayable with their exact historical prompts, maps and validation.
+
+### Local sets and changing sentence subjects (prompt v16)
+
+V16 requests keep the v15 input, fixed E refs, maps, response schema and validation. English instructions resolve “the remaining”, “the others” and similar references within the nearest explicit bounded discourse set, respecting local paragraph focus and exclusions rather than expanding to every object in an earlier table or section. Review every clause for a changed subject; when different resolved candidates are directly described in one sentence, select all of them on the same original E ref.
+
+Preserve the full sentence and uncertainty wording without splitting or rewriting. Sharing a sentence does not copy each clause's properties to every participant or propagate adjacent cells/sentences. Keep confirmed targets and genuine unresolved alternatives when the local set cannot be resolved. Generic type inventories alone still cannot identify individual artifacts. No deterministic semantic reassignment, response repair or new relation/attribute extraction is introduced. V1–v15 keep their exact historical requests, maps and checks.
+
+### Implicit subjects and universal references (prompt v17)
+
+V17 keeps the v16 input, fixed E refs, maps, response schema and checks. An omitted subject or “all”, “they” and similar references inherit the nearest explicitly established bounded discourse set. Original text must explicitly reset, narrow or expand the set; shared period, chapter, location, category or association alone cannot enlarge it. Review every clause and retain members directly described by an earlier clause even when a later universal expression refers to a smaller subset.
+
+Keep local “remaining” references, table-cell ownership and explicit relation sharing unchanged. Preserve original text and raw responses without deterministic semantic reassignment. V1–v16 retain their exact historical requests, maps and checks.
+
+### Nearest subsets and table consistency checks (prompt v18)
+
+V18 prioritizes an explicit subset in the immediately preceding sentence or clause over an older section/table inventory. It retains every directly described participant of the unchanged sentence. Identified table data cells belong in assignments, including identifiers, numbers and dashes; generic column labels belong in ignored. A reason identifying a row owner cannot justify excluding that owner's data cell. Explicit relation sharing remains cell-local.
+
+For v18 and later audits, deterministic checks report inconsistencies without editing the response or adding/removing targets. A row owner is checked only when the exact original identifier cell matches one registry entry and the same mention has either evidence in that table row or its literal object name in the table caption. Multiple matching entries are not resolved automatically. Every selectable cell in a uniquely identified row must include that owner in assignments. A finite list of Korean/English generic labels, with optional parenthesized units, must be ignored when marked as headers or appearing in the first row above identified data rows. Registered object headings and unrecognized labels are not automatically treated as generic headers. Comparison normalization never changes original text.
+
+Issues prevent unit completion while preserving the raw response and its assembled assignments/exclusions for review. These checks do not resolve body coreference, identify every possible header, or prove semantic correctness. V1–v17 retain their exact requests, maps and historical checks. The model input and response schema remain unchanged.
+
+### Abbreviated table counterparts and state referents (prompt v19)
+
+V19 resolves shortened counterpart terms in table remarks through the supplied body, table, chapter/period, location and archaeological role. A full registry name or number need not recur in the cell when original context establishes identity. Assign the unchanged remark to the row owner and identified counterpart; retain confirmed targets and genuine identity alternatives separately. Local-set restrictions for implicit subjects do not erase a counterpart directly mentioned in a relation remark.
+
+Keep the original object and predicate: a remark about partial ditch damage must not become building damage merely because it appears in a building row. Do not invent a damaging agent, causal direction or chronology. Share only the original remark, preserving ordinary-cell ownership, header exclusion and all other boundaries. Model input, maps, response schema and v18 table consistency checks remain unchanged. V1–v18 retain their exact historical requests and validation; no source/response repair or deterministic target reassignment is introduced.
+
+### Generic collection headings and explicit exceptions (prompt v20)
+
+V20 excludes generic type/collection section headings from individual records even when the following body/table identifies every member. Section enumeration and group coverage do not turn a category heading into each object's own heading. Actual identifiable registered-object headings, including independently registered aggregate records, retain their existing treatment.
+
+An explicitly excepted object receives the unchanged sentence that states its exception status, alongside the other directly described objects. Distinguish preserving that evidence from applying the sentence's positive predicate to the exception. Do not infer the exception object's exact location or propagate it to later sentences; subsequent “all/remaining” references still use the narrowed set. Input, maps, schema, table validation and original text remain unchanged. V1–v19 retain their exact historical requests and checks, without response repair or deterministic reassignment.
+
+### Body collectives and identified members (prompt v21)
+
+V21 separates a collective's descriptive relevance from evidence identifying its individual members. A spatial relationship with a group does not justify assigning its sentence to all same-type registry entries. Require original member lists, unambiguous references to an already established set, or a location/enclosure/layout definition linking the relevant members. Matching period, chapter, approximate location or registry inventory alone is insufficient; full names/numbers need not recur when an original evidence chain exists.
+
+Retain the original sentence on its identified owner and other independently identified participants. Do not invent member alternatives or missing-group concerns merely because similar candidates exist. Preserve genuine identity uncertainty, explicitly bounded sets, registered collectives and identified abbreviated counterparts. Input, maps, schema and table checks remain unchanged. V1–v20 retain their exact historical requests and validation, without source/response repair or deterministic reassignment.
+
+### Individual artifact headings take precedence (prompt v22)
+
+V22 preserves an identified registered individual artifact's entire original heading even when its body is separately excerpted or already assigned. The object's number, name and chapter/body evidence establish its own heading; a type name inside it does not make it a generic category title. This preservation takes priority over generic type/collection heading and table-header exclusion. A reason recognizing that individual heading must select assignment rather than exclude it because the body is separate. Genuine identity ambiguity remains unresolved; general category headings remain ignored.
+
+Input, excerpt IDs, source maps, schema and existing heading/table validation remain unchanged. V1–v21 retain their exact historical requests and validation. Source text and raw responses are never repaired or automatically reassigned.
+
+### Pure table navigation and substantive descriptions (prompt v23)
+
+V23 excludes a body excerpt that only directs the reader to a table without making a substantive object statement. Identifying the referenced table's rows or registered members does not justify assigning that pointer to them or creating unresolved targets. This eligibility boundary takes priority over all-target coverage and collective sharing for the pure pointer only.
+
+Preserve an entire fixed excerpt that contains actual object description even when it also refers to a table. Do not strip the reference, split the excerpt or replace it with table data. Identifiable object headings remain identity evidence; substantive table cells, relation sharing and generic header exclusion retain their existing rules. Input, source maps, schema and assembly validation are unchanged. V1–v22 retain their exact historical requests and checks; source text and raw responses are never repaired or automatically reassigned.
+
+### Local scope of navigation exclusion (prompt v24)
+
+V24 confines pure table-navigation exclusion to the pointer itself. Factual investigation inventories and distributions remain substantive descriptions; establish their bounded membership from original investigation scope, individual chapter accounts and tables before carrying it into implicit subjects. Do not require repeated identifiers when that evidence chain exists or expand an ungrounded type summary to every registry entry.
+
+Recheck original context for identified enclosure/ditch counterparts in inside/outside/damage descriptions, retaining their unchanged excerpts alongside the identified row owner or buildings. Navigation exclusion does not weaken relation sharing, alter ordinary property-cell ownership or resolve genuinely ambiguous identity. Inputs, maps, schema and validation are unchanged, and v1–v23 remain reproducible without source/response repair or automatic reassignment.
+
+### Original table-row context in compact input (prompt v25)
+
+`createContentAttachmentTableAnchorInput(plan, unit)` extends the v13–v24 decision input with original candidate table anchors. All candidate rows remain available. For candidate evidence in a currently selected table cell, `candidateTableAnchors` contains `[candidate, row, column, excerpt]`, for example `["R12", "A1", 4, "E23"]`. Shared `candidateTableRows` contains `[ref, table, row, excerpts]`, such as `["A1", "T1", 2, ["E19", "E20", "E21", "E22", "E23"]]`. The existing table grid, merged headers and exact excerpt text provide the trench/row context without rewriting labels or repeating rows per candidate. Row references follow original table order, independently of candidate order.
+
+The English prompt uses these anchors to distinguish otherwise identical candidates and prohibits using candidate reference numbers or list order as identity evidence. Candidates without a local table anchor remain eligible through other supplied evidence. Anchors identify original mentions; they do not establish parenthood or automatically assign excerpts. Semantic selection still belongs to the model.
+
+Long candidate/resource/table IDs, evidence ranges and all original alias provenance remain in `codeMap`; repeated model anchor tuples are emitted once. Original ranges are validated before creating anchors, without relocating or correcting text. V25 audits retain the exact request, raw response and new mappings for deterministic replay. V1–v24 retain their exact original input builders, prompts and validation. This change does not rewrite source text, repair responses or start a full sweep.
+
+### Qualified descriptions of an established set (prompt v26)
+
+V26 carries an already identified bounded investigation set into subsequent distribution, shape, state or interpretation sentences even when individual identifiers are not repeated. Resolve omitted subjects and repeated category names against that established set; do not reject a supported follow-up solely as an unidentified generic summary. Original membership evidence remains required, and actual subject changes or narrowed subsets retain their scope. This does not establish membership from names, chapter, period or registry inventory alone.
+
+Preserve the entire fixed excerpt, including qualifiers such as “most”, “generally” or “mostly”. Linking that qualified context to identified members does not establish that every member has the positive property, identify exceptions or replace differing individual table values. Unidentified subgroups must not be invented. Keep existing source selection, table ownership, uncertainty and type-summary boundaries. User input, maps, schema and validation are unchanged; v1–v25 replay their exact historical requests without source/response correction or automatic reassignment.
+
+### Identifier anchors and complete row evidence (prompt v27)
+
+V27 treats candidate number-cell anchors and quotes as identity evidence rather than the complete list of excerpts to preserve. After identifying an owner, inspect every selectable nonblank data cell in that object's original row segment, including unanchored shape, dimensions and remarks. Keep parallel object groups separate through headers and column positions; one shared row reference does not transfer neighboring owners' values. Generic headers and blank cells retain their existing handling, and identified relation remarks retain their sharing rules.
+
+Before finishing, the model checks each identified row segment and all selectable IDs against its assignments, unresolved and ignored lists. Selecting the identifier alone does not cover other cells, which remain independent original E selections. Keep v26 set-level context and quantifiers alongside individual cell evidence. Code does not fill omissions or reassign targets; existing completeness validation reports failures. Input, maps, schema and validation remain unchanged, and v1–v26 replay their exact historical requests.
+
+### Identity of inferred collectives (prompt v28)
+
+V28 separates identifying an interpretation's subject category from identifying its individual registry members. Overlapping traces, possible components or an inference of repeated construction do not equate a newly inferred collective with nearby registered objects. Numbered objects used as location references or reasoning premises, shared context and the available registry inventory do not establish that membership. Require an original identification or an unambiguous same-set link for each target; preserve the source's uncertainty without inventing a group or unresolved members.
+
+Keep qualified follow-ups of an already established set and complete original table-row evidence. Input, maps, schema and validation remain unchanged. Semantic targets remain model selections; code does not remove unsupported sharing or repair responses. V1–v27 retain exact historical request replay.
+
+### Objects used only as location references (prompt v29)
+
+V29 keeps an object mentioned only to locate another subject out of that excerpt's targets. A locative clause such as “where Buildings K-M are distributed” does not independently describe those buildings when its role is only to locate the described pits. Explicit identifiers establish reference identity, not descriptive relevance. This boundary takes priority over all-target coverage and the own-spatial-relationship exception for reference-only mentions.
+
+Preserve the entire original excerpt, location wording and qualifiers on its identified subject set. Keep independent state/property descriptions and explicit archaeological relationships, including findspots, foundations and exposure, under the existing sharing rules. Do not create uncertainty merely for omitted reference objects or infer members of a generic collective. Input, maps, schema and validation are unchanged; code does not remove sharing or repair responses. V1–v28 retain exact historical request replay.
+
+### Provider termination and attempt evidence
+
+New `attachContentUnit` audits include `callAttempts`, captured below structured-output parsing through `createAuditedModel`. Each provider invocation retains its request and complete SDK response bodies, content, usage, response ID, API status, incomplete details, unified/raw finish reason or original provider error. The optional `onAttempt` callback can persist each record even if the final call fails. Missing metadata stays null, and historical audits without the field still replay unchanged. The selection response remains separate and is never repaired.
+
+This adds observation only: prompt v29, user input, schemas, mappings, retry policy and coverage validation remain unchanged. A parsed object is not proof of normal provider termination or complete excerpt coverage; inspect the per-attempt metadata and automatic issues separately. SDK bodies are preserved without claiming byte-for-byte HTTP capture; credentials and headers are excluded.
+
+### Survey scope and verified feature inventories (prompt v30)
+
+Selecting a directly described survey area does not replace feature members independently identified by the investigation scope, body-to-table reference, original rows and candidate anchors. Preserve the same inventory excerpt on all verified, directly described feature members even when only types, periods and aggregate counts recur. Area selection remains independently justified, and trench and feature sets remain distinct.
+
+Keep unsupported type summaries, inferred collectives and location-only references outside this rule. Preserve aggregate wording and differing counts without resolving identities or transferring every listed property to every member. Input, maps, schemas and validation are unchanged; code never fills semantic targets. V1–v29 retain exact historical request replay.
+
+### Original body boundaries and nonlocal table evidence (prompt v31)
+
+V31 finds body boundaries from the actual text resources inside mixed batches even when table cells come first or last. Table-only batches retain nearby body blocks around their physical page. Up to two preceding and two following blocks remain separate verbatim context, including original subjects, qualifiers and incomplete alternatives. Existing plans can derive this context from their unchanged source snapshot; newly prepared plans also store it.
+
+`current.readOnlyContext` uses compact B refs, chapter contexts and original text. For candidates whose original chapter path matches this unit, `supportingTables`, `supportingRows` and `supportingAnchors` expose nonlocal original table headers/spans and candidate-evidence cells through shared Q/M refs. They omit unrelated rows and unneeded measurements. All cells in retained header rows preserve their original flags, including false flags. Long source IDs, ranges and exact candidate bindings remain in the audit map. This does not establish table continuation or collective membership: the model evaluates the body definition, table structure, numbering and anchors together. Only current E refs are selectable; context neither adds excerpts nor fills targets. Historical v1–v30 requests/maps replay exactly against their saved plans.
+
+### Context eligibility and alternative construction layers (prompt v32)
+
+V32 separates using a pure table pointer to identify a neighboring description's subjects from preserving that pointer as evidence. A pointer with no substantive object fact remains ignored even when its exact table members are known. This exclusion takes priority over inventory sharing and supporting-context instructions; actual object descriptions containing a table reference remain eligible.
+
+Alternative substrates and unknown per-member construction contexts do not automatically create candidate identity uncertainty. Preserve a layer literally identified by the current fragment and original candidate evidence alongside the established feature set, retaining qualifiers without extracting universal properties or relations. A layer named only in read-only context is not automatically an additional target. Genuine common-name ambiguity and conflicting definitions retain their uncertainty handling. Input, maps, schema and automatic validation are unchanged; no semantic target is repaired in code. V1–v31 replay their exact saved requests.
+
+### Original body boundaries and nonregistered subjects (prompt v33)
+
+`current.bodyBlocks` follows `bodyBlockColumns = [ref, excerpts]`: each short P reference groups the unchanged selectable E references from one original processed body block in source order. Text, sentence ranges, table cells and E IDs stay unchanged. Empty body blocks have no group; tables and read-only B context stay separate. Distinct source blocks remain distinct even if their text matches. Original source IDs and resource keys stay in the audit map, and only E references can be selected.
+
+The model must track subjects from previous campaigns, cited examples and comparisons even when those subjects intentionally have no registry record. Their subsequent measurements or history do not become descriptions of a matching registered object. Preserve independently stated relationships with current objects, while ignoring excerpts that describe only an out-of-scope subject. A block boundary neither forces one subject throughout the block nor resets a continuing subject. Code supplies source bindings without choosing subjects, adding candidates or repairing responses. V1–v32 retain their exact saved requests and audit maps.
+
+### Partial descriptions of an established set (prompt v34)
+
+A quantified follow-up such as “some appear to be postholes” remains original evidence about an already identified investigation set even when the positive cases cannot be numbered. Preserve the entire unchanged excerpt, including “some” and the author's uncertainty, on that established set's member records without asserting that each member has the property or identifying a positive subset. Keep explicitly identified narrower membership, and require independent member evidence for a newly inferred collective. Do not turn possible components into links to registered buildings, confuse unknown predicate applicability with candidate identity uncertainty, or use the unidentified-subgroup boundary to discard the qualified parent-set description. Payloads, source maps, response schema and automatic checks are unchanged. V1–v33 replay their exact saved requests and responses without semantic repair.
+
+### Trench inventory co-targets and identifier-cell validation (prompt v35)
+
+An original trench-row feature inventory describes both that row's trench and its explicitly identified registered features. Keep the same E reference on both, using original row/cell anchors; naming the trench in the reason does not replace selecting it. Ordinary trench measurements remain on the trench only, and body inventories do not automatically propagate to every trench. All existing set, type-summary and uncertainty boundaries remain in force.
+
+For v35 audits, automatic table validation identifies row owners only from original candidate evidence whose entire literal identifier matches that exact cell and range. It does not match arbitrary dimension values or use caption names as ownership substitutes. Each identifier anchor starts its own row segment, supporting parallel object groups; genuinely competing anchors leave that segment unresolved by the checker. Header cells remain separate. The validator reports omitted owners without adding targets or changing raw responses. Payloads, maps and schemas stay unchanged, while v1–v34 preserve their exact historical prompts and checks.
+
+### Investigation area layout and identified trenches (prompt v36)
+
+When original discourse defines the current registered investigation area, a substantive follow-up describing its survey grid or trench subdivision belongs to both that area and the independently identified trenches. The area's name need not repeat when the original scope remains clear. Resolve trench membership through original body/table evidence and candidate anchors. Preserving the area's own investigation layout is distinct from automatic ancestor propagation, a location-only mention, or sharing a feature inventory with every trench.
+
+Keep genuine scope changes and previous-campaign referents. Do not distribute unrelated methodology or trench measurements to the area, infer containment, or turn grid dimensions into each trench's size. Payloads, maps, schemas and the original identifier-cell validator are unchanged; v1–v35 retain their exact historical requests and checks. The model selects all semantic targets without source or response repair.
+
+### Nonregistered subject continuity and boundary continuations (prompt v37)
+
+Track the source's descriptive subject separately from the candidates receiving a relationship excerpt. An earlier-investigation or comparative object remains the subject of subsequent generic-noun and omitted-subject descriptions until the original text explicitly changes it. A relation involving the current object does not transfer the counterpart's neighboring measurements or use history to that record. Preserve current-object relationship evidence while excluding complete descriptions of nonregistered counterparts.
+
+Interpret an unfinished current excerpt with its supplied next read-only original block before classifying relationship participants. A continuation can establish that the current object participates in a conditional connection even if its predicate lies beyond the selectable fragment. Preserve only the unchanged current E ref; do not select or append B text, turn counterpart measurements into current properties, or confirm the conditional relation. Input, maps, schemas and automatic checks remain unchanged, with exact historical v1–v36 replay and no source/response repair.
+
+### Established sets and later individual clauses (prompt v38)
+
+Review every clause of a fixed sentence before selecting its targets. When an earlier clause substantively describes an already identified investigation set, a later clause naming one member narrows that clause only. Preserve the unchanged sentence on the union of the directly described, originally identified participants. Keep qualifications, contrasts and exceptions intact without asserting every predicate for every member or identifying unknown positive subsets.
+
+A finds/recovery summary can describe that verified feature/layer set while still failing to identify individual artifact specimens. Apply the type-summary restriction to artifact identity separately; it must not erase the earlier established feature/layer subjects. Original membership evidence remains required, and genuinely narrower preceding sets are not expanded. Input, maps, schemas and automatic checks remain unchanged. V1–v37 retain exact historical replay; code never adds missing semantic targets or repairs source/response text.
+
+### Required row owners and relation counterparts (prompt v39)
+
+Selecting the original row owner does not complete a relation remark's target coverage. For each relation cell, separately resolve explicitly named counterparts through their original number/name cells, table and chapter context, then retain all identified participants on that same unchanged E ref. Reciprocal remarks remain independent evidence and each receives both participants. If counterpart identity is genuinely uncertain, retain the owner and unresolved alternatives separately rather than guessing or silently dropping the counterpart.
+
+Relation-cell sharing never propagates the owner's identifier, shape or dimensions to another object. Keep ordinary property cells on their actual row owner and maintain the earlier established-set evidence within mixed sentences. Input, maps, schema and automatic checks remain unchanged, with exact v1–v38 request/audit replay and no semantic target filling or source/response repair.
+
+### Source-defined inventory boundaries in follow-ups (prompt v40)
+
+Resolve omitted subjects and collective distribution accounts against the nearest explicitly enumerated original investigation set and its verified members. A broad follow-up label does not reopen the registry. Shared period, chapter, location or a relationship with a member cannot add another object. An additional target requires an explicit source expansion/reset or an independently direct description in the current excerpt. Establish membership from original evidence rather than a prior model response.
+
+All-target coverage and preservation of earlier set clauses retain supported participants without inventing additional members. Keep genuine scope changes, narrower subsets, explicit exceptions and identified relationship counterparts, including shared table remarks without adjacent measurement propagation. Input, maps, schema and automatic checks remain unchanged; v1–v39 retain exact request/audit replay without source/response repair or semantic target correction in code.
+
+### Independent artifact headings and final excerpt coverage (prompt v41)
+
+V41 requires an identified registered individual artifact heading to have its own E assignment even when every following body excerpt is separately assigned. Heading numbers, names and chapter/body evidence establish identity; treating the heading only as an identification anchor or redundant registry information does not process its E ref. This requirement takes priority over generic type/collection title and table-header exclusions. Genuine heading identity ambiguity remains explicitly unresolved.
+
+Before returning, the model checks every original E in order against the actual assignments, unresolved and ignored arrays, including standalone headings between body blocks. It finishes any missing decision in the existing schema and separately verifies required individual-heading assignments. This prompt-side review does not replace deterministic coverage validation or guarantee semantic correctness. Input, maps, schema, segmentation and automatic checks are unchanged; v1–v40 retain exact request/audit replay. Code never supplies missing semantic targets or repairs source/response text.
+
+### Required per-excerpt response keys (prompt v42)
+
+V42 makes every current E a required property of a strict `decisions` object. Each value is a non-null assigned, unresolved or ignored decision. Assigned decisions require nonempty `candidateRefs`, a reason and an `unresolved` field: null for no additional uncertainty, or a separate candidate/reason object for partial uncertainty. Unresolved-only decisions may retain an empty candidate list for missing identity. Ignored decisions carry only their status and reason. Unknown E keys and missing decisions fail schema validation; model-side coverage instructions remain supplementary.
+
+Shared schema definitions reference the decision shape and registry enum once, avoiding registry duplication for every E. This follows the required-object-property and nested-union support in the [official OpenAI Structured Outputs documentation](https://developers.openai.com/api/docs/guides/structured-outputs). Completion/refusal and semantic validation still require independent checks; a required decision does not guarantee correct targets.
+
+New audits preserve the exact keyed model output in `rawResponse`. Their existing `response` arrays are a deterministic, lossless format projection, retaining every target, reason and partial uncertainty without semantic correction. Replay validates the required raw keys and the projection's equality before assembling original source ranges. Input, maps, segmentation and existing semantic checks are unchanged. V1–v41 retain their exact historical requests and array-response validation. Source text and provider output are never repaired, missing decisions are never filled, and old snapshots remain untouched.
+
+### Previous-investigation category fragments and next context (prompt v43)
+
+V43 interprets unfinished category/noun phrases using the next supplied read-only B block while retaining a locally introduced previous-investigation or comparison subject. A page/block boundary, footnote marker or repeated generic type/period label does not reset that subject. A matching registered type or an earlier current-investigation count is insufficient to return to the current set after the source has explicitly changed scope.
+
+Require an original explicit return or direct description of an identified current participant/relationship. Otherwise preserve the current E as an ignored decision with its scope reason; mandatory E keys do not force assignment or missing-candidate uncertainty. Genuine current returns and relationship evidence retain existing treatment. Input, maps, required-key schema, segmentation and semantic checks are unchanged; v1–v42 requests and audits retain exact replay, including v42 raw/projection validation. No source/response text is corrected or supplemented in code.
+
+### Contextual names and the nearest explicit subset (prompt v44)
+
+V44 identifies shorter registry names and more specific narrative names through original chapter/period, numbered body accounts, investigation inventory and substantive table evidence. Exact-name candidates from another period do not make correctly scoped candidates absent. Resolve every explicitly described participant independently and retain confirmed targets when another identity is genuinely uncertain. Generic category headings, pure table pointers and ungrounded collective identities retain their exclusions; no source or registry string is rewritten.
+
+Resolve “the remaining” within the immediately preceding explicit source subset, including the preceding E in the same P block. An earlier full table/inventory or an earlier exception assignment cannot reintroduce a member excluded by a later subset without explicit expansion or independent direct description. Read membership from the original text rather than prior response targets, including separately co-described relation participants. Input, maps, required-key schema and semantic checks remain unchanged. V1–v43 preserve exact request/audit replay, including v42/v43 raw/projection validation; code never corrects source text or semantic decisions.
+
+### Inclusive explicit identifier ranges (prompt v45)
+
+Expand an explicitly named integer range to both endpoints and every intervening member before checking the returned candidate refs. For example, `Trench 2 ~ Trench 5, Trench 8` describes trenches 2, 3, 4, 5 and 8. Preserve the same original E text; a reason repeating the full range does not account for an omitted target. This applies to body and table task/remark excerpts even when the current table has no original registration anchors.
+
+V45 adds a validation-only check for explicit name-prefixed nonnegative integer ranges (`~`, `～`, hyphen and en/em dash), including repeated endpoint names, optional Korean number markers and TR/trench/트렌치 aliases. Candidate numbers come from original numeric identifiers, never R-ref arithmetic or registry order. A confirmed range member must establish exactly one original kind/chapter context. Within that context, each uniquely identified existing numbered candidate in the interval must be assigned; duplicate mentions of one ref are not ambiguous. Distinct candidates with the same number remain ambiguous, absent candidates are never invented, and ignored or identity-only unresolved excerpts are not converted into assignments. Unlabeled dates, day counts and measurements are not identifier ranges.
+
+A missing member produces an issue and prevents automatic unit completion. The check never changes source text, provider output or assignments. Input/maps and required-E output schema remain unchanged; v1–v44 requests and audits retain their original replay behavior, including v44 raw-response/projection validation. Required E coverage and complete candidate coverage are separate checks.
+
+### Current qualifiers and elliptical table work subjects (prompt v46)
+
+Apply the current clause's explicit period, investigation, location and type restrictions before inheriting a broader preceding inventory. A period-qualified road/pit description does not acquire other-period pits merely because the preceding survey inventory contained both groups. Check proposed members against their original names, quotes and context. Preserve independently described cross-period relationships and genuinely ambiguous identities without imposing a mechanical filter in code.
+
+A substantive table work cell may inherit the established body subject for the same investigation action without repeating individual numbers. Use the original body action, verified member set, body/table link, table title, row and date context. For example, a diary's site-backfilling entry can describe the already identified test units when the body explicitly states that those units were backfilled. Keep a pure table pointer ignored, preserve the whole task cell, and do not turn adjacent meeting/date material into object properties. Do not inherit arbitrary nearby or previous-investigation subjects.
+
+V46 appends generic English guidance only. Input/maps, required-E schema, sentence units and v45 range validation are unchanged. V1–v45 retain exact request/audit replay, including required raw-response/projection checks and v45's missing-range validation. No source text, model output or semantic targets are repaired in code.
+
+### Established feature groups and investigation-stage identity (prompt v47)
+
+V47 distinguishes an originally identified feature inventory from a generic type list. A local period or scope qualifier narrows that verified set without erasing its qualifying member records merely because their individual numbers are not repeated. Original inventory and membership evidence is required; matching quantities, period, chapter or type alone does not establish membership. The exclusion of individual artifacts inferred from type-level finds summaries remains unchanged.
+
+Both confirmed targets and unresolved identity alternatives require evidence linking them to the current investigation stage. A later excavation object is not a trial-survey alternative merely because its name, period and project area match. Original cross-references or clear same-object context can establish cross-stage identity; different stages are not automatically different physical objects. A later read-only section does not reset the current subject. Genuine cross-stage relationship participants remain separately assessable.
+
+Only generic English instructions change. Inputs, source maps, required-E schema, segmentation, backfill inheritance and range checks are unchanged. V1–v46 requests/audits replay exactly, with required raw/projection and historical range checks retained. No report identifiers, sample-specific target rules, source correction or semantic output repair are introduced. Generality beyond the current report still requires independent report validation.
+
+### Set evidence and relationship-subject uncertainty (prompt v48)
+
+An excerpt can describe an established feature set while leaving the participant of a later relationship clause unidentified. Preserve the original excerpt on its verified set members without treating that attachment as a merge, an individual identity decision or confirmation of every clause's predicate for every member. A pure collective inventory does not require identity uncertainty merely because it omits repeated identifiers.
+
+For a mixed set/relationship excerpt, use the existing assigned decision and nested unresolved field. The same candidate refs may appear in both: confirmed recipients of set evidence can still be alternatives for the relationship role. Explain those different grounds in the existing reasons; do not require disjoint ref lists, clear uncertainty just because candidates already receive evidence, or invent uncertainty when the original participant is clear. Keep the uncertainty within the supported investigation/subject scope and preserve tentative wording. No relationship is created or confirmed.
+
+V48 adds generic English guidance only. Inputs, E segmentation, strict schema, lossless projection, source assembly and validation remain unchanged; v1–v47 replay exactly. Code does not infer assignments or uncertainty, repair source/output, or hardcode sample records. Independent-report generality remains to be validated.
+
+### Quantity scope and source-linked relationship participants (prompt v49)
+
+A count in a candidate name, quote or original row belongs to that observation's subject and scope. It cannot supply an unstated total for a wider body inventory or a different category. Do not exclude verified members because only one candidate writes a count, or treat a singular noun as an inventory limit. Apply genuine original totals within their stated scope while retaining tentative wording and avoiding unsupported physical-object identity decisions.
+
+Identify both relationship endpoints through original referent-to-record evidence. A shared name, type, period, project or report is insufficient, and calling a candidate the counterpart does not establish the link. Keep nonregistered cited/comparative counterparts in discourse without replacing them with an available later-stage record. Preserve supported local subject alternatives in partial uncertainty alongside confirmed set evidence; selecting a counterpart does not resolve the subject. Relationship possibility and participant identity are independent uncertainties.
+
+V49 appends generic English rules without report/sample identifiers. Inputs, fixed E units, required schema, lossless projection, assembly and checks are unchanged. V1–v48 retain exact replay, including original raw/projection guards, overlapping set/role uncertainty and historical range validation. Code never corrects source/model output or supplies semantic targets. Cross-report generality still requires independent validation.

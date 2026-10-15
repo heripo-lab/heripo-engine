@@ -1,4 +1,7 @@
-import type { LedgerExtractionPreview } from '@heripo/ledger-extractor';
+import type {
+  DocumentResourceIndex,
+  LedgerExtractionPreview,
+} from '@heripo/ledger-extractor';
 import type {
   Chapter,
   PageRange,
@@ -7,6 +10,12 @@ import type {
   ProcessedTable,
   TokenUsageReport,
 } from '@heripo/model';
+
+import type {
+  CandidateDiscoveryRun,
+  CandidateDiscoveryRunSettings,
+} from '~/lib/ledger/candidate-discovery-run';
+import type { ContentAttachmentRun } from '~/lib/ledger/content-attachment-run';
 
 import type { ProcessingOptions } from '~/features/upload';
 
@@ -155,6 +164,53 @@ export async function fetchTaskResult(
   return handleResponse<TaskResultResponse>(response);
 }
 
+export interface DocumentResourceIndexResponse {
+  inputSha256: string;
+  index: DocumentResourceIndex;
+}
+
+export async function fetchCandidateDiscovery(
+  taskId: string,
+): Promise<{ run: CandidateDiscoveryRun | null }> {
+  return handleResponse(await fetch(`/api/tasks/${taskId}/candidates`));
+}
+
+export async function startCandidateDiscoveryRun(
+  taskId: string,
+  settings: CandidateDiscoveryRunSettings,
+): Promise<{ run: CandidateDiscoveryRun }> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/candidates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }),
+  );
+}
+
+export async function cancelCandidateDiscoveryRun(
+  taskId: string,
+): Promise<{ success: boolean }> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/candidates`, { method: 'DELETE' }),
+  );
+}
+
+export async function fetchCandidateDiscoveryAudit(
+  taskId: string,
+): Promise<unknown> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/candidates?audit=true`),
+  );
+}
+
+export async function fetchDocumentResourceIndex(
+  taskId: string,
+): Promise<DocumentResourceIndexResponse> {
+  const response = await fetch(`/api/tasks/${taskId}/resource-index`);
+  return handleResponse<DocumentResourceIndexResponse>(response);
+}
+
 export interface CreateTaskInput {
   file: File;
   options: ProcessingOptions;
@@ -233,4 +289,42 @@ export async function downloadTaskZip(taskId: string): Promise<Blob> {
   }
 
   return response.blob();
+}
+
+export async function fetchContentAttachment(taskId: string): Promise<{
+  run: ContentAttachmentRun | null;
+}> {
+  return handleResponse(await fetch(`/api/tasks/${taskId}/content-attachment`));
+}
+export async function prepareContentAttachmentPreview(
+  taskId: string,
+  maxUnitChars: number,
+): Promise<{
+  run: ContentAttachmentRun;
+}> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'prepare', maxUnitChars }),
+    }),
+  );
+}
+export async function runFirstContentAttachment(taskId: string): Promise<{
+  run: ContentAttachmentRun;
+}> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'run-first' }),
+    }),
+  );
+}
+export async function fetchContentAttachmentAudit(
+  taskId: string,
+): Promise<unknown> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment?audit=true`),
+  );
 }

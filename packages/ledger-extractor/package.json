@@ -64,7 +64,8 @@
   "dependencies": {
     "@heripo/logger": "workspace:*",
     "@heripo/model": "workspace:*",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "ai": "catalog:"
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
@@ -73,6 +74,7 @@
     "@vitest/coverage-v8": "catalog:",
     "@vitest/expect": "catalog:",
     "tsup": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@heripo/shared": "workspace:*"
   }
 }
