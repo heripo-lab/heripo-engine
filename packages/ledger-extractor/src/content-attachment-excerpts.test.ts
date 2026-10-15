@@ -13,6 +13,7 @@ import {
   attachContentUnit,
   createContentAttachmentRequest,
 } from './content-attachment';
+import { createContentAttachmentContextInput } from './content-attachment-context';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
@@ -134,8 +135,7 @@ function audit(
   return {
     unitId: plan.units[0].unitId,
     ...createContentAttachmentRequest(plan, plan.units[0]),
-    codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
-      .codeMap,
+    codeMap: createContentAttachmentContextInput(plan, plan.units[0]).codeMap,
     response,
     usage: {
       component: 'test',
@@ -185,8 +185,14 @@ describe('immutable content excerpt selection', () => {
         plan.units[0],
         'content-attachment.v25',
       ),
+      codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
+        .codeMap,
     };
-    expect(historical.userPrompt).toBe(raw.userPrompt);
+    expect(historical.userPrompt).toBe(
+      JSON.stringify(
+        createContentAttachmentTableAnchorInput(plan, plan.units[0]).payload,
+      ),
+    );
     expect(raw.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
     expect(historical.systemPrompt).not.toContain(
       'QUALIFIED FOLLOW-UP DESCRIPTIONS',
@@ -207,8 +213,14 @@ describe('immutable content excerpt selection', () => {
         plan.units[0],
         'content-attachment.v26',
       ),
+      codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
+        .codeMap,
     };
-    expect(previousQualified.userPrompt).toBe(raw.userPrompt);
+    expect(previousQualified.userPrompt).toBe(
+      JSON.stringify(
+        createContentAttachmentTableAnchorInput(plan, plan.units[0]).payload,
+      ),
+    );
     expect(raw.systemPrompt.startsWith(previousQualified.systemPrompt)).toBe(
       true,
     );
@@ -225,8 +237,14 @@ describe('immutable content excerpt selection', () => {
         plan.units[0],
         'content-attachment.v27',
       ),
+      codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
+        .codeMap,
     };
-    expect(previousRows.userPrompt).toBe(raw.userPrompt);
+    expect(previousRows.userPrompt).toBe(
+      JSON.stringify(
+        createContentAttachmentTableAnchorInput(plan, plan.units[0]).payload,
+      ),
+    );
     expect(raw.systemPrompt.startsWith(previousRows.systemPrompt)).toBe(true);
     expect(previousRows.systemPrompt).not.toContain(
       'INFERRED COLLECTIVES REQUIRE',
@@ -239,8 +257,14 @@ describe('immutable content excerpt selection', () => {
         plan.units[0],
         'content-attachment.v28',
       ),
+      codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
+        .codeMap,
     };
-    expect(previousCollective.userPrompt).toBe(raw.userPrompt);
+    expect(previousCollective.userPrompt).toBe(
+      JSON.stringify(
+        createContentAttachmentTableAnchorInput(plan, plan.units[0]).payload,
+      ),
+    );
     expect(raw.systemPrompt.startsWith(previousCollective.systemPrompt)).toBe(
       true,
     );
@@ -257,8 +281,14 @@ describe('immutable content excerpt selection', () => {
         plan.units[0],
         'content-attachment.v29',
       ),
+      codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
+        .codeMap,
     };
-    expect(previousLocation.userPrompt).toBe(raw.userPrompt);
+    expect(previousLocation.userPrompt).toBe(
+      JSON.stringify(
+        createContentAttachmentTableAnchorInput(plan, plan.units[0]).payload,
+      ),
+    );
     expect(raw.systemPrompt.startsWith(previousLocation.systemPrompt)).toBe(
       true,
     );
@@ -303,6 +333,8 @@ describe('immutable content excerpt selection', () => {
         plan.units[0],
         'content-attachment.v29',
       ),
+      codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
+        .codeMap,
     };
     expect(assembleContentAttachment(plan, [historical])).toEqual(result);
     const areaOnly = structuredClone(raw);
@@ -671,7 +703,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v30');
+    expect(raw.promptVersion).toBe('content-attachment.v31');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',

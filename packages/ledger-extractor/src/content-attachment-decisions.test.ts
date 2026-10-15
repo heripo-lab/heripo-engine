@@ -15,9 +15,9 @@ import {
   attachContentUnit,
   createContentAttachmentRequest,
 } from './content-attachment';
+import { createContentAttachmentContextInput } from './content-attachment-context';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
-import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
 vi.mock('@heripo/shared', () => ({
@@ -154,7 +154,7 @@ describe('mention-scoped registration decisions', () => {
     expect(plan).toEqual(before);
     const request = createContentAttachmentRequest(plan, unit);
     expect(JSON.parse(request.userPrompt)).toEqual(
-      createContentAttachmentTableAnchorInput(plan, unit).payload,
+      createContentAttachmentContextInput(plan, unit).payload,
     );
     const response = {
       assignments: [
@@ -195,7 +195,7 @@ describe('mention-scoped registration decisions', () => {
     expect(LLMCaller.call).toHaveBeenCalledTimes(1);
     expect(audit.response).toEqual(response);
     expect(audit.codeMap).toEqual(
-      createContentAttachmentTableAnchorInput(plan, unit).codeMap,
+      createContentAttachmentContextInput(plan, unit).codeMap,
     );
     const saved = structuredClone(audit);
     const result = assembleContentAttachment(plan, [audit]);
