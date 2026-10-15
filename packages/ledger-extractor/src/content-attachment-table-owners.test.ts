@@ -146,15 +146,13 @@ test('requires the original trench owner alongside an inventory feature despite 
     ...createContentAttachmentRequest(plan, unit),
     codeMap: compiled.codeMap,
     response: {
-      assignments: compiled.codeMap.excerpts
-        .slice(4)
-        .map((e) => ({
-          excerptRef: e.ref,
-          candidateRefs: [
-            Number(e.ref.slice(1)) < 9 ? 'R1' : e.ref === 'E12' ? 'R3' : 'R2',
-          ],
-          reason: 'Original inventory cell',
-        })),
+      assignments: compiled.codeMap.excerpts.slice(4).map((e) => ({
+        excerptRef: e.ref,
+        candidateRefs: [
+          Number(e.ref.slice(1)) < 9 ? 'R1' : e.ref === 'E12' ? 'R3' : 'R2',
+        ],
+        reason: 'Original inventory cell',
+      })),
       unresolved: [],
       ignored: compiled.codeMap.excerpts
         .slice(0, 4)
