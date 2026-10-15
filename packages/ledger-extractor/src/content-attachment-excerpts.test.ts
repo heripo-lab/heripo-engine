@@ -200,6 +200,24 @@ describe('immutable content excerpt selection', () => {
         { ...raw, systemPrompt: historical.systemPrompt },
       ]).issues[0].reason,
     ).toContain('Audit does not match');
+    const previousQualified = {
+      ...raw,
+      ...createContentAttachmentRequest(
+        plan,
+        plan.units[0],
+        'content-attachment.v26',
+      ),
+    };
+    expect(previousQualified.userPrompt).toBe(raw.userPrompt);
+    expect(raw.systemPrompt.startsWith(previousQualified.systemPrompt)).toBe(
+      true,
+    );
+    expect(previousQualified.systemPrompt).not.toContain(
+      'IDENTIFIER ANCHORS ESTABLISH IDENTITY',
+    );
+    expect(assembleContentAttachment(plan, [previousQualified])).toEqual(
+      result,
+    );
     expect([plan, raw]).toEqual(before);
   });
 
@@ -359,11 +377,17 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v22',
       'content-attachment.v23',
       'content-attachment.v24',
+      'content-attachment.v25',
+      'content-attachment.v26',
     ] as const) {
       const previousTableAudit = {
         ...raw,
         ...createContentAttachmentRequest(plan, unit, version),
-        codeMap: createContentAttachmentDecisionInput(plan, unit).codeMap,
+        codeMap:
+          version === 'content-attachment.v25' ||
+          version === 'content-attachment.v26'
+            ? createContentAttachmentTableAnchorInput(plan, unit).codeMap
+            : createContentAttachmentDecisionInput(plan, unit).codeMap,
       };
       expect(assembleContentAttachment(plan, [previousTableAudit])).toEqual(
         result,
@@ -550,7 +574,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v26');
+    expect(raw.promptVersion).toBe('content-attachment.v27');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
