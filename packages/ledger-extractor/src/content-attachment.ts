@@ -35,7 +35,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v47';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v48';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -480,11 +480,17 @@ const QUALIFIED_SUBJECT_SYSTEM_PROMPT_V46 =
 CURRENT CLAUSE PERIOD AND OTHER EXPLICIT QUALIFIERS OVERRIDE A BROADER PRIOR INVENTORY: Resolve the subjects of the current unchanged E and each clause using its own explicit period, investigation, location and type restrictions before inheriting a preceding collective. If a prior inventory includes pits from Period A and Period B, a subsequent description of 'Period A roads and pits' does not describe the Period B pits merely because both groups belong to that survey or share a chapter. Match every proposed member against the current qualifier using its original registry names, quotes and source context; keeping the preceding broad inventory in a reason is not evidence for ignoring a nearer restriction. A coordinated subject may share the stated period unless original grammar or an explicit separate description establishes a different scope. Retain genuinely co-described cross-period participants only when the original E independently identifies that relationship; do not erase them through a mechanical period filter. Preserve current-scope area co-description when independently supported, inclusive identifier ranges, genuine unresolved identities and original uncertainty wording. Before returning, recheck each newly added member of an inherited inventory against all current explicit qualifiers; same type or chapter alone cannot override them.
 ELLIPTICAL TABLE WORK SUBJECTS INHERIT VERIFIED BODY CONTEXT FOR THE SAME ACTION: A substantive diary/task cell can describe existing objects without repeating their names or individual numbers. Read its actual row, table title, investigation/date context, preceding original body and body-to-table link together. When the body establishes an identified bounded set and explicitly states that an action was performed on it, a table entry recording that SAME investigation action can inherit those confirmed participants unless original evidence changes or narrows the subject. For example, if the survey established Test Units A-C, the body says the units were backfilled after the survey, and its diary records 'Site backfilling', preserve that unchanged task E on the identified units A-C rather than excluding it solely because the cell has no individual identifiers. An adjacent pure table pointer stays ignored but can establish the body/table link. Distinguish the event-bearing task from generic headings, day counts, weather and unrelated administration. If one original cell combines a meeting with supported object work, retain the entire E for the work's confirmed objects; do not turn the meeting into an object property or rewrite/split the cell. Require source evidence linking the same action and investigation: do not inherit arbitrary nearby objects, previous-investigation subjects, or an unrelated set from registry availability. Retain genuine ambiguity as partial uncertainty and preserve confirmed participants. Before returning, compare every ignored substantive work cell against the supplied body action and its already identified source-defined participants. Keep all required E keys, range coverage, period restrictions, table ownership and existing exclusions; code never supplies semantic targets or repairs saved responses.`;
 
-const SYSTEM_PROMPT =
+const INVESTIGATION_IDENTITY_SYSTEM_PROMPT_V47 =
   QUALIFIED_SUBJECT_SYSTEM_PROMPT_V46 +
   `
 ESTABLISHED FEATURE GROUPS REMAIN IDENTIFIED SUBJECTS AFTER A LOCAL QUALIFIER: First distinguish a source-defined investigation inventory with established member records from an ungrounded list of object types. If the original body identifies a bounded inventory and supplied candidate names, quotes and investigation context establish its members, a later description of those features can retain the SAME unchanged E on the identified members without repeating individual numbers. Apply the current clause's period, location and investigation restrictions to narrow that established inventory; do not discard every qualifying member as a type summary. For example, when an inventory contains two independently identified chronological subsets, a follow-up explicitly describing the earlier subset retains its verified member records; it neither inherits the later subset nor discards both subsets for lacking repeated identifiers. Selecting the area does not replace these directly described feature subjects. Membership requires the original investigation and inventory link, not matching counts, types, period, chapter or registry availability alone. The restriction against guessing individual artifacts from type-level finds summaries still applies to artifact identity; it does not erase a separately established feature group. Preserve group records as registered, without inventing individual members, inferring attributes or rewriting qualified evidence. Recheck both assigned and ignored follow-ups for lost qualifying members before returning.
 INVESTIGATION-STAGE IDENTITY BOUNDS BOTH ASSIGNMENTS AND UNRESOLVED ALTERNATIVES: Resolve the current descriptive subject and its investigation stage from the original body blocks, headings and reading order before forming any candidate list. A later excavation account does not become an alternative identity for an object in an earlier trial-survey account merely because both are registered in the same report and share a name, period or project area. Require original evidence connecting those stage-specific descriptions, such as an explicit cross-reference, identified trench/location continuity or another clear same-object link. A next read-only block beginning a different investigation stage does not retroactively switch the current subject. For example, a report can describe the same feature category in multiple investigation stages; the shared category alone does not establish that two stage-specific accounts are interchangeable identities or competing alternatives. Do not claim that different stages necessarily describe different physical objects: allow cross-stage identification when original evidence establishes it, and keep genuine ambiguity among supported candidates. The same scope test applies to unresolved.candidateRefs as to confirmed candidateRefs; an uncertainty list is not permission to include every same-type record. Resolve each participant of a genuine relationship independently, preserving supported cross-stage relationships without treating their participants as interchangeable identities. Keep existing backfill/action context inheritance, inclusive ranges, all required E decisions and unchanged source/response preservation; code never chooses or repairs semantic targets.`;
+
+const SYSTEM_PROMPT =
+  INVESTIGATION_IDENTITY_SYSTEM_PROMPT_V47 +
+  `
+SET-LEVEL EVIDENCE ATTACHMENT DOES NOT RESOLVE RELATION-PARTICIPANT IDENTITY: Evaluate independently (a) which identified records a fixed original E describes as members of an established set and (b) which specific member or members participate in each relationship clause. Preserve the unchanged E on all source-supported set members when its collective account describes them. This evidence attachment does not merge the records, prove that observations are one physical object, or establish every clause's predicate for every member. A later relationship clause may still have an unresolved descriptive subject even though the same E clearly belongs on those records through its earlier collective clause. For example, 'The inspected features occur here, and the feature may adjoin an earlier enclosure.' can preserve the set account on its verified members while leaving the participating member's identity unresolved if original context identifies neither an individual nor the whole set as that relationship subject. Do not convert a singular or ambiguous relation subject into all members merely because they already receive the E. Conversely, do not invent uncertainty when original evidence clearly identifies the participant or explicitly relates the entire set. A purely collective inventory with established members needs no identity alternatives simply because it lacks repeated individual identifiers.
+USE THE SAME REQUIRED E DECISION FOR CONFIRMED SET EVIDENCE AND PARTIAL RELATION IDENTITY: In that mixed case return status assigned with the verified evidence targets, and preserve the relation-subject alternatives in that SAME decision's existing unresolved field. The assigned reason must explain the supported set/other description; the unresolved reason must identify the unresolved relationship role, distinguish it from confirmed membership and explain the missing identity evidence. Those unresolved candidateRefs may overlap assigned candidateRefs: they are confirmed recipients of the set evidence but unresolved alternatives for a different role in the same original E. Earlier instructions about 'uncertain targets only' or 'additional targets' do not require disjoint ref lists in this case. Do not erase role uncertainty merely because all plausible participants already have assigned evidence. Keep alternatives within the original investigation and supported local subject set, retaining excluded/nonregistered counterparts as discourse context without substituting an unrelated registered object. Preserve every original qualifier such as 'may' or 'possibility': preserving its evidence does not confirm the proposed relationship. Do not split, rewrite or complete E, return clause text, add fields, create relationship structures or repair saved responses. Before returning a collective-plus-relationship E with unresolved null, verify that the relationship subject is actually identified by original evidence rather than by the fact that its candidate received the collective excerpt. Retain existing source boundaries, backfill sharing, ranges and every required E key; code never supplies semantic assignments or unresolved alternatives.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -743,7 +749,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v44'
     | 'content-attachment.v45'
     | 'content-attachment.v46'
-    | 'content-attachment.v47' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v47'
+    | 'content-attachment.v48' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -871,7 +878,10 @@ export function createContentAttachmentRequest(
                                                                                               : promptVersion ===
                                                                                                   'content-attachment.v46'
                                                                                                 ? QUALIFIED_SUBJECT_SYSTEM_PROMPT_V46
-                                                                                                : SYSTEM_PROMPT,
+                                                                                                : promptVersion ===
+                                                                                                    'content-attachment.v47'
+                                                                                                  ? INVESTIGATION_IDENTITY_SYSTEM_PROMPT_V47
+                                                                                                  : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
@@ -887,7 +897,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v44' ||
         promptVersion === 'content-attachment.v45' ||
         promptVersion === 'content-attachment.v46' ||
-        promptVersion === 'content-attachment.v47'
+        promptVersion === 'content-attachment.v47' ||
+        promptVersion === 'content-attachment.v48'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -1043,6 +1054,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v44' &&
       audit.promptVersion !== 'content-attachment.v45' &&
       audit.promptVersion !== 'content-attachment.v46' &&
+      audit.promptVersion !== 'content-attachment.v47' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1088,7 +1100,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v44' ||
       audit.promptVersion === 'content-attachment.v45' ||
       audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47';
+      audit.promptVersion === 'content-attachment.v47' ||
+      audit.promptVersion === 'content-attachment.v48';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
@@ -1104,7 +1117,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v44' ||
       audit.promptVersion === 'content-attachment.v45' ||
       audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47'
+      audit.promptVersion === 'content-attachment.v47' ||
+      audit.promptVersion === 'content-attachment.v48'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1204,6 +1218,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v44' ||
       audit.promptVersion === 'content-attachment.v45' ||
       audit.promptVersion === 'content-attachment.v46' ||
+      audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
@@ -1211,6 +1226,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v44' ||
       audit.promptVersion === 'content-attachment.v45' ||
       audit.promptVersion === 'content-attachment.v46' ||
+      audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = createContentAttachmentResponseSchema(
@@ -1478,7 +1494,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v44' ||
           audit.promptVersion === 'content-attachment.v45' ||
           audit.promptVersion === 'content-attachment.v46' ||
-          audit.promptVersion === 'content-attachment.v47'
+          audit.promptVersion === 'content-attachment.v47' ||
+          audit.promptVersion === 'content-attachment.v48'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1588,7 +1605,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v44' ||
       audit.promptVersion === 'content-attachment.v45' ||
       audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47'
+      audit.promptVersion === 'content-attachment.v47' ||
+      audit.promptVersion === 'content-attachment.v48'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1607,13 +1625,15 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v44' ||
           audit.promptVersion === 'content-attachment.v45' ||
           audit.promptVersion === 'content-attachment.v46' ||
-          audit.promptVersion === 'content-attachment.v47',
+          audit.promptVersion === 'content-attachment.v47' ||
+          audit.promptVersion === 'content-attachment.v48',
       ))
         issue(reason);
     }
     if (
       audit.promptVersion === 'content-attachment.v45' ||
       audit.promptVersion === 'content-attachment.v46' ||
+      audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(

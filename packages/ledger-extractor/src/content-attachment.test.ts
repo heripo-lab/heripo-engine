@@ -1495,6 +1495,27 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV46Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v47 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v47',
+      ),
+    };
+    expect(out.userPrompt).toBe(v47.userPrompt);
+    expect(out.systemPrompt.startsWith(v47.systemPrompt)).toBe(true);
+    expect(v47.systemPrompt).not.toContain('SET-LEVEL EVIDENCE ATTACHMENT');
+    expect(out.systemPrompt).toContain('SET-LEVEL EVIDENCE ATTACHMENT');
+    expect(out.systemPrompt).toContain('PARTIAL RELATION IDENTITY');
+    expect(assembleContentAttachment(p, [v47])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV47Projection = structuredClone(v47);
+    alteredV47Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV47Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(

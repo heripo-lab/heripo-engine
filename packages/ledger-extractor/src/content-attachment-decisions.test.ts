@@ -263,6 +263,73 @@ describe('mention-scoped registration decisions', () => {
     ).toEqual([]);
   });
 
+  test('preserves set evidence and overlapping relation-identity alternatives on one original excerpt without repair', async () => {
+    const { plan, unit } = fixture();
+    delete plan.registrationDecisions;
+    for (const candidate of plan.registry) {
+      candidate.recordKind = 'feature';
+      candidate.mentions[0].sourceName = `Feature ${candidate.ref}`;
+    }
+    const text =
+      'The inspected features occur here, and the feature may adjoin an earlier enclosure.';
+    unit.sources[0].resource.data.text = text;
+    const wireResponse = {
+      decisions: {
+        E1: {
+          status: 'assigned',
+          candidateRefs: ['R1', 'R2'],
+          reason:
+            'The original set description applies to both registered members.',
+          unresolved: {
+            candidateRefs: ['R1', 'R2'],
+            reason:
+              'Which member may adjoin the earlier enclosure is not identified.',
+          },
+        },
+      },
+    };
+    vi.mocked(LLMCaller.call).mockResolvedValue({
+      output: wireResponse,
+      usage: {
+        component: 'test',
+        phase: 'test',
+        model: 'primary',
+        modelName: 'mock',
+        inputTokens: 1,
+        outputTokens: 1,
+        totalTokens: 2,
+      },
+      usedFallback: false,
+    });
+    const audit = await attachContentUnit(plan, unit, {
+      model: {} as LanguageModel,
+      maxRetries: 0,
+    });
+    const before = structuredClone({ plan, audit });
+    const result = assembleContentAttachment(plan, [audit]);
+    expect(result.issues).toEqual([]);
+    expect(result.completedUnitIds).toEqual([unit.unitId]);
+    expect(result.contents.map((c) => c.registryRef)).toEqual(['R1', 'R2']);
+    for (const content of result.contents) {
+      expect(content.excerpts[0].fragments).toEqual([text]);
+      expect(content.excerpts[0].occurrences[0].evidence).toEqual(
+        result.unresolved[0].evidence,
+      );
+    }
+    expect(result.unresolved[0]).toMatchObject({
+      candidateRefs: ['R1', 'R2'],
+      reason: wireResponse.decisions.E1.unresolved.reason,
+    });
+    expect(audit.rawResponse).toEqual(wireResponse);
+    expect(audit.response.unresolved[0].candidateRefs).toEqual(['R1', 'R2']);
+    expect({ plan, audit }).toEqual(before);
+    const historical = {
+      ...audit,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
+    };
+    expect(assembleContentAttachment(plan, [historical])).toEqual(result);
+  });
+
   test('rejects foreign, ambiguous, inexact or cross-sentence decisions before calling a model', async () => {
     const { plan, unit } = fixture();
     const mutate: Array<(p: ContentAttachmentPlan) => void> = [
