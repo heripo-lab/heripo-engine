@@ -24,7 +24,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v27';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v28';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -344,11 +344,17 @@ const QUALIFIED_SET_SYSTEM_PROMPT_V26 =
 QUALIFIED FOLLOW-UP DESCRIPTIONS OF AN ESTABLISHED SET: Once original evidence has identified an explicit bounded investigation set and its registry members, subsequent distribution, shape, state or interpretation sentences can describe that SAME set without repeating individual identifiers. Resolve omitted subjects and repeated category nouns against the nearest established set in reading order. Do not downgrade such a follow-up to an ungrounded generic category summary merely because it names no individual object. For example, 'Pits A-C were investigated. Most occur on the terrace. Their plans are mostly circular or square.' preserves each follow-up's unchanged E ref on the already identified A-C set. An intervening place reference does not by itself replace that subject set. This requires the original membership link; matching names, chapter, period or registry inventory alone still does not establish one. Respect genuine resets and explicitly narrowed subsets, and do not infer members of an unidentified subgroup or add other same-type candidates.
 PRESERVE QUANTIFIERS IN ORIGINAL EVIDENCE: Qualifiers such as 'most', 'generally', 'mostly', '대부분' and '대체로' remain part of the ENTIRE fixed E ref. Keeping that qualified set-level evidence on identified member records does not assert that every member has the positive property or that exceptions are individually known. Do not require the source to identify which members are exceptions merely to preserve the established set's qualified description. Do not turn 'most' into 'all', choose an unsupported exception subset, replace an individual table value with the aggregate description, or infer attributes/relations. Preserve potentially differing individual cell evidence as well. Before returning, compare ignored distribution/shape descriptions with the nearest assigned set-defining excerpt: a reason based solely on absent individual identifiers is insufficient when that antecedent and membership are already established. Keep original E/R selection, table-owner boundaries, genuine identity uncertainty, registered headings and type-summary exclusions; never repair source text, a saved response or semantic targets in code.`;
 
-const SYSTEM_PROMPT =
+const ROW_COMPLETENESS_SYSTEM_PROMPT_V27 =
   QUALIFIED_SET_SYSTEM_PROMPT_V26 +
   `
 IDENTIFIER ANCHORS ESTABLISH IDENTITY, NOT EXCERPT COVERAGE: A candidate's original number-cell anchor identifies that candidate and its row context. Its quotes/anchors are registration evidence, not an exhaustive list of the source cells to preserve. After identifying the owner, inspect every selectable nonblank data cell in that object's segment of the same original row, including shape, length, width, depth, other measurements and remarks. Assign each such unchanged E ref to the identified owner under the existing sharing rules even if that cell is not itself a candidate anchor, is only numeric, or does not repeat the identifier. Do not stop at selecting the number. For tables with parallel left/right object groups, use the original headers and column positions to keep each group's cells with its own owner; a shared A row does not make the other group's values this owner's properties. Keep generic headers ignored, preserve independent relation-remark sharing, and never manufacture an E ref for a blank cell.
 FINISH THE IDENTIFIED ROW SEGMENT BEFORE MOVING ON: For every owner selected through a number anchor, check its source row segment's full list of selectable E refs. A number-only response with that same object's shape/dimension refs absent from assignments, unresolved and ignored is incomplete, not a valid exclusion. Keep each cell as its own existing E selection; do not collapse an entire row into the number E ref or treat the number's reason as coverage of neighboring cells. Before returning, compare ALL selectable current.excerpts IDs with the union of the three response lists and revisit any missing IDs, including rows in the middle of the table. Clearly identified ordinary owner cells belong in assignments, not an invented uncertainty or generic exclusion. Retain the established-set follow-up and quantifier rules without replacing individual cell evidence. This is a model completeness obligation: code never fills missing cells, rewrites source/response text or chooses semantic targets for the model.`;
+
+const SYSTEM_PROMPT =
+  ROW_COMPLETENESS_SYSTEM_PROMPT_V27 +
+  `
+INFERRED COLLECTIVES REQUIRE THEIR OWN MEMBER IDENTITY EVIDENCE: Distinguish identifying the category directly interpreted by a sentence from identifying the individual registry members of that category. An inference that many structures repeatedly existed, based on overlapping traces or possible structural components, does not by itself identify those structures with the registered structures nearby. Previously numbered objects used as a location reference or reasoning premise do not automatically become the members of a newly inferred collective. Phrases such as 'these observations suggest' or '이러한 점으로 미루어 보아' can refer to the evidence for an inference rather than carry forward an identical object set. Shared location, period, chapter, type, or being the only registered matching objects does not establish that identity or exhaust the inferred group.
+For each proposed individual target, require original evidence linking THAT inferred group to THAT member, such as an explicit identification or unambiguous same-set reference. Do not share merely because the interpretation directly concerns that candidate's category. Preserve the unchanged uncertainty wording on independently identified targets under the existing rules; inference itself is not a reason to reject supported evidence. If no target is identified, apply the existing exclusion/uncertainty rules without inventing a collective record or listing every same-type candidate as unresolved. This boundary does not weaken qualified follow-ups of an already established SAME set: continue attaching those unchanged descriptions, including 'most' and similar qualifiers, without demanding repeated identifiers. Keep complete table-row assignment, original E/R IDs, source text, raw responses and all other selection rules unchanged; code never supplies or removes semantic targets.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -591,7 +597,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v24'
     | 'content-attachment.v25'
     | 'content-attachment.v26'
-    | 'content-attachment.v27' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v27'
+    | 'content-attachment.v28' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -659,11 +666,15 @@ export function createContentAttachmentRequest(
                                                       : promptVersion ===
                                                           'content-attachment.v26'
                                                         ? QUALIFIED_SET_SYSTEM_PROMPT_V26
-                                                        : SYSTEM_PROMPT,
+                                                        : promptVersion ===
+                                                            'content-attachment.v27'
+                                                          ? ROW_COMPLETENESS_SYSTEM_PROMPT_V27
+                                                          : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v25' ||
         promptVersion === 'content-attachment.v26' ||
-        promptVersion === 'content-attachment.v27'
+        promptVersion === 'content-attachment.v27' ||
+        promptVersion === 'content-attachment.v28'
         ? createContentAttachmentTableAnchorInput(plan, unit).payload
         : legacy
           ? {
@@ -786,6 +797,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v24' &&
       audit.promptVersion !== 'content-attachment.v25' &&
       audit.promptVersion !== 'content-attachment.v26' &&
+      audit.promptVersion !== 'content-attachment.v27' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -811,11 +823,13 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v24' ||
       audit.promptVersion === 'content-attachment.v25' ||
       audit.promptVersion === 'content-attachment.v26' ||
-      audit.promptVersion === 'content-attachment.v27';
+      audit.promptVersion === 'content-attachment.v27' ||
+      audit.promptVersion === 'content-attachment.v28';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v25' ||
       audit.promptVersion === 'content-attachment.v26' ||
-      audit.promptVersion === 'content-attachment.v27'
+      audit.promptVersion === 'content-attachment.v27' ||
+      audit.promptVersion === 'content-attachment.v28'
         ? createContentAttachmentTableAnchorInput(plan, unit)
         : selection
           ? audit.promptVersion === 'content-attachment.v13' ||
@@ -885,6 +899,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v24' ||
       audit.promptVersion === 'content-attachment.v25' ||
       audit.promptVersion === 'content-attachment.v26' ||
+      audit.promptVersion === 'content-attachment.v27' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1118,7 +1133,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v24' ||
           audit.promptVersion === 'content-attachment.v25' ||
           audit.promptVersion === 'content-attachment.v26' ||
-          audit.promptVersion === 'content-attachment.v27'
+          audit.promptVersion === 'content-attachment.v27' ||
+          audit.promptVersion === 'content-attachment.v28'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1208,7 +1224,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v24' ||
       audit.promptVersion === 'content-attachment.v25' ||
       audit.promptVersion === 'content-attachment.v26' ||
-      audit.promptVersion === 'content-attachment.v27'
+      audit.promptVersion === 'content-attachment.v27' ||
+      audit.promptVersion === 'content-attachment.v28'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
