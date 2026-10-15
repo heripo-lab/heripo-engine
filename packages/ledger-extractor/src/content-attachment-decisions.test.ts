@@ -15,7 +15,7 @@ import {
   attachContentUnit,
   createContentAttachmentRequest,
 } from './content-attachment';
-import { createContentAttachmentContextInput } from './content-attachment-context';
+import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { buildDocumentResourceIndex } from './document-resource-index';
@@ -154,7 +154,7 @@ describe('mention-scoped registration decisions', () => {
     expect(plan).toEqual(before);
     const request = createContentAttachmentRequest(plan, unit);
     expect(JSON.parse(request.userPrompt)).toEqual(
-      createContentAttachmentContextInput(plan, unit).payload,
+      createContentAttachmentBodyBlockInput(plan, unit).payload,
     );
     const response = {
       assignments: [
@@ -195,7 +195,7 @@ describe('mention-scoped registration decisions', () => {
     expect(LLMCaller.call).toHaveBeenCalledTimes(1);
     expect(audit.response).toEqual(response);
     expect(audit.codeMap).toEqual(
-      createContentAttachmentContextInput(plan, unit).codeMap,
+      createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     );
     const saved = structuredClone(audit);
     const result = assembleContentAttachment(plan, [audit]);
