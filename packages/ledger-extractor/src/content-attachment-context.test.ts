@@ -492,12 +492,12 @@ describe('original selectable body block input', () => {
     ).toEqual([]);
   });
 
-  test('replays v31 and v32 without block bindings and rejects forged or selected block references in v33', () => {
+  test('replays v31 and v32 without block bindings and replays v33 block bindings and rejects forged or selected block references', () => {
     const { plan, unit } = fixture();
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
     const request = createContentAttachmentRequest(plan, unit);
-    expect(request.promptVersion).toBe('content-attachment.v33');
+    expect(request.promptVersion).toBe('content-attachment.v34');
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',
@@ -554,6 +554,19 @@ describe('original selectable body block input', () => {
         ]),
       ).toEqual(result);
     }
+    const v33 = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v33',
+    );
+    expect(JSON.parse(v33.userPrompt)).toEqual(current.payload);
+    expect(v33.systemPrompt).not.toContain(
+      'PARTIAL FOLLOW-UPS PRESERVE QUALIFIED SET EVIDENCE',
+    );
+    expect(request.systemPrompt.startsWith(v33.systemPrompt)).toBe(true);
+    expect(assembleContentAttachment(plan, [{ ...raw, ...v33 }])).toEqual(
+      result,
+    );
     const forged = structuredClone(raw);
     (forged.codeMap as typeof current.codeMap).bodyBlocks[0].excerpts = ['E5'];
     expect(

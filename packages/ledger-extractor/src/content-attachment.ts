@@ -29,7 +29,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v33';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v34';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -389,11 +389,17 @@ const CONTEXT_ELIGIBILITY_SYSTEM_PROMPT_V32 =
 USING A PURE TABLE POINTER AS CONTEXT DOES NOT MAKE IT AN ASSIGNMENT: Decide excerpt eligibility separately from identifying its possible subjects. A sentence such as 'The pits’ shapes and dimensions are presented in Table 9.' only tells where information can be found; it states no shape, dimension, state or other substantive object fact. You may use its table reference with original headers, rows and candidate anchors to resolve a neighboring substantive sentence's bounded membership. Still put the pointer E ref itself in ignored, even when that membership is completely known. Neither supplying supporting rows nor establishing the exact set turns that pointer into a description of the set. This exclusion has priority over all-target sharing, established-inventory follow-ups and the v31 instruction to use body/table references as identity context. Preserve actual descriptions such as 'Pit J is circular and 1.5 m wide (Table 9).' under the existing rules. Before returning, recheck every assigned table-reference sentence whose reason merely says it introduces, guides or points to a table. Retain original E text and ID; never copy table values into it or repair the response in code.
 ALTERNATIVE CONSTRUCTION LAYERS ARE NOT AUTOMATICALLY AMBIGUOUS CANDIDATE IDENTITIES: Distinguish the identity of a literally named layer from uncertainty about which individual members were constructed in which layer. A preceding read-only block may say 'Most pits were cut into red clay', and the current fragment 'or dark clay (Layer V).' may identify a different, registered layer through its explicit designation and original candidate evidence. Preserve the current E ref on that independently identified layer and its directly described established feature set. Do not remove the identified layer or put both known layer candidates in unresolved merely because the source offers alternative substrates, uses 'most' or does not identify each member's substrate. Attaching unchanged qualified evidence does not assert that all members used the named layer or extract a property/relationship. A different layer named ONLY in read-only context is not automatically another target of the current fragment. Keep the source fragments separate without completing them. Use unresolved for genuinely indistinguishable candidate identities, conflicting definitions or missing identity evidence, including common soil names, not as a substitute for preserving a clear layer mention. Retain existing partial-uncertainty handling where real identity uncertainty remains, all current-table assignments, and exact E/R selection without source/response correction.`;
 
-const SYSTEM_PROMPT =
+const ORIGINAL_BODY_SYSTEM_PROMPT_V33 =
   CONTEXT_ELIGIBILITY_SYSTEM_PROMPT_V32 +
   `
 ORIGINAL SELECTABLE BODY BLOCKS: current.bodyBlocks follows bodyBlockColumns [ref, excerpts]. Each P ref groups the unchanged E refs from ONE original processed body block in original order. Different P refs remain different blocks even when their text or chapter matches. These bindings preserve source boundaries, not inferred semantic subjects. Read sentences in their original block context together with preceding/following blocks and read-only context. A block may introduce a new subject or describe several subjects; its boundary does not force every sentence onto one target or reset a continuing subject automatically. Only E refs are selectable; never return P refs, combine sentences, repeat block text, or repair fragments. Long source IDs and ranges stay in the code map.
 NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES: The registry limits output targets, not the objects that can be subjects in the source discourse. Track a clearly introduced previous-campaign, comparative or cited object even when it intentionally has no R ref. Subsequent repeated generic nouns or omitted subjects inherit that local referent until the original text changes it. Never substitute a matching registered object merely because that object is the chapter focus, was assigned in a neighboring sentence, has the same type/name, or is the only available candidate. For example, 'A road from an earlier excavation lies beyond the current road. Its width is 9 m. It was resurfaced twice. It may connect to the current road.' does not make the earlier road's width or use history properties of the registered current road. Put an excerpt describing only that out-of-scope object's dimensions, state or history in ignored with the scope reason; do not invent a missing-candidate uncertainty or register the object. Preserve unchanged excerpts directly describing the current object's own state or an explicit relationship with that other object, including stated spatial alignment or connection, under existing direct-description rules. A relation excerpt attached to the current object does not transfer neighboring descriptions of its counterpart to that object. Distinguish participants and predicates within mixed excerpts without splitting or rewriting them. An explicit return such as 'the road found in this investigation' can restore the current referent; compare later dimensions and original identity evidence as context without correcting source values or treating distinct objects' measurements as a single object's conflict. Before returning, review implicit-subject assignments following a newly introduced nonregistered object. Preserve every unrelated heading, sharing, bounded-set, layer uncertainty and table-owner decision. Code only preserves block/ID bindings and never decides, removes or repairs semantic targets.`;
+
+const SYSTEM_PROMPT =
+  ORIGINAL_BODY_SYSTEM_PROMPT_V33 +
+  `
+PARTIAL FOLLOW-UPS PRESERVE QUALIFIED SET EVIDENCE: Expressions such as 'some', 'a few', 'part of', '일부' and '몇몇' can qualify a subsequent description of an already identified bounded investigation set. If original discourse and candidate anchors establish that set and the follow-up refers to its members, preserve the ENTIRE unchanged E ref on those established members as collective evidence, even when the source does not identify which individual members satisfy the predicate. For example, 'Pits K-M were investigated. Some appear to be postholes.' preserves the second E ref on K-M with BOTH 'some' and 'appear' intact. This does not assert that every pit is a posthole, identify the positive subset, assign an individual function, or establish a parent/relationship to registered buildings. Do not put that E ref in ignored or invent candidate-identity uncertainty merely because the source supplies no numbers for the positive cases. A reason acknowledging a substantive follow-up about some members of the identified set is not itself a reason for exclusion.
+Keep the nearest established subject set and any explicitly identified narrower membership. Do not invent the members of an unidentified subgroup, but do not use that restriction to erase a qualified description of its identified parent set. An interpretation of some known pits as possible structural components still describes the known pit set; a later inference that many buildings once existed does not identify those buildings with nearby registered buildings. Apply the original-membership requirement separately to each subject category. Matching type, period, chapter, registry availability or a generic finds summary alone still does not establish membership. Retain previous-campaign exclusions, nonregistered subject continuity, location-reference boundaries, valid relation sharing, complete table-cell ownership, heading preservation and genuine identity uncertainty. Preserve quantifiers and author uncertainty without extracting positive properties for individuals, changing original values, repairing text/responses or choosing semantic targets in code.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -638,7 +644,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v30'
     | 'content-attachment.v31'
     | 'content-attachment.v32'
-    | 'content-attachment.v33' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v33'
+    | 'content-attachment.v34' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -724,9 +731,13 @@ export function createContentAttachmentRequest(
                                                                   : promptVersion ===
                                                                       'content-attachment.v32'
                                                                     ? CONTEXT_ELIGIBILITY_SYSTEM_PROMPT_V32
-                                                                    : SYSTEM_PROMPT,
+                                                                    : promptVersion ===
+                                                                        'content-attachment.v33'
+                                                                      ? ORIGINAL_BODY_SYSTEM_PROMPT_V33
+                                                                      : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
-      promptVersion === 'content-attachment.v33'
+      promptVersion === 'content-attachment.v33' ||
+        promptVersion === 'content-attachment.v34'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -868,6 +879,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v30' &&
       audit.promptVersion !== 'content-attachment.v31' &&
       audit.promptVersion !== 'content-attachment.v32' &&
+      audit.promptVersion !== 'content-attachment.v33' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -899,9 +911,11 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v30' ||
       audit.promptVersion === 'content-attachment.v31' ||
       audit.promptVersion === 'content-attachment.v32' ||
-      audit.promptVersion === 'content-attachment.v33';
+      audit.promptVersion === 'content-attachment.v33' ||
+      audit.promptVersion === 'content-attachment.v34';
     const selectionInput =
-      audit.promptVersion === 'content-attachment.v33'
+      audit.promptVersion === 'content-attachment.v33' ||
+      audit.promptVersion === 'content-attachment.v34'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -987,6 +1001,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v30' ||
       audit.promptVersion === 'content-attachment.v31' ||
       audit.promptVersion === 'content-attachment.v32' ||
+      audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1226,7 +1241,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v30' ||
           audit.promptVersion === 'content-attachment.v31' ||
           audit.promptVersion === 'content-attachment.v32' ||
-          audit.promptVersion === 'content-attachment.v33'
+          audit.promptVersion === 'content-attachment.v33' ||
+          audit.promptVersion === 'content-attachment.v34'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1322,7 +1338,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v30' ||
       audit.promptVersion === 'content-attachment.v31' ||
       audit.promptVersion === 'content-attachment.v32' ||
-      audit.promptVersion === 'content-attachment.v33'
+      audit.promptVersion === 'content-attachment.v33' ||
+      audit.promptVersion === 'content-attachment.v34'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
