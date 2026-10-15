@@ -209,6 +209,7 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v17',
       'content-attachment.v18',
       'content-attachment.v19',
+      'content-attachment.v20',
     ] as const) {
       const historical = {
         ...raw,
@@ -220,7 +221,8 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v16' ||
           version === 'content-attachment.v17' ||
           version === 'content-attachment.v18' ||
-          version === 'content-attachment.v19'
+          version === 'content-attachment.v19' ||
+          version === 'content-attachment.v20'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
@@ -289,6 +291,7 @@ describe('immutable content excerpt selection', () => {
     for (const version of [
       'content-attachment.v18',
       'content-attachment.v19',
+      'content-attachment.v20',
     ] as const) {
       const previousTableAudit = {
         ...raw,
@@ -478,7 +481,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v20');
+    expect(raw.promptVersion).toBe('content-attachment.v21');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
@@ -492,6 +495,7 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v17',
       'content-attachment.v18',
       'content-attachment.v19',
+      'content-attachment.v20',
     ] as const) {
       const historical = {
         ...raw,
@@ -503,7 +507,8 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v16' ||
           version === 'content-attachment.v17' ||
           version === 'content-attachment.v18' ||
-          version === 'content-attachment.v19'
+          version === 'content-attachment.v19' ||
+          version === 'content-attachment.v20'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
@@ -514,7 +519,8 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v16' ||
           version === 'content-attachment.v17' ||
           version === 'content-attachment.v18' ||
-          version === 'content-attachment.v19'
+          version === 'content-attachment.v19' ||
+          version === 'content-attachment.v20'
           ? raw.userPrompt
           : JSON.stringify(input.payload),
       );
