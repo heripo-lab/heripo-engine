@@ -1410,6 +1410,28 @@ describe('bounded content attachment', () => {
     const before = structuredClone(out);
     expect(assembleContentAttachment(p, [out]).issues).toEqual([]);
     expect(out).toEqual(before);
+    const v42 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v42',
+      ),
+    };
+    expect(out.userPrompt).toBe(v42.userPrompt);
+    expect(out.systemPrompt.startsWith(v42.systemPrompt)).toBe(true);
+    expect(v42.systemPrompt).not.toContain(
+      'CARRY PREVIOUS-INVESTIGATION SUBJECTS THROUGH CATEGORY FRAGMENTS AND THEIR NEXT CONTEXT',
+    );
+    expect(assembleContentAttachment(p, [v42])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredHistoricalProjection = structuredClone(v42);
+    alteredHistoricalProjection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredHistoricalProjection]).issues[0]
+        .reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(

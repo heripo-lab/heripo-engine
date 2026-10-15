@@ -34,7 +34,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v42';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v43';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -150,7 +150,7 @@ export interface ContentAttachmentAudit<Response = ContentAttachmentResponse> {
   systemPrompt: string;
   userPrompt: string;
   response: Response;
-  /** Exact model output in v42; response is its lossless legacy-format projection. */
+  /** Exact model output from v42 onward; response is its lossless legacy-format projection. */
   rawResponse?: ContentAttachmentRequiredResponse;
   usage: ExtendedTokenUsage;
   /** Optional for historical audits; new calls retain every provider attempt. */
@@ -450,11 +450,17 @@ const HEADING_COVERAGE_SYSTEM_PROMPT_V41 =
 EACH REGISTERED INDIVIDUAL ARTIFACT HEADING IS AN INDEPENDENT REQUIRED E SELECTION: When an original standalone heading's number, name and supplied chapter/body evidence identify a registered individual artifact, return an assignments item for that heading's OWN E ref and that artifact. Its following body excerpts are separate E refs; assigning any or all of them does not account for the heading. Do not absorb the heading into the next sentence, treat it only as a candidate-identification anchor, or silently leave it out because its information also appears in the registry or body. Preserve its entire unchanged original E, including drawing/photo references. This mandatory individual-heading treatment takes priority over generic type/collection title exclusion, redundancy arguments and table-header exclusion. If artifact identity genuinely remains ambiguous, explicitly account for that heading in unresolved rather than omitting it. A general type title without evidence identifying a registered individual remains excluded under the existing rules.
 FINAL FULL-E COVERAGE CHECK BEFORE RETURNING: Revisit EVERY supplied current.excerpts E ref in its original order, including standalone object headings between body blocks, sentences, measurements, boundary fragments and table cells. For each E, verify that its ref actually occurs in the assignments, unresolved or ignored arrays you are about to return; discussing it in a reason, selecting neighboring body E refs, or using it as identification context does not process that E. For any absent E, finish its evidence-based decision in the appropriate existing array before returning. Then separately check that each identified registered individual artifact heading has its own assignment, not merely that its body is assigned. Do not return an unaccounted E or replace a required heading assignment with generic exclusion. Keep supported multi-target sharing, genuine partial identity uncertainty, source-defined set boundaries and exclusions unchanged. Use only the existing schema and original E/R refs: add no coverage field, rewritten source text, combined excerpts or invented targets. This is a check of the response being generated, never permission to repair saved responses or supply semantic targets in code.`;
 
-const SYSTEM_PROMPT =
+const REQUIRED_DECISIONS_SYSTEM_PROMPT_V42 =
   HEADING_COVERAGE_SYSTEM_PROMPT_V41 +
   `
 REQUIRED PER-E OUTPUT CONTRACT (REPLACES EARLIER THREE-ARRAY SERIALIZATION ONLY): Return one root object {"decisions": {...}}. Its properties are EVERY supplied current.excerpts E ref, each exactly once as a required key in original order. For each E choose one decision: {"status":"assigned","candidateRefs":[...],"reason":"...","unresolved":null}; {"status":"unresolved","candidateRefs":[...],"reason":"..."}; or {"status":"ignored","reason":"..."}. If confirmed targets coexist with genuinely uncertain additional targets, use status assigned and set its unresolved field to {"candidateRefs":[...],"reason":"..."} instead of null. A purely unresolved missing identity may use an empty candidateRefs list as before. Assigned candidateRefs must be nonempty. An ignored E cannot carry assigned or unresolved targets. No decision may be null, empty, omitted or a reference to a neighboring E.
 All earlier references to assignments/unresolved/ignored arrays describe those SAME semantic categories, now expressed by each required E decision; do not return those arrays or repeat excerptRef inside a decision. This output contract changes serialization only. Preserve all existing evidence-based sharing, partial uncertainty, headings, exclusions, original row ownership and bounded-set rules. A substantive set description does not account for any individual table cell. After completing the body and headers, independently decide EVERY table-data E through the last current.excerpts ref. If identity is genuinely uncertain, explicitly choose unresolved with its reason; never choose ignored merely to fill a required key. Code preserves the raw decisions and projects them into the previous three categories without inventing, dropping or correcting targets. Return no rewritten source text or additional fields.`;
+
+const SYSTEM_PROMPT =
+  REQUIRED_DECISIONS_SYSTEM_PROMPT_V42 +
+  `
+CARRY PREVIOUS-INVESTIGATION SUBJECTS THROUGH CATEGORY FRAGMENTS AND THEIR NEXT CONTEXT: When the original discourse introduces a previous-investigation, comparative or cited subject, keep that subject for its following unfinished description until the source explicitly switches back. Read the supplied next read-only B block before interpreting a current E that ends inside a noun phrase, category label or inventory. For example, after an earlier excavation's domestic features are introduced, a fragment ending 'the domestic features include pit' followed by a read-only continuation 'dwellings and hearths ...' continues that earlier excavation's account; the word 'pit' does not identify the current registered pit set. Resolve the continued noun phrase and archaeological subject from both sides of the boundary without completing, merging or rewriting either original text. A page/block boundary, footnote/citation marker, repeated period label or restart of a generic category phrase is not an explicit subject reset.
+DO NOT JUMP BACK FROM AN EXCLUDED LOCAL SUBJECT TO AN EARLIER CURRENT INVENTORY: If preceding excerpts describe an intentionally nonregistered investigation or comparison and are ignored for that scope, review the adjacent boundary fragment together with them and its next B continuation. Do not attach that fragment to an earlier count-defined current set merely because the registry contains matching type names, numbering or period. The earlier current inventory remains available for its own discourse, but it does not override a subsequent explicit change to the local previous-investigation subject. Require original evidence explicitly returning to the current investigation, or a clause that directly describes an identified current participant or its relationship, before selecting current targets. Without that evidence, return the required E decision as ignored with its scope reason; required-key coverage permits a justified exclusion and never forces assignment or an invented missing-candidate uncertainty. Preserve genuine explicit returns and direct current-object relationship evidence under the existing rules. Keep every original E, all required decision keys, supported set sharing, table owners/counterparts, heading and pointer exclusions, and real identity uncertainties unchanged. B remains interpretation-only, not a selectable excerpt or replacement text; code never chooses semantic targets or repairs source/response text.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -708,7 +714,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v39'
     | 'content-attachment.v40'
     | 'content-attachment.v41'
-    | 'content-attachment.v42' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v42'
+    | 'content-attachment.v43' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -821,7 +828,10 @@ export function createContentAttachmentRequest(
                                                                                     : promptVersion ===
                                                                                         'content-attachment.v41'
                                                                                       ? HEADING_COVERAGE_SYSTEM_PROMPT_V41
-                                                                                      : SYSTEM_PROMPT,
+                                                                                      : promptVersion ===
+                                                                                          'content-attachment.v42'
+                                                                                        ? REQUIRED_DECISIONS_SYSTEM_PROMPT_V42
+                                                                                        : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
@@ -832,7 +842,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v39' ||
         promptVersion === 'content-attachment.v40' ||
         promptVersion === 'content-attachment.v41' ||
-        promptVersion === 'content-attachment.v42'
+        promptVersion === 'content-attachment.v42' ||
+        promptVersion === 'content-attachment.v43'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -983,6 +994,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v39' &&
       audit.promptVersion !== 'content-attachment.v40' &&
       audit.promptVersion !== 'content-attachment.v41' &&
+      audit.promptVersion !== 'content-attachment.v42' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1023,7 +1035,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
       audit.promptVersion === 'content-attachment.v41' ||
-      audit.promptVersion === 'content-attachment.v42';
+      audit.promptVersion === 'content-attachment.v42' ||
+      audit.promptVersion === 'content-attachment.v43';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
@@ -1034,7 +1047,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
       audit.promptVersion === 'content-attachment.v41' ||
-      audit.promptVersion === 'content-attachment.v42'
+      audit.promptVersion === 'content-attachment.v42' ||
+      audit.promptVersion === 'content-attachment.v43'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1129,8 +1143,12 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
       audit.promptVersion === 'content-attachment.v41' ||
+      audit.promptVersion === 'content-attachment.v42' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
-    if (audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION) {
+    if (
+      audit.promptVersion === 'content-attachment.v42' ||
+      audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
+    ) {
       const raw = createContentAttachmentResponseSchema(
         selectionInput!.codeMap.excerpts.map((e) => e.ref),
         plan.registry.map((r) => r.ref),
@@ -1391,7 +1409,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v39' ||
           audit.promptVersion === 'content-attachment.v40' ||
           audit.promptVersion === 'content-attachment.v41' ||
-          audit.promptVersion === 'content-attachment.v42'
+          audit.promptVersion === 'content-attachment.v42' ||
+          audit.promptVersion === 'content-attachment.v43'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1496,7 +1515,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
       audit.promptVersion === 'content-attachment.v41' ||
-      audit.promptVersion === 'content-attachment.v42'
+      audit.promptVersion === 'content-attachment.v42' ||
+      audit.promptVersion === 'content-attachment.v43'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1510,7 +1530,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v39' ||
           audit.promptVersion === 'content-attachment.v40' ||
           audit.promptVersion === 'content-attachment.v41' ||
-          audit.promptVersion === 'content-attachment.v42',
+          audit.promptVersion === 'content-attachment.v42' ||
+          audit.promptVersion === 'content-attachment.v43',
       ))
         issue(reason);
     }
