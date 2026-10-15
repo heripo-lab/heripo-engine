@@ -1474,6 +1474,27 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV45Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v46 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v46',
+      ),
+    };
+    expect(out.userPrompt).toBe(v46.userPrompt);
+    expect(out.systemPrompt.startsWith(v46.systemPrompt)).toBe(true);
+    expect(v46.systemPrompt).not.toContain('ESTABLISHED FEATURE GROUPS REMAIN');
+    expect(out.systemPrompt).toContain('ESTABLISHED FEATURE GROUPS REMAIN');
+    expect(out.systemPrompt).toContain('INVESTIGATION-STAGE IDENTITY BOUNDS');
+    expect(assembleContentAttachment(p, [v46])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV46Projection = structuredClone(v46);
+    alteredV46Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV46Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(
