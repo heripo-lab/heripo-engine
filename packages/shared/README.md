@@ -54,3 +54,9 @@ pnpm --filter @heripo/shared test:coverage
 ```
 
 [Project README](../../README.md) · [License](../../LICENSE)
+
+## Provider Attempt Audits
+
+`createAuditedModel(model, onAttempt?)` returns `{ model, attempts }`. Pass that model to `LLMCaller` to capture each non-streaming provider `doGenerate` invocation before structured-output parsing. Schema retries and SDK transport retries remain separate attempt records. Records retain the SDK's original request body, complete provider response body, content, usage, unified/raw finish reason, API status, incomplete details and response ID when available. Provider exceptions retain their original response body and error metadata before rethrowing. No prompt, output, limit, temperature or retry policy is changed.
+
+Bodies are preserved as returned by the provider SDK, without reconstructing HTTP bytes; unavailable metadata is null. Authorization and response headers are not copied. `onAttempt` can persist records immediately, including when all structured attempts eventually fail. Callback persistence errors propagate. This opt-in helper requires a model instance and observes generation calls, not streaming. Existing `LLMCaller` result and final-attempt usage contracts are unchanged; per-attempt usage is available for separate audit/accounting.

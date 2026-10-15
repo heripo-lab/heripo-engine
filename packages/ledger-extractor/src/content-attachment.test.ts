@@ -9,7 +9,7 @@ import type {
 } from './content-attachment';
 import type { ContentRegistrationDecision } from './content-attachment-decisions';
 
-import { LLMCaller } from '@heripo/shared';
+import { LLMCaller, createAuditedModel } from '@heripo/shared';
 import { describe, expect, test, vi } from 'vitest';
 
 import { prepareCandidateDiscovery } from './candidate-discovery';
@@ -22,7 +22,10 @@ import {
 import { createContentAttachmentInput } from './content-attachment-input';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
+vi.mock('@heripo/shared', () => ({
+  LLMCaller: { call: vi.fn() },
+  createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
+}));
 const usage = {
   component: 'test',
   phase: 'test',
@@ -1360,10 +1363,38 @@ describe('bounded content attachment', () => {
       usage,
       usedFallback: false,
     });
-    const out = await attachContentUnit(p, p.units[0], {
-      model: {} as LanguageModel,
-      maxRetries: 0,
+    const model = {} as LanguageModel;
+    const onAttempt = vi.fn();
+    const attempts = [
+      {
+        sequence: 1,
+        modelId: 'mock',
+        provider: 'openai.responses',
+        startedAt: 'start',
+        completedAt: 'end',
+        outcome: 'returned' as const,
+        finishReason: { unified: 'stop' },
+        apiStatus: 'completed',
+        incompleteDetails: null,
+        responseId: 'resp-original',
+        requestBody: { input: 'original' },
+        responseBody: { id: 'resp-original', status: 'completed' },
+        content: [],
+        usage: null,
+        error: null,
+      },
+    ];
+    vi.mocked(createAuditedModel).mockReturnValueOnce({
+      model: model as Exclude<LanguageModel, string>,
+      attempts,
     });
+    const out = await attachContentUnit(p, p.units[0], {
+      model,
+      maxRetries: 0,
+      onAttempt,
+    });
+    expect(createAuditedModel).toHaveBeenCalledWith(model, onAttempt);
+    expect(out.callAttempts).toBe(attempts);
     expect(LLMCaller.call).toHaveBeenCalledTimes(1);
     expect(out.response).toEqual(response);
     const call = vi.mocked(LLMCaller.call).mock.calls[0][0];
