@@ -1453,6 +1453,27 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV43Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v45 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v45',
+      ),
+    };
+    expect(out.userPrompt).toBe(v45.userPrompt);
+    expect(out.systemPrompt.startsWith(v45.systemPrompt)).toBe(true);
+    expect(v45.systemPrompt).not.toContain('CURRENT CLAUSE PERIOD');
+    expect(out.systemPrompt).toContain('CURRENT CLAUSE PERIOD');
+    expect(out.systemPrompt).toContain('ELLIPTICAL TABLE WORK SUBJECTS');
+    expect(assembleContentAttachment(p, [v45])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV45Projection = structuredClone(v45);
+    alteredV45Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV45Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(

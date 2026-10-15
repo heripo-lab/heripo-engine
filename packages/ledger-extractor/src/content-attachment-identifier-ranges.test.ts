@@ -318,6 +318,16 @@ test('rejects missing named range members in current assembly while retaining ex
   );
   expect(historical.userPrompt).toBe(audit.userPrompt);
   expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
+  const v45 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v45'),
+  };
+  expect(audit.systemPrompt.startsWith(v45.systemPrompt)).toBe(true);
+  expect(v45.userPrompt).toBe(audit.userPrompt);
+  expect(assembleContentAttachment(plan, [v45])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v45.systemPrompt).not.toContain('CURRENT CLAUSE PERIOD');
   const forged = structuredClone(historical);
   forged.response.assignments[0].reason = 'Changed';
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
