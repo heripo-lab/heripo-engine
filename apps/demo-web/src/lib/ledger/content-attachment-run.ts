@@ -12,8 +12,8 @@ import {
   assembleContentAttachment,
   attachContentUnit,
   buildDocumentResourceIndex,
-  createContentAttachmentDecisionInput,
   createContentAttachmentRequest,
+  createContentAttachmentTableAnchorInput,
   prepareContentAttachment,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
@@ -174,7 +174,7 @@ export async function prepareContentAttachmentRun(
     writeFileSync(
       join(dir, 'first-unit-code-map.json'),
       JSON.stringify(
-        createContentAttachmentDecisionInput(plan, firstUnit).codeMap,
+        createContentAttachmentTableAnchorInput(plan, firstUnit).codeMap,
         null,
         2,
       ),
@@ -228,7 +228,7 @@ export function startFirstContentAttachment(
   if (
     JSON.stringify(read(join(dir, 'first-unit-code-map.json'))) !==
     JSON.stringify(
-      createContentAttachmentDecisionInput(plan, plan.units[0]).codeMap,
+      createContentAttachmentTableAnchorInput(plan, plan.units[0]).codeMap,
     )
   )
     throw new Error('First-unit code map changed');
