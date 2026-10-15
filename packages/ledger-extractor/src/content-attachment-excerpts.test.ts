@@ -15,6 +15,7 @@ import {
 } from './content-attachment';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
+import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
 const s6 = [
@@ -133,7 +134,8 @@ function audit(
   return {
     unitId: plan.units[0].unitId,
     ...createContentAttachmentRequest(plan, plan.units[0]),
-    codeMap: createContentAttachmentDecisionInput(plan, plan.units[0]).codeMap,
+    codeMap: createContentAttachmentTableAnchorInput(plan, plan.units[0])
+      .codeMap,
     response,
     usage: {
       component: 'test',
@@ -213,6 +215,7 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v21',
       'content-attachment.v22',
       'content-attachment.v23',
+      'content-attachment.v24',
     ] as const) {
       const historical = {
         ...raw,
@@ -228,7 +231,8 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v20' ||
           version === 'content-attachment.v21' ||
           version === 'content-attachment.v22' ||
-          version === 'content-attachment.v23'
+          version === 'content-attachment.v23' ||
+          version === 'content-attachment.v24'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
@@ -301,10 +305,12 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v21',
       'content-attachment.v22',
       'content-attachment.v23',
+      'content-attachment.v24',
     ] as const) {
       const previousTableAudit = {
         ...raw,
         ...createContentAttachmentRequest(plan, unit, version),
+        codeMap: createContentAttachmentDecisionInput(plan, unit).codeMap,
       };
       expect(assembleContentAttachment(plan, [previousTableAudit])).toEqual(
         result,
@@ -317,6 +323,7 @@ describe('immutable content excerpt selection', () => {
     const historical = {
       ...raw,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v17'),
+      codeMap: createContentAttachmentDecisionInput(plan, unit).codeMap,
     };
     expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
     const ambiguousHeader = structuredClone(valid);
@@ -490,7 +497,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v24');
+    expect(raw.promptVersion).toBe('content-attachment.v25');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
@@ -508,6 +515,7 @@ describe('immutable content excerpt selection', () => {
       'content-attachment.v21',
       'content-attachment.v22',
       'content-attachment.v23',
+      'content-attachment.v24',
     ] as const) {
       const historical = {
         ...raw,
@@ -523,7 +531,8 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v20' ||
           version === 'content-attachment.v21' ||
           version === 'content-attachment.v22' ||
-          version === 'content-attachment.v23'
+          version === 'content-attachment.v23' ||
+          version === 'content-attachment.v24'
             ? createContentAttachmentDecisionInput(plan, unit).codeMap
             : createContentAttachmentSelectionInput(plan, unit).codeMap,
       };
@@ -538,8 +547,11 @@ describe('immutable content excerpt selection', () => {
           version === 'content-attachment.v20' ||
           version === 'content-attachment.v21' ||
           version === 'content-attachment.v22' ||
-          version === 'content-attachment.v23'
-          ? raw.userPrompt
+          version === 'content-attachment.v23' ||
+          version === 'content-attachment.v24'
+          ? JSON.stringify(
+              createContentAttachmentDecisionInput(plan, unit).payload,
+            )
           : JSON.stringify(input.payload),
       );
       expect(raw.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);

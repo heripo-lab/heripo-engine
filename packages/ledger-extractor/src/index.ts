@@ -89,3 +89,5 @@ export { createContentAttachmentInput } from './content-attachment-input';
 export { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 export { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 export type { ContentRegistrationDecision } from './content-attachment-decisions';
+
+export { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';

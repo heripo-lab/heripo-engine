@@ -21,9 +21,10 @@ import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentInput } from './content-attachment-input';
+import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v24';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v25';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -144,7 +145,8 @@ export interface ContentAttachmentAudit<Response = ContentAttachmentResponse> {
   codeMap?:
     | ReturnType<typeof createContentAttachmentInput>['codeMap']
     | ReturnType<typeof createContentAttachmentSelectionInput>['codeMap']
-    | ReturnType<typeof createContentAttachmentDecisionInput>['codeMap'];
+    | ReturnType<typeof createContentAttachmentDecisionInput>['codeMap']
+    | ReturnType<typeof createContentAttachmentTableAnchorInput>['codeMap'];
 }
 export interface AttachedExcerpt {
   kind: 'body' | 'table_item';
@@ -325,11 +327,16 @@ const TABLE_NAVIGATION_SYSTEM_PROMPT_V23 =
 PURE TABLE-NAVIGATION EXCERPTS ARE EXCLUDED: Before selecting candidate targets, distinguish a substantive object description from a body sentence that ONLY directs the reader to a table. Put a pure table-navigation E ref in ignored when it states no substantive fact about an object's identity, state, property, context, relationship or archaeological interpretation. For example, 'The feature inventory is provided in Table 4.' is navigation only. Identifying the table's rows or the candidates covered by that table does not make this pointer a description of those objects; do not assign it to the table members or invent unresolved targets for it. This exclusion takes priority over all-target coverage and collective/member sharing for that pure pointer ONLY.
 A table reference does not make a substantive sentence navigation-only. For example, 'Pit A is circular and 2 m wide (Table 4).' remains assigned to its identified subject. If the SAME fixed E ref contains both an actual object description and a table reference, preserve the ENTIRE unchanged E ref, including the reference, with its directly described identified candidates under existing sharing/uncertainty rules. Never remove the reference, split the fixed excerpt or replace its text with table data. Keep substantive table-cell assignments, relation-remark sharing, generic-header/category exclusion and registered-object heading preservation unchanged; an identified object's own heading is identity evidence, not a pure table-navigation sentence. Account for the ignored E ref with a reason explaining its lack of substantive object description. Return only the existing ID-selection schema without source/response repair or deterministic target reassignment.`;
 
-const SYSTEM_PROMPT =
+const LOCAL_NAVIGATION_SYSTEM_PROMPT_V24 =
   TABLE_NAVIGATION_SYSTEM_PROMPT_V23 +
   `
 TABLE-NAVIGATION EXCLUSION HAS LOCAL SCOPE ONLY: Apply the navigation-only exclusion to an excerpt whose own content merely points to a table. Do not use it as a broader reason to discard substantive investigation counts, distributions, spatial states or relations. A factual inventory of investigated features and its following distribution account are substantive evidence, not table navigation. Resolve their bounded membership from the full supplied investigation scope, individual chapter accounts and original tables. An explicit investigation inventory can establish that set when those original accounts link its members to the same investigation and inventory; carry that set into subsequent implicit subjects under existing rules. Do not require every individual name/number to recur in each sentence, or expand an ungrounded type summary to all same-type registry entries.
 RETAIN IDENTIFIED RELATION COUNTERPARTS: Excluding a pure table pointer does not change relation sharing. An identified enclosure or ditch is directly described by statements that buildings lie inside or outside it, or that part of the ditch is destroyed. Resolve shortened counterpart terms from the supplied original body, chapter, location and table context before claiming no corresponding registry candidate exists. Keep the same unchanged E ref on the row owner/identified buildings and that identified counterpart. A name alone remains insufficient; preserve genuine identity uncertainty. Do not propagate ordinary shape/dimension cells to the counterpart. Before returning, inspect ignored substantive accounts and relational excerpts separately from pure pointers. Preserve all existing heading, bounded-set, layer-identity, cell-owner and header rules; return only original E/R selections without source/response repair or deterministic reassignment.`;
+
+const SYSTEM_PROMPT =
+  LOCAL_NAVIGATION_SYSTEM_PROMPT_V24 +
+  `
+ORIGINAL CANDIDATE TABLE ANCHORS: candidateTableRows follows candidateTableRowColumns [ref, table, row, excerpts]; each A ref identifies an original row in current.tables, with its selectable E refs as row context. Read that table's original headers, spans and number/name cells to identify the row's trench or other context. candidateTableAnchors follows candidateTableAnchorColumns [candidate, row, column, excerpt]; it links an existing R ref's original registration evidence to that row/column and E ref. These are exact source bindings made by code, not inferred parents, relations or new assignments. When candidate names/quotes repeat, use their distinct anchors instead of candidate order, R numbering or neighboring list entries. Preserve distinct candidates when their original anchors differ. A candidate with no anchor in the current table is still available for body and other directly supported matching; absence is not ineligibility. Anchors identify original mentions, not a restriction to assigning only those E refs: continue attaching other clearly relevant original excerpts under all existing sharing and uncertainty rules. Reasons must follow original row context. Keep the ID-only response schema, source text and saved responses unchanged; code does not choose or repair semantic targets.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -569,7 +576,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v21'
     | 'content-attachment.v22'
     | 'content-attachment.v23'
-    | 'content-attachment.v24' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v24'
+    | 'content-attachment.v25' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -628,36 +636,41 @@ export function createContentAttachmentRequest(
                                                 : promptVersion ===
                                                     'content-attachment.v23'
                                                   ? TABLE_NAVIGATION_SYSTEM_PROMPT_V23
-                                                  : SYSTEM_PROMPT,
+                                                  : promptVersion ===
+                                                      'content-attachment.v24'
+                                                    ? LOCAL_NAVIGATION_SYSTEM_PROMPT_V24
+                                                    : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
-      legacy
-        ? {
-            inputSha256: plan.inputSha256,
-            candidateSnapshotId: plan.candidateSnapshotId,
-            registrySha256: plan.registrySha256,
-            registry: plan.registry,
-            registryUncertainties: plan.registryUncertainties,
-            unit,
-          }
-        : promptVersion === 'content-attachment.v13' ||
-            promptVersion === 'content-attachment.v14' ||
-            promptVersion === 'content-attachment.v15' ||
-            promptVersion === 'content-attachment.v16' ||
-            promptVersion === 'content-attachment.v17' ||
-            promptVersion === 'content-attachment.v18' ||
-            promptVersion === 'content-attachment.v19' ||
-            promptVersion === 'content-attachment.v20' ||
-            promptVersion === 'content-attachment.v21' ||
-            promptVersion === 'content-attachment.v22' ||
-            promptVersion === 'content-attachment.v23' ||
-            promptVersion === 'content-attachment.v24'
-          ? createContentAttachmentDecisionInput(plan, unit).payload
-          : promptVersion === 'content-attachment.v9' ||
-              promptVersion === 'content-attachment.v10' ||
-              promptVersion === 'content-attachment.v11' ||
-              promptVersion === 'content-attachment.v12'
-            ? createContentAttachmentSelectionInput(plan, unit).payload
-            : createContentAttachmentInput(plan, unit).payload,
+      promptVersion === 'content-attachment.v25'
+        ? createContentAttachmentTableAnchorInput(plan, unit).payload
+        : legacy
+          ? {
+              inputSha256: plan.inputSha256,
+              candidateSnapshotId: plan.candidateSnapshotId,
+              registrySha256: plan.registrySha256,
+              registry: plan.registry,
+              registryUncertainties: plan.registryUncertainties,
+              unit,
+            }
+          : promptVersion === 'content-attachment.v13' ||
+              promptVersion === 'content-attachment.v14' ||
+              promptVersion === 'content-attachment.v15' ||
+              promptVersion === 'content-attachment.v16' ||
+              promptVersion === 'content-attachment.v17' ||
+              promptVersion === 'content-attachment.v18' ||
+              promptVersion === 'content-attachment.v19' ||
+              promptVersion === 'content-attachment.v20' ||
+              promptVersion === 'content-attachment.v21' ||
+              promptVersion === 'content-attachment.v22' ||
+              promptVersion === 'content-attachment.v23' ||
+              promptVersion === 'content-attachment.v24'
+            ? createContentAttachmentDecisionInput(plan, unit).payload
+            : promptVersion === 'content-attachment.v9' ||
+                promptVersion === 'content-attachment.v10' ||
+                promptVersion === 'content-attachment.v11' ||
+                promptVersion === 'content-attachment.v12'
+              ? createContentAttachmentSelectionInput(plan, unit).payload
+              : createContentAttachmentInput(plan, unit).payload,
     ),
   };
 }
@@ -671,7 +684,7 @@ export async function attachContentUnit(
   },
 ): Promise<ContentAttachmentSelectionAudit> {
   if (!unit.sources.length) throw new Error('No selectable attachment sources');
-  const input = createContentAttachmentDecisionInput(plan, unit);
+  const input = createContentAttachmentTableAnchorInput(plan, unit);
   const ids = input.codeMap.excerpts.map((e) => e.ref);
   if (!ids.length) throw new Error('No selectable attachment sources');
   const request = createContentAttachmentRequest(plan, unit);
@@ -748,6 +761,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v21' &&
       audit.promptVersion !== 'content-attachment.v22' &&
       audit.promptVersion !== 'content-attachment.v23' &&
+      audit.promptVersion !== 'content-attachment.v24' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -770,23 +784,27 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v21' ||
       audit.promptVersion === 'content-attachment.v22' ||
       audit.promptVersion === 'content-attachment.v23' ||
-      audit.promptVersion === 'content-attachment.v24';
-    const selectionInput = selection
-      ? audit.promptVersion === 'content-attachment.v13' ||
-        audit.promptVersion === 'content-attachment.v14' ||
-        audit.promptVersion === 'content-attachment.v15' ||
-        audit.promptVersion === 'content-attachment.v16' ||
-        audit.promptVersion === 'content-attachment.v17' ||
-        audit.promptVersion === 'content-attachment.v18' ||
-        audit.promptVersion === 'content-attachment.v19' ||
-        audit.promptVersion === 'content-attachment.v20' ||
-        audit.promptVersion === 'content-attachment.v21' ||
-        audit.promptVersion === 'content-attachment.v22' ||
-        audit.promptVersion === 'content-attachment.v23' ||
-        audit.promptVersion === 'content-attachment.v24'
-        ? createContentAttachmentDecisionInput(plan, unit)
-        : createContentAttachmentSelectionInput(plan, unit)
-      : null;
+      audit.promptVersion === 'content-attachment.v24' ||
+      audit.promptVersion === 'content-attachment.v25';
+    const selectionInput =
+      audit.promptVersion === 'content-attachment.v25'
+        ? createContentAttachmentTableAnchorInput(plan, unit)
+        : selection
+          ? audit.promptVersion === 'content-attachment.v13' ||
+            audit.promptVersion === 'content-attachment.v14' ||
+            audit.promptVersion === 'content-attachment.v15' ||
+            audit.promptVersion === 'content-attachment.v16' ||
+            audit.promptVersion === 'content-attachment.v17' ||
+            audit.promptVersion === 'content-attachment.v18' ||
+            audit.promptVersion === 'content-attachment.v19' ||
+            audit.promptVersion === 'content-attachment.v20' ||
+            audit.promptVersion === 'content-attachment.v21' ||
+            audit.promptVersion === 'content-attachment.v22' ||
+            audit.promptVersion === 'content-attachment.v23' ||
+            audit.promptVersion === 'content-attachment.v24'
+            ? createContentAttachmentDecisionInput(plan, unit)
+            : createContentAttachmentSelectionInput(plan, unit)
+          : null;
     if (
       !legacy &&
       JSON.stringify(audit.codeMap) !==
@@ -836,6 +854,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v21' ||
       audit.promptVersion === 'content-attachment.v22' ||
       audit.promptVersion === 'content-attachment.v23' ||
+      audit.promptVersion === 'content-attachment.v24' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1066,7 +1085,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v21' ||
           audit.promptVersion === 'content-attachment.v22' ||
           audit.promptVersion === 'content-attachment.v23' ||
-          audit.promptVersion === 'content-attachment.v24'
+          audit.promptVersion === 'content-attachment.v24' ||
+          audit.promptVersion === 'content-attachment.v25'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1153,7 +1173,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v21' ||
       audit.promptVersion === 'content-attachment.v22' ||
       audit.promptVersion === 'content-attachment.v23' ||
-      audit.promptVersion === 'content-attachment.v24'
+      audit.promptVersion === 'content-attachment.v24' ||
+      audit.promptVersion === 'content-attachment.v25'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
