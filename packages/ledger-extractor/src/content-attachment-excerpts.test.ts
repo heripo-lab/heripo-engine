@@ -150,6 +150,59 @@ function audit(
 }
 
 describe('immutable content excerpt selection', () => {
+  test('preserves qualified set evidence on selected members and replays v25 without changing its input or repairing responses', () => {
+    const plan = fixture([
+      'Pits A and B were investigated. Most are circular or square.',
+    ]);
+    plan.registry = plan.registry.slice(0, 2);
+    for (const [i, record] of plan.registry.entries()) {
+      record.recordKind = 'feature';
+      record.mentions[0].sourceName = 'Pit';
+      record.mentions[0].sourceIdentifier = ['A', 'B'][i];
+    }
+    const raw = audit(plan, {
+      assignments: ['E1', 'E2'].map((excerptRef) => ({
+        excerptRef,
+        candidateRefs: ['R1', 'R2'],
+        reason: 'Qualified description of the established set',
+      })),
+      unresolved: [],
+      ignored: [],
+    });
+    const before = structuredClone([plan, raw]);
+    const result = assembleContentAttachment(plan, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(
+      result.contents.map((c) => c.excerpts.map((e) => e.fragments)),
+    ).toEqual([
+      [['Pits A and B were investigated.'], ['Most are circular or square.']],
+      [['Pits A and B were investigated.'], ['Most are circular or square.']],
+    ]);
+    const historical = {
+      ...raw,
+      ...createContentAttachmentRequest(
+        plan,
+        plan.units[0],
+        'content-attachment.v25',
+      ),
+    };
+    expect(historical.userPrompt).toBe(raw.userPrompt);
+    expect(raw.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
+    expect(historical.systemPrompt).not.toContain(
+      'QUALIFIED FOLLOW-UP DESCRIPTIONS',
+    );
+    expect(raw.systemPrompt).toContain(
+      'PRESERVE QUANTIFIERS IN ORIGINAL EVIDENCE',
+    );
+    expect(assembleContentAttachment(plan, [historical])).toEqual(result);
+    expect(
+      assembleContentAttachment(plan, [
+        { ...raw, systemPrompt: historical.systemPrompt },
+      ]).issues[0].reason,
+    ).toContain('Audit does not match');
+    expect([plan, raw]).toEqual(before);
+  });
+
   test('reports ignored literal artifact headings in their chapter without repairing responses or rejecting other text and ambiguous identities', () => {
     const plan = fixture(
       [
@@ -497,7 +550,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v25');
+    expect(raw.promptVersion).toBe('content-attachment.v26');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',

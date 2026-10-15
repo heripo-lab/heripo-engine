@@ -24,7 +24,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v25';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v26';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -333,10 +333,16 @@ const LOCAL_NAVIGATION_SYSTEM_PROMPT_V24 =
 TABLE-NAVIGATION EXCLUSION HAS LOCAL SCOPE ONLY: Apply the navigation-only exclusion to an excerpt whose own content merely points to a table. Do not use it as a broader reason to discard substantive investigation counts, distributions, spatial states or relations. A factual inventory of investigated features and its following distribution account are substantive evidence, not table navigation. Resolve their bounded membership from the full supplied investigation scope, individual chapter accounts and original tables. An explicit investigation inventory can establish that set when those original accounts link its members to the same investigation and inventory; carry that set into subsequent implicit subjects under existing rules. Do not require every individual name/number to recur in each sentence, or expand an ungrounded type summary to all same-type registry entries.
 RETAIN IDENTIFIED RELATION COUNTERPARTS: Excluding a pure table pointer does not change relation sharing. An identified enclosure or ditch is directly described by statements that buildings lie inside or outside it, or that part of the ditch is destroyed. Resolve shortened counterpart terms from the supplied original body, chapter, location and table context before claiming no corresponding registry candidate exists. Keep the same unchanged E ref on the row owner/identified buildings and that identified counterpart. A name alone remains insufficient; preserve genuine identity uncertainty. Do not propagate ordinary shape/dimension cells to the counterpart. Before returning, inspect ignored substantive accounts and relational excerpts separately from pure pointers. Preserve all existing heading, bounded-set, layer-identity, cell-owner and header rules; return only original E/R selections without source/response repair or deterministic reassignment.`;
 
-const SYSTEM_PROMPT =
+const TABLE_ANCHOR_SYSTEM_PROMPT_V25 =
   LOCAL_NAVIGATION_SYSTEM_PROMPT_V24 +
   `
 ORIGINAL CANDIDATE TABLE ANCHORS: candidateTableRows follows candidateTableRowColumns [ref, table, row, excerpts]; each A ref identifies an original row in current.tables, with its selectable E refs as row context. Read that table's original headers, spans and number/name cells to identify the row's trench or other context. candidateTableAnchors follows candidateTableAnchorColumns [candidate, row, column, excerpt]; it links an existing R ref's original registration evidence to that row/column and E ref. These are exact source bindings made by code, not inferred parents, relations or new assignments. When candidate names/quotes repeat, use their distinct anchors instead of candidate order, R numbering or neighboring list entries. Preserve distinct candidates when their original anchors differ. A candidate with no anchor in the current table is still available for body and other directly supported matching; absence is not ineligibility. Anchors identify original mentions, not a restriction to assigning only those E refs: continue attaching other clearly relevant original excerpts under all existing sharing and uncertainty rules. Reasons must follow original row context. Keep the ID-only response schema, source text and saved responses unchanged; code does not choose or repair semantic targets.`;
+
+const SYSTEM_PROMPT =
+  TABLE_ANCHOR_SYSTEM_PROMPT_V25 +
+  `
+QUALIFIED FOLLOW-UP DESCRIPTIONS OF AN ESTABLISHED SET: Once original evidence has identified an explicit bounded investigation set and its registry members, subsequent distribution, shape, state or interpretation sentences can describe that SAME set without repeating individual identifiers. Resolve omitted subjects and repeated category nouns against the nearest established set in reading order. Do not downgrade such a follow-up to an ungrounded generic category summary merely because it names no individual object. For example, 'Pits A-C were investigated. Most occur on the terrace. Their plans are mostly circular or square.' preserves each follow-up's unchanged E ref on the already identified A-C set. An intervening place reference does not by itself replace that subject set. This requires the original membership link; matching names, chapter, period or registry inventory alone still does not establish one. Respect genuine resets and explicitly narrowed subsets, and do not infer members of an unidentified subgroup or add other same-type candidates.
+PRESERVE QUANTIFIERS IN ORIGINAL EVIDENCE: Qualifiers such as 'most', 'generally', 'mostly', '대부분' and '대체로' remain part of the ENTIRE fixed E ref. Keeping that qualified set-level evidence on identified member records does not assert that every member has the positive property or that exceptions are individually known. Do not require the source to identify which members are exceptions merely to preserve the established set's qualified description. Do not turn 'most' into 'all', choose an unsupported exception subset, replace an individual table value with the aggregate description, or infer attributes/relations. Preserve potentially differing individual cell evidence as well. Before returning, compare ignored distribution/shape descriptions with the nearest assigned set-defining excerpt: a reason based solely on absent individual identifiers is insufficient when that antecedent and membership are already established. Keep original E/R selection, table-owner boundaries, genuine identity uncertainty, registered headings and type-summary exclusions; never repair source text, a saved response or semantic targets in code.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -577,7 +583,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v22'
     | 'content-attachment.v23'
     | 'content-attachment.v24'
-    | 'content-attachment.v25' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v25'
+    | 'content-attachment.v26' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -639,9 +646,13 @@ export function createContentAttachmentRequest(
                                                   : promptVersion ===
                                                       'content-attachment.v24'
                                                     ? LOCAL_NAVIGATION_SYSTEM_PROMPT_V24
-                                                    : SYSTEM_PROMPT,
+                                                    : promptVersion ===
+                                                        'content-attachment.v25'
+                                                      ? TABLE_ANCHOR_SYSTEM_PROMPT_V25
+                                                      : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
-      promptVersion === 'content-attachment.v25'
+      promptVersion === 'content-attachment.v25' ||
+        promptVersion === 'content-attachment.v26'
         ? createContentAttachmentTableAnchorInput(plan, unit).payload
         : legacy
           ? {
@@ -762,6 +773,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v22' &&
       audit.promptVersion !== 'content-attachment.v23' &&
       audit.promptVersion !== 'content-attachment.v24' &&
+      audit.promptVersion !== 'content-attachment.v25' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -785,9 +797,11 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v22' ||
       audit.promptVersion === 'content-attachment.v23' ||
       audit.promptVersion === 'content-attachment.v24' ||
-      audit.promptVersion === 'content-attachment.v25';
+      audit.promptVersion === 'content-attachment.v25' ||
+      audit.promptVersion === 'content-attachment.v26';
     const selectionInput =
-      audit.promptVersion === 'content-attachment.v25'
+      audit.promptVersion === 'content-attachment.v25' ||
+      audit.promptVersion === 'content-attachment.v26'
         ? createContentAttachmentTableAnchorInput(plan, unit)
         : selection
           ? audit.promptVersion === 'content-attachment.v13' ||
@@ -855,6 +869,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v22' ||
       audit.promptVersion === 'content-attachment.v23' ||
       audit.promptVersion === 'content-attachment.v24' ||
+      audit.promptVersion === 'content-attachment.v25' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1086,7 +1101,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v22' ||
           audit.promptVersion === 'content-attachment.v23' ||
           audit.promptVersion === 'content-attachment.v24' ||
-          audit.promptVersion === 'content-attachment.v25'
+          audit.promptVersion === 'content-attachment.v25' ||
+          audit.promptVersion === 'content-attachment.v26'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1174,7 +1190,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v22' ||
       audit.promptVersion === 'content-attachment.v23' ||
       audit.promptVersion === 'content-attachment.v24' ||
-      audit.promptVersion === 'content-attachment.v25'
+      audit.promptVersion === 'content-attachment.v25' ||
+      audit.promptVersion === 'content-attachment.v26'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
