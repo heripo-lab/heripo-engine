@@ -91,3 +91,5 @@ export { createContentAttachmentDecisionInput } from './content-attachment-decis
 export type { ContentRegistrationDecision } from './content-attachment-decisions';
 
 export { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
+
+export { createContentAttachmentContextInput } from './content-attachment-context';

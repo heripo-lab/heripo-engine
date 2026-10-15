@@ -283,6 +283,13 @@ describe('bounded content attachment', () => {
     expect(p.registryUncertainties).toEqual(f.groups.uncertainMatches);
     expect(p.registrySha256).toMatch(/^[a-f0-9]{64}$/);
     expect((await prepare()).registrySha256).toBe(p.registrySha256);
+    const mixed = (await prepare()).units.find((u) => u.pdfPageNo === 3)!;
+    expect(mixed.sources.at(-1)!.resource.kind).toBe('tableCell');
+    expect(mixed.readOnlyContext.map((c) => c.text)).toEqual([
+      '報告書',
+      '井戸と廃棄層。',
+      '前半の文は切れ',
+    ]);
     const nested = fixture();
     nested.doc.chapters = [
       {
