@@ -497,7 +497,7 @@ describe('original selectable body block input', () => {
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
     const request = createContentAttachmentRequest(plan, unit);
-    expect(request.promptVersion).toBe('content-attachment.v39');
+    expect(request.promptVersion).toBe('content-attachment.v40');
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',
@@ -619,6 +619,22 @@ describe('original selectable body block input', () => {
       'ROW OWNERS ARE REQUIRED, NOT EXCLUSIVE, TARGETS OF RELATION REMARKS',
     );
     expect(assembleContentAttachment(plan, [{ ...raw, ...v38 }])).toEqual(
+      result,
+    );
+    const v39 = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v39',
+    );
+    expect(v39.userPrompt).toBe(request.userPrompt);
+    expect(request.systemPrompt.startsWith(v39.systemPrompt)).toBe(true);
+    expect(v39.systemPrompt).toContain(
+      'ROW OWNERS ARE REQUIRED, NOT EXCLUSIVE, TARGETS OF RELATION REMARKS',
+    );
+    expect(v39.systemPrompt).not.toContain(
+      'NEAREST EXPLICIT INVENTORY BOUNDS IMPLICIT FOLLOW-UPS',
+    );
+    expect(assembleContentAttachment(plan, [{ ...raw, ...v39 }])).toEqual(
       result,
     );
     const forged = structuredClone(raw);
