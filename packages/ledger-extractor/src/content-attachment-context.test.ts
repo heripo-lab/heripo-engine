@@ -497,7 +497,7 @@ describe('original selectable body block input', () => {
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
     const request = createContentAttachmentRequest(plan, unit);
-    expect(request.promptVersion).toBe('content-attachment.v40');
+    expect(request.promptVersion).toBe('content-attachment.v41');
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',
@@ -637,6 +637,28 @@ describe('original selectable body block input', () => {
     expect(assembleContentAttachment(plan, [{ ...raw, ...v39 }])).toEqual(
       result,
     );
+    const v40 = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v40',
+    );
+    expect(v40.userPrompt).toBe(request.userPrompt);
+    expect(request.systemPrompt.startsWith(v40.systemPrompt)).toBe(true);
+    expect(v40.systemPrompt).toContain(
+      'NEAREST EXPLICIT INVENTORY BOUNDS IMPLICIT FOLLOW-UPS',
+    );
+    expect(v40.systemPrompt).not.toContain(
+      'EACH REGISTERED INDIVIDUAL ARTIFACT HEADING IS AN INDEPENDENT REQUIRED E SELECTION',
+    );
+    expect(
+      assembleContentAttachment(plan, [
+        {
+          ...raw,
+          ...v40,
+        },
+      ]),
+    ).toEqual(result);
+
     const forged = structuredClone(raw);
     (forged.codeMap as typeof current.codeMap).bodyBlocks[0].excerpts = ['E5'];
     expect(

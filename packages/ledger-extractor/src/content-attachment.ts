@@ -29,7 +29,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v40';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v41';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -431,11 +431,17 @@ const RELATION_TARGET_SYSTEM_PROMPT_V39 =
 ROW OWNERS ARE REQUIRED, NOT EXCLUSIVE, TARGETS OF RELATION REMARKS: Original number-cell anchors establish the row owner; selecting that owner is the first required target, not completion of target coverage. For EVERY fixed relation-remark E ref, separately inspect the unchanged cell for explicitly named counterpart objects and resolve each through its original number/name cells, table, chapter and archaeological context. If those anchors identify both pits in a remark such as 'overlaps Pit S' in Pit Q's row, include BOTH Q and S in the SAME assignments item's candidateRefs. A reason saying only that the row records its pit's overlap does not justify an owner-only selection: the identified counterpart is directly described by that same relationship. Do not apply ordinary property-cell owner-only limits to a relation remark. Assess a reciprocal remark in S's row as a separate original E ref, again selecting both participants; one direction does not replace the other. Before returning, review every owner-only relation remark for a missing identified counterpart. Where identity genuinely remains ambiguous, retain the confirmed owner and use the SAME E ref for unresolved counterpart alternatives; do not guess, invent candidates or treat an absent target as resolved merely because the owner is known.
 KEEP RELATION SHARING WITHIN ITS ORIGINAL CELL: Adding the explicitly identified counterpart to a relationship remark does not add that counterpart to the owner's number, shape, length, width, depth or any neighboring property cell. Evaluate each original E ref independently using its own unchanged text and original row segment. Share only the relation cell with all identified participants, keep ordinary cells on their actual owner, and preserve reciprocal remarks separately without merging or rewriting them. This distinction does not weaken earlier established-set clauses within one sentence, qualified finds evidence, artifact-identity limits, pure-pointer/header exclusions, nonregistered subject continuity, boundary-context interpretation or genuine uncertainties. Keep all existing original E/R selection rules; code never adds semantic targets, repairs responses or corrects source text.`;
 
-const SYSTEM_PROMPT =
+const INVENTORY_BOUNDARY_SYSTEM_PROMPT_V40 =
   RELATION_TARGET_SYSTEM_PROMPT_V39 +
   `
 NEAREST EXPLICIT INVENTORY BOUNDS IMPLICIT FOLLOW-UPS: Before resolving an omitted subject, 'all', 'they', '모두' or a subsequent collective description, identify the nearest original explicitly enumerated investigation set and its members from the source inventory plus original candidate evidence. Carry THAT bounded set into its follow-up unless the original discourse explicitly changes it. A broad phrase such as 'the investigated features' does not reopen the entire registry when the immediately preceding source has just listed a narrower set. For example, if the inventory names Structures K and L and Pit M, 'They are concentrated on the western terrace.' describes those established members, not a nearby Ditch N registered elsewhere. Being in the same period, chapter or central location, enclosing a listed structure, or receiving a different relationship excerpt does not add N to this inventory. A reason claiming to follow the preceding inventory must select its supported member set, not that set plus associated candidates. Resolve membership from original source evidence, never from a previous model response or registry order.
 EXPANDING A BOUNDED SET REQUIRES ORIGINAL EVIDENCE: For each proposed target outside that nearest set, require an explicit source expansion/reset or a clause of the current unchanged E ref that independently and directly describes that identified additional participant. If neither exists, do not add the candidate merely to satisfy all-target coverage or the instruction to preserve earlier set clauses. Those rules retain all supported participants; they do not supply unmentioned members. A distribution follow-up with an exception for some already listed members does not by itself expand the set. Preserve real source changes, narrower subsets, independently stated relationship participants and explicit exceptions: a relation remark naming a counterpart still shares that SAME cell with its owner and identified counterpart, without sharing adjacent measurements. Keep qualified established-set evidence, original E text, unresolved identities, headings and exclusions unchanged. Before returning, recheck any follow-up whose targets exceed its source-defined antecedent and remove unsupported choices from the response you are generating, without repairing saved responses or assigning semantic targets in code.`;
+
+const SYSTEM_PROMPT =
+  INVENTORY_BOUNDARY_SYSTEM_PROMPT_V40 +
+  `
+EACH REGISTERED INDIVIDUAL ARTIFACT HEADING IS AN INDEPENDENT REQUIRED E SELECTION: When an original standalone heading's number, name and supplied chapter/body evidence identify a registered individual artifact, return an assignments item for that heading's OWN E ref and that artifact. Its following body excerpts are separate E refs; assigning any or all of them does not account for the heading. Do not absorb the heading into the next sentence, treat it only as a candidate-identification anchor, or silently leave it out because its information also appears in the registry or body. Preserve its entire unchanged original E, including drawing/photo references. This mandatory individual-heading treatment takes priority over generic type/collection title exclusion, redundancy arguments and table-header exclusion. If artifact identity genuinely remains ambiguous, explicitly account for that heading in unresolved rather than omitting it. A general type title without evidence identifying a registered individual remains excluded under the existing rules.
+FINAL FULL-E COVERAGE CHECK BEFORE RETURNING: Revisit EVERY supplied current.excerpts E ref in its original order, including standalone object headings between body blocks, sentences, measurements, boundary fragments and table cells. For each E, verify that its ref actually occurs in the assignments, unresolved or ignored arrays you are about to return; discussing it in a reason, selecting neighboring body E refs, or using it as identification context does not process that E. For any absent E, finish its evidence-based decision in the appropriate existing array before returning. Then separately check that each identified registered individual artifact heading has its own assignment, not merely that its body is assigned. Do not return an unaccounted E or replace a required heading assignment with generic exclusion. Keep supported multi-target sharing, genuine partial identity uncertainty, source-defined set boundaries and exclusions unchanged. Use only the existing schema and original E/R refs: add no coverage field, rewritten source text, combined excerpts or invented targets. This is a check of the response being generated, never permission to repair saved responses or supply semantic targets in code.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -687,7 +693,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v37'
     | 'content-attachment.v38'
     | 'content-attachment.v39'
-    | 'content-attachment.v40' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v40'
+    | 'content-attachment.v41' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -794,7 +801,10 @@ export function createContentAttachmentRequest(
                                                                                 : promptVersion ===
                                                                                     'content-attachment.v39'
                                                                                   ? RELATION_TARGET_SYSTEM_PROMPT_V39
-                                                                                  : SYSTEM_PROMPT,
+                                                                                  : promptVersion ===
+                                                                                      'content-attachment.v40'
+                                                                                    ? INVENTORY_BOUNDARY_SYSTEM_PROMPT_V40
+                                                                                    : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
@@ -803,7 +813,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v37' ||
         promptVersion === 'content-attachment.v38' ||
         promptVersion === 'content-attachment.v39' ||
-        promptVersion === 'content-attachment.v40'
+        promptVersion === 'content-attachment.v40' ||
+        promptVersion === 'content-attachment.v41'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -952,6 +963,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v37' &&
       audit.promptVersion !== 'content-attachment.v38' &&
       audit.promptVersion !== 'content-attachment.v39' &&
+      audit.promptVersion !== 'content-attachment.v40' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -990,7 +1002,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v37' ||
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
-      audit.promptVersion === 'content-attachment.v40';
+      audit.promptVersion === 'content-attachment.v40' ||
+      audit.promptVersion === 'content-attachment.v41';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
@@ -999,7 +1012,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v37' ||
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
-      audit.promptVersion === 'content-attachment.v40'
+      audit.promptVersion === 'content-attachment.v40' ||
+      audit.promptVersion === 'content-attachment.v41'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1092,6 +1106,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v37' ||
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
+      audit.promptVersion === 'content-attachment.v40' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1338,7 +1353,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v37' ||
           audit.promptVersion === 'content-attachment.v38' ||
           audit.promptVersion === 'content-attachment.v39' ||
-          audit.promptVersion === 'content-attachment.v40'
+          audit.promptVersion === 'content-attachment.v40' ||
+          audit.promptVersion === 'content-attachment.v41'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1441,7 +1457,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v37' ||
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
-      audit.promptVersion === 'content-attachment.v40'
+      audit.promptVersion === 'content-attachment.v40' ||
+      audit.promptVersion === 'content-attachment.v41'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1453,7 +1470,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v37' ||
           audit.promptVersion === 'content-attachment.v38' ||
           audit.promptVersion === 'content-attachment.v39' ||
-          audit.promptVersion === 'content-attachment.v40',
+          audit.promptVersion === 'content-attachment.v40' ||
+          audit.promptVersion === 'content-attachment.v41',
       ))
         issue(reason);
     }
