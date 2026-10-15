@@ -183,8 +183,30 @@ describe('mention-scoped registration decisions', () => {
       outputTokens: 1,
       totalTokens: 2,
     };
+    const wireResponse = {
+      decisions: Object.fromEntries([
+        ...response.assignments.map(({ excerptRef, ...item }) => [
+          excerptRef,
+          {
+            status: 'assigned' as const,
+            ...item,
+            unresolved:
+              excerptRef === 'E2'
+                ? {
+                    candidateRefs: ['R2', 'R3'],
+                    reason: 'Uncertain soil identity',
+                  }
+                : null,
+          },
+        ]),
+        ...response.ignored.map(({ excerptRef, reason }) => [
+          excerptRef,
+          { status: 'ignored' as const, reason },
+        ]),
+      ]),
+    };
     vi.mocked(LLMCaller.call).mockResolvedValue({
-      output: response,
+      output: wireResponse,
       usage,
       usedFallback: false,
     });
@@ -194,6 +216,7 @@ describe('mention-scoped registration decisions', () => {
     });
     expect(LLMCaller.call).toHaveBeenCalledTimes(1);
     expect(audit.response).toEqual(response);
+    expect(audit.rawResponse).toBe(wireResponse);
     expect(audit.codeMap).toEqual(
       createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     );
@@ -219,7 +242,10 @@ describe('mention-scoped registration decisions', () => {
     expect(
       assembleContentAttachment(plan, [forged]).issues[0].reason,
     ).toContain('code map');
-    const unresolved = structuredClone(audit);
+    const unresolved = {
+      ...structuredClone(audit),
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v41'),
+    };
     unresolved.response.unresolved.push({
       excerptRef: 'E1',
       candidateRefs: [],

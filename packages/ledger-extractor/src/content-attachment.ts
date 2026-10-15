@@ -9,6 +9,7 @@ import type {
   LedgerObjectCandidate,
 } from './candidate-discovery';
 import type { ContentRegistrationDecision } from './content-attachment-decisions';
+import type { ContentAttachmentRequiredResponse } from './content-attachment-response';
 import type {
   DocumentResource,
   DocumentResourceIndex,
@@ -26,10 +27,14 @@ import {
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
 import { createContentAttachmentInput } from './content-attachment-input';
+import {
+  createContentAttachmentResponseSchema,
+  flattenContentAttachmentResponse,
+} from './content-attachment-response';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v41';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v42';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -145,6 +150,8 @@ export interface ContentAttachmentAudit<Response = ContentAttachmentResponse> {
   systemPrompt: string;
   userPrompt: string;
   response: Response;
+  /** Exact model output in v42; response is its lossless legacy-format projection. */
+  rawResponse?: ContentAttachmentRequiredResponse;
   usage: ExtendedTokenUsage;
   /** Optional for historical audits; new calls retain every provider attempt. */
   callAttempts?: LLMCallAttempt[];
@@ -437,11 +444,17 @@ const INVENTORY_BOUNDARY_SYSTEM_PROMPT_V40 =
 NEAREST EXPLICIT INVENTORY BOUNDS IMPLICIT FOLLOW-UPS: Before resolving an omitted subject, 'all', 'they', '모두' or a subsequent collective description, identify the nearest original explicitly enumerated investigation set and its members from the source inventory plus original candidate evidence. Carry THAT bounded set into its follow-up unless the original discourse explicitly changes it. A broad phrase such as 'the investigated features' does not reopen the entire registry when the immediately preceding source has just listed a narrower set. For example, if the inventory names Structures K and L and Pit M, 'They are concentrated on the western terrace.' describes those established members, not a nearby Ditch N registered elsewhere. Being in the same period, chapter or central location, enclosing a listed structure, or receiving a different relationship excerpt does not add N to this inventory. A reason claiming to follow the preceding inventory must select its supported member set, not that set plus associated candidates. Resolve membership from original source evidence, never from a previous model response or registry order.
 EXPANDING A BOUNDED SET REQUIRES ORIGINAL EVIDENCE: For each proposed target outside that nearest set, require an explicit source expansion/reset or a clause of the current unchanged E ref that independently and directly describes that identified additional participant. If neither exists, do not add the candidate merely to satisfy all-target coverage or the instruction to preserve earlier set clauses. Those rules retain all supported participants; they do not supply unmentioned members. A distribution follow-up with an exception for some already listed members does not by itself expand the set. Preserve real source changes, narrower subsets, independently stated relationship participants and explicit exceptions: a relation remark naming a counterpart still shares that SAME cell with its owner and identified counterpart, without sharing adjacent measurements. Keep qualified established-set evidence, original E text, unresolved identities, headings and exclusions unchanged. Before returning, recheck any follow-up whose targets exceed its source-defined antecedent and remove unsupported choices from the response you are generating, without repairing saved responses or assigning semantic targets in code.`;
 
-const SYSTEM_PROMPT =
+const HEADING_COVERAGE_SYSTEM_PROMPT_V41 =
   INVENTORY_BOUNDARY_SYSTEM_PROMPT_V40 +
   `
 EACH REGISTERED INDIVIDUAL ARTIFACT HEADING IS AN INDEPENDENT REQUIRED E SELECTION: When an original standalone heading's number, name and supplied chapter/body evidence identify a registered individual artifact, return an assignments item for that heading's OWN E ref and that artifact. Its following body excerpts are separate E refs; assigning any or all of them does not account for the heading. Do not absorb the heading into the next sentence, treat it only as a candidate-identification anchor, or silently leave it out because its information also appears in the registry or body. Preserve its entire unchanged original E, including drawing/photo references. This mandatory individual-heading treatment takes priority over generic type/collection title exclusion, redundancy arguments and table-header exclusion. If artifact identity genuinely remains ambiguous, explicitly account for that heading in unresolved rather than omitting it. A general type title without evidence identifying a registered individual remains excluded under the existing rules.
 FINAL FULL-E COVERAGE CHECK BEFORE RETURNING: Revisit EVERY supplied current.excerpts E ref in its original order, including standalone object headings between body blocks, sentences, measurements, boundary fragments and table cells. For each E, verify that its ref actually occurs in the assignments, unresolved or ignored arrays you are about to return; discussing it in a reason, selecting neighboring body E refs, or using it as identification context does not process that E. For any absent E, finish its evidence-based decision in the appropriate existing array before returning. Then separately check that each identified registered individual artifact heading has its own assignment, not merely that its body is assigned. Do not return an unaccounted E or replace a required heading assignment with generic exclusion. Keep supported multi-target sharing, genuine partial identity uncertainty, source-defined set boundaries and exclusions unchanged. Use only the existing schema and original E/R refs: add no coverage field, rewritten source text, combined excerpts or invented targets. This is a check of the response being generated, never permission to repair saved responses or supply semantic targets in code.`;
+
+const SYSTEM_PROMPT =
+  HEADING_COVERAGE_SYSTEM_PROMPT_V41 +
+  `
+REQUIRED PER-E OUTPUT CONTRACT (REPLACES EARLIER THREE-ARRAY SERIALIZATION ONLY): Return one root object {"decisions": {...}}. Its properties are EVERY supplied current.excerpts E ref, each exactly once as a required key in original order. For each E choose one decision: {"status":"assigned","candidateRefs":[...],"reason":"...","unresolved":null}; {"status":"unresolved","candidateRefs":[...],"reason":"..."}; or {"status":"ignored","reason":"..."}. If confirmed targets coexist with genuinely uncertain additional targets, use status assigned and set its unresolved field to {"candidateRefs":[...],"reason":"..."} instead of null. A purely unresolved missing identity may use an empty candidateRefs list as before. Assigned candidateRefs must be nonempty. An ignored E cannot carry assigned or unresolved targets. No decision may be null, empty, omitted or a reference to a neighboring E.
+All earlier references to assignments/unresolved/ignored arrays describe those SAME semantic categories, now expressed by each required E decision; do not return those arrays or repeat excerptRef inside a decision. This output contract changes serialization only. Preserve all existing evidence-based sharing, partial uncertainty, headings, exclusions, original row ownership and bounded-set rules. A substantive set description does not account for any individual table cell. After completing the body and headers, independently decide EVERY table-data E through the last current.excerpts ref. If identity is genuinely uncertain, explicitly choose unresolved with its reason; never choose ignored merely to fill a required key. Code preserves the raw decisions and projects them into the previous three categories without inventing, dropping or correcting targets. Return no rewritten source text or additional fields.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -694,7 +707,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v38'
     | 'content-attachment.v39'
     | 'content-attachment.v40'
-    | 'content-attachment.v41' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v41'
+    | 'content-attachment.v42' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -804,7 +818,10 @@ export function createContentAttachmentRequest(
                                                                                   : promptVersion ===
                                                                                       'content-attachment.v40'
                                                                                     ? INVENTORY_BOUNDARY_SYSTEM_PROMPT_V40
-                                                                                    : SYSTEM_PROMPT,
+                                                                                    : promptVersion ===
+                                                                                        'content-attachment.v41'
+                                                                                      ? HEADING_COVERAGE_SYSTEM_PROMPT_V41
+                                                                                      : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
@@ -814,7 +831,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v38' ||
         promptVersion === 'content-attachment.v39' ||
         promptVersion === 'content-attachment.v40' ||
-        promptVersion === 'content-attachment.v41'
+        promptVersion === 'content-attachment.v41' ||
+        promptVersion === 'content-attachment.v42'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -872,13 +890,12 @@ export async function attachContentUnit(
   const ids = input.codeMap.excerpts.map((e) => e.ref);
   if (!ids.length) throw new Error('No selectable attachment sources');
   const request = createContentAttachmentRequest(plan, unit);
-  const source = z.enum(ids as [string, ...string[]]);
   const audited = createAuditedModel(options.model, options.onAttempt);
   const { output, usage } = await LLMCaller.call({
     ...request,
-    schema: selectionSchema(
-      source,
-      z.enum(plan.registry.map((r) => r.ref) as [string, ...string[]]),
+    schema: createContentAttachmentResponseSchema(
+      ids,
+      plan.registry.map((r) => r.ref),
     ),
     primaryModel: audited.model,
     maxRetries: options.maxRetries,
@@ -893,7 +910,8 @@ export async function attachContentUnit(
   return {
     unitId: unit.unitId,
     ...request,
-    response: output,
+    response: flattenContentAttachmentResponse(output),
+    rawResponse: output,
     usage,
     callAttempts: audited.attempts,
     codeMap: input.codeMap,
@@ -964,6 +982,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v38' &&
       audit.promptVersion !== 'content-attachment.v39' &&
       audit.promptVersion !== 'content-attachment.v40' &&
+      audit.promptVersion !== 'content-attachment.v41' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1003,7 +1022,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
-      audit.promptVersion === 'content-attachment.v41';
+      audit.promptVersion === 'content-attachment.v41' ||
+      audit.promptVersion === 'content-attachment.v42';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
@@ -1013,7 +1033,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
-      audit.promptVersion === 'content-attachment.v41'
+      audit.promptVersion === 'content-attachment.v41' ||
+      audit.promptVersion === 'content-attachment.v42'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1107,7 +1128,22 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
+      audit.promptVersion === 'content-attachment.v41' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
+    if (audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION) {
+      const raw = createContentAttachmentResponseSchema(
+        selectionInput!.codeMap.excerpts.map((e) => e.ref),
+        plan.registry.map((r) => r.ref),
+      ).safeParse(audit.rawResponse);
+      if (
+        !raw.success ||
+        JSON.stringify(flattenContentAttachmentResponse(raw.data)) !==
+          JSON.stringify(audit.response)
+      ) {
+        issue('Invalid required excerpt response or inconsistent projection');
+        continue;
+      }
+    }
     const parsed = selection
       ? null
       : (fullCoverage
@@ -1354,7 +1390,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v38' ||
           audit.promptVersion === 'content-attachment.v39' ||
           audit.promptVersion === 'content-attachment.v40' ||
-          audit.promptVersion === 'content-attachment.v41'
+          audit.promptVersion === 'content-attachment.v41' ||
+          audit.promptVersion === 'content-attachment.v42'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1458,7 +1495,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v38' ||
       audit.promptVersion === 'content-attachment.v39' ||
       audit.promptVersion === 'content-attachment.v40' ||
-      audit.promptVersion === 'content-attachment.v41'
+      audit.promptVersion === 'content-attachment.v41' ||
+      audit.promptVersion === 'content-attachment.v42'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1471,7 +1509,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v38' ||
           audit.promptVersion === 'content-attachment.v39' ||
           audit.promptVersion === 'content-attachment.v40' ||
-          audit.promptVersion === 'content-attachment.v41',
+          audit.promptVersion === 'content-attachment.v41' ||
+          audit.promptVersion === 'content-attachment.v42',
       ))
         issue(reason);
     }

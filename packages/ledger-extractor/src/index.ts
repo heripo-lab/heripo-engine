@@ -95,3 +95,5 @@ export { createContentAttachmentTableAnchorInput } from './content-attachment-ta
 export { createContentAttachmentContextInput } from './content-attachment-context';
 
 export { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
+
+export type { ContentAttachmentRequiredResponse } from './content-attachment-response';

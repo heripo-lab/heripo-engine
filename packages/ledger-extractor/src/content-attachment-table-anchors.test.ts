@@ -353,8 +353,24 @@ describe('candidate table source anchors', () => {
         )
         .map((e) => ({ excerptRef: e.ref, reason: 'Other' })),
     };
+    const wireResponse = {
+      decisions: Object.fromEntries([
+        ...response.assignments.map(({ excerptRef, ...item }) => [
+          excerptRef,
+          {
+            status: 'assigned' as const,
+            ...item,
+            unresolved: null,
+          },
+        ]),
+        ...response.ignored.map(({ excerptRef, reason }) => [
+          excerptRef,
+          { status: 'ignored' as const, reason },
+        ]),
+      ]),
+    };
     vi.mocked(LLMCaller.call).mockResolvedValue({
-      output: response,
+      output: wireResponse,
       usedFallback: false,
       usage: {
         component: 'test',
