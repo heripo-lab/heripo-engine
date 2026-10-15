@@ -1516,6 +1516,29 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV47Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v48 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v48',
+      ),
+    };
+    expect(out.userPrompt).toBe(v48.userPrompt);
+    expect(out.systemPrompt.startsWith(v48.systemPrompt)).toBe(true);
+    expect(v48.systemPrompt).not.toContain(
+      'QUANTITIES REMAIN WITH THEIR ORIGINAL',
+    );
+    expect(out.systemPrompt).toContain('QUANTITIES REMAIN WITH THEIR ORIGINAL');
+    expect(out.systemPrompt).toContain('BOTH RELATION ENDPOINTS REQUIRE');
+    expect(assembleContentAttachment(p, [v48])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV48Projection = structuredClone(v48);
+    alteredV48Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV48Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(
