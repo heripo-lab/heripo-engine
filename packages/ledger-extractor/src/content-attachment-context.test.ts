@@ -497,7 +497,7 @@ describe('original selectable body block input', () => {
     const current = createContentAttachmentBodyBlockInput(plan, unit);
     const old = createContentAttachmentContextInput(plan, unit);
     const request = createContentAttachmentRequest(plan, unit);
-    expect(request.promptVersion).toBe('content-attachment.v37');
+    expect(request.promptVersion).toBe('content-attachment.v38');
     expect(JSON.parse(request.userPrompt)).toEqual(current.payload);
     expect(request.systemPrompt).toContain(
       'NONREGISTERED SUBJECTS STILL GOVERN FOLLOW-UP SENTENCES',
@@ -589,6 +589,22 @@ describe('original selectable body block input', () => {
         assembleContentAttachment(plan, [{ ...raw, ...historical }]),
       ).toEqual(result);
     }
+    const v37 = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v37',
+    );
+    expect(v37.userPrompt).toBe(request.userPrompt);
+    expect(request.systemPrompt.startsWith(v37.systemPrompt)).toBe(true);
+    expect(v37.systemPrompt).toContain(
+      'NONREGISTERED ANTECEDENTS GOVERN SUBSEQUENT DESCRIPTIONS',
+    );
+    expect(v37.systemPrompt).not.toContain(
+      'LATER INDIVIDUAL CLAUSES DO NOT ERASE EARLIER ESTABLISHED-SET DESCRIPTIONS',
+    );
+    expect(assembleContentAttachment(plan, [{ ...raw, ...v37 }])).toEqual(
+      result,
+    );
     const forged = structuredClone(raw);
     (forged.codeMap as typeof current.codeMap).bodyBlocks[0].excerpts = ['E5'];
     expect(

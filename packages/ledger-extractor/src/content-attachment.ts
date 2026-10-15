@@ -29,7 +29,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v37';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v38';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -413,11 +413,17 @@ const SURVEY_LAYOUT_SYSTEM_PROMPT_V36 =
 SURVEY AREA LAYOUT AND IDENTIFIED TRENCHES ARE CO-DESCRIPTION TARGETS: When original discourse defines a registered current investigation area and a subsequent substantive account describes setting its survey grid, laying out its investigation units, or subdividing and investigating that area through identified trenches, preserve the SAME unchanged E ref on BOTH that area and the identified trench members. Resolve the continuing investigation scope from the original area definition, body sequence and table/identifier anchors; the area's name need not repeat in the layout sentence. For example, 'The current survey covered Area Q. A grid was established and four trenches were laid out to investigate it.' describes Q's investigation layout as well as the four trenches when original evidence identifies their membership. Mentioning the investigation area in the reason does not replace selecting its R ref.
 This is a direct description of the area's own investigation organization, not automatic propagation to an ancestor or an object used only as a location reference. The restrictions against propagating a body feature inventory to every trench and against transferring targets between trench and feature sets do not exclude an independently described area from its own substantive layout account. Require the explicit original scope and membership link; matching chapter, location, type, candidate count or registry availability alone remains insufficient. Respect actual scope changes, previous-campaign subjects and nonregistered referents. Do not attach unrelated methodology, every trench cell or feature measurement to the area, infer parent/containment relations, or convert a grid size into each trench's dimensions. Before returning, recheck trench-only body layout assignments against the previously defined scope and retain an area whose investigation organization that SAME excerpt describes. Keep the original text, E/R schema, table-row co-targets, verified feature sharing, exclusions and genuine uncertainty unchanged; code never adds semantic targets or repairs source/response text.`;
 
-const SYSTEM_PROMPT =
+const SUBJECT_CONTINUITY_SYSTEM_PROMPT_V37 =
   SURVEY_LAYOUT_SYSTEM_PROMPT_V36 +
   `
 NONREGISTERED ANTECEDENTS GOVERN SUBSEQUENT DESCRIPTIONS UNTIL AN EXPLICIT SUBJECT CHANGE: Track the original descriptive subject separately from every candidate receiving a relation excerpt. When the text introduces an earlier-investigation, comparative or cited object, subsequent repeated generic nouns and omitted subjects continue describing THAT object until original wording explicitly returns to or introduces another subject. Assigning a preceding alignment/connection sentence to the registered current object does not change the subject of the next dimension, chronology or use-history sentence. For example, 'An older road found in a prior excavation lies beyond the current road. The road is wide. It was used twice. It may connect to the current road.' keeps the dimensions and use history with the older nonregistered road, while retaining the explicit relationship excerpts on the identified current road. Ignore complete counterpart-only descriptions with the scope reason; do not replace the absent older record with a matching current R ref or invent missing-candidate uncertainty. A later explicit 'the road found in this investigation' can change the descriptive subject. Same chapter, name, archaeological type, available registry records and neighboring assigned E refs cannot substitute for that original subject change. Preserve all directly stated relationship participants without transferring their neighbors' predicates.
 INTERPRET A BOUNDARY FRAGMENT WITH ITS SUPPLIED NEXT READ-ONLY CONTEXT BEFORE CLASSIFYING PARTICIPANTS: A fixed current E ref may stop before the predicate or before the noun following a phrase such as 'this investigation'. Read the immediately following original B block, together with the preceding discourse, to determine what that same unfinished sentence describes. If its continuation explicitly makes an identified current object a participant in a conditional archaeological connection or other direct relationship, preserve the unchanged current E fragment on that object. Do not classify the object as location-reference-only merely because the current fragment alone has not yet reached its relational predicate. A preceding clause may still describe a nonregistered counterpart's width or state; preserving the whole fragment as relation evidence does not make that counterpart's measurement a current-object property. Keep conditional and interpretive language unconfirmed. Conversely, complete nonregistered-object descriptions remain excluded even when a later sentence describes a relationship with the current object. Use B only for interpretation: never select B, append its text to E, complete or rewrite the fragment, extract a confirmed relation, or repair saved responses. Before returning, review relation-adjacent omitted-subject descriptions and boundary-fragment exclusions separately. Retain every existing table owner, bounded-set, heading, scope and genuine identity-uncertainty rule; code supplies bindings but never chooses semantic targets.`;
+
+const SYSTEM_PROMPT =
+  SUBJECT_CONTINUITY_SYSTEM_PROMPT_V37 +
+  `
+LATER INDIVIDUAL CLAUSES DO NOT ERASE EARLIER ESTABLISHED-SET DESCRIPTIONS: Resolve the described subjects of EVERY clause before selecting the targets of one fixed E ref. When an earlier clause substantively describes an already identified bounded investigation set, a later clause naming one particular member narrows that later clause only; it does not retroactively replace the earlier set. Preserve the union of all directly described, originally identified participants in ONE assignments item for the SAME unchanged E ref. For example, after original body/table anchors establish Pits J-M, 'Most yielded no finds or only tiny fragments that were not collected, whereas Pit L yielded several vessels that were collected.' belongs to J-M, including L. The first clause preserves the set's qualified finds/recovery pattern; the second adds the specifically described member without deleting the other members. Keep every quantifier, contrast, exception and uncertainty intact. This preserves original evidence, not an assertion that every member has every clause's positive property. Do not identify which members had no finds, transfer L's vessels to the others, split or rewrite the E ref, or broaden a genuinely narrower preceding subject set. Before returning a singular-only assignment for a mixed set/individual sentence, recheck its earlier clauses against the supplied original set definition and member anchors.
+FEATURE-SET FINDS EVIDENCE IS DISTINCT FROM INDIVIDUAL ARTIFACT IDENTITY: A qualified finds or collection summary can substantively describe an already identified feature/layer set and remain evidence on its verified members. The restriction against guessing individual artifacts from type-level finds summaries does NOT remove those independently established feature/layer subjects. Evaluate these two target categories separately: retain the directly described, originally identified feature/layer members, while assigning individually registered artifacts only when original evidence identifies those specimens beyond matching type names, chapter, period or findspot. In the preceding example, mentioning vessel types does not identify individual artifact records, but it also does not erase the earlier pit-set description. A later named feature is not the exclusive owner of the whole sentence when an earlier clause describes the established set. This does not establish an unknown collective's membership, add ancestors or location-only references, or propagate neighboring excerpts. Keep original table-owner assignments, pure-pointer exclusions, nonregistered-subject continuity, boundary-context interpretation, headings and genuine identity uncertainty unchanged. Code never supplies missing semantic targets or repairs source/response text.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -666,7 +672,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v34'
     | 'content-attachment.v35'
     | 'content-attachment.v36'
-    | 'content-attachment.v37' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v37'
+    | 'content-attachment.v38' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -764,13 +771,17 @@ export function createContentAttachmentRequest(
                                                                           : promptVersion ===
                                                                               'content-attachment.v36'
                                                                             ? SURVEY_LAYOUT_SYSTEM_PROMPT_V36
-                                                                            : SYSTEM_PROMPT,
+                                                                            : promptVersion ===
+                                                                                'content-attachment.v37'
+                                                                              ? SUBJECT_CONTINUITY_SYSTEM_PROMPT_V37
+                                                                              : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
         promptVersion === 'content-attachment.v35' ||
         promptVersion === 'content-attachment.v36' ||
-        promptVersion === 'content-attachment.v37'
+        promptVersion === 'content-attachment.v37' ||
+        promptVersion === 'content-attachment.v38'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -916,6 +927,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v34' &&
       audit.promptVersion !== 'content-attachment.v35' &&
       audit.promptVersion !== 'content-attachment.v36' &&
+      audit.promptVersion !== 'content-attachment.v37' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -951,13 +963,15 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v34' ||
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
-      audit.promptVersion === 'content-attachment.v37';
+      audit.promptVersion === 'content-attachment.v37' ||
+      audit.promptVersion === 'content-attachment.v38';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
-      audit.promptVersion === 'content-attachment.v37'
+      audit.promptVersion === 'content-attachment.v37' ||
+      audit.promptVersion === 'content-attachment.v38'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1047,6 +1061,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v34' ||
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
+      audit.promptVersion === 'content-attachment.v37' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1290,7 +1305,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v34' ||
           audit.promptVersion === 'content-attachment.v35' ||
           audit.promptVersion === 'content-attachment.v36' ||
-          audit.promptVersion === 'content-attachment.v37'
+          audit.promptVersion === 'content-attachment.v37' ||
+          audit.promptVersion === 'content-attachment.v38'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1390,7 +1406,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v34' ||
       audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === 'content-attachment.v36' ||
-      audit.promptVersion === 'content-attachment.v37'
+      audit.promptVersion === 'content-attachment.v37' ||
+      audit.promptVersion === 'content-attachment.v38'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1399,7 +1416,8 @@ export function assembleContentAttachment(
         newData!,
         audit.promptVersion === 'content-attachment.v35' ||
           audit.promptVersion === 'content-attachment.v36' ||
-          audit.promptVersion === 'content-attachment.v37',
+          audit.promptVersion === 'content-attachment.v37' ||
+          audit.promptVersion === 'content-attachment.v38',
       ))
         issue(reason);
     }
