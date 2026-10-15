@@ -1432,6 +1432,27 @@ describe('bounded content attachment', () => {
       assembleContentAttachment(p, [alteredHistoricalProjection]).issues[0]
         .reason,
     ).toContain('inconsistent projection');
+    const v43 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v43',
+      ),
+    };
+    expect(out.userPrompt).toBe(v43.userPrompt);
+    expect(out.systemPrompt.startsWith(v43.systemPrompt)).toBe(true);
+    expect(v43.systemPrompt).not.toContain(
+      'RESOLVE DIFFERENT REGISTRY AND NARRATIVE NAMES THROUGH ORIGINAL IDENTITY EVIDENCE',
+    );
+    expect(assembleContentAttachment(p, [v43])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV43Projection = structuredClone(v43);
+    alteredV43Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV43Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(
