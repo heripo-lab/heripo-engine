@@ -362,3 +362,9 @@ Preserve the entire original excerpt, location wording and qualifiers on its ide
 New `attachContentUnit` audits include `callAttempts`, captured below structured-output parsing through `createAuditedModel`. Each provider invocation retains its request and complete SDK response bodies, content, usage, response ID, API status, incomplete details, unified/raw finish reason or original provider error. The optional `onAttempt` callback can persist each record even if the final call fails. Missing metadata stays null, and historical audits without the field still replay unchanged. The selection response remains separate and is never repaired.
 
 This adds observation only: prompt v29, user input, schemas, mappings, retry policy and coverage validation remain unchanged. A parsed object is not proof of normal provider termination or complete excerpt coverage; inspect the per-attempt metadata and automatic issues separately. SDK bodies are preserved without claiming byte-for-byte HTTP capture; credentials and headers are excluded.
+
+### Survey scope and verified feature inventories (prompt v30)
+
+Selecting a directly described survey area does not replace feature members independently identified by the investigation scope, body-to-table reference, original rows and candidate anchors. Preserve the same inventory excerpt on all verified, directly described feature members even when only types, periods and aggregate counts recur. Area selection remains independently justified, and trench and feature sets remain distinct.
+
+Keep unsupported type summaries, inferred collectives and location-only references outside this rule. Preserve aggregate wording and differing counts without resolving identities or transferring every listed property to every member. Input, maps, schemas and validation are unchanged; code never fills semantic targets. V1–v29 retain exact historical request replay.

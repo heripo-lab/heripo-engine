@@ -250,7 +250,68 @@ describe('immutable content excerpt selection', () => {
     expect(assembleContentAttachment(plan, [previousCollective])).toEqual(
       result,
     );
+    const previousLocation = {
+      ...raw,
+      ...createContentAttachmentRequest(
+        plan,
+        plan.units[0],
+        'content-attachment.v29',
+      ),
+    };
+    expect(previousLocation.userPrompt).toBe(raw.userPrompt);
+    expect(raw.systemPrompt.startsWith(previousLocation.systemPrompt)).toBe(
+      true,
+    );
+    expect(assembleContentAttachment(plan, [previousLocation])).toEqual(result);
     expect([plan, raw]).toEqual(before);
+  });
+
+  test('preserves selected survey and feature targets without supplying omitted members', () => {
+    const plan = fixture([
+      'Survey inventory',
+      'The survey found pits A and B.',
+    ]);
+    plan.registry = plan.registry.slice(0, 3);
+    plan.registry.forEach((record, i) => {
+      record.recordKind = i === 0 ? 'area' : 'feature';
+      record.mentions[0].sourceName = ['Survey area', 'Pit A', 'Pit B'][i];
+    });
+    const raw = audit(plan, {
+      assignments: [
+        {
+          excerptRef: 'E2',
+          candidateRefs: ['R1', 'R2', 'R3'],
+          reason: 'Area and verified inventory members',
+        },
+      ],
+      unresolved: [],
+      ignored: [{ excerptRef: 'E1', reason: 'Generic title' }],
+    });
+    const before = structuredClone(raw);
+    const result = assembleContentAttachment(plan, [raw]);
+    expect(result.issues).toEqual([]);
+    expect(result.contents.map((c) => c.registryRef)).toEqual([
+      'R1',
+      'R2',
+      'R3',
+    ]);
+    expect(raw).toEqual(before);
+    const historical = {
+      ...raw,
+      ...createContentAttachmentRequest(
+        plan,
+        plan.units[0],
+        'content-attachment.v29',
+      ),
+    };
+    expect(assembleContentAttachment(plan, [historical])).toEqual(result);
+    const areaOnly = structuredClone(raw);
+    areaOnly.response.assignments[0].candidateRefs = ['R1'];
+    expect(
+      assembleContentAttachment(plan, [areaOnly]).contents.map(
+        (c) => c.registryRef,
+      ),
+    ).toEqual(['R1']);
   });
 
   test('reports ignored literal artifact headings in their chapter without repairing responses or rejecting other text and ambiguous identities', () => {
@@ -610,7 +671,7 @@ describe('immutable content excerpt selection', () => {
       quote: s6[2],
     });
     expect([plan, raw]).toEqual(before);
-    expect(raw.promptVersion).toBe('content-attachment.v29');
+    expect(raw.promptVersion).toBe('content-attachment.v30');
     expect(raw.systemPrompt).toContain('Never return quotes');
     for (const version of [
       'content-attachment.v9',
