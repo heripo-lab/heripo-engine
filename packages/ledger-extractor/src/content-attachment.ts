@@ -29,7 +29,7 @@ import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v35';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v36';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -401,11 +401,17 @@ const PARTIAL_SET_SYSTEM_PROMPT_V34 =
 PARTIAL FOLLOW-UPS PRESERVE QUALIFIED SET EVIDENCE: Expressions such as 'some', 'a few', 'part of', '일부' and '몇몇' can qualify a subsequent description of an already identified bounded investigation set. If original discourse and candidate anchors establish that set and the follow-up refers to its members, preserve the ENTIRE unchanged E ref on those established members as collective evidence, even when the source does not identify which individual members satisfy the predicate. For example, 'Pits K-M were investigated. Some appear to be postholes.' preserves the second E ref on K-M with BOTH 'some' and 'appear' intact. This does not assert that every pit is a posthole, identify the positive subset, assign an individual function, or establish a parent/relationship to registered buildings. Do not put that E ref in ignored or invent candidate-identity uncertainty merely because the source supplies no numbers for the positive cases. A reason acknowledging a substantive follow-up about some members of the identified set is not itself a reason for exclusion.
 Keep the nearest established subject set and any explicitly identified narrower membership. Do not invent the members of an unidentified subgroup, but do not use that restriction to erase a qualified description of its identified parent set. An interpretation of some known pits as possible structural components still describes the known pit set; a later inference that many buildings once existed does not identify those buildings with nearby registered buildings. Apply the original-membership requirement separately to each subject category. Matching type, period, chapter, registry availability or a generic finds summary alone still does not establish membership. Retain previous-campaign exclusions, nonregistered subject continuity, location-reference boundaries, valid relation sharing, complete table-cell ownership, heading preservation and genuine identity uncertainty. Preserve quantifiers and author uncertainty without extracting positive properties for individuals, changing original values, repairing text/responses or choosing semantic targets in code.`;
 
-const SYSTEM_PROMPT =
+const TRENCH_INVENTORY_SYSTEM_PROMPT_V35 =
   PARTIAL_SET_SYSTEM_PROMPT_V34 +
   `
 TRENCH INVENTORY CELLS DESCRIBE BOTH THE ROW OWNER AND IDENTIFIED FEATURES: In an original trench/survey table, a feature-occurrence cell describes the identified trench's investigation results AND the explicitly identified registered features listed in that cell. Select the SAME unchanged E ref on BOTH that row-owner trench and every listed feature whose original row/cell anchors establish its identity. Naming the trench in the reason is not a substitute for including its R ref in candidateRefs. For example, a trench row listing 'road and pit' keeps that inventory cell on its trench, the identified road and the identified pit; the trench's number and measurement cells stay on the trench only. A feature's occurrence-cell anchor does not replace the trench's number-cell anchor or make the feature the exclusive row owner.
 The restriction against automatic inheritance between a trench set and a feature inventory applies to unsupported collective propagation, not to this original row's directly stated inventory. Do not propagate a body inventory to every trench, share a cell with another trench, identify individual artifacts from type summaries, or copy the trench's dimensions to its listed features. For each selectable inventory cell, check its original table headers, row context and number-cell anchor, then retain the row-owner trench alongside all identified feature participants. Keep all existing body-set sharing, registered headings, exclusions, genuine uncertainty and original E/R selection rules. Code validates original identifier-cell ownership and reports missing targets; it never repairs a source, response or semantic assignment.`;
+
+const SYSTEM_PROMPT =
+  TRENCH_INVENTORY_SYSTEM_PROMPT_V35 +
+  `
+SURVEY AREA LAYOUT AND IDENTIFIED TRENCHES ARE CO-DESCRIPTION TARGETS: When original discourse defines a registered current investigation area and a subsequent substantive account describes setting its survey grid, laying out its investigation units, or subdividing and investigating that area through identified trenches, preserve the SAME unchanged E ref on BOTH that area and the identified trench members. Resolve the continuing investigation scope from the original area definition, body sequence and table/identifier anchors; the area's name need not repeat in the layout sentence. For example, 'The current survey covered Area Q. A grid was established and four trenches were laid out to investigate it.' describes Q's investigation layout as well as the four trenches when original evidence identifies their membership. Mentioning the investigation area in the reason does not replace selecting its R ref.
+This is a direct description of the area's own investigation organization, not automatic propagation to an ancestor or an object used only as a location reference. The restrictions against propagating a body feature inventory to every trench and against transferring targets between trench and feature sets do not exclude an independently described area from its own substantive layout account. Require the explicit original scope and membership link; matching chapter, location, type, candidate count or registry availability alone remains insufficient. Respect actual scope changes, previous-campaign subjects and nonregistered referents. Do not attach unrelated methodology, every trench cell or feature measurement to the area, infer parent/containment relations, or convert a grid size into each trench's dimensions. Before returning, recheck trench-only body layout assignments against the previously defined scope and retain an area whose investigation organization that SAME excerpt describes. Keep the original text, E/R schema, table-row co-targets, verified feature sharing, exclusions and genuine uncertainty unchanged; code never adds semantic targets or repairs source/response text.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -652,7 +658,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v32'
     | 'content-attachment.v33'
     | 'content-attachment.v34'
-    | 'content-attachment.v35' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v35'
+    | 'content-attachment.v36' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -744,11 +751,15 @@ export function createContentAttachmentRequest(
                                                                       : promptVersion ===
                                                                           'content-attachment.v34'
                                                                         ? PARTIAL_SET_SYSTEM_PROMPT_V34
-                                                                        : SYSTEM_PROMPT,
+                                                                        : promptVersion ===
+                                                                            'content-attachment.v35'
+                                                                          ? TRENCH_INVENTORY_SYSTEM_PROMPT_V35
+                                                                          : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
-        promptVersion === 'content-attachment.v35'
+        promptVersion === 'content-attachment.v35' ||
+        promptVersion === 'content-attachment.v36'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -892,6 +903,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v32' &&
       audit.promptVersion !== 'content-attachment.v33' &&
       audit.promptVersion !== 'content-attachment.v34' &&
+      audit.promptVersion !== 'content-attachment.v35' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -925,11 +937,13 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v32' ||
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
-      audit.promptVersion === 'content-attachment.v35';
+      audit.promptVersion === 'content-attachment.v35' ||
+      audit.promptVersion === 'content-attachment.v36';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
-      audit.promptVersion === 'content-attachment.v35'
+      audit.promptVersion === 'content-attachment.v35' ||
+      audit.promptVersion === 'content-attachment.v36'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1017,6 +1031,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v32' ||
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
+      audit.promptVersion === 'content-attachment.v35' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     const parsed = selection
       ? null
@@ -1258,7 +1273,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v32' ||
           audit.promptVersion === 'content-attachment.v33' ||
           audit.promptVersion === 'content-attachment.v34' ||
-          audit.promptVersion === 'content-attachment.v35'
+          audit.promptVersion === 'content-attachment.v35' ||
+          audit.promptVersion === 'content-attachment.v36'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1356,14 +1372,16 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v32' ||
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
-      audit.promptVersion === 'content-attachment.v35'
+      audit.promptVersion === 'content-attachment.v35' ||
+      audit.promptVersion === 'content-attachment.v36'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
         unit,
         selectionInput!.codeMap.excerpts,
         newData!,
-        audit.promptVersion === 'content-attachment.v35',
+        audit.promptVersion === 'content-attachment.v35' ||
+          audit.promptVersion === 'content-attachment.v36',
       ))
         issue(reason);
     }
