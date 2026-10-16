@@ -710,6 +710,13 @@ describe('original table identifiers and chapter continuations', () => {
       null,
     ]);
     expect(result.issues).toHaveLength(7);
+    const historical = {
+      ...raw,
+      ...createCandidateDiscoveryRequest(unit, 'candidate-discovery.v6'),
+    };
+    expect(await assembleCandidateDiscovery(plan, [historical])).toEqual(
+      result,
+    );
     expect(raw).toEqual(rawBefore);
     expect(doc).toEqual(before);
     expect(
@@ -830,4 +837,89 @@ describe('original table identifiers and chapter continuations', () => {
         prepareCandidateDiscoveryRetry(plan, audits, options),
       ).rejects.toThrow('matching original');
   });
+});
+
+test('keeps distinct explicit investigation areas eligible in a stratigraphy unit while replaying v6 unchanged', async () => {
+  const doc = input();
+  doc.chapters = [
+    chapter({
+      textBlocks: [
+        {
+          id: 'scope',
+          text: '전체 사업대상범위 4,200㎡를 발굴하였다.',
+          pdfPageNo: 1,
+        },
+        { id: 'subset', text: '시굴범위 900㎡를 조사하였다.', pdfPageNo: 1 },
+        { id: 'deposit', text: '회색 퇴적층이 확인된다.', pdfPageNo: 1 },
+      ],
+    }),
+  ];
+  doc.tables = [];
+  doc.chapters[0].tableIds = [];
+  const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+      scopeChapterId: 'root',
+      inputSha256: 'hash',
+      maxTextChars: 8000,
+      tableRowsPerUnit: 12,
+    }),
+    unit = plan.units[0],
+    old = createCandidateDiscoveryRequest(unit, 'candidate-discovery.v6'),
+    current = createCandidateDiscoveryRequest(unit),
+    response: CandidateDiscoveryResponse = {
+      candidates: [
+        {
+          recordKind: 'area',
+          sourceName: '사업대상범위',
+          sourceIdentifier: null,
+          identifierSourceId: null,
+          eligibilityBasis: 'explicit_context_unit',
+          reason: 'Current whole extent',
+          evidence: [
+            { sourceId: 'id:scope', quote: '전체 사업대상범위 4,200㎡' },
+          ],
+        },
+        {
+          recordKind: 'area',
+          sourceName: '시굴범위',
+          sourceIdentifier: null,
+          identifierSourceId: null,
+          eligibilityBasis: 'explicit_context_unit',
+          reason: 'Distinct current survey portion',
+          evidence: [{ sourceId: 'id:subset', quote: '시굴범위 900㎡' }],
+        },
+        {
+          recordKind: 'layer',
+          sourceName: '퇴적층',
+          sourceIdentifier: null,
+          identifierSourceId: null,
+          eligibilityBasis: 'explicit_context_unit',
+          reason: 'Named context layer',
+          evidence: [{ sourceId: 'id:deposit', quote: '회색 퇴적층' }],
+        },
+      ],
+      exclusions: [],
+    };
+  expect(current.userPrompt).toBe(old.userPrompt);
+  expect(current.systemPrompt).toContain(
+    'EXPLICIT INVESTIGATION AREAS REQUIRE A SEPARATE REVIEW',
+  );
+  expect(old.systemPrompt).not.toContain(
+    'EXPLICIT INVESTIGATION AREAS REQUIRE A SEPARATE REVIEW',
+  );
+  const oldAudit = { unitId: unit.unitId, ...old, response, usage },
+    currentAudit = { unitId: unit.unitId, ...current, response, usage },
+    before = structuredClone({ plan, oldAudit, currentAudit }),
+    historical = await assembleCandidateDiscovery(plan, [oldAudit]),
+    result = await assembleCandidateDiscovery(plan, [currentAudit]);
+  expect(result.issues).toEqual([]);
+  expect(result).toEqual(historical);
+  expect(result.candidates.map((c) => c.recordKind)).toEqual([
+    'area',
+    'area',
+    'layer',
+  ]);
+  expect(result.candidates.map((c) => c.evidence[0].quote)).toEqual(
+    response.candidates.map((c) => c.evidence[0].quote),
+  );
+  expect({ plan, oldAudit, currentAudit }).toEqual(before);
 });
