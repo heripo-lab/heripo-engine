@@ -400,6 +400,7 @@ describe('candidate table source anchors', () => {
         traceAreaRecording: true,
         boundAreaRecording: true,
         checkClauseGrounds: true,
+        gateQualifierStage: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
