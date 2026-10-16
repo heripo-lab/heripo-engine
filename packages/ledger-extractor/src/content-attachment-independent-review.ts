@@ -7,6 +7,7 @@ import type { ContentAttachmentRequiredResponse } from './content-attachment-res
 import { z } from 'zod';
 
 import {
+  CONTENT_ATTACHMENT_AREA_RECIPIENT_BOUNDARY_POLICY,
   CONTENT_ATTACHMENT_AREA_RESULTS_POLICY,
   CONTENT_ATTACHMENT_AREA_SCOPE_POLICY,
   CONTENT_ATTACHMENT_AREA_WORK_POLICY,
@@ -64,6 +65,7 @@ export function createContentAttachmentIndependentReviewRequest(
     crossChapterAreas?: boolean;
     preserveAreaWork?: boolean;
     preserveAreaResults?: boolean;
+    boundAreaResultRecipients?: boolean;
   } = {},
 ) {
   const baseline = createContentAttachmentInventoryReviewRequest(
@@ -159,6 +161,9 @@ export function createContentAttachmentIndependentReviewRequest(
         : '') +
       (options.preserveAreaResults
         ? '\n' + CONTENT_ATTACHMENT_AREA_RESULTS_POLICY
+        : '') +
+      (options.boundAreaResultRecipients
+        ? '\n' + CONTENT_ATTACHMENT_AREA_RECIPIENT_BOUNDARY_POLICY
         : ''),
     userPrompt: JSON.stringify(evidence),
   };
@@ -176,6 +181,7 @@ export function inspectContentAttachmentIndependentReview(
     crossChapterAreas?: boolean;
     preserveAreaWork?: boolean;
     preserveAreaResults?: boolean;
+    boundAreaResultRecipients?: boolean;
   } = {},
 ): {
   issues: string[];
