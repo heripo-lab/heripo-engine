@@ -6,7 +6,10 @@ import type {
   LedgerObjectCandidate,
 } from '@heripo/ledger-extractor';
 
-import { getCandidateGroupMembers } from '@heripo/ledger-extractor';
+import {
+  getCandidateGroupMembers,
+  groupCandidateUncertainties,
+} from '@heripo/ledger-extractor';
 import { useState } from 'react';
 
 export function CandidateDeduplicationPanel({
@@ -25,6 +28,13 @@ export function CandidateDeduplicationPanel({
     ...group,
     members: getCandidateGroupMembers(group, candidates),
   }));
+  const uncertainties = groupCandidateUncertainties(result, candidates);
+  const groupLabels = new Map(
+    groups.map((g, i) => [
+      g.groupId,
+      `R${i + 1} ${g.members[0].sourceIdentifier ?? ''} ${g.members[0].sourceName}`,
+    ]),
+  );
   const visible = groups.filter(
     (g) =>
       (!onlyMerged || g.members.length > 1) &&
@@ -42,7 +52,8 @@ export function CandidateDeduplicationPanel({
       <p className="text-sm">
         원래 후보 {candidates.length}개 → 객체 후보 {groups.length}개 · 합친
         묶음 {groups.filter((g) => g.members.length > 1).length}개 · 불확실한
-        동일성 {result.uncertainMatches.length}건 · 자동 검사 문제{' '}
+        동일성 {uncertainties.length}건 · 근거 후보쌍{' '}
+        {result.uncertainMatches.length}개 · 자동 검사 문제{' '}
         {result.issues.length}개
       </p>
       <p className="text-muted-foreground text-xs">
@@ -136,24 +147,41 @@ export function CandidateDeduplicationPanel({
           <summary className="cursor-pointer text-sm">
             통합 검사·불확실성 확인
           </summary>
-          <pre className="max-h-80 overflow-auto text-xs whitespace-pre-wrap">
-            {JSON.stringify(
-              {
-                issues: result.issues,
-                uncertainMatches: result.uncertainMatches.map((m) => ({
-                  ...m,
-                  left: candidates.find(
-                    (c) => c.candidateId === m.leftCandidateId,
-                  ),
-                  right: candidates.find(
-                    (c) => c.candidateId === m.rightCandidateId,
-                  ),
-                })),
-              },
-              null,
-              2,
-            )}
-          </pre>
+          {result.issues.length > 0 && (
+            <pre className="max-h-80 overflow-auto text-xs whitespace-pre-wrap">
+              {JSON.stringify(result.issues, null, 2)}
+            </pre>
+          )}
+          <div className="mt-2 space-y-3">
+            {uncertainties.map((item) => (
+              <details
+                key={JSON.stringify([item.leftGroupId, item.rightGroupId])}
+                className="rounded border p-3"
+              >
+                <summary className="cursor-pointer text-sm">
+                  {groupLabels.get(item.leftGroupId)} ↔{' '}
+                  {groupLabels.get(item.rightGroupId)} · 근거{' '}
+                  {item.candidateMatches.length}쌍
+                </summary>
+                {item.candidateMatches.map((match) => (
+                  <details
+                    key={match.sourceMatchIndex}
+                    open
+                    className="mt-3 border-t pt-2"
+                  >
+                    <summary className="cursor-pointer text-sm">
+                      {match.leftCandidate.sourceName} ↔{' '}
+                      {match.rightCandidate.sourceName}
+                    </summary>
+                    <p className="my-2 text-sm">판단: {match.reason}</p>
+                    <pre className="max-h-80 overflow-auto text-xs whitespace-pre-wrap">
+                      {JSON.stringify(match, null, 2)}
+                    </pre>
+                  </details>
+                ))}
+              </details>
+            ))}
+          </div>
         </details>
       )}
     </section>

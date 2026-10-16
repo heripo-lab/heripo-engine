@@ -60,12 +60,14 @@ export {
   deduplicateCandidates,
   assembleCandidateDeduplication,
   getCandidateGroupMembers,
+  groupCandidateUncertainties,
   CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
 } from './candidate-deduplication';
 export type {
   CandidateDeduplicationAudit,
   CandidateDeduplicationResult,
   CandidateGroup,
+  CandidateGroupUncertainty,
 } from './candidate-deduplication';
 
 export {

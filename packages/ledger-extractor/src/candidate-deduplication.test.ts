@@ -15,6 +15,7 @@ import {
   createCandidateDeduplicationRequest,
   deduplicateCandidates,
   getCandidateGroupMembers,
+  groupCandidateUncertainties,
 } from './candidate-deduplication';
 
 vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
@@ -333,4 +334,63 @@ test('replays archived v4 judgments without applying the new scope or distributi
     }).issues,
   ).toHaveLength(1);
   expect({ d, priorAudit }).toEqual(before);
+});
+
+test('groups unordered identity pairs while retaining every source pair, reason and original candidate', () => {
+  const d = discovery();
+  d.candidates.push(candidate('d'));
+  const a = audit(d);
+  a.response.groups.push({ members: ['C4'], reason: 'another object' });
+  a.response.uncertainMatches = [
+    { left: 'C1', right: 'C3', reason: 'definition conflict' },
+    { left: 'C4', right: 'C1', reason: 'different identity gap' },
+    { left: 'C3', right: 'C2', reason: 'local occurrence conflict' },
+  ];
+  const result = assembleCandidateDeduplication(plan, d, a),
+    before = structuredClone({ result, d, a });
+  const grouped = groupCandidateUncertainties(result, d.candidates);
+  expect(grouped).toHaveLength(2);
+  expect(grouped.map((g) => g.candidateMatches.length)).toEqual([2, 1]);
+  expect(grouped[0]).toMatchObject({
+    leftGroupId: 'group-a',
+    rightGroupId: 'group-c',
+  });
+  expect(grouped[0].candidateMatches[1]).toEqual({
+    ...result.uncertainMatches[2],
+    sourceMatchIndex: 2,
+    leftCandidate: d.candidates[2],
+    rightCandidate: d.candidates[1],
+  });
+  for (const match of grouped.flatMap((g) => g.candidateMatches)) {
+    expect(match.reason).toBe(
+      result.uncertainMatches[match.sourceMatchIndex].reason,
+    );
+    expect(match.leftCandidate).toBe(
+      d.candidates.find((c) => c.candidateId === match.leftCandidateId),
+    );
+    expect(match.rightCandidate).toBe(
+      d.candidates.find((c) => c.candidateId === match.rightCandidateId),
+    );
+  }
+  expect({ result, d, a }).toEqual(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+  expect(
+    groupCandidateUncertainties({ ...result, uncertainMatches: [] }, []),
+  ).toEqual([]);
+});
+
+test('rejects missing provenance and intra-group doubts instead of silently dropping them', () => {
+  const d = discovery(),
+    result = assembleCandidateDeduplication(plan, d, audit(d));
+  expect(() =>
+    groupCandidateUncertainties({ ...result, groups: [] }, d.candidates),
+  ).toThrow('Missing uncertainty candidate group');
+  expect(() => groupCandidateUncertainties(result, [])).toThrow(
+    'Missing original candidate',
+  );
+  const invalid = structuredClone(result);
+  invalid.uncertainMatches[0].rightCandidateId = 'a';
+  expect(() => groupCandidateUncertainties(invalid, d.candidates)).toThrow(
+    'Identity uncertainty must link distinct groups',
+  );
 });

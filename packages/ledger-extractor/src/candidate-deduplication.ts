@@ -257,3 +257,60 @@ export function getCandidateGroupMembers(
     return member;
   });
 }
+
+export interface CandidateGroupUncertainty {
+  leftGroupId: string;
+  rightGroupId: string;
+  candidateMatches: Array<
+    CandidateDeduplicationResult['uncertainMatches'][number] & {
+      sourceMatchIndex: number;
+      leftCandidate: LedgerObjectCandidate;
+      rightCandidate: LedgerObjectCandidate;
+    }
+  >;
+}
+
+/** Derive a display view from a validated partition without changing pairs or evidence. */
+export function groupCandidateUncertainties(
+  result: CandidateDeduplicationResult,
+  candidates: LedgerObjectCandidate[],
+): CandidateGroupUncertainty[] {
+  const byId = new Map(candidates.map((c) => [c.candidateId, c]));
+  const membership = new Map(
+    result.groups.flatMap((g) =>
+      g.memberCandidateIds.map((id) => [id, g.groupId] as const),
+    ),
+  );
+  const grouped = new Map<string, CandidateGroupUncertainty>();
+  for (const [sourceMatchIndex, match] of result.uncertainMatches.entries()) {
+    const ids = [match.leftCandidateId, match.rightCandidateId];
+    const groupIds = ids.map((id) => {
+      const groupId = membership.get(id);
+      if (groupId === undefined)
+        throw new Error(`Missing uncertainty candidate group: ${id}`);
+      return groupId;
+    });
+    const originals = ids.map((id) => {
+      const original = byId.get(id);
+      if (!original) throw new Error(`Missing original candidate: ${id}`);
+      return original;
+    });
+    if (groupIds[0] === groupIds[1])
+      throw new Error('Identity uncertainty must link distinct groups');
+    const [leftGroupId, rightGroupId] = groupIds.sort();
+    const key = JSON.stringify([leftGroupId, rightGroupId]);
+    const item: CandidateGroupUncertainty = grouped.get(key) ?? {
+      leftGroupId,
+      rightGroupId,
+      candidateMatches: [],
+    };
+    item.candidateMatches.push({
+      ...match,
+      sourceMatchIndex,
+      leftCandidate: originals[0],
+      rightCandidate: originals[1],
+    });
+    grouped.set(key, item);
+  }
+  return [...grouped.values()];
+}
