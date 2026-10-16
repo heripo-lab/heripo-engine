@@ -35,6 +35,7 @@ import { createCandidateDeduplicationRequest } from './candidate-deduplication';
 import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import {
   CONTENT_ATTACHMENT_AREA_SCOPE_POLICY,
+  CONTENT_ATTACHMENT_AREA_WORK_POLICY,
   CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY,
   CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY,
   CONTENT_ATTACHMENT_RECIPIENT_REF_CHECK_POLICY,
@@ -65,7 +66,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v65';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v66';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -649,8 +650,11 @@ const SYSTEM_PROMPT_V64 =
   '\n' +
   CONTENT_ATTACHMENT_RECIPIENT_REF_CHECK_POLICY;
 
-const SYSTEM_PROMPT =
+const SYSTEM_PROMPT_V65 =
   SYSTEM_PROMPT_V64 + '\n' + CONTENT_ATTACHMENT_AREA_SCOPE_POLICY;
+
+const SYSTEM_PROMPT =
+  SYSTEM_PROMPT_V65 + '\n' + CONTENT_ATTACHMENT_AREA_WORK_POLICY;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -927,7 +931,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v62'
     | 'content-attachment.v63'
     | 'content-attachment.v64'
-    | 'content-attachment.v65' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v65'
+    | 'content-attachment.v66' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -1109,7 +1114,10 @@ export function createContentAttachmentRequest(
                                                                                                                                   : promptVersion ===
                                                                                                                                       'content-attachment.v64'
                                                                                                                                     ? SYSTEM_PROMPT_V64
-                                                                                                                                    : SYSTEM_PROMPT,
+                                                                                                                                    : promptVersion ===
+                                                                                                                                        'content-attachment.v65'
+                                                                                                                                      ? SYSTEM_PROMPT_V65
+                                                                                                                                      : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v59' ||
         promptVersion === 'content-attachment.v60' ||
@@ -1117,7 +1125,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v62' ||
         promptVersion === 'content-attachment.v63' ||
         promptVersion === 'content-attachment.v64' ||
-        promptVersion === 'content-attachment.v65'
+        promptVersion === 'content-attachment.v65' ||
+        promptVersion === 'content-attachment.v66'
         ? createContentAttachmentGroundedInput(plan, unit).payload
         : promptVersion === 'content-attachment.v55' ||
             promptVersion === 'content-attachment.v56' ||
@@ -1229,6 +1238,7 @@ export async function attachContentUnit(
       qualifyBeforeIdentity: true,
       reconcileRecipientRefs: true,
       crossChapterAreas: true,
+      preserveAreaWork: true,
     },
   );
   let independentReview: ContentAttachmentIndependentReviewAudit | undefined;
@@ -1365,6 +1375,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v62' &&
       audit.promptVersion !== 'content-attachment.v63' &&
       audit.promptVersion !== 'content-attachment.v64' &&
+      audit.promptVersion !== 'content-attachment.v65' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1428,7 +1439,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v62' ||
       audit.promptVersion === 'content-attachment.v63' ||
       audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65';
+      audit.promptVersion === 'content-attachment.v65' ||
+      audit.promptVersion === 'content-attachment.v66';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v59' ||
       audit.promptVersion === 'content-attachment.v60' ||
@@ -1436,7 +1448,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v62' ||
       audit.promptVersion === 'content-attachment.v63' ||
       audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65'
+      audit.promptVersion === 'content-attachment.v65' ||
+      audit.promptVersion === 'content-attachment.v66'
         ? createContentAttachmentGroundedInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v55' ||
             audit.promptVersion === 'content-attachment.v56' ||
@@ -1582,6 +1595,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v62' ||
       audit.promptVersion === 'content-attachment.v63' ||
       audit.promptVersion === 'content-attachment.v64' ||
+      audit.promptVersion === 'content-attachment.v65' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
@@ -1607,6 +1621,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v62' ||
       audit.promptVersion === 'content-attachment.v63' ||
       audit.promptVersion === 'content-attachment.v64' ||
+      audit.promptVersion === 'content-attachment.v65' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = (
@@ -1658,7 +1673,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v62' ||
       audit.promptVersion === 'content-attachment.v63' ||
       audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65'
+      audit.promptVersion === 'content-attachment.v65' ||
+      audit.promptVersion === 'content-attachment.v66'
     ) {
       const reviewed = inspectContentAttachmentIndependentReview(
         createContentAttachmentGroundedInput(plan, unit),
@@ -1669,11 +1685,16 @@ export function assembleContentAttachment(
           qualifyBeforeIdentity:
             audit.promptVersion === 'content-attachment.v63' ||
             audit.promptVersion === 'content-attachment.v64' ||
-            audit.promptVersion === 'content-attachment.v65',
-          crossChapterAreas: audit.promptVersion === 'content-attachment.v65',
+            audit.promptVersion === 'content-attachment.v65' ||
+            audit.promptVersion === 'content-attachment.v66',
+          preserveAreaWork: audit.promptVersion === 'content-attachment.v66',
+          crossChapterAreas:
+            audit.promptVersion === 'content-attachment.v65' ||
+            audit.promptVersion === 'content-attachment.v66',
           reconcileRecipientRefs:
             audit.promptVersion === 'content-attachment.v64' ||
-            audit.promptVersion === 'content-attachment.v65',
+            audit.promptVersion === 'content-attachment.v65' ||
+            audit.promptVersion === 'content-attachment.v66',
         },
       );
       for (const reason of reviewed.issues) issue(reason);
@@ -1957,7 +1978,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v62' ||
           audit.promptVersion === 'content-attachment.v63' ||
           audit.promptVersion === 'content-attachment.v64' ||
-          audit.promptVersion === 'content-attachment.v65'
+          audit.promptVersion === 'content-attachment.v65' ||
+          audit.promptVersion === 'content-attachment.v66'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -2085,7 +2107,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v62' ||
       audit.promptVersion === 'content-attachment.v63' ||
       audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65'
+      audit.promptVersion === 'content-attachment.v65' ||
+      audit.promptVersion === 'content-attachment.v66'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -2122,7 +2145,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v62' ||
           audit.promptVersion === 'content-attachment.v63' ||
           audit.promptVersion === 'content-attachment.v64' ||
-          audit.promptVersion === 'content-attachment.v65',
+          audit.promptVersion === 'content-attachment.v65' ||
+          audit.promptVersion === 'content-attachment.v66',
       ))
         issue(reason);
     }
@@ -2147,6 +2171,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v62' ||
       audit.promptVersion === 'content-attachment.v63' ||
       audit.promptVersion === 'content-attachment.v64' ||
+      audit.promptVersion === 'content-attachment.v65' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(
@@ -2165,6 +2190,7 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v62' ||
           audit.promptVersion === 'content-attachment.v63' ||
           audit.promptVersion === 'content-attachment.v64' ||
+          audit.promptVersion === 'content-attachment.v65' ||
           audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION,
       ))
         issue(reason);
