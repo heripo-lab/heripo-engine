@@ -97,3 +97,5 @@ export { createContentAttachmentContextInput } from './content-attachment-contex
 export { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 
 export type { ContentAttachmentRequiredResponse } from './content-attachment-response';
+
+export { createContentAttachmentOriginInput } from './content-attachment-origins';

@@ -19,6 +19,7 @@ import {
   createContentAttachmentRequest,
   prepareContentAttachment,
 } from './content-attachment';
+import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentInput } from './content-attachment-input';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -1410,15 +1411,21 @@ describe('bounded content attachment', () => {
     const before = structuredClone(out);
     expect(assembleContentAttachment(p, [out]).issues).toEqual([]);
     expect(out).toEqual(before);
+    const archivedUserPrompt = createContentAttachmentRequest(
+      p,
+      p.units[0],
+      'content-attachment.v54',
+    ).userPrompt;
     const v42 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v42',
       ),
     };
-    expect(out.userPrompt).toBe(v42.userPrompt);
+    expect(archivedUserPrompt).toBe(v42.userPrompt);
     expect(out.systemPrompt.startsWith(v42.systemPrompt)).toBe(true);
     expect(v42.systemPrompt).not.toContain(
       'CARRY PREVIOUS-INVESTIGATION SUBJECTS THROUGH CATEGORY FRAGMENTS AND THEIR NEXT CONTEXT',
@@ -1434,13 +1441,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v43 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v43',
       ),
     };
-    expect(out.userPrompt).toBe(v43.userPrompt);
+    expect(archivedUserPrompt).toBe(v43.userPrompt);
     expect(out.systemPrompt.startsWith(v43.systemPrompt)).toBe(true);
     expect(v43.systemPrompt).not.toContain(
       'RESOLVE DIFFERENT REGISTRY AND NARRATIVE NAMES THROUGH ORIGINAL IDENTITY EVIDENCE',
@@ -1455,13 +1463,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v45 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v45',
       ),
     };
-    expect(out.userPrompt).toBe(v45.userPrompt);
+    expect(archivedUserPrompt).toBe(v45.userPrompt);
     expect(out.systemPrompt.startsWith(v45.systemPrompt)).toBe(true);
     expect(v45.systemPrompt).not.toContain('CURRENT CLAUSE PERIOD');
     expect(out.systemPrompt).toContain('CURRENT CLAUSE PERIOD');
@@ -1476,13 +1485,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v46 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v46',
       ),
     };
-    expect(out.userPrompt).toBe(v46.userPrompt);
+    expect(archivedUserPrompt).toBe(v46.userPrompt);
     expect(out.systemPrompt.startsWith(v46.systemPrompt)).toBe(true);
     expect(v46.systemPrompt).not.toContain('ESTABLISHED FEATURE GROUPS REMAIN');
     expect(out.systemPrompt).toContain('ESTABLISHED FEATURE GROUPS REMAIN');
@@ -1497,13 +1507,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v47 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v47',
       ),
     };
-    expect(out.userPrompt).toBe(v47.userPrompt);
+    expect(archivedUserPrompt).toBe(v47.userPrompt);
     expect(out.systemPrompt.startsWith(v47.systemPrompt)).toBe(true);
     expect(v47.systemPrompt).not.toContain('SET-LEVEL EVIDENCE ATTACHMENT');
     expect(out.systemPrompt).toContain('SET-LEVEL EVIDENCE ATTACHMENT');
@@ -1518,13 +1529,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v48 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v48',
       ),
     };
-    expect(out.userPrompt).toBe(v48.userPrompt);
+    expect(archivedUserPrompt).toBe(v48.userPrompt);
     expect(out.systemPrompt.startsWith(v48.systemPrompt)).toBe(true);
     expect(v48.systemPrompt).not.toContain(
       'QUANTITIES REMAIN WITH THEIR ORIGINAL',
@@ -1541,13 +1553,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v49 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v49',
       ),
     };
-    expect(out.userPrompt).toBe(v49.userPrompt);
+    expect(archivedUserPrompt).toBe(v49.userPrompt);
     expect(out.systemPrompt.startsWith(v49.systemPrompt)).toBe(true);
     expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
     expect(out.systemPrompt).toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
@@ -1562,13 +1575,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v50 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v50',
       ),
     };
-    expect(out.userPrompt).toBe(v50.userPrompt);
+    expect(archivedUserPrompt).toBe(v50.userPrompt);
     expect(out.systemPrompt.startsWith(v50.systemPrompt)).toBe(true);
     expect(v50.systemPrompt).not.toContain(
       'NO STATED RESTRICTION IS NOT POSITIVE',
@@ -1584,13 +1598,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v51 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v51',
       ),
     };
-    expect(out.userPrompt).toBe(v51.userPrompt);
+    expect(archivedUserPrompt).toBe(v51.userPrompt);
     expect(out.systemPrompt.startsWith(v51.systemPrompt)).toBe(true);
     expect(v51.systemPrompt).not.toContain(
       'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
@@ -1609,13 +1624,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v52 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v52',
       ),
     };
-    expect(out.userPrompt).toBe(v52.userPrompt);
+    expect(archivedUserPrompt).toBe(v52.userPrompt);
     expect(out.systemPrompt.startsWith(v52.systemPrompt)).toBe(true);
     expect(v52.systemPrompt).not.toContain(
       'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
@@ -1633,13 +1649,14 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v53 = {
       ...out,
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v53',
       ),
     };
-    expect(out.userPrompt).toBe(v53.userPrompt);
+    expect(archivedUserPrompt).toBe(v53.userPrompt);
     expect(out.systemPrompt.startsWith(v53.systemPrompt)).toBe(true);
     expect(v53.systemPrompt).not.toContain(
       'IDENTIFIER CROSS-CHECKING IS LOCAL',

@@ -12,8 +12,8 @@ import {
   attachContentUnit,
   createContentAttachmentRequest,
 } from './content-attachment';
-import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
+import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -324,7 +324,7 @@ describe('candidate table source anchors', () => {
 
   test('sends anchors to the model, replays historical input, rejects forged maps, and preserves a model decision rather than repairing it', async () => {
     const { plan, unit } = fixture();
-    const current = createContentAttachmentBodyBlockInput(plan, unit);
+    const current = createContentAttachmentOriginInput(plan, unit);
     const response = {
       assignments: [
         ...['E7', 'E8', 'E9'].map((excerptRef) => ({

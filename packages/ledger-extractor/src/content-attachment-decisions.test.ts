@@ -18,6 +18,7 @@ import {
 import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
+import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
 vi.mock('@heripo/shared', () => ({
@@ -154,7 +155,7 @@ describe('mention-scoped registration decisions', () => {
     expect(plan).toEqual(before);
     const request = createContentAttachmentRequest(plan, unit);
     expect(JSON.parse(request.userPrompt)).toEqual(
-      createContentAttachmentBodyBlockInput(plan, unit).payload,
+      createContentAttachmentOriginInput(plan, unit).payload,
     );
     const response = {
       assignments: [
@@ -218,7 +219,7 @@ describe('mention-scoped registration decisions', () => {
     expect(audit.response).toEqual(response);
     expect(audit.rawResponse).toBe(wireResponse);
     expect(audit.codeMap).toEqual(
-      createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+      createContentAttachmentOriginInput(plan, unit).codeMap,
     );
     const saved = structuredClone(audit);
     const result = assembleContentAttachment(plan, [audit]);
@@ -245,6 +246,7 @@ describe('mention-scoped registration decisions', () => {
     const unresolved = {
       ...structuredClone(audit),
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v41'),
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     };
     unresolved.response.unresolved.push({
       excerptRef: 'E1',
@@ -325,36 +327,43 @@ describe('mention-scoped registration decisions', () => {
     expect({ plan, audit }).toEqual(before);
     const historical = {
       ...audit,
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
     };
     expect(assembleContentAttachment(plan, [historical])).toEqual(result);
     const v48 = {
       ...audit,
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v48'),
     };
     expect(assembleContentAttachment(plan, [v48])).toEqual(result);
     const v49 = {
       ...audit,
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v49'),
     };
     expect(assembleContentAttachment(plan, [v49])).toEqual(result);
     const v50 = {
       ...audit,
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v50'),
     };
     expect(assembleContentAttachment(plan, [v50])).toEqual(result);
     const v51 = {
       ...audit,
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v51'),
     };
     expect(assembleContentAttachment(plan, [v51])).toEqual(result);
     const v52 = {
       ...audit,
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v52'),
     };
     expect(assembleContentAttachment(plan, [v52])).toEqual(result);
     const v53 = {
       ...audit,
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v53'),
     };
     expect(assembleContentAttachment(plan, [v53])).toEqual(result);
