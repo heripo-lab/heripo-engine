@@ -405,6 +405,15 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(assembleContentAttachment(plan, [v52])).toEqual(
     assembleContentAttachment(plan, [audit]),
   );
+  const v53 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v53'),
+  };
+  expect(audit.systemPrompt.startsWith(v53.systemPrompt)).toBe(true);
+  expect(v53.systemPrompt).not.toContain('IDENTIFIER CROSS-CHECKING IS LOCAL');
+  expect(assembleContentAttachment(plan, [v53])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
   const forged = structuredClone(historical);
   forged.response.assignments[0].reason = 'Changed';
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
@@ -453,6 +462,17 @@ test('rejects missing named range members in current assembly while retaining ex
     assembleContentAttachment(singletonPlan, [singletonAudit]).completedUnitIds,
   ).toEqual([]);
   expect(singletonAudit).toEqual(untouched);
+  const v53SingletonAudit = {
+    ...singletonAudit,
+    ...createContentAttachmentRequest(
+      singletonPlan,
+      singletonUnit,
+      'content-attachment.v53',
+    ),
+  };
+  expect(assembleContentAttachment(singletonPlan, [v53SingletonAudit])).toEqual(
+    assembleContentAttachment(singletonPlan, [singletonAudit]),
+  );
   const oldSingletonAudit = {
     ...singletonAudit,
     ...createContentAttachmentRequest(
