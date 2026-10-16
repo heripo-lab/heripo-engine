@@ -36,7 +36,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v55';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v56';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -528,10 +528,16 @@ const LOCAL_IDENTIFIERS_SYSTEM_PROMPT_V54 =
 IDENTIFIER CROSS-CHECKING IS LOCAL TO EXPLICIT OBJECT IDENTIFIERS, NOT A GLOBAL ELIGIBILITY GATE: Apply the preceding number-to-ref checks when the original passage actually names object identifiers, including inclusive ranges and individually listed identifiers. Do not reinterpret an unnumbered category, an inventory count, a local quantity in a candidate name/quote or the opaque R suffix as an object identifier. An inventory or follow-up need not enumerate identifiers to describe originally verified members. A null number field or absence of repeated individual identification does not disqualify a supported member from collective evidence or from genuine relationship-role alternatives. Resolve an explicit identifier through actual original names/quotes/context when needed, without inventing a number; do not make the existence of such an identifier a prerequisite for unrelated collective accounts. Keep the number check for actually numbered participants while assessing unnumbered co-described participants independently. Do not transfer a candidate's local count into a category total or select only the member whose name happens to contain a quantity. Preserve all originally established members within the current clause's investigation, period, location and type restrictions, including original tentative observations with unchanged wording. A generic type list without original membership still does not identify arbitrary registered objects.
 COMPLETE COLLECTIVE RECIPIENTS AND RELATIONSHIP-SUBJECT ALTERNATIVES AS SEPARATE CHECKS: First resolve the original bounded inventory, apply the current clause's qualifiers and retain every directly described verified member, whether numbered or unnumbered. Then independently resolve each relationship role from original evidence. Sharing the E with those members does not identify which member participates in a later relationship clause; return genuine subject alternatives in the SAME E's existing nested unresolved field even when those refs also receive collective evidence. Treating the counterpart as earlier, comparative or intentionally nonregistered does not identify the local subject or remove that subject's supported alternatives. Preserve tentative wording about whether a relation holds separately from uncertainty about which object participates. Before returning unresolved null, identify the actual source link that resolves the subject rather than treating collective membership, a local count, candidate availability or counterpart exclusion as that link. Do not invent uncertainty if the original account really identifies the participant or the whole set. Finally recheck that identifier auditing did not silently drop unnumbered collective members or genuine role alternatives: explain an actual membership gap or current qualifier for exclusions, rather than absent repeated numbers. Keep every fixed E, original source strings, explicit-number mappings, nearest-work defaults and existing schema/validation behavior; code never fills missing semantic targets or repairs source/model output.`;
 
-const SYSTEM_PROMPT =
+const ORIGIN_ROWS_SYSTEM_PROMPT_V55 =
   LOCAL_IDENTIFIERS_SYSTEM_PROMPT_V54 +
   `
 ORIGINAL REGISTRATION ROWS AND COUNT SCOPE: originTables supplies read-only original table captions, chapter contexts and header cells [row,column,text,rowSpan,colSpan,isHeader]. originRows follows originRowColumns; each row contains unchanged cells following originCellColumns, preserving original indexes/spans. originAnchors links [candidate,row,column] to the actual cell from which that candidate was registered; multiple candidates can share an inventory cell and repeated mentions retain the same candidate. These bindings cover available original table evidence across the fixed registry, not just the current chapter or selectable page. Read the original row and headers to locate a candidate's observation context, such as its trench, area or numbered owner. Do not infer ownership merely from row order or propagate one side of a parallel row into the other side. originQuantityScope=cell_and_row means a count in a registered name/quote is bounded by that original cell and row; it does NOT assert a table-wide, investigation-wide or category total. A row reporting one observation does not exclude supported observations in other rows. Use an explicit original wider total only if the source actually states it for that same scope. Preserve tentative labels and current period/investigation restrictions. Neither the row bindings nor their counts merge candidates or prove which member is the subject of a later relationship; independently retain genuine subject alternatives, including overlap with collective recipients, unless original discourse identifies the role. U/O refs and all origin cells are READ-ONLY CONTEXT, never selectable E refs or new excerpts. Long source IDs and exact candidate quote ranges remain code-only; code binds original cells without interpreting counts, choosing targets or repairing source/output.`;
+
+const SYSTEM_PROMPT =
+  ORIGIN_ROWS_SYSTEM_PROMPT_V55 +
+  `
+REGISTRATION CONTEXT IDENTIFIES CANDIDATES; THE CURRENT PASSAGE DETERMINES RECIPIENTS: Original read-only rows and their owners establish where a registered observation belongs, not which records every current body passage describes. For a body inventory, do not add all trenches, areas or row owners merely because those records share original registration rows with the listed features or belong to the investigation set. A phrase locating findings inside investigation units does not by itself make every unit the descriptive subject of that feature inventory. Identify the actual current claim independently of its registration context. Retain an investigation unit when the current E independently describes that identified unit's own layout, work, state, findspot or other substantive account; require that original descriptive link rather than registry membership alone. This does not weaken the existing rule for an ACTUALLY SELECTABLE original table occurrence cell: its identified row owner and listed features can both receive that table E. The read-only origin cell is not that selectable E and must not transfer its entire recipient set to a different body E. Before returning, separately justify any body-to-owner sharing through the current source claim; original row co-membership is identity context, not automatic evidence propagation.
+CURRENT QUALIFIERS FIRST, THEN RETAIN SOURCE-ESTABLISHED TENTATIVE MEMBERS AND ROLE ALTERNATIVES: Resolve the current original clause's investigation, period, location and type scope before selecting from an inventory that may mix periods or observation categories. Check every proposed recipient and unresolved alternative against its literal name, quote and original row; a shared table, chapter or matching noun does not lift the current qualifiers. After that narrowing, keep every originally established member genuinely described by the collective, including observations whose original category is marked tentative, estimated, possible or similar. Such a label preserves the report's classification uncertainty; it is not, by itself, a reason to remove an established observation from collective evidence or from a supported relationship-subject alternative set. Do not silently reinterpret an account of confirmed investigation results as excluding all tentative classifications in that same verified inventory. Preserve the unchanged tentative wording rather than asserting the classification as certain. Exclude a proposed member only on actual missing membership, an explicit current qualifier, contradictory original evidence or a genuinely unsupported role, not the tentative marker alone. Assess relationship roles separately from collective evidence; when the original subject remains unidentified among the scoped candidates, retain all genuinely supported alternatives, including scoped tentative observations and overlap with assigned refs, without guessing or creating uncertainty for unrelated objects. Before returning, recheck both members outside the current qualifiers and scoped tentative members missing from assignments or role alternatives. Keep original strings, all required E keys, explicit-number checks, local-work subjects and existing output/validation contracts; code never fills targets or repairs source/model output.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -798,7 +804,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v52'
     | 'content-attachment.v53'
     | 'content-attachment.v54'
-    | 'content-attachment.v55' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v55'
+    | 'content-attachment.v56' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -950,9 +957,13 @@ export function createContentAttachmentRequest(
                                                                                                               : promptVersion ===
                                                                                                                   'content-attachment.v54'
                                                                                                                 ? LOCAL_IDENTIFIERS_SYSTEM_PROMPT_V54
-                                                                                                                : SYSTEM_PROMPT,
+                                                                                                                : promptVersion ===
+                                                                                                                    'content-attachment.v55'
+                                                                                                                  ? ORIGIN_ROWS_SYSTEM_PROMPT_V55
+                                                                                                                  : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
-      promptVersion === 'content-attachment.v55'
+      promptVersion === 'content-attachment.v55' ||
+        promptVersion === 'content-attachment.v56'
         ? createContentAttachmentOriginInput(plan, unit).payload
         : promptVersion === 'content-attachment.v33' ||
             promptVersion === 'content-attachment.v34' ||
@@ -1139,6 +1150,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v52' &&
       audit.promptVersion !== 'content-attachment.v53' &&
       audit.promptVersion !== 'content-attachment.v54' &&
+      audit.promptVersion !== 'content-attachment.v55' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1192,9 +1204,11 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === 'content-attachment.v53' ||
       audit.promptVersion === 'content-attachment.v54' ||
-      audit.promptVersion === 'content-attachment.v55';
+      audit.promptVersion === 'content-attachment.v55' ||
+      audit.promptVersion === 'content-attachment.v56';
     const selectionInput =
-      audit.promptVersion === 'content-attachment.v55'
+      audit.promptVersion === 'content-attachment.v55' ||
+      audit.promptVersion === 'content-attachment.v56'
         ? createContentAttachmentOriginInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v33' ||
             audit.promptVersion === 'content-attachment.v34' ||
@@ -1325,6 +1339,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === 'content-attachment.v53' ||
       audit.promptVersion === 'content-attachment.v54' ||
+      audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
@@ -1340,6 +1355,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === 'content-attachment.v53' ||
       audit.promptVersion === 'content-attachment.v54' ||
+      audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = createContentAttachmentResponseSchema(
@@ -1615,7 +1631,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v52' ||
           audit.promptVersion === 'content-attachment.v53' ||
           audit.promptVersion === 'content-attachment.v54' ||
-          audit.promptVersion === 'content-attachment.v55'
+          audit.promptVersion === 'content-attachment.v55' ||
+          audit.promptVersion === 'content-attachment.v56'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1733,7 +1750,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === 'content-attachment.v53' ||
       audit.promptVersion === 'content-attachment.v54' ||
-      audit.promptVersion === 'content-attachment.v55'
+      audit.promptVersion === 'content-attachment.v55' ||
+      audit.promptVersion === 'content-attachment.v56'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1760,7 +1778,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v52' ||
           audit.promptVersion === 'content-attachment.v53' ||
           audit.promptVersion === 'content-attachment.v54' ||
-          audit.promptVersion === 'content-attachment.v55',
+          audit.promptVersion === 'content-attachment.v55' ||
+          audit.promptVersion === 'content-attachment.v56',
       ))
         issue(reason);
     }
@@ -1775,6 +1794,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === 'content-attachment.v53' ||
       audit.promptVersion === 'content-attachment.v54' ||
+      audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(
@@ -1783,6 +1803,7 @@ export function assembleContentAttachment(
         newData!,
         audit.promptVersion === 'content-attachment.v53' ||
           audit.promptVersion === 'content-attachment.v54' ||
+          audit.promptVersion === 'content-attachment.v55' ||
           audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION,
       ))
         issue(reason);

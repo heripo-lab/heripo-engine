@@ -368,6 +368,20 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   };
   expect(JSON.parse(old.userPrompt)).toEqual(legacy.payload);
   expect(assembleContentAttachment(plan, [old])).toEqual(result);
+  const v55 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v55'),
+  };
+  expect(v55.userPrompt).toBe(audit.userPrompt);
+  expect(audit.systemPrompt.startsWith(v55.systemPrompt)).toBe(true);
+  expect(v55.systemPrompt).not.toContain(
+    'REGISTRATION CONTEXT IDENTIFIES CANDIDATES',
+  );
+  expect(audit.systemPrompt).toContain(
+    'REGISTRATION CONTEXT IDENTIFIES CANDIDATES',
+  );
+  expect(audit.systemPrompt).toContain('CURRENT QUALIFIERS FIRST, THEN RETAIN');
+  expect(assembleContentAttachment(plan, [v55])).toEqual(result);
   const forged = structuredClone(audit);
   (forged.codeMap as typeof current.codeMap).originRows[0].rowIndex = 99;
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
