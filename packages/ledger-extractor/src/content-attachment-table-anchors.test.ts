@@ -13,7 +13,7 @@ import {
   createContentAttachmentRequest,
 } from './content-attachment';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
-import { createContentAttachmentOriginInput } from './content-attachment-origins';
+import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -324,7 +324,7 @@ describe('candidate table source anchors', () => {
 
   test('sends anchors to the model, replays historical input, rejects forged maps, and preserves a model decision rather than repairing it', async () => {
     const { plan, unit } = fixture();
-    const current = createContentAttachmentOriginInput(plan, unit);
+    const current = createContentAttachmentGroundedInput(plan, unit);
     const response = {
       assignments: [
         ...['E7', 'E8', 'E9'].map((excerptRef) => ({
@@ -354,6 +354,8 @@ describe('candidate table source anchors', () => {
         .map((e) => ({ excerptRef: e.ref, reason: 'Other' })),
     };
     const wireResponse = {
+      inventoryAudits: [],
+      exclusions: [],
       decisions: Object.fromEntries([
         ...response.assignments.map(({ excerptRef, ...item }) => [
           excerptRef,

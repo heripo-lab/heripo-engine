@@ -275,6 +275,8 @@ test('rejects missing named range members in current assembly while retaining ex
   const unit = plan.units[0],
     compiled = createContentAttachmentOriginInput(plan, unit);
   const rawResponse = {
+    inventoryAudits: [],
+    exclusions: [],
     decisions: {
       E1: {
         status: 'assigned' as const,
@@ -316,6 +318,7 @@ test('rejects missing named range members in current assembly while retaining ex
   ).systemPrompt;
   const historical = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v44'),
   };
@@ -329,6 +332,7 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
   const v45 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v45'),
   };
@@ -340,6 +344,7 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(v45.systemPrompt).not.toContain('CURRENT CLAUSE PERIOD');
   const v46 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v46'),
   };
@@ -351,6 +356,7 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(v46.systemPrompt).not.toContain('ESTABLISHED FEATURE GROUPS REMAIN');
   const v47 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
   };
@@ -362,6 +368,7 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(v47.systemPrompt).not.toContain('SET-LEVEL EVIDENCE ATTACHMENT');
   const v48 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v48'),
   };
@@ -375,6 +382,7 @@ test('rejects missing named range members in current assembly while retaining ex
   );
   const v49 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v49'),
   };
@@ -386,6 +394,7 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
   const v50 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v50'),
   };
@@ -399,6 +408,7 @@ test('rejects missing named range members in current assembly while retaining ex
   );
   const v51 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v51'),
   };
@@ -412,6 +422,7 @@ test('rejects missing named range members in current assembly while retaining ex
   );
   const v52 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v52'),
   };
@@ -424,6 +435,7 @@ test('rejects missing named range members in current assembly while retaining ex
   );
   const v53 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v53'),
   };
@@ -449,6 +461,8 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentOriginInput(singletonPlan, singletonUnit)
       .codeMap,
     rawResponse: {
+      inventoryAudits: [],
+      exclusions: [],
       decisions: {
         E1: {
           status: 'assigned' as const,
@@ -482,6 +496,7 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(singletonAudit).toEqual(untouched);
   const v53SingletonAudit = {
     ...singletonAudit,
+    rawResponse: { decisions: singletonAudit.rawResponse.decisions },
     codeMap: createContentAttachmentBodyBlockInput(singletonPlan, singletonUnit)
       .codeMap,
     ...createContentAttachmentRequest(
@@ -495,6 +510,7 @@ test('rejects missing named range members in current assembly while retaining ex
   );
   const oldSingletonAudit = {
     ...singletonAudit,
+    rawResponse: { decisions: singletonAudit.rawResponse.decisions },
     codeMap: createContentAttachmentBodyBlockInput(singletonPlan, singletonUnit)
       .codeMap,
     ...createContentAttachmentRequest(

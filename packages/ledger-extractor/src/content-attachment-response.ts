@@ -2,7 +2,7 @@ import type { ContentAttachmentSelectionResponse } from './content-attachment';
 
 import { z } from 'zod';
 
-function decisionSchema(candidate: z.ZodType<string>) {
+export function contentAttachmentDecisionSchema(candidate: z.ZodType<string>) {
   const reason = z.string().min(1);
   const uncertainty = z.strictObject({
     candidateRefs: z.array(candidate),
@@ -21,7 +21,10 @@ function decisionSchema(candidate: z.ZodType<string>) {
 }
 
 export interface ContentAttachmentRequiredResponse {
-  decisions: Record<string, z.infer<ReturnType<typeof decisionSchema>>>;
+  decisions: Record<
+    string,
+    z.infer<ReturnType<typeof contentAttachmentDecisionSchema>>
+  >;
 }
 
 /** Every original E is a required key; shared definitions avoid repeating the registry enum. */
@@ -32,7 +35,7 @@ export function createContentAttachmentResponseSchema(
   const candidate = z
     .enum(candidateRefs as [string, ...string[]])
     .meta({ id: 'ContentAttachmentCandidate' });
-  const decision = decisionSchema(candidate).meta({
+  const decision = contentAttachmentDecisionSchema(candidate).meta({
     id: 'ContentAttachmentDecision',
   });
   return z.strictObject({

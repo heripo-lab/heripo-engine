@@ -503,7 +503,7 @@ describe('original selectable body block input', () => {
     );
     expect(request.promptVersion).toBe('content-attachment.v41');
     const latest = createContentAttachmentRequest(plan, unit);
-    expect(latest.promptVersion).toBe('content-attachment.v58');
+    expect(latest.promptVersion).toBe('content-attachment.v59');
     expect(JSON.parse(latest.userPrompt).current).toEqual(
       JSON.parse(request.userPrompt).current,
     );

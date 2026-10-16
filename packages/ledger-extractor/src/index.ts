@@ -99,3 +99,13 @@ export { createContentAttachmentBodyBlockInput } from './content-attachment-body
 export type { ContentAttachmentRequiredResponse } from './content-attachment-response';
 
 export { createContentAttachmentOriginInput } from './content-attachment-origins';
+
+export {
+  createContentAttachmentGroundedInput,
+  createContentAttachmentGroundedSchema,
+  inspectContentAttachmentGrounding,
+} from './content-attachment-grounding';
+export type {
+  ContentAttachmentGroundedResponse,
+  ContentAttachmentExclusion,
+} from './content-attachment-grounding';
