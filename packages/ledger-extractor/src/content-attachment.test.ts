@@ -1383,6 +1383,7 @@ describe('bounded content attachment', () => {
         reconcileRecipientRefs: true,
         crossChapterAreas: true,
         preserveAreaWork: true,
+        preserveAreaResults: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({

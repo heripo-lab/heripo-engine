@@ -719,6 +719,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         reconcileRecipientRefs: true,
         crossChapterAreas: true,
         preserveAreaWork: true,
+        preserveAreaResults: true,
       },
     ),
     review = request.schema.parse({
@@ -1556,7 +1557,11 @@ test('shares body inventory boundaries and area fieldwork criteria without chang
       unit,
       'content-attachment.v65',
     ),
-    current = createContentAttachmentRequest(plan, unit),
+    current = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v66',
+    ),
     historicalReview = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
@@ -1633,7 +1638,98 @@ test('shares body inventory boundaries and area fieldwork criteria without chang
   expect({ input, selection }).toEqual(before);
 });
 
-test.each(['content-attachment.v64', 'content-attachment.v65'] as const)(
+test('shares identified area result eligibility without changing evidence coverage or forcing an independent disposition', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection(),
+    before = structuredClone({ input, selection }),
+    options = {
+      includeBodyContext: true,
+      qualifyBeforeIdentity: true,
+      reconcileRecipientRefs: true,
+      crossChapterAreas: true,
+      preserveAreaWork: true,
+    },
+    historical = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v66',
+    ),
+    current = createContentAttachmentRequest(plan, unit),
+    historicalReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      options,
+    ),
+    review = createContentAttachmentIndependentReviewRequest(input, selection, {
+      ...options,
+      preserveAreaResults: true,
+    });
+  const added = current.systemPrompt.slice(historical.systemPrompt.length + 1);
+  expect(current.systemPrompt).toBe(historical.systemPrompt + '\n' + added);
+  expect(review.systemPrompt).toBe(
+    historicalReview.systemPrompt + '\n' + added,
+  );
+  expect(added).toContain(
+    'directly describes that area own investigation results as well as the supported feature members',
+  );
+  expect(added).toContain(
+    'Do not spread a body feature aggregate to every trench or unit',
+  );
+  expect(added).toContain(
+    'do not spread a partial investigation result to a containing project area',
+  );
+  expect(current.userPrompt).toBe(historical.userPrompt);
+  expect(review.userPrompt).toBe(historicalReview.userPrompt);
+  expect(review.required).toEqual(historicalReview.required);
+  expect(JSON.parse(review.userPrompt)).not.toHaveProperty('decisions');
+  const rawResponse = review.schema.parse({
+    reviews: Object.fromEntries(
+      review.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason: 'Independent eligibility judgment retained',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  });
+  expect(historicalReview.schema.safeParse(rawResponse).success).toBe(true);
+  const audit = {
+    systemPrompt: review.systemPrompt,
+    userPrompt: review.userPrompt,
+    rawResponse,
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      ...options,
+      preserveAreaResults: true,
+    }).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, options)
+      .issues,
+  ).toHaveLength(1);
+  expect({ input, selection }).toEqual(before);
+});
+
+test.each([
+  'content-attachment.v64',
+  'content-attachment.v65',
+  'content-attachment.v66',
+] as const)(
   'replays archived %s request and independent coverage after the live version advances',
   (version) => {
     const { plan, unit } = fixture(),
@@ -1647,7 +1743,8 @@ test.each(['content-attachment.v64', 'content-attachment.v65'] as const)(
           includeBodyContext: true,
           qualifyBeforeIdentity: true,
           reconcileRecipientRefs: true,
-          crossChapterAreas: version === 'content-attachment.v65',
+          crossChapterAreas: version !== 'content-attachment.v64',
+          preserveAreaWork: version === 'content-attachment.v66',
         },
       );
     const rawResponse = review.schema.parse({
