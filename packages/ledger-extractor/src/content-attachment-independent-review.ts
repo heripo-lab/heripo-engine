@@ -12,6 +12,7 @@ import {
   CONTENT_ATTACHMENT_AREA_SCOPE_POLICY,
   CONTENT_ATTACHMENT_AREA_WORK_POLICY,
   CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY,
+  CONTENT_ATTACHMENT_FIELDWORK_CONTINUITY_POLICY,
   CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY,
   CONTENT_ATTACHMENT_RECIPIENT_REF_CHECK_POLICY,
   createContentAttachmentBodyReviewCoverage,
@@ -66,6 +67,7 @@ export function createContentAttachmentIndependentReviewRequest(
     preserveAreaWork?: boolean;
     preserveAreaResults?: boolean;
     boundAreaResultRecipients?: boolean;
+    reviewTableWork?: boolean;
   } = {},
 ) {
   const baseline = createContentAttachmentInventoryReviewRequest(
@@ -79,6 +81,7 @@ export function createContentAttachmentIndependentReviewRequest(
         input,
         baseline.required,
         options.crossChapterAreas ? selection : undefined,
+        options.reviewTableWork,
       )
     : null;
   const required = coverage?.required ?? baseline.required;
@@ -93,6 +96,21 @@ export function createContentAttachmentIndependentReviewRequest(
       r.excerptRef,
       r.inventoryRef,
     ]);
+  }
+  if (options.reviewTableWork) {
+    evidence.excerpts = input.payload.current.excerpts;
+    evidence.currentTables = input.payload.current.tables;
+    const inventories = new Set(required.map((r) => r.inventoryRef));
+    evidence.originTables = input.payload.originTables.filter((t) =>
+      inventories.has(t.ref),
+    );
+    evidence.originRows = input.payload.originRows.filter((r) =>
+      inventories.has(r[1]),
+    );
+    const rows = new Set(evidence.originRows.map((r: [string]) => r[0]));
+    evidence.originAnchors = input.payload.originAnchors.filter((a) =>
+      rows.has(a[1]),
+    );
   }
   const context = z
     .enum(input.codeMap.excerpts.map((e) => e.ref) as [string, ...string[]])
@@ -164,6 +182,9 @@ export function createContentAttachmentIndependentReviewRequest(
         : '') +
       (options.boundAreaResultRecipients
         ? '\n' + CONTENT_ATTACHMENT_AREA_RECIPIENT_BOUNDARY_POLICY
+        : '') +
+      (options.reviewTableWork
+        ? '\n' + CONTENT_ATTACHMENT_FIELDWORK_CONTINUITY_POLICY
         : ''),
     userPrompt: JSON.stringify(evidence),
   };
@@ -182,6 +203,7 @@ export function inspectContentAttachmentIndependentReview(
     preserveAreaWork?: boolean;
     preserveAreaResults?: boolean;
     boundAreaResultRecipients?: boolean;
+    reviewTableWork?: boolean;
   } = {},
 ): {
   issues: string[];

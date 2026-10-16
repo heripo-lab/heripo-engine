@@ -392,6 +392,11 @@ describe('candidate table source anchors', () => {
         includeBodyContext: true,
         qualifyBeforeIdentity: true,
         reconcileRecipientRefs: true,
+        crossChapterAreas: true,
+        preserveAreaWork: true,
+        preserveAreaResults: true,
+        boundAreaResultRecipients: true,
+        reviewTableWork: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
