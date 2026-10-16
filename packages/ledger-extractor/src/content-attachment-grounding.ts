@@ -59,6 +59,56 @@ export function createContentAttachmentGroundedInput(
 }
 
 type Input = ReturnType<typeof createContentAttachmentGroundedInput>;
+
+/** Derive review coverage from frozen selections and original row bindings, not lexical guesses. */
+export function requiredContentAttachmentInventoryAudits(
+  input: Input,
+  response: ContentAttachmentRequiredResponse,
+) {
+  return input.codeMap.excerpts.flatMap((e) => {
+    const source = input.codeMap.sources.find(
+      (s) => s.source.sourceId === e.evidence[0].sourceId,
+    )!;
+    if (source.source.resource.kind !== 'text') return [];
+    const decision = response.decisions[e.ref];
+    const targets =
+      decision.status === 'assigned'
+        ? [
+            ...decision.candidateRefs,
+            ...(decision.unresolved?.candidateRefs ?? []),
+          ]
+        : decision.status === 'unresolved'
+          ? decision.candidateRefs
+          : [];
+    return input.inventories.flatMap((inventory) => {
+      const selected = inventory.candidateRefs.filter((ref) =>
+        targets.includes(ref),
+      );
+      const rows = new Set(
+        input.codeMap.originAnchors
+          .filter(
+            (a) =>
+              selected.includes(a.candidateRef) &&
+              input.codeMap.originRows.some(
+                (r) => r.ref === a.rowRef && r.tableRef === inventory.ref,
+              ),
+          )
+          .map((a) => a.rowRef),
+      );
+      return selected.length > 1 && rows.size > 1
+        ? [
+            {
+              key: `${e.ref}:${inventory.ref}`,
+              excerptRef: e.ref,
+              inventoryRef: inventory.ref,
+              candidateRefs: inventory.candidateRefs,
+              selected,
+            },
+          ]
+        : [];
+    });
+  });
+}
 const enumOf = (refs: string[]) => z.enum(refs as [string, ...string[]]);
 const explanation = z.string().min(1);
 const included = z
@@ -252,35 +302,11 @@ export function inspectContentAttachmentGrounding(
       exclusion.reason,
       null,
     );
-  for (const e of input.codeMap.excerpts) {
-    const source = input.codeMap.sources.find(
-      (s) => s.source.sourceId === e.evidence[0].sourceId,
-    )!;
-    if (source.source.resource.kind !== 'text') continue;
-    for (const inventory of input.inventories) {
-      const selected = inventory.candidateRefs.filter((ref) =>
-        targets(e.ref).includes(ref),
-      );
-      const rows = new Set(
-        input.codeMap.originAnchors
-          .filter(
-            (a) =>
-              selected.includes(a.candidateRef) &&
-              input.codeMap.originRows.some(
-                (r) => r.ref === a.rowRef && r.tableRef === inventory.ref,
-              ),
-          )
-          .map((a) => a.rowRef),
-      );
-      if (
-        selected.length > 1 &&
-        rows.size > 1 &&
-        !audited.has(`${e.ref}:${inventory.ref}`)
-      )
-        issues.push(
-          `Missing original inventory audit: ${e.ref}:${inventory.ref}`,
-        );
-    }
-  }
+  for (const review of requiredContentAttachmentInventoryAudits(
+    input,
+    response,
+  ))
+    if (!audited.has(review.key))
+      issues.push(`Missing original inventory audit: ${review.key}`);
   return { issues, exclusions };
 }

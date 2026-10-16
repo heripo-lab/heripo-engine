@@ -275,8 +275,6 @@ test('rejects missing named range members in current assembly while retaining ex
   const unit = plan.units[0],
     compiled = createContentAttachmentOriginInput(plan, unit);
   const rawResponse = {
-    inventoryAudits: [],
-    exclusions: [],
     decisions: {
       E1: {
         status: 'assigned' as const,
@@ -461,8 +459,6 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentOriginInput(singletonPlan, singletonUnit)
       .codeMap,
     rawResponse: {
-      inventoryAudits: [],
-      exclusions: [],
       decisions: {
         E1: {
           status: 'assigned' as const,

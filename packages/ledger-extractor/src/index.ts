@@ -109,3 +109,12 @@ export type {
   ContentAttachmentGroundedResponse,
   ContentAttachmentExclusion,
 } from './content-attachment-grounding';
+
+export {
+  createContentAttachmentInventoryReviewRequest,
+  inspectContentAttachmentInventoryReview,
+} from './content-attachment-inventory-review';
+export type {
+  ContentAttachmentInventoryReviewAudit,
+  ContentAttachmentInventoryReviewResponse,
+} from './content-attachment-inventory-review';

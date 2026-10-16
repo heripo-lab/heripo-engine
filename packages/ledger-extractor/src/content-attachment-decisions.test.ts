@@ -1,4 +1,5 @@
 import type { ProcessedDocument } from '@heripo/model';
+import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type {
@@ -22,7 +23,8 @@ import { createContentAttachmentGroundedInput } from './content-attachment-groun
 import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({
+vi.mock('@heripo/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof Shared>()),
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
@@ -186,8 +188,6 @@ describe('mention-scoped registration decisions', () => {
       totalTokens: 2,
     };
     const wireResponse = {
-      inventoryAudits: [],
-      exclusions: [],
       decisions: Object.fromEntries([
         ...response.assignments.map(({ excerptRef, ...item }) => [
           excerptRef,
@@ -279,8 +279,6 @@ describe('mention-scoped registration decisions', () => {
       'The inspected features occur here, and the feature may adjoin an earlier enclosure.';
     unit.sources[0].resource.data.text = text;
     const wireResponse = {
-      inventoryAudits: [],
-      exclusions: [],
       decisions: {
         E1: {
           status: 'assigned',
