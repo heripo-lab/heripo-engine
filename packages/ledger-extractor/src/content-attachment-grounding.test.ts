@@ -721,6 +721,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         preserveAreaWork: true,
         preserveAreaResults: true,
         boundAreaResultRecipients: true,
+        reviewTableWork: true,
       },
     ),
     review = request.schema.parse({
@@ -1748,7 +1749,11 @@ test('separates area result eligibility from clause-qualified feature recipients
       unit,
       'content-attachment.v67',
     ),
-    current = createContentAttachmentRequest(plan, unit),
+    current = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v68',
+    ),
     historicalReview = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
@@ -1827,6 +1832,7 @@ test.each([
   'content-attachment.v65',
   'content-attachment.v66',
   'content-attachment.v67',
+  'content-attachment.v68',
 ] as const)(
   'replays archived %s request and independent coverage after the live version advances',
   (version) => {
@@ -1845,7 +1851,10 @@ test.each([
           preserveAreaWork:
             version !== 'content-attachment.v64' &&
             version !== 'content-attachment.v65',
-          preserveAreaResults: version === 'content-attachment.v67',
+          preserveAreaResults:
+            version === 'content-attachment.v67' ||
+            version === 'content-attachment.v68',
+          boundAreaResultRecipients: version === 'content-attachment.v68',
         },
       );
     const rawResponse = review.schema.parse({
@@ -1891,3 +1900,118 @@ test.each([
     expect(audit).toEqual(before);
   },
 );
+
+test('reviews non-header table data independently even when first selection ignores every cell, with complete table and body context', () => {
+  const { plan } = fixture();
+  const unit = plan.units[1];
+  unit.tables[0].data.grid[0][0].isHeader = true;
+  const input = createContentAttachmentGroundedInput(plan, unit);
+  input.payload.current.tables[0].grid[0].push([
+    null,
+    'Read-only context',
+    1,
+    1,
+    false,
+  ]);
+  const selection: ContentAttachmentRequiredResponse = {
+    decisions: Object.fromEntries(
+      input.codeMap.excerpts.map((e) => [
+        e.ref,
+        { status: 'ignored', reason: 'First independent classification' },
+      ]),
+    ),
+  };
+  const before = structuredClone({ input, selection });
+  const historical = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { includeBodyContext: true },
+  );
+  const request = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { includeBodyContext: true, reviewTableWork: true },
+  );
+  expect(historical.required.some((r) => r.excerptRef === 'E2')).toBe(false);
+  expect(
+    request.required.find((r) => r.key === 'E2:U1')?.candidateRefs,
+  ).toEqual(['opaque-nine', 'opaque-two']);
+  expect(request.required.some((r) => r.excerptRef === 'E1')).toBe(false);
+  const payload = JSON.parse(request.userPrompt);
+  expect(payload.excerpts).toEqual(input.payload.current.excerpts);
+  expect(payload.currentTables).toEqual(input.payload.current.tables);
+  expect(payload.originRows).toEqual(input.payload.originRows);
+  expect(payload.originAnchors).toEqual(input.payload.originAnchors);
+  expect(payload).not.toHaveProperty('decisions');
+  const raw = {
+    reviews: Object.fromEntries(
+      request.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'included',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason: 'Own source-grounded independent decision',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(request.schema.safeParse(raw).success).toBe(true);
+  const missing = structuredClone(raw);
+  delete missing.reviews['E2:U1'];
+  expect(request.schema.safeParse(missing).success).toBe(false);
+  delete raw.reviews['E2:U1']['opaque-two'];
+  expect(request.schema.safeParse(raw).success).toBe(false);
+  expect({ input, selection }).toEqual(before);
+});
+
+test('shares layout recording and linked diary work criteria without forcing semantic answers or changing first evidence', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const options = {
+    includeBodyContext: true,
+    qualifyBeforeIdentity: true,
+    reconcileRecipientRefs: true,
+    crossChapterAreas: true,
+    preserveAreaWork: true,
+    preserveAreaResults: true,
+    boundAreaResultRecipients: true,
+  };
+  const old = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v68',
+    ),
+    current = createContentAttachmentRequest(plan, unit);
+  const oldReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      options,
+    ),
+    review = createContentAttachmentIndependentReviewRequest(input, selection, {
+      ...options,
+      reviewTableWork: true,
+    });
+  const added = current.systemPrompt.slice(old.systemPrompt.length + 1);
+  expect(current.systemPrompt).toBe(old.systemPrompt + '\n' + added);
+  expect(review.systemPrompt).toBe(oldReview.systemPrompt + '\n' + added);
+  expect(added).toContain('measuring their collective layout');
+  expect(added).toContain(
+    'inherit those source-established participants even without repeated names or numbers',
+  );
+  expect(added).toContain('whole-project and partial scopes distinct');
+  expect(added).not.toMatch(/E7|E44|R1|화지산/);
+  expect(current.userPrompt).toBe(old.userPrompt);
+  const request = JSON.parse(review.userPrompt);
+  expect(request.currentTables).toEqual([]);
+  expect(request.excerpts).toEqual(input.payload.current.excerpts);
+});

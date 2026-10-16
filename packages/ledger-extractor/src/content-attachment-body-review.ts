@@ -31,21 +31,62 @@ export const CONTENT_ATTACHMENT_AREA_RESULTS_POLICY =
 export const CONTENT_ATTACHMENT_AREA_RECIPIENT_BOUNDARY_POLICY =
   'AREA RESULT PRESERVATION DOES NOT EXPAND FEATURE RECIPIENTS: Apply this SAME separation in first selection and independent review. Decide three dimensions independently: (a) the identified area whose own investigation results the clause describes, (b) the feature collective actually described by that CURRENT clause, and (c) unresolved individual relationship-subject alternatives. Area eligibility in (a) neither broadens nor narrows the feature set in (b). Resolve (b) from the source-established inventory after applying the current clause period, investigation stage, location and object-type qualifiers; decide (c) separately within its source-supported role scope. The phrases supported feature members and those feature members in the area-results policy mean only the members supported for THIS clause, not every feature registered for that area, period, table, row or earlier broader inventory. Original row co-occurrence and investigation membership establish candidate identity and inventory membership, not direct description by every later clause. A non-exhaustive expression such as etc. is not by itself evidence that every other known type belongs to the current described collective; extending a named type set needs an original discourse or definition link that supports the additional types. Do not replace a source type-qualified collective with a broader generic feature collective merely to preserve its area results. Conversely, retain all independently supported collective members, their original tentative classifications and genuine relationship-subject alternatives; do not demand individual relationship identity as a condition for collective attachment. Preserve the independently described area even when additional feature types are excluded. In each stage, recheck proposed area and feature recipients separately against the current original clause and each candidate own grounds, and keep a current type restriction even when the area has a wider inventory. Do not infer per-object attributes from collective preservation. Keep evidence, required schema, first judgments and independent judgments unchanged except for the actual model decision; code never supplies expected recipients, adopts review corrections or repairs a response.';
 
+export const CONTENT_ATTACHMENT_FIELDWORK_CONTINUITY_POLICY = `SAME AREA FIELDWORK AND BODY-TO-TABLE ACTION CRITERIA IN BOTH STAGES: Apply this identical rule in first selection and independent review. Resolve the investigation area from its own original extent and the continuing current investigation. A substantive record of laying out that area investigation units, measuring their collective layout, or producing the plan and field documentation of that investigation arrangement directly describes the identified area organization and record as well as its independently identified units. The area name or measurement need not repeat. Read the original paragraph and preceding layout definition: do not exclude the area solely because the documentation also describes its units. This requires an original link to that area own investigation arrangement, not containment, a generic procedure or a drawing of an unrelated individual object. Keep whole-project and partial scopes distinct; do not extend the area or feature set through this rule.
+For a table task with an omitted work subject, read the original table caption, headers, complete row/date, source body and explicit body-to-table pointer together. If the body defines the participants of a completed investigation action and the linked diary records the same action/event, inherit those source-established participants even without repeated names or numbers. A navigation pointer is context establishing the link, not itself an attached object description. A cell combining administration or a meeting with substantive object work remains one unchanged E, preserved for the supported work participants. Do not dismiss it solely as an unnumbered diary entry. Before excluding a task, compare it with the source body action and explain any actual different event, narrower subject or missing link; lack of an identifier alone does not rebut an established link. A different dated row local subject does not silently replace a positively linked completed set-wide action. Conversely, a same-row local subject governs its own elliptical actions unless source evidence positively establishes expansion; shared action vocabulary or absence of a restriction alone never supplies a whole-set link. Preserve the confirmed participants independently of work purpose or beneficiaries. Review every supplied non-header data-cell/member key, including cells ignored by first selection: coverage is not evidence of eligibility. Use headers, dates and non-substantive cells as context; do not turn a day, weather or generic heading into an object description. Both stages keep exact E/K text and scope/period qualifiers. Preserve independent area, feature and relationship judgments; never repair responses, assign expected semantic targets in code or adopt review corrections.`;
+
 /** Expand review coverage without deciding semantic recipients or copying earlier judgments. */
 export function createContentAttachmentBodyReviewCoverage(
   input: Input,
   inventoryRequired: Required[],
   selection?: ContentAttachmentRequiredResponse,
+  includeTableCells = false,
 ) {
   const body = input.payload.current.excerpts.filter((e) => e[1] === 'text');
-  const contexts = new Set(body.flatMap((e) => e[2]));
-  for (const r of inventoryRequired)
+  const dataRefs = new Set(
+    includeTableCells
+      ? input.payload.current.tables.flatMap((table) =>
+          table.grid.flatMap((row) =>
+            row.flatMap((cell) => (cell[0] && !cell[4] ? [cell[0]] : [])),
+          ),
+        )
+      : [],
+  );
+  const data = input.payload.current.excerpts.filter((e) => dataRefs.has(e[0]));
+  const contexts = new Set([...body, ...data].flatMap((e) => e[2]));
+  const tableInventories = includeTableCells
+    ? input.inventories.filter(
+        (inventory) =>
+          inventoryRequired.some((r) => r.inventoryRef === inventory.ref) ||
+          input.payload.originTables
+            .find((t) => t.ref === inventory.ref)!
+            .contexts.some((c) => contexts.has(c)) ||
+          input.codeMap.originTables.some(
+            (origin) =>
+              origin.ref === inventory.ref &&
+              input.codeMap.tables.some(
+                (current) => current.table.key === origin.table.key,
+              ),
+          ),
+      )
+    : [];
+  const tableRequired: ContextReviewSlot[] = data.flatMap((e) =>
+    tableInventories.map((inventory) => ({
+      key: `${e[0]}:${inventory.ref}`,
+      excerptRef: e[0],
+      inventoryRef: inventory.ref,
+      candidateRefs: inventory.candidateRefs,
+      selected: [],
+      basis: 'inventory' as const,
+    })),
+  );
+  const allInventoryRequired = [...inventoryRequired, ...tableRequired];
+  for (const r of allInventoryRequired)
     for (const context of input.payload.originTables.find(
       (t) => t.ref === r.inventoryRef,
     )!.contexts)
       contexts.add(context);
   const inventoryMembers = new Set(
-    inventoryRequired.flatMap((r) => r.candidateRefs),
+    allInventoryRequired.flatMap((r) => r.candidateRefs),
   );
   const crossChapterRefs = new Set(
     selection
@@ -83,8 +124,8 @@ export function createContentAttachmentBodyReviewCoverage(
     candidateRefs: [...refs],
   }));
   const required: ContextReviewSlot[] = [
-    ...inventoryRequired.map((r) => ({ ...r, basis: 'inventory' as const })),
-    ...body.flatMap((e) =>
+    ...allInventoryRequired.map((r) => ({ ...r, basis: 'inventory' as const })),
+    ...[...body, ...data].flatMap((e) =>
       pools.map((pool) => ({
         key: `${e[0]}:${pool.ref}`,
         excerptRef: e[0],
