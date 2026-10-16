@@ -398,6 +398,7 @@ describe('candidate table source anchors', () => {
         boundAreaResultRecipients: true,
         reviewTableWork: true,
         traceAreaRecording: true,
+        boundAreaRecording: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
