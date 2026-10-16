@@ -382,6 +382,18 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(v50.systemPrompt).not.toContain(
     'NO STATED RESTRICTION IS NOT POSITIVE',
   );
+  const v51 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v51'),
+  };
+  expect(audit.systemPrompt.startsWith(v51.systemPrompt)).toBe(true);
+  expect(v51.userPrompt).toBe(audit.userPrompt);
+  expect(assembleContentAttachment(plan, [v51])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v51.systemPrompt).not.toContain(
+    'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
+  );
   const forged = structuredClone(historical);
   forged.response.assignments[0].reason = 'Changed';
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(

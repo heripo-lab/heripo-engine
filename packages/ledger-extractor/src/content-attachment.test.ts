@@ -1582,6 +1582,31 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV50Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v51 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v51',
+      ),
+    };
+    expect(out.userPrompt).toBe(v51.userPrompt);
+    expect(out.systemPrompt.startsWith(v51.systemPrompt)).toBe(true);
+    expect(v51.systemPrompt).not.toContain(
+      'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
+    );
+    expect(out.systemPrompt).toContain(
+      'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
+    );
+    expect(out.systemPrompt).toContain('NARROW THE VERIFIED ANTECEDENT SET');
+    expect(assembleContentAttachment(p, [v51])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV51Projection = structuredClone(v51);
+    alteredV51Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV51Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(
