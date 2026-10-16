@@ -309,12 +309,17 @@ test('rejects missing named range members in current assembly while retaining ex
   ]);
   expect(assembleContentAttachment(plan, [audit]).completedUnitIds).toEqual([]);
   expect(audit).toEqual(before);
+  const preservedPrompt = createContentAttachmentRequest(
+    plan,
+    unit,
+    'content-attachment.v57',
+  ).systemPrompt;
   const historical = {
     ...audit,
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v44'),
   };
-  expect(audit.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(historical.systemPrompt)).toBe(true);
   expect(historical.systemPrompt).not.toContain(
     'INCLUSIVE EXPLICIT IDENTIFIER RANGES',
   );
@@ -327,7 +332,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v45'),
   };
-  expect(audit.systemPrompt.startsWith(v45.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v45.systemPrompt)).toBe(true);
   expect(v45.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v45])).toEqual(
     assembleContentAttachment(plan, [audit]),
@@ -338,7 +343,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v46'),
   };
-  expect(audit.systemPrompt.startsWith(v46.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v46.systemPrompt)).toBe(true);
   expect(v46.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v46])).toEqual(
     assembleContentAttachment(plan, [audit]),
@@ -349,7 +354,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
   };
-  expect(audit.systemPrompt.startsWith(v47.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v47.systemPrompt)).toBe(true);
   expect(v47.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v47])).toEqual(
     assembleContentAttachment(plan, [audit]),
@@ -360,7 +365,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v48'),
   };
-  expect(audit.systemPrompt.startsWith(v48.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v48.systemPrompt)).toBe(true);
   expect(v48.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v48])).toEqual(
     assembleContentAttachment(plan, [audit]),
@@ -373,7 +378,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v49'),
   };
-  expect(audit.systemPrompt.startsWith(v49.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v49.systemPrompt)).toBe(true);
   expect(v49.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v49])).toEqual(
     assembleContentAttachment(plan, [audit]),
@@ -384,7 +389,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v50'),
   };
-  expect(audit.systemPrompt.startsWith(v50.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v50.systemPrompt)).toBe(true);
   expect(v50.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v50])).toEqual(
     assembleContentAttachment(plan, [audit]),
@@ -397,7 +402,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v51'),
   };
-  expect(audit.systemPrompt.startsWith(v51.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v51.systemPrompt)).toBe(true);
   expect(v51.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v51])).toEqual(
     assembleContentAttachment(plan, [audit]),
@@ -410,7 +415,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v52'),
   };
-  expect(audit.systemPrompt.startsWith(v52.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v52.systemPrompt)).toBe(true);
   expect(v52.systemPrompt).not.toContain(
     'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
   );
@@ -422,7 +427,7 @@ test('rejects missing named range members in current assembly while retaining ex
     codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v53'),
   };
-  expect(audit.systemPrompt.startsWith(v53.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(v53.systemPrompt)).toBe(true);
   expect(v53.systemPrompt).not.toContain('IDENTIFIER CROSS-CHECKING IS LOCAL');
   expect(assembleContentAttachment(plan, [v53])).toEqual(
     assembleContentAttachment(plan, [audit]),

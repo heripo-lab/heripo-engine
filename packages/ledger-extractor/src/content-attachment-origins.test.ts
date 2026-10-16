@@ -373,7 +373,6 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v55'),
   };
   expect(v55.userPrompt).toBe(audit.userPrompt);
-  expect(audit.systemPrompt.startsWith(v55.systemPrompt)).toBe(true);
   expect(v55.systemPrompt).not.toContain(
     'REGISTRATION CONTEXT IDENTIFIES CANDIDATES',
   );
@@ -387,7 +386,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v56'),
   };
   expect(v56.userPrompt).toBe(audit.userPrompt);
-  expect(audit.systemPrompt.startsWith(v56.systemPrompt)).toBe(true);
+  expect(v56.systemPrompt.startsWith(v55.systemPrompt)).toBe(true);
   expect(v56.systemPrompt).not.toContain(
     'EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET',
   );
@@ -398,6 +397,28 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     'AUDIT TENTATIVE MEMBERS ACROSS COLLECTIVE EVIDENCE',
   );
   expect(assembleContentAttachment(plan, [v56])).toEqual(result);
+  const v57 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v57'),
+  };
+  expect(v57.userPrompt).toBe(audit.userPrompt);
+  expect(v57.systemPrompt.startsWith(v56.systemPrompt)).toBe(true);
+  expect(v57.systemPrompt).toContain(
+    'Never return quotes, source IDs, offsets or rewritten text.',
+  );
+  expect(audit.systemPrompt).not.toContain(
+    'Never return quotes, source IDs, offsets or rewritten text.',
+  );
+  expect(audit.systemPrompt).not.toContain(
+    'never quote, repair, split or combine original text.',
+  );
+  expect(audit.systemPrompt).toContain(
+    'Inside an existing reason, brief unchanged original evidence phrases',
+  );
+  expect(audit.systemPrompt).toContain(
+    'AUDIT CURRENT-QUALIFIER EXCLUSIONS AGAINST THE ORIGINAL SET BEFORE NARROWING',
+  );
+  expect(assembleContentAttachment(plan, [v57])).toEqual(result);
   const forged = structuredClone(audit);
   (forged.codeMap as typeof current.codeMap).originRows[0].rowIndex = 99;
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
