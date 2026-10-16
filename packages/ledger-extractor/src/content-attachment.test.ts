@@ -1386,6 +1386,7 @@ describe('bounded content attachment', () => {
         preserveAreaResults: true,
         boundAreaResultRecipients: true,
         reviewTableWork: true,
+        traceAreaRecording: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({

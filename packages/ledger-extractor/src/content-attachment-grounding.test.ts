@@ -722,6 +722,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         preserveAreaResults: true,
         boundAreaResultRecipients: true,
         reviewTableWork: true,
+        traceAreaRecording: true,
       },
     ),
     review = request.schema.parse({
@@ -1833,6 +1834,7 @@ test.each([
   'content-attachment.v66',
   'content-attachment.v67',
   'content-attachment.v68',
+  'content-attachment.v69',
 ] as const)(
   'replays archived %s request and independent coverage after the live version advances',
   (version) => {
@@ -1853,8 +1855,12 @@ test.each([
             version !== 'content-attachment.v65',
           preserveAreaResults:
             version === 'content-attachment.v67' ||
-            version === 'content-attachment.v68',
-          boundAreaResultRecipients: version === 'content-attachment.v68',
+            version === 'content-attachment.v68' ||
+            version === 'content-attachment.v69',
+          boundAreaResultRecipients:
+            version === 'content-attachment.v68' ||
+            version === 'content-attachment.v69',
+          reviewTableWork: version === 'content-attachment.v69',
         },
       );
     const rawResponse = review.schema.parse({
@@ -1991,7 +1997,11 @@ test('shares layout recording and linked diary work criteria without forcing sem
       unit,
       'content-attachment.v68',
     ),
-    current = createContentAttachmentRequest(plan, unit);
+    current = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v69',
+    );
   const oldReview = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
@@ -2014,4 +2024,92 @@ test('shares layout recording and linked diary work criteria without forcing sem
   const request = JSON.parse(review.userPrompt);
   expect(request.currentTables).toEqual([]);
   expect(request.excerpts).toEqual(input.payload.current.excerpts);
+});
+
+test('shares an explicit original area-definition layout-recording check without changing evidence, coverage or semantic freedom', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const before = structuredClone({ input, selection });
+  const options = {
+    includeBodyContext: true,
+    qualifyBeforeIdentity: true,
+    reconcileRecipientRefs: true,
+    crossChapterAreas: true,
+    preserveAreaWork: true,
+    preserveAreaResults: true,
+    boundAreaResultRecipients: true,
+    reviewTableWork: true,
+  };
+  const historical = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v69',
+    ),
+    current = createContentAttachmentRequest(plan, unit);
+  const oldReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      options,
+    ),
+    review = createContentAttachmentIndependentReviewRequest(input, selection, {
+      ...options,
+      traceAreaRecording: true,
+    });
+  const added = current.systemPrompt.slice(historical.systemPrompt.length + 1);
+  expect(current.systemPrompt).toBe(historical.systemPrompt + '\n' + added);
+  expect(review.systemPrompt).toBe(oldReview.systemPrompt + '\n' + added);
+  expect(added).toContain('AREA DEFINITION -> LAYOUT -> RECORDING LINK CHECK');
+  expect(added).toContain('area through its own K definition');
+  expect(added).toContain('original E or body clause');
+  expect(added).toContain('same-investigation recording links');
+  expect(added).toContain('before omitting an independently described area');
+  expect(added).toContain('specific missing or contradicted link');
+  expect(added).not.toMatch(/E7|E4|R1|화지산|2,776/);
+  expect(current.userPrompt).toBe(historical.userPrompt);
+  expect(review.userPrompt).toBe(oldReview.userPrompt);
+  expect(review.required).toEqual(oldReview.required);
+  expect(JSON.parse(review.userPrompt)).not.toHaveProperty('decisions');
+  const output = {
+    reviews: Object.fromEntries(
+      review.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason:
+                'Original link not established in this independent fixture judgment',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(review.schema.safeParse(output).success).toBe(true);
+  expect(oldReview.schema.safeParse(output).success).toBe(true);
+  const audit = {
+    systemPrompt: review.systemPrompt,
+    userPrompt: review.userPrompt,
+    rawResponse: review.schema.parse(output),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      ...options,
+      traceAreaRecording: true,
+    }).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, options)
+      .issues,
+  ).toHaveLength(1);
+  expect({ input, selection }).toEqual(before);
 });

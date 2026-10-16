@@ -397,6 +397,7 @@ describe('candidate table source anchors', () => {
         preserveAreaResults: true,
         boundAreaResultRecipients: true,
         reviewTableWork: true,
+        traceAreaRecording: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
