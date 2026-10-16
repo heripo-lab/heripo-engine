@@ -118,3 +118,14 @@ export type {
   ContentAttachmentInventoryReviewAudit,
   ContentAttachmentInventoryReviewResponse,
 } from './content-attachment-inventory-review';
+
+export {
+  createContentAttachmentIndependentReviewRequest,
+  inspectContentAttachmentIndependentReview,
+} from './content-attachment-independent-review';
+export type {
+  ContentAttachmentIndependentMember,
+  ContentAttachmentIndependentReviewAudit,
+  ContentAttachmentIndependentReviewResponse,
+  ContentAttachmentReviewFinding,
+} from './content-attachment-independent-review';
