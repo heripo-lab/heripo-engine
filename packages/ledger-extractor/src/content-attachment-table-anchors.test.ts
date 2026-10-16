@@ -401,6 +401,7 @@ describe('candidate table source anchors', () => {
         boundAreaRecording: true,
         checkClauseGrounds: true,
         gateQualifierStage: true,
+        preserveTentativeMembership: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({

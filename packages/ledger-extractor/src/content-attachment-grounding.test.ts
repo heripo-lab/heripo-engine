@@ -726,6 +726,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         boundAreaRecording: true,
         checkClauseGrounds: true,
         gateQualifierStage: true,
+        preserveTentativeMembership: true,
       },
     ),
     review = request.schema.parse({
@@ -1841,6 +1842,7 @@ test.each([
   'content-attachment.v70',
   'content-attachment.v71',
   'content-attachment.v72',
+  'content-attachment.v73',
 ] as const)(
   'replays archived %s request and independent coverage after the live version advances',
   (version) => {
@@ -1865,26 +1867,34 @@ test.each([
             version === 'content-attachment.v69' ||
             version === 'content-attachment.v70' ||
             version === 'content-attachment.v71' ||
-            version === 'content-attachment.v72',
+            version === 'content-attachment.v72' ||
+            version === 'content-attachment.v73',
           boundAreaResultRecipients:
             version === 'content-attachment.v68' ||
             version === 'content-attachment.v69' ||
             version === 'content-attachment.v70' ||
             version === 'content-attachment.v71' ||
-            version === 'content-attachment.v72',
+            version === 'content-attachment.v72' ||
+            version === 'content-attachment.v73',
           reviewTableWork:
             version === 'content-attachment.v69' ||
             version === 'content-attachment.v70' ||
             version === 'content-attachment.v71' ||
-            version === 'content-attachment.v72',
+            version === 'content-attachment.v72' ||
+            version === 'content-attachment.v73',
           traceAreaRecording:
             version === 'content-attachment.v70' ||
             version === 'content-attachment.v71' ||
-            version === 'content-attachment.v72',
+            version === 'content-attachment.v72' ||
+            version === 'content-attachment.v73',
           boundAreaRecording:
             version === 'content-attachment.v71' ||
-            version === 'content-attachment.v72',
-          checkClauseGrounds: version === 'content-attachment.v72',
+            version === 'content-attachment.v72' ||
+            version === 'content-attachment.v73',
+          checkClauseGrounds:
+            version === 'content-attachment.v72' ||
+            version === 'content-attachment.v73',
+          gateQualifierStage: version === 'content-attachment.v73',
         },
       );
     const rawResponse = review.schema.parse({
@@ -2371,7 +2381,11 @@ test('shares per-candidate current qualifier and original cross-stage identity g
     unit,
     'content-attachment.v72',
   );
-  const current = createContentAttachmentRequest(plan, unit);
+  const current = createContentAttachmentRequest(
+    plan,
+    unit,
+    'content-attachment.v73',
+  );
   const oldReview = createContentAttachmentIndependentReviewRequest(
     input,
     selection,
@@ -2446,6 +2460,115 @@ test('shares per-candidate current qualifier and original cross-stage identity g
     inspectContentAttachmentIndependentReview(input, selection, audit, {
       ...options,
       gateQualifierStage: true,
+    }).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, options)
+      .issues,
+  ).toHaveLength(1);
+  expect({ input, selection }).toEqual(before);
+});
+
+test('shares tentative inventory membership and separate attachment/role criteria without changing replay evidence or forcing independent outcomes', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const before = structuredClone({ input, selection });
+  const options = {
+    includeBodyContext: true,
+    qualifyBeforeIdentity: true,
+    reconcileRecipientRefs: true,
+    crossChapterAreas: true,
+    preserveAreaWork: true,
+    preserveAreaResults: true,
+    boundAreaResultRecipients: true,
+    reviewTableWork: true,
+    traceAreaRecording: true,
+    boundAreaRecording: true,
+    checkClauseGrounds: true,
+    gateQualifierStage: true,
+  };
+  const old = createContentAttachmentRequest(
+    plan,
+    unit,
+    'content-attachment.v73',
+  );
+  const current = createContentAttachmentRequest(plan, unit);
+  const oldReview = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    options,
+  );
+  const review = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    {
+      ...options,
+      preserveTentativeMembership: true,
+    },
+  );
+  const added = current.systemPrompt.slice(old.systemPrompt.length + 1);
+  expect(current.promptVersion).toBe('content-attachment.v74');
+  expect(current.systemPrompt).toBe(old.systemPrompt + '\n' + added);
+  expect(review.systemPrompt).toBe(oldReview.systemPrompt + '\n' + added);
+  expect(added).toContain(
+    'TENTATIVE CLASSIFICATION IS NOT INVENTORY EXCLUSION',
+  );
+  expect(added).toContain(
+    'Confirmed inventory membership does not mean confirmed classification',
+  );
+  expect(added).toContain('Do not treat tentative Type T as an unrelated type');
+  expect(added).toContain('TWO independent decisions');
+  expect(added).toContain('nested unresolved.candidateRefs');
+  expect(added).toContain(
+    'attachment=included and relationshipSubject=alternative',
+  );
+  expect(added).toContain(
+    'collective-only E without an unresolved relationship',
+  );
+  expect(added).toContain(
+    'genuinely incompatible period or investigation stage still excludes',
+  );
+  expect(added).not.toMatch(/E8|E10|R23|R30|화지산|백제|조선/);
+  expect(current.userPrompt).toBe(old.userPrompt);
+  expect(review.userPrompt).toBe(oldReview.userPrompt);
+  expect(review.required).toEqual(oldReview.required);
+  expect(JSON.parse(review.userPrompt)).not.toHaveProperty('decisions');
+  const output = {
+    reviews: Object.fromEntries(
+      review.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason:
+                'This independent fixture judgment lacks an original membership link',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(oldReview.schema.safeParse(output).success).toBe(true);
+  expect(review.schema.safeParse(output).success).toBe(true);
+  const audit = {
+    systemPrompt: review.systemPrompt,
+    userPrompt: review.userPrompt,
+    rawResponse: review.schema.parse(output),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      ...options,
+      preserveTentativeMembership: true,
     }).issues,
   ).toEqual([]);
   expect(
