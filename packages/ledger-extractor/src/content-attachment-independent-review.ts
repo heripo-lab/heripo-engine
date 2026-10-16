@@ -9,6 +9,7 @@ import { z } from 'zod';
 import {
   CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY,
   CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY,
+  CONTENT_ATTACHMENT_RECIPIENT_REF_CHECK_POLICY,
   createContentAttachmentBodyReviewCoverage,
 } from './content-attachment-body-review';
 import { createContentAttachmentInventoryReviewRequest } from './content-attachment-inventory-review';
@@ -56,6 +57,7 @@ export function createContentAttachmentIndependentReviewRequest(
   options: {
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
+    reconcileRecipientRefs?: boolean;
   } = {},
 ) {
   const baseline = createContentAttachmentInventoryReviewRequest(
@@ -135,6 +137,9 @@ export function createContentAttachmentIndependentReviewRequest(
         : systemPrompt) +
       (options.qualifyBeforeIdentity
         ? '\n' + CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY
+        : '') +
+      (options.reconcileRecipientRefs
+        ? '\n' + CONTENT_ATTACHMENT_RECIPIENT_REF_CHECK_POLICY
         : ''),
     userPrompt: JSON.stringify(evidence),
   };
@@ -148,6 +153,7 @@ export function inspectContentAttachmentIndependentReview(
   options: {
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
+    reconcileRecipientRefs?: boolean;
   } = {},
 ): {
   issues: string[];

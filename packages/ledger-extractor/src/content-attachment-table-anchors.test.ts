@@ -388,7 +388,11 @@ describe('candidate table source anchors', () => {
     const reviewRequest = createContentAttachmentIndependentReviewRequest(
       current,
       wireResponse,
-      { includeBodyContext: true, qualifyBeforeIdentity: true },
+      {
+        includeBodyContext: true,
+        qualifyBeforeIdentity: true,
+        reconcileRecipientRefs: true,
+      },
     );
     const reviewOutput = reviewRequest.schema.parse({
       reviews: Object.fromEntries(

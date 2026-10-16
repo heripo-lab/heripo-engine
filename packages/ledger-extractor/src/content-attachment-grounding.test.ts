@@ -712,7 +712,11 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
   const request = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
-      { includeBodyContext: true, qualifyBeforeIdentity: true },
+      {
+        includeBodyContext: true,
+        qualifyBeforeIdentity: true,
+        reconcileRecipientRefs: true,
+      },
     ),
     review = request.schema.parse({
       reviews: {
@@ -1196,7 +1200,11 @@ test('reviews body-only contexts without any initial inventory selections and re
   const request = createContentAttachmentIndependentReviewRequest(
     input,
     ignored,
-    { includeBodyContext: true, qualifyBeforeIdentity: true },
+    {
+      includeBodyContext: true,
+      qualifyBeforeIdentity: true,
+      reconcileRecipientRefs: true,
+    },
   );
   expect(request.required.map((r) => r.key)).toEqual(['E1:B1', 'E2:B1']);
   expect(
@@ -1207,7 +1215,11 @@ test('reviews body-only contexts without any initial inventory selections and re
     empty = createContentAttachmentIndependentReviewRequest(
       emptyInput,
       ignored,
-      { includeBodyContext: true, qualifyBeforeIdentity: true },
+      {
+        includeBodyContext: true,
+        qualifyBeforeIdentity: true,
+        reconcileRecipientRefs: true,
+      },
     );
   expect(empty.required).toEqual([]);
   expect(empty.schema.safeParse({ reviews: {} }).success).toBe(true);
@@ -1236,7 +1248,11 @@ test('preserves historical body review while qualifying collective evidence and 
     currentReview = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
-      { includeBodyContext: true, qualifyBeforeIdentity: true },
+      {
+        includeBodyContext: true,
+        qualifyBeforeIdentity: true,
+        reconcileRecipientRefs: true,
+      },
     );
   expect(current.userPrompt).toBe(archived.userPrompt);
   expect(currentReview.userPrompt).toBe(historicalReview.userPrompt);
@@ -1286,6 +1302,7 @@ test('preserves historical body review while qualifying collective evidence and 
     inspectContentAttachmentIndependentReview(input, selection, audit, {
       includeBodyContext: true,
       qualifyBeforeIdentity: true,
+      reconcileRecipientRefs: true,
     }).issues,
   ).toEqual([]);
   expect(
@@ -1293,4 +1310,89 @@ test('preserves historical body review while qualifying collective evidence and 
       includeBodyContext: true,
     }).issues,
   ).toHaveLength(1);
+});
+
+test('retains original recipient lists and historical policy while checking area recipients and original numbers before return', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const legacyOptions = {
+      includeBodyContext: true,
+      qualifyBeforeIdentity: true,
+    },
+    options = { ...legacyOptions, reconcileRecipientRefs: true },
+    historical = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v63',
+    ),
+    current = createContentAttachmentRequest(plan, unit),
+    legacyReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      legacyOptions,
+    ),
+    currentReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      options,
+    ),
+    before = structuredClone(selection);
+  expect(current.userPrompt).toBe(historical.userPrompt);
+  expect(currentReview.userPrompt).toBe(legacyReview.userPrompt);
+  expect(currentReview.required).toEqual(legacyReview.required);
+  expect(current.systemPrompt).toContain(
+    'inspect the candidateRefs array you will ACTUALLY return',
+  );
+  expect(currentReview.systemPrompt).toContain(
+    'preserve the area alongside the qualified feature set',
+  );
+  expect(historical.systemPrompt).not.toContain(
+    'FINAL RECIPIENT AND ORIGINAL-NUMBER RECONCILIATION',
+  );
+  expect(legacyReview.systemPrompt).not.toContain(
+    'FINAL RECIPIENT AND ORIGINAL-NUMBER RECONCILIATION',
+  );
+  const raw = {
+    reviews: Object.fromEntries(
+      currentReview.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason: 'Fixture exclusion retained for independent judgment',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(legacyReview.schema.safeParse(raw).success).toBe(true);
+  const audit = {
+    systemPrompt: currentReview.systemPrompt,
+    userPrompt: currentReview.userPrompt,
+    rawResponse: currentReview.schema.parse(raw),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, options)
+      .issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(
+      input,
+      selection,
+      audit,
+      legacyOptions,
+    ).issues,
+  ).toHaveLength(1);
+  expect(selection).toEqual(before);
 });
