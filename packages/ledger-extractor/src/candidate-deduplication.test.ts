@@ -1,5 +1,6 @@
 import type { LanguageModel } from 'ai';
 
+import type { CandidateDeduplicationAudit } from './candidate-deduplication';
 import type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
@@ -129,7 +130,7 @@ const response = () => ({
   ],
   uncertainMatches: [{ left: 'C2', right: 'C3', reason: '번호만 같음' }],
 });
-const audit = (d = discovery()) => ({
+const audit = (d = discovery()): CandidateDeduplicationAudit => ({
   ...createCandidateDeduplicationRequest(plan, d),
   response: response(),
   usage,
@@ -247,4 +248,52 @@ describe('whole-pool candidate deduplication', () => {
       ),
     ).rejects.toThrow('No candidates');
   });
+});
+
+test('adds full-source layer and identity-conflict review while replaying immutable v3 partitions', () => {
+  const d = discovery();
+  d.candidates.forEach((c) => {
+    c.recordKind = 'layer';
+    c.evidence[0].quote = '원문';
+  });
+  const fullPlan = structuredClone(plan);
+  fullPlan.units[0].resources[0].data.text =
+    '원문 그대로: 정의된 층은 동측 사면부의 풍화암반에 해당한다.';
+  const oldRequest = createCandidateDeduplicationRequest(
+      fullPlan,
+      d,
+      'candidate-deduplication.v3',
+    ),
+    current = createCandidateDeduplicationRequest(fullPlan, d),
+    oldAudit = { ...oldRequest, response: response(), usage },
+    newAudit = { ...current, response: response(), usage },
+    before = structuredClone({ d, fullPlan, oldAudit, newAudit });
+  expect(current.userPrompt).toBe(oldRequest.userPrompt);
+  expect(JSON.parse(current.userPrompt).units[0].sources[0].text).toBe(
+    fullPlan.units[0].resources[0].data.text,
+  );
+  expect(current.systemPrompt).toContain('FULL-SOURCE LAYER IDENTITY REVIEW');
+  expect(current.systemPrompt).toContain(
+    'RELATIONS ARE NOT IDENTITY UNCERTAINTY',
+  );
+  expect(current.systemPrompt).toContain('FINAL CONFLICT AND COVERAGE AUDIT');
+  expect(oldRequest.systemPrompt).not.toContain(
+    'FULL-SOURCE LAYER IDENTITY REVIEW',
+  );
+  const historical = assembleCandidateDeduplication(fullPlan, d, oldAudit),
+    result = assembleCandidateDeduplication(fullPlan, d, newAudit);
+  expect(result.issues).toEqual([]);
+  expect(result).toEqual(historical);
+  expect(result.uncertainMatches).toHaveLength(1);
+  expect(
+    getCandidateGroupMembers(result.groups[0], d.candidates)[0].evidence[0]
+      .quote,
+  ).toBe('원문');
+  expect({ d, fullPlan, oldAudit, newAudit }).toEqual(before);
+  expect(
+    assembleCandidateDeduplication(fullPlan, d, {
+      ...oldAudit,
+      systemPrompt: current.systemPrompt,
+    }).issues,
+  ).toHaveLength(1);
 });
