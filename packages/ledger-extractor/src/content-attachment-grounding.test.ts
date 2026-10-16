@@ -712,7 +712,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
   const request = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
-      { includeBodyContext: true },
+      { includeBodyContext: true, qualifyBeforeIdentity: true },
     ),
     review = request.schema.parse({
       reviews: {
@@ -1196,7 +1196,7 @@ test('reviews body-only contexts without any initial inventory selections and re
   const request = createContentAttachmentIndependentReviewRequest(
     input,
     ignored,
-    { includeBodyContext: true },
+    { includeBodyContext: true, qualifyBeforeIdentity: true },
   );
   expect(request.required.map((r) => r.key)).toEqual(['E1:B1', 'E2:B1']);
   expect(
@@ -1207,7 +1207,7 @@ test('reviews body-only contexts without any initial inventory selections and re
     empty = createContentAttachmentIndependentReviewRequest(
       emptyInput,
       ignored,
-      { includeBodyContext: true },
+      { includeBodyContext: true, qualifyBeforeIdentity: true },
     );
   expect(empty.required).toEqual([]);
   expect(empty.schema.safeParse({ reviews: {} }).success).toBe(true);
@@ -1216,4 +1216,81 @@ test('reviews body-only contexts without any initial inventory selections and re
       includeBodyContext: true,
     }),
   ).toEqual({ issues: [], findings: [], disagreements: [] });
+});
+
+test('preserves historical body review while qualifying collective evidence and relationship identity independently', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const archived = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v62',
+    ),
+    current = createContentAttachmentRequest(plan, unit),
+    historicalReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      { includeBodyContext: true },
+    ),
+    currentReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      { includeBodyContext: true, qualifyBeforeIdentity: true },
+    );
+  expect(current.userPrompt).toBe(archived.userPrompt);
+  expect(currentReview.userPrompt).toBe(historicalReview.userPrompt);
+  expect(currentReview.required).toEqual(historicalReview.required);
+  expect(current.systemPrompt).toContain(
+    'FIRST narrow that inventory by the CURRENT clause period',
+  );
+  expect(currentReview.systemPrompt).toContain(
+    'attachment=included plus relationshipSubject=alternative',
+  );
+  expect(archived.systemPrompt).not.toContain('ORDERED CLAUSE JUDGMENT');
+  expect(historicalReview.systemPrompt).not.toContain(
+    'ORDERED CLAUSE JUDGMENT',
+  );
+  const raw = {
+    reviews: Object.fromEntries(
+      currentReview.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'included',
+              relationshipSubject: 'alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason:
+                'Original collective membership; relationship subject unresolved',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(currentReview.schema.safeParse(raw).success).toBe(true);
+  expect(historicalReview.schema.safeParse(raw).success).toBe(true);
+  const audit = {
+    systemPrompt: currentReview.systemPrompt,
+    userPrompt: currentReview.userPrompt,
+    rawResponse: currentReview.schema.parse(raw),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      includeBodyContext: true,
+      qualifyBeforeIdentity: true,
+    }).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      includeBodyContext: true,
+    }).issues,
+  ).toHaveLength(1);
 });

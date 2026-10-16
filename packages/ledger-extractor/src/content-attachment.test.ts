@@ -1377,7 +1377,7 @@ describe('bounded content attachment', () => {
     const reviewRequest = createContentAttachmentIndependentReviewRequest(
       compiled,
       response,
-      { includeBodyContext: true },
+      { includeBodyContext: true, qualifyBeforeIdentity: true },
     );
     const reviewOutput = reviewRequest.schema.parse({
       reviews: Object.fromEntries(

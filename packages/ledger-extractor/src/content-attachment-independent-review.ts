@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import {
   CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY,
+  CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY,
   createContentAttachmentBodyReviewCoverage,
 } from './content-attachment-body-review';
 import { createContentAttachmentInventoryReviewRequest } from './content-attachment-inventory-review';
@@ -52,7 +53,10 @@ export interface ContentAttachmentReviewFinding {
 export function createContentAttachmentIndependentReviewRequest(
   input: Input,
   selection: ContentAttachmentRequiredResponse,
-  options: { includeBodyContext?: boolean } = {},
+  options: {
+    includeBodyContext?: boolean;
+    qualifyBeforeIdentity?: boolean;
+  } = {},
 ) {
   const baseline = createContentAttachmentInventoryReviewRequest(
     input,
@@ -122,12 +126,16 @@ export function createContentAttachmentIndependentReviewRequest(
   return {
     required,
     schema,
-    systemPrompt: options.includeBodyContext
-      ? systemPrompt +
-        '\n' +
-        CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY +
-        '\nBody review pools use B refs for original body-grounded context candidates; U refs retain original table membership. Evaluate every supplied E/pool/member independently, including excluded or ignored passages. A pool is review coverage, not a claim of table membership or a preset inclusion. Explain all decisions with the current E and the candidate own K evidence.'
-      : systemPrompt,
+    systemPrompt:
+      (options.includeBodyContext
+        ? systemPrompt +
+          '\n' +
+          CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY +
+          '\nBody review pools use B refs for original body-grounded context candidates; U refs retain original table membership. Evaluate every supplied E/pool/member independently, including excluded or ignored passages. A pool is review coverage, not a claim of table membership or a preset inclusion. Explain all decisions with the current E and the candidate own K evidence.'
+        : systemPrompt) +
+      (options.qualifyBeforeIdentity
+        ? '\n' + CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY
+        : ''),
     userPrompt: JSON.stringify(evidence),
   };
 }
@@ -137,7 +145,10 @@ export function inspectContentAttachmentIndependentReview(
   input: Input,
   selection: ContentAttachmentRequiredResponse,
   audit?: ContentAttachmentIndependentReviewAudit,
-  options: { includeBodyContext?: boolean } = {},
+  options: {
+    includeBodyContext?: boolean;
+    qualifyBeforeIdentity?: boolean;
+  } = {},
 ): {
   issues: string[];
   findings: ContentAttachmentReviewFinding[];
