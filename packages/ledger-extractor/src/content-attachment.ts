@@ -35,7 +35,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v52';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v53';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -509,11 +509,16 @@ const POSITIVE_SCOPE_SYSTEM_PROMPT_V51 =
   `
 NO STATED RESTRICTION IS NOT POSITIVE EVIDENCE OF A WIDER WORK SCOPE: For a task cell that first names a local work subject, the absence of a repeated identifier, an explicit restriction or the word 'only' in a following action does not establish a new whole-set subject. Treat surveying, recording or photography with an omitted or generic subject as continuing that nearest named subject unless original evidence positively establishes expansion. If such expansion evidence is absent, keep the verified local subject; do not choose the whole investigation set as a default, invent a scope change or use uncertainty to list every member merely because wider real-world work is possible. Reasons such as 'the following work is not limited to a particular unit', 'recording normally covers the whole set' or 'all members were investigated' do not prove that this dated action covered them. Generic category wording, punctuation and a general methods account remain insufficient on their own. An original phrase identifying wider participants or a clear source link to the same wider event can establish expansion; identify that evidence in the existing reason when selecting members beyond the local subject. Before returning, check every proposed extra member against that positive source link. Without it, preserve only the nearest originally identified work participants on the unchanged entire cell. This local-work default does not narrow an independently established collective inventory or a source-supported set-wide action with no nearer local subject, and it does not remove independently identified participants from other clauses. Preserve confirmed set evidence, original tentative wording and genuine relationship-role uncertainty on the same E where appropriate. Do not split or complete E, add fields, manufacture event links or repair source/output; code never supplies or filters semantic targets.`;
 
-const SYSTEM_PROMPT =
+const VERIFIED_SET_SYSTEM_PROMPT_V52 =
   POSITIVE_SCOPE_SYSTEM_PROMPT_V51 +
   `
 DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION AFTER ORIGINAL SET MEMBERSHIP IS ESTABLISHED: Establish each member's inclusion from original investigation scope, inventory/body-to-table links and candidate source evidence. Once those establish a bounded set, preserve its collective account on the supported member records without requiring the current sentence to name, number or individually distinguish them again. Absence of a repeated individual identifier, an omitted count or the candidate's original tentative classification is not by itself a reason to drop an established member. Preserve that tentative wording and the grouped record as supplied, without asserting physical identity across observations. If excluding a proposed member, distinguish an actual source membership gap or current-clause restriction from mere lack of individual restatement. A generic type list with unestablished membership still cannot identify arbitrary registry objects, but an originally verified inventory must not be downgraded to that case. Keep individual relationship-role identification as a separate decision; uncertainty in that role does not erase independently supported collective evidence.
 NARROW THE VERIFIED ANTECEDENT SET BY THE CURRENT CLAUSE BEFORE SHARING A FOLLOW-UP: Resolve the original antecedent inventory, then apply the current unchanged clause's explicit period, investigation, location and type restrictions to its members before selecting evidence recipients. Preserve only the members that remain directly described after that narrowing, plus any independently identified participants genuinely described by another clause. For example, a source inventory may contain Period A and Period B observations; a follow-up explicitly about Period A retains its originally verified Period A members without repeating their identifiers and does not inherit Period B merely because both belong to the same survey. Use each candidate's literal period/name/quote and original context to check the current restriction. An appeal to 'the confirmed set', 'this area', 'etc.' or the fact that members share a report/chapter is not evidence that a nearer period restriction has disappeared. Do not copy a preceding excerpt's assigned list or carry the whole mixed inventory forward as if membership alone licenses the current predicate. Genuine explicit cross-period descriptions and independently identified relationship participants remain valid; do not impose a mechanical period filter when the source actually describes them. Before returning, separately recheck missing verified members of collective accounts and any included members outside a follow-up's current qualifiers. Preserve original E text, local work-subject defaults, partial relationship identity, all required keys and existing range/source checks; code never filters or repairs semantic targets.`;
+
+const SYSTEM_PROMPT =
+  VERIFIED_SET_SYSTEM_PROMPT_V52 +
+  `
+CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER AGAINST THE ORIGINAL NUMBER FIELD: An original list can mix an inclusive range with separately named numbers; process EVERY listed member, not only the range. First read the original object labels and numbers, then resolve each against the candidate row's kind/name, number, original quotes and investigation context. The R ref is an opaque selection key, never the object's original number or an index from which that number can be calculated. For example, if a row's ref is R40 and its number is 8, the original object numbered 8 selects R40, not R8. This example defines no actual registry mapping. Before returning, decode every proposed R ref back through the actual supplied number/name fields and compare it with the original list, including singleton numbers outside ranges. A reason that repeats the right source numbers does not compensate for wrong candidateRefs. Keep all uniquely supported listed participants and retain genuine identity ambiguity rather than guessing. Do not remove independently described participants merely because they are not in a particular list, or propagate ordinary dimensions to relation counterparts. Preserve confirmed collective membership, current-clause period/investigation restrictions, partial relationship-role uncertainty, nearest local work subjects and all required E keys. Code reports missing uniquely resolved explicitly named singleton members in a confirmed original scope as well as range omissions for this version; it never inserts or replaces a target, rewrites a source or repairs a saved response.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -777,7 +782,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v49'
     | 'content-attachment.v50'
     | 'content-attachment.v51'
-    | 'content-attachment.v52' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v52'
+    | 'content-attachment.v53' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -920,7 +926,10 @@ export function createContentAttachmentRequest(
                                                                                                         : promptVersion ===
                                                                                                             'content-attachment.v51'
                                                                                                           ? POSITIVE_SCOPE_SYSTEM_PROMPT_V51
-                                                                                                          : SYSTEM_PROMPT,
+                                                                                                          : promptVersion ===
+                                                                                                              'content-attachment.v52'
+                                                                                                            ? VERIFIED_SET_SYSTEM_PROMPT_V52
+                                                                                                            : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
@@ -941,7 +950,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v49' ||
         promptVersion === 'content-attachment.v50' ||
         promptVersion === 'content-attachment.v51' ||
-        promptVersion === 'content-attachment.v52'
+        promptVersion === 'content-attachment.v52' ||
+        promptVersion === 'content-attachment.v53'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -1102,6 +1112,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v49' &&
       audit.promptVersion !== 'content-attachment.v50' &&
       audit.promptVersion !== 'content-attachment.v51' &&
+      audit.promptVersion !== 'content-attachment.v52' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1152,7 +1163,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === 'content-attachment.v50' ||
       audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52';
+      audit.promptVersion === 'content-attachment.v52' ||
+      audit.promptVersion === 'content-attachment.v53';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
@@ -1173,7 +1185,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === 'content-attachment.v50' ||
       audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52'
+      audit.promptVersion === 'content-attachment.v52' ||
+      audit.promptVersion === 'content-attachment.v53'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1278,6 +1291,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === 'content-attachment.v50' ||
       audit.promptVersion === 'content-attachment.v51' ||
+      audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
@@ -1290,6 +1304,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === 'content-attachment.v50' ||
       audit.promptVersion === 'content-attachment.v51' ||
+      audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = createContentAttachmentResponseSchema(
@@ -1562,7 +1577,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v49' ||
           audit.promptVersion === 'content-attachment.v50' ||
           audit.promptVersion === 'content-attachment.v51' ||
-          audit.promptVersion === 'content-attachment.v52'
+          audit.promptVersion === 'content-attachment.v52' ||
+          audit.promptVersion === 'content-attachment.v53'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1677,7 +1693,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === 'content-attachment.v50' ||
       audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52'
+      audit.promptVersion === 'content-attachment.v52' ||
+      audit.promptVersion === 'content-attachment.v53'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1701,7 +1718,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v49' ||
           audit.promptVersion === 'content-attachment.v50' ||
           audit.promptVersion === 'content-attachment.v51' ||
-          audit.promptVersion === 'content-attachment.v52',
+          audit.promptVersion === 'content-attachment.v52' ||
+          audit.promptVersion === 'content-attachment.v53',
       ))
         issue(reason);
     }
@@ -1713,12 +1731,14 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === 'content-attachment.v50' ||
       audit.promptVersion === 'content-attachment.v51' ||
+      audit.promptVersion === 'content-attachment.v52' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(
         plan,
         selectionInput!.codeMap.excerpts,
         newData!,
+        audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION,
       ))
         issue(reason);
     }

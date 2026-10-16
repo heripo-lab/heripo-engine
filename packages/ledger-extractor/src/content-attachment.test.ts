@@ -1607,6 +1607,30 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV51Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v52 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v52',
+      ),
+    };
+    expect(out.userPrompt).toBe(v52.userPrompt);
+    expect(out.systemPrompt.startsWith(v52.systemPrompt)).toBe(true);
+    expect(v52.systemPrompt).not.toContain(
+      'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
+    );
+    expect(out.systemPrompt).toContain(
+      'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
+    );
+    expect(assembleContentAttachment(p, [v52])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV52Projection = structuredClone(v52);
+    alteredV52Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV52Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(
