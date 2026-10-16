@@ -12,6 +12,7 @@ import {
   createContentAttachmentRequest,
 } from './content-attachment';
 import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
+import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
 import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -325,9 +326,11 @@ test('rejects broken original cell bindings instead of guessing or correcting so
 
 test('sends compact origin context, replays v54 exactly and retains model decisions without filling targets', async () => {
   const { plan, unit } = fixture(),
-    current = createContentAttachmentOriginInput(plan, unit),
+    current = createContentAttachmentGroundedInput(plan, unit),
     legacy = createContentAttachmentBodyBlockInput(plan, unit);
   const output = {
+    inventoryAudits: [],
+    exclusions: [],
     decisions: {
       E1: {
         status: 'assigned' as const,
@@ -363,6 +366,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   expect(result.contents.map((c) => c.registryRef)).toEqual(['object-a']);
   const old = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v54'),
     codeMap: legacy.codeMap,
   };
@@ -370,9 +374,12 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   expect(assembleContentAttachment(plan, [old])).toEqual(result);
   const v55 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v55'),
   };
-  expect(v55.userPrompt).toBe(audit.userPrompt);
+  expect(v55.userPrompt).toBe(
+    JSON.stringify(createContentAttachmentOriginInput(plan, unit).payload),
+  );
   expect(v55.systemPrompt).not.toContain(
     'REGISTRATION CONTEXT IDENTIFIES CANDIDATES',
   );
@@ -383,25 +390,28 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   expect(assembleContentAttachment(plan, [v55])).toEqual(result);
   const v56 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v56'),
   };
-  expect(v56.userPrompt).toBe(audit.userPrompt);
+  expect(v56.userPrompt).toBe(v55.userPrompt);
   expect(v56.systemPrompt.startsWith(v55.systemPrompt)).toBe(true);
   expect(v56.systemPrompt).not.toContain(
     'EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET',
   );
-  expect(audit.systemPrompt).toContain(
-    'EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET',
-  );
+  expect(
+    createContentAttachmentRequest(plan, unit, 'content-attachment.v57')
+      .systemPrompt,
+  ).toContain('EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET');
   expect(audit.systemPrompt).toContain(
     'AUDIT TENTATIVE MEMBERS ACROSS COLLECTIVE EVIDENCE',
   );
   expect(assembleContentAttachment(plan, [v56])).toEqual(result);
   const v57 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v57'),
   };
-  expect(v57.userPrompt).toBe(audit.userPrompt);
+  expect(v57.userPrompt).toBe(v55.userPrompt);
   expect(v57.systemPrompt.startsWith(v56.systemPrompt)).toBe(true);
   expect(v57.systemPrompt).toContain(
     'Never return quotes, source IDs, offsets or rewritten text.',
@@ -412,13 +422,21 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   expect(audit.systemPrompt).not.toContain(
     'never quote, repair, split or combine original text.',
   );
-  expect(audit.systemPrompt).toContain(
+
+  expect(assembleContentAttachment(plan, [v57])).toEqual(result);
+  const v58 = {
+    ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v58'),
+  };
+  expect(assembleContentAttachment(plan, [v58])).toEqual(result);
+  expect(v58.systemPrompt).toContain(
     'Inside an existing reason, brief unchanged original evidence phrases',
   );
-  expect(audit.systemPrompt).toContain(
+  expect(v58.systemPrompt).toContain(
     'AUDIT CURRENT-QUALIFIER EXCLUSIONS AGAINST THE ORIGINAL SET BEFORE NARROWING',
   );
-  expect(assembleContentAttachment(plan, [v57])).toEqual(result);
+  expect(audit.systemPrompt).toContain('REQUIRED GROUNDED OUTPUT CONTRACT');
   const forged = structuredClone(audit);
   (forged.codeMap as typeof current.codeMap).originRows[0].rowIndex = 99;
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(

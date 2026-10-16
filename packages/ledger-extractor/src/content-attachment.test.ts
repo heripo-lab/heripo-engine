@@ -1362,6 +1362,8 @@ describe('bounded content attachment', () => {
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
     const response = {
+      inventoryAudits: [],
+      exclusions: [],
       decisions: { E1: { status: 'ignored' as const, reason: '対象外' } },
     };
     vi.mocked(LLMCaller.call).mockResolvedValue({
@@ -1423,6 +1425,7 @@ describe('bounded content attachment', () => {
     ).systemPrompt;
     const v42 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1446,6 +1449,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v43 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1468,6 +1472,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v45 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1490,6 +1495,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v46 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1512,6 +1518,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v47 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1534,6 +1541,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v48 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1558,6 +1566,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v49 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1580,6 +1589,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v50 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1603,6 +1613,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v51 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1629,6 +1640,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v52 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
@@ -1654,6 +1666,7 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v53 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
       codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,

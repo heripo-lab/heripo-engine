@@ -9,6 +9,10 @@ import type {
   LedgerObjectCandidate,
 } from './candidate-discovery';
 import type { ContentRegistrationDecision } from './content-attachment-decisions';
+import type {
+  ContentAttachmentExclusion,
+  ContentAttachmentGroundedResponse,
+} from './content-attachment-grounding';
 import type { ContentAttachmentRequiredResponse } from './content-attachment-response';
 import type {
   DocumentResource,
@@ -26,6 +30,11 @@ import {
 } from './content-attachment-context';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
+import {
+  createContentAttachmentGroundedInput,
+  createContentAttachmentGroundedSchema,
+  inspectContentAttachmentGrounding,
+} from './content-attachment-grounding';
 import { validateContentAttachmentIdentifierRanges } from './content-attachment-identifier-ranges';
 import { createContentAttachmentInput } from './content-attachment-input';
 import { createContentAttachmentOriginInput } from './content-attachment-origins';
@@ -36,7 +45,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v58';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v59';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -153,7 +162,8 @@ export interface ContentAttachmentAudit<Response = ContentAttachmentResponse> {
   userPrompt: string;
   response: Response;
   /** Exact model output from v42 onward; response is its lossless legacy-format projection. */
-  rawResponse?: ContentAttachmentRequiredResponse;
+  rawResponse?:
+    ContentAttachmentRequiredResponse | ContentAttachmentGroundedResponse;
   usage: ExtendedTokenUsage;
   /** Optional for historical audits; new calls retain every provider attempt. */
   callAttempts?: LLMCallAttempt[];
@@ -190,6 +200,7 @@ export interface ContentAttachmentResult {
     evidence: CandidateEvidence[];
     reason: string;
   }>;
+  exclusionEvidence?: Array<ContentAttachmentExclusion & { unitId: string }>;
   ignoredSources: Array<{ unitId: string; sourceId: string; reason: string }>;
   ignoredPassages: Array<{
     unitId: string;
@@ -545,7 +556,7 @@ const EXCLUSION_GROUNDS_SYSTEM_PROMPT_V57 =
 EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET REQUIRE ORIGINAL GROUNDS IN THE EXISTING REASON: For an E describing a source-established inventory or its qualified follow-up, check the applicable bounded members against the supplied original account and registration evidence. When excluding an otherwise established member, name its candidate ref in the existing reason and cite a brief unchanged original phrase with its supplied E/context/row reference that actually establishes the exclusion, such as a different investigation, incompatible current period/location, explicit nonmembership or contradictory identification. Explain the connection between that evidence and the exclusion. Merely listing selected candidates, saying that only those candidates are confirmed, repeating a type label, or failing to find an individual number is not an exclusion ground. Do not invent an absent source restriction or treat a tentative classification word as evidence of nonmembership. Audit only the relevant originally bounded set, not every unrelated registry candidate; keep the explanation concise and group exclusions only when the same original ground applies. Put these grounds in the existing assigned/unresolved reason as appropriate, without adding fields, changing the fixed E text or returning replacement excerpts. A genuinely unknown membership link belongs in the existing unresolved handling with its actual missing evidence, rather than a fabricated categorical exclusion.
 AUDIT TENTATIVE MEMBERS ACROSS COLLECTIVE EVIDENCE AND RELATIONSHIP ROLE ALTERNATIVES: Within the current source-defined investigation/period/location/type scope, an originally recorded tentative observation remains a member of the verified observation inventory; verification of the observation does not certify its tentative classification. For each such member omitted from BOTH evidence recipients and applicable relationship-subject alternatives, identify an actual original exclusion ground under the preceding rule. If the only distinction is its tentative label or absent repeated individual identification, do not silently remove it: retain the supported collective evidence with original tentative wording, and independently retain it among genuinely unresolved role alternatives when that role is unidentified within the same supported set. Do not first narrow the inventory to non-tentative names and then reuse that unsupported shortlist as the entire relationship-subject set. Distinguish the report's classification uncertainty, the collective evidence link and the relationship participant's identity. This does not assign a relationship to every member or make unrelated candidates alternatives; preserve actual current qualifiers, positively supported exclusions and resolved roles. Before returning, compare the whole relevant original set with BOTH lists and justify genuine exclusions from original evidence, not from the earlier selected list. Keep all required E keys, original strings, local work subjects, explicit-number checks and existing schema/validation behavior; code never fills targets or repairs source/model output.`;
 
-const SYSTEM_PROMPT =
+const QUOTE_SCOPE_SYSTEM_PROMPT_V58 =
   EXCLUSION_GROUNDS_SYSTEM_PROMPT_V57.replace(
     'Never return quotes, source IDs, offsets or rewritten text.',
     'Do not re-output E source text as excerpt selections or add quote/source-ID/offset fields. Inside an existing reason, brief unchanged original evidence phrases and supplied short references ARE allowed and required when explaining an exclusion. These reason citations never replace or modify the E text selected by code.',
@@ -555,6 +566,21 @@ const SYSTEM_PROMPT =
   ) +
   `
 AUDIT CURRENT-QUALIFIER EXCLUSIONS AGAINST THE ORIGINAL SET BEFORE NARROWING: For a source-established inventory or its qualified follow-up, use the original bounded inventory as the exclusion-audit baseline BEFORE applying the current period, investigation, location or type restrictions. Members removed by those restrictions still require an explanation; being outside the final eligible subset does not make them unrelated registry objects or exempt them from the audit. In the existing reason for that E, give both the supported assignment basis and the excluded member refs with brief unchanged original evidence for the narrowing: cite the current E's actual qualifier and the incompatible candidate quote/original-row phrase with its supplied short reference. Group excluded refs only when that same literal ground applies to every grouped member. Do not replace these grounds with a positive summary of selected candidates or a general assertion that the current scope was applied. Keep the explanation concise and bounded to this source-established inventory, without listing unrelated candidates or inventing absent exclusions. Quoted evidence inside reason is explicitly permitted by the preceding scoped quotation rules; it does not create a new excerpt, change a source, add fields or authorize response repair. Classifying a recorded observation as tentative alone is still not an exclusion ground: retain supported collective recipients and independently preserve genuine relationship-subject alternatives. Before returning, verify that the current-qualifier exclusions are explained even though their refs are absent from both target lists, while the fixed E text, every required E key, source-grounded scope, local work subjects and explicit-number checks remain unchanged.`;
+
+const GROUNDED_REPLACEMENTS: Record<number, string> = {
+  1: 'Code freezes every E excerpt and its source text. Select only the supplied E and candidate refs. Candidate quotes are now pairs [K ref, unchanged text] following candidateQuoteColumns. Never return, normalize or quote source text as evidence. Evidence provenance is selected exclusively through E and K refs; code resolves the frozen original strings. Existing reasons explain judgments in Korean, never serve as quoted evidence or reproduce text values. Keep all E boundaries and characters unchanged.',
+  14: 'BEFORE RETURNING: Check every fixed E for all directly described candidates, grounded shared context and genuine identity alternatives. Select evidence IDs rather than copying text. Keep original source strings and fixed E boundaries unchanged; explanatory reason prose is not an original-source citation.',
+  71: "REQUIRED GROUNDED OUTPUT CONTRACT: Return exactly {decisions, inventoryAudits, exclusions}. decisions keeps EVERY supplied E key and its existing assigned/unresolved/ignored decision shape. Assigned decisions keep all confirmed candidateRefs and independently supported nested unresolved role alternatives. inventoryAudits and exclusions are required arrays, empty only where no review applies. Each inventory audit names its excerptRef and original inventoryRef and returns EVERY member key required by that inventory schema. Each member is either state included or state excluded. Included means that member occurs among the same E assignments or genuine unresolved alternatives. Excluded requires contextRef equal to that E, candidateEvidenceRefs selecting that SAME candidate's provided K evidence, and a concise explanation. Every excluded member has its own structured grounds; a summary reason cannot replace those required fields. Code reports incomplete, contradictory or missing required reviews without adding targets or repairing the response.",
+  72: 'Earlier assignments/unresolved/ignored array references still describe the same semantic categories inside decisions. Audit metadata is provenance and coverage, never a replacement for selecting the E or its targets. Multiple candidates may share the unchanged E and assigned/role-uncertain refs may overlap. Do not add quote fields, source paths, copied source strings, calculated IDs or extra properties. All actual citations use provided IDs; code reconstructs their unchanged text and source ranges.',
+  97: 'STRUCTURED EXCLUSION GROUNDS: inventoryMembers lists original-table registration pools, not automatically eligible description recipients. When reviewing a source-established set, select the relevant original inventory and classify EVERY member using the current E and its original K evidence. Members removed by current period/investigation/location/type qualifiers remain in this review and require an excluded entry with contextRef, their own candidateEvidenceRefs and reason. Do not remove them from the audit after narrowing. Unrelated inventory members such as row owners need a direct-description explanation for exclusion, never automatic sharing from registration context. Use exclusions for additional excluded candidates outside a selected table review, with excerptRef, candidateRef, contextRef, candidateEvidenceRefs and reason; do not duplicate the same E/member in both places. No source text is requested in either structure.',
+  99: 'REVIEW COVERAGE AND PROVENANCE CHECK: A body E selecting multiple registered candidates from multiple rows of the same original table requires that inventory audit. Code checks this deterministic source-trace condition, every included/excluded member against the actual selected refs, and each K ID against that candidate. This trace rule does not determine the semantic truth of membership or of an exclusion. For any other source-established set, still provide the relevant inventory audit or explicit exclusions rather than silently dropping supported members. Select the full original set before narrowing; explain real qualifier exclusions through context E and candidate K IDs. Preserve originally recorded tentative observations and genuine relationship-role alternatives; a tentative classification is not by itself an exclusion ground.',
+};
+const SYSTEM_PROMPT =
+  QUOTE_SCOPE_SYSTEM_PROMPT_V58.split('\n')
+    .map((line, index) => GROUNDED_REPLACEMENTS[index] ?? line)
+    .join('\n') +
+  `
+MIXED AREA-WORK AND NAMED-UNIT CELLS: Read every substantive clause of an indivisible diary cell. An explicitly stated current investigation area, its boundary survey, grid or site-layout work is its own work subject, even when another clause names one trench or feature. Resolve that area through the supplied current investigation definition, body-to-table context and registry evidence. Preserve the SAME whole cell on the identified area AND the named unit when their independent work is described. A later named unit does not retroactively absorb an earlier explicitly named area subject; the nearest-subject default only resolves genuinely omitted work subjects. Do not classify an area's own boundary survey as unrelated administration merely because it has no object number or differs from the registry's literal name. Do not spread local work to all units or ancestors without original grounds. Keep full E source text immutable and return only evidence IDs for provenance.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -824,7 +850,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v55'
     | 'content-attachment.v56'
     | 'content-attachment.v57'
-    | 'content-attachment.v58' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v58'
+    | 'content-attachment.v59' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -985,74 +1012,80 @@ export function createContentAttachmentRequest(
                                                                                                                     : promptVersion ===
                                                                                                                         'content-attachment.v57'
                                                                                                                       ? EXCLUSION_GROUNDS_SYSTEM_PROMPT_V57
-                                                                                                                      : SYSTEM_PROMPT,
+                                                                                                                      : promptVersion ===
+                                                                                                                          'content-attachment.v58'
+                                                                                                                        ? QUOTE_SCOPE_SYSTEM_PROMPT_V58
+                                                                                                                        : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
-      promptVersion === 'content-attachment.v55' ||
-        promptVersion === 'content-attachment.v56' ||
-        promptVersion === 'content-attachment.v57' ||
-        promptVersion === 'content-attachment.v58'
-        ? createContentAttachmentOriginInput(plan, unit).payload
-        : promptVersion === 'content-attachment.v33' ||
-            promptVersion === 'content-attachment.v34' ||
-            promptVersion === 'content-attachment.v35' ||
-            promptVersion === 'content-attachment.v36' ||
-            promptVersion === 'content-attachment.v37' ||
-            promptVersion === 'content-attachment.v38' ||
-            promptVersion === 'content-attachment.v39' ||
-            promptVersion === 'content-attachment.v40' ||
-            promptVersion === 'content-attachment.v41' ||
-            promptVersion === 'content-attachment.v42' ||
-            promptVersion === 'content-attachment.v43' ||
-            promptVersion === 'content-attachment.v44' ||
-            promptVersion === 'content-attachment.v45' ||
-            promptVersion === 'content-attachment.v46' ||
-            promptVersion === 'content-attachment.v47' ||
-            promptVersion === 'content-attachment.v48' ||
-            promptVersion === 'content-attachment.v49' ||
-            promptVersion === 'content-attachment.v50' ||
-            promptVersion === 'content-attachment.v51' ||
-            promptVersion === 'content-attachment.v52' ||
-            promptVersion === 'content-attachment.v53' ||
-            promptVersion === 'content-attachment.v54'
-          ? createContentAttachmentBodyBlockInput(plan, unit).payload
-          : promptVersion === 'content-attachment.v31' ||
-              promptVersion === 'content-attachment.v32'
-            ? createContentAttachmentContextInput(plan, unit).payload
-            : promptVersion === 'content-attachment.v25' ||
-                promptVersion === 'content-attachment.v26' ||
-                promptVersion === 'content-attachment.v27' ||
-                promptVersion === 'content-attachment.v28' ||
-                promptVersion === 'content-attachment.v29' ||
-                promptVersion === 'content-attachment.v30'
-              ? createContentAttachmentTableAnchorInput(plan, unit).payload
-              : legacy
-                ? {
-                    inputSha256: plan.inputSha256,
-                    candidateSnapshotId: plan.candidateSnapshotId,
-                    registrySha256: plan.registrySha256,
-                    registry: plan.registry,
-                    registryUncertainties: plan.registryUncertainties,
-                    unit,
-                  }
-                : promptVersion === 'content-attachment.v13' ||
-                    promptVersion === 'content-attachment.v14' ||
-                    promptVersion === 'content-attachment.v15' ||
-                    promptVersion === 'content-attachment.v16' ||
-                    promptVersion === 'content-attachment.v17' ||
-                    promptVersion === 'content-attachment.v18' ||
-                    promptVersion === 'content-attachment.v19' ||
-                    promptVersion === 'content-attachment.v20' ||
-                    promptVersion === 'content-attachment.v21' ||
-                    promptVersion === 'content-attachment.v22' ||
-                    promptVersion === 'content-attachment.v23' ||
-                    promptVersion === 'content-attachment.v24'
-                  ? createContentAttachmentDecisionInput(plan, unit).payload
-                  : promptVersion === 'content-attachment.v9' ||
-                      promptVersion === 'content-attachment.v10' ||
-                      promptVersion === 'content-attachment.v11' ||
-                      promptVersion === 'content-attachment.v12'
-                    ? createContentAttachmentSelectionInput(plan, unit).payload
-                    : createContentAttachmentInput(plan, unit).payload,
+      promptVersion === 'content-attachment.v59'
+        ? createContentAttachmentGroundedInput(plan, unit).payload
+        : promptVersion === 'content-attachment.v55' ||
+            promptVersion === 'content-attachment.v56' ||
+            promptVersion === 'content-attachment.v57' ||
+            promptVersion === 'content-attachment.v58'
+          ? createContentAttachmentOriginInput(plan, unit).payload
+          : promptVersion === 'content-attachment.v33' ||
+              promptVersion === 'content-attachment.v34' ||
+              promptVersion === 'content-attachment.v35' ||
+              promptVersion === 'content-attachment.v36' ||
+              promptVersion === 'content-attachment.v37' ||
+              promptVersion === 'content-attachment.v38' ||
+              promptVersion === 'content-attachment.v39' ||
+              promptVersion === 'content-attachment.v40' ||
+              promptVersion === 'content-attachment.v41' ||
+              promptVersion === 'content-attachment.v42' ||
+              promptVersion === 'content-attachment.v43' ||
+              promptVersion === 'content-attachment.v44' ||
+              promptVersion === 'content-attachment.v45' ||
+              promptVersion === 'content-attachment.v46' ||
+              promptVersion === 'content-attachment.v47' ||
+              promptVersion === 'content-attachment.v48' ||
+              promptVersion === 'content-attachment.v49' ||
+              promptVersion === 'content-attachment.v50' ||
+              promptVersion === 'content-attachment.v51' ||
+              promptVersion === 'content-attachment.v52' ||
+              promptVersion === 'content-attachment.v53' ||
+              promptVersion === 'content-attachment.v54'
+            ? createContentAttachmentBodyBlockInput(plan, unit).payload
+            : promptVersion === 'content-attachment.v31' ||
+                promptVersion === 'content-attachment.v32'
+              ? createContentAttachmentContextInput(plan, unit).payload
+              : promptVersion === 'content-attachment.v25' ||
+                  promptVersion === 'content-attachment.v26' ||
+                  promptVersion === 'content-attachment.v27' ||
+                  promptVersion === 'content-attachment.v28' ||
+                  promptVersion === 'content-attachment.v29' ||
+                  promptVersion === 'content-attachment.v30'
+                ? createContentAttachmentTableAnchorInput(plan, unit).payload
+                : legacy
+                  ? {
+                      inputSha256: plan.inputSha256,
+                      candidateSnapshotId: plan.candidateSnapshotId,
+                      registrySha256: plan.registrySha256,
+                      registry: plan.registry,
+                      registryUncertainties: plan.registryUncertainties,
+                      unit,
+                    }
+                  : promptVersion === 'content-attachment.v13' ||
+                      promptVersion === 'content-attachment.v14' ||
+                      promptVersion === 'content-attachment.v15' ||
+                      promptVersion === 'content-attachment.v16' ||
+                      promptVersion === 'content-attachment.v17' ||
+                      promptVersion === 'content-attachment.v18' ||
+                      promptVersion === 'content-attachment.v19' ||
+                      promptVersion === 'content-attachment.v20' ||
+                      promptVersion === 'content-attachment.v21' ||
+                      promptVersion === 'content-attachment.v22' ||
+                      promptVersion === 'content-attachment.v23' ||
+                      promptVersion === 'content-attachment.v24'
+                    ? createContentAttachmentDecisionInput(plan, unit).payload
+                    : promptVersion === 'content-attachment.v9' ||
+                        promptVersion === 'content-attachment.v10' ||
+                        promptVersion === 'content-attachment.v11' ||
+                        promptVersion === 'content-attachment.v12'
+                      ? createContentAttachmentSelectionInput(plan, unit)
+                          .payload
+                      : createContentAttachmentInput(plan, unit).payload,
     ),
   };
 }
@@ -1067,17 +1100,14 @@ export async function attachContentUnit(
   },
 ): Promise<ContentAttachmentSelectionAudit> {
   if (!unit.sources.length) throw new Error('No selectable attachment sources');
-  const input = createContentAttachmentOriginInput(plan, unit);
+  const input = createContentAttachmentGroundedInput(plan, unit);
   const ids = input.codeMap.excerpts.map((e) => e.ref);
   if (!ids.length) throw new Error('No selectable attachment sources');
   const request = createContentAttachmentRequest(plan, unit);
   const audited = createAuditedModel(options.model, options.onAttempt);
   const { output, usage } = await LLMCaller.call({
     ...request,
-    schema: createContentAttachmentResponseSchema(
-      ids,
-      plan.registry.map((r) => r.ref),
-    ),
+    schema: createContentAttachmentGroundedSchema(input),
     primaryModel: audited.model,
     maxRetries: options.maxRetries,
     abortSignal: options.abortSignal,
@@ -1180,6 +1210,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v55' &&
       audit.promptVersion !== 'content-attachment.v56' &&
       audit.promptVersion !== 'content-attachment.v57' &&
+      audit.promptVersion !== 'content-attachment.v58' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1236,62 +1267,65 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
       audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58';
+      audit.promptVersion === 'content-attachment.v58' ||
+      audit.promptVersion === 'content-attachment.v59';
     const selectionInput =
-      audit.promptVersion === 'content-attachment.v55' ||
-      audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58'
-        ? createContentAttachmentOriginInput(plan, unit)
-        : audit.promptVersion === 'content-attachment.v33' ||
-            audit.promptVersion === 'content-attachment.v34' ||
-            audit.promptVersion === 'content-attachment.v35' ||
-            audit.promptVersion === 'content-attachment.v36' ||
-            audit.promptVersion === 'content-attachment.v37' ||
-            audit.promptVersion === 'content-attachment.v38' ||
-            audit.promptVersion === 'content-attachment.v39' ||
-            audit.promptVersion === 'content-attachment.v40' ||
-            audit.promptVersion === 'content-attachment.v41' ||
-            audit.promptVersion === 'content-attachment.v42' ||
-            audit.promptVersion === 'content-attachment.v43' ||
-            audit.promptVersion === 'content-attachment.v44' ||
-            audit.promptVersion === 'content-attachment.v45' ||
-            audit.promptVersion === 'content-attachment.v46' ||
-            audit.promptVersion === 'content-attachment.v47' ||
-            audit.promptVersion === 'content-attachment.v48' ||
-            audit.promptVersion === 'content-attachment.v49' ||
-            audit.promptVersion === 'content-attachment.v50' ||
-            audit.promptVersion === 'content-attachment.v51' ||
-            audit.promptVersion === 'content-attachment.v52' ||
-            audit.promptVersion === 'content-attachment.v53' ||
-            audit.promptVersion === 'content-attachment.v54'
-          ? createContentAttachmentBodyBlockInput(plan, unit)
-          : audit.promptVersion === 'content-attachment.v31' ||
-              audit.promptVersion === 'content-attachment.v32'
-            ? createContentAttachmentContextInput(plan, unit)
-            : audit.promptVersion === 'content-attachment.v25' ||
-                audit.promptVersion === 'content-attachment.v26' ||
-                audit.promptVersion === 'content-attachment.v27' ||
-                audit.promptVersion === 'content-attachment.v28' ||
-                audit.promptVersion === 'content-attachment.v29' ||
-                audit.promptVersion === 'content-attachment.v30'
-              ? createContentAttachmentTableAnchorInput(plan, unit)
-              : selection
-                ? audit.promptVersion === 'content-attachment.v13' ||
-                  audit.promptVersion === 'content-attachment.v14' ||
-                  audit.promptVersion === 'content-attachment.v15' ||
-                  audit.promptVersion === 'content-attachment.v16' ||
-                  audit.promptVersion === 'content-attachment.v17' ||
-                  audit.promptVersion === 'content-attachment.v18' ||
-                  audit.promptVersion === 'content-attachment.v19' ||
-                  audit.promptVersion === 'content-attachment.v20' ||
-                  audit.promptVersion === 'content-attachment.v21' ||
-                  audit.promptVersion === 'content-attachment.v22' ||
-                  audit.promptVersion === 'content-attachment.v23' ||
-                  audit.promptVersion === 'content-attachment.v24'
-                  ? createContentAttachmentDecisionInput(plan, unit)
-                  : createContentAttachmentSelectionInput(plan, unit)
-                : null;
+      audit.promptVersion === 'content-attachment.v59'
+        ? createContentAttachmentGroundedInput(plan, unit)
+        : audit.promptVersion === 'content-attachment.v55' ||
+            audit.promptVersion === 'content-attachment.v56' ||
+            audit.promptVersion === 'content-attachment.v57' ||
+            audit.promptVersion === 'content-attachment.v58'
+          ? createContentAttachmentOriginInput(plan, unit)
+          : audit.promptVersion === 'content-attachment.v33' ||
+              audit.promptVersion === 'content-attachment.v34' ||
+              audit.promptVersion === 'content-attachment.v35' ||
+              audit.promptVersion === 'content-attachment.v36' ||
+              audit.promptVersion === 'content-attachment.v37' ||
+              audit.promptVersion === 'content-attachment.v38' ||
+              audit.promptVersion === 'content-attachment.v39' ||
+              audit.promptVersion === 'content-attachment.v40' ||
+              audit.promptVersion === 'content-attachment.v41' ||
+              audit.promptVersion === 'content-attachment.v42' ||
+              audit.promptVersion === 'content-attachment.v43' ||
+              audit.promptVersion === 'content-attachment.v44' ||
+              audit.promptVersion === 'content-attachment.v45' ||
+              audit.promptVersion === 'content-attachment.v46' ||
+              audit.promptVersion === 'content-attachment.v47' ||
+              audit.promptVersion === 'content-attachment.v48' ||
+              audit.promptVersion === 'content-attachment.v49' ||
+              audit.promptVersion === 'content-attachment.v50' ||
+              audit.promptVersion === 'content-attachment.v51' ||
+              audit.promptVersion === 'content-attachment.v52' ||
+              audit.promptVersion === 'content-attachment.v53' ||
+              audit.promptVersion === 'content-attachment.v54'
+            ? createContentAttachmentBodyBlockInput(plan, unit)
+            : audit.promptVersion === 'content-attachment.v31' ||
+                audit.promptVersion === 'content-attachment.v32'
+              ? createContentAttachmentContextInput(plan, unit)
+              : audit.promptVersion === 'content-attachment.v25' ||
+                  audit.promptVersion === 'content-attachment.v26' ||
+                  audit.promptVersion === 'content-attachment.v27' ||
+                  audit.promptVersion === 'content-attachment.v28' ||
+                  audit.promptVersion === 'content-attachment.v29' ||
+                  audit.promptVersion === 'content-attachment.v30'
+                ? createContentAttachmentTableAnchorInput(plan, unit)
+                : selection
+                  ? audit.promptVersion === 'content-attachment.v13' ||
+                    audit.promptVersion === 'content-attachment.v14' ||
+                    audit.promptVersion === 'content-attachment.v15' ||
+                    audit.promptVersion === 'content-attachment.v16' ||
+                    audit.promptVersion === 'content-attachment.v17' ||
+                    audit.promptVersion === 'content-attachment.v18' ||
+                    audit.promptVersion === 'content-attachment.v19' ||
+                    audit.promptVersion === 'content-attachment.v20' ||
+                    audit.promptVersion === 'content-attachment.v21' ||
+                    audit.promptVersion === 'content-attachment.v22' ||
+                    audit.promptVersion === 'content-attachment.v23' ||
+                    audit.promptVersion === 'content-attachment.v24'
+                    ? createContentAttachmentDecisionInput(plan, unit)
+                    : createContentAttachmentSelectionInput(plan, unit)
+                  : null;
     if (
       !legacy &&
       JSON.stringify(audit.codeMap) !==
@@ -1375,6 +1409,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
       audit.promptVersion === 'content-attachment.v57' ||
+      audit.promptVersion === 'content-attachment.v58' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
@@ -1393,11 +1428,18 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
       audit.promptVersion === 'content-attachment.v57' ||
+      audit.promptVersion === 'content-attachment.v58' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
-      const raw = createContentAttachmentResponseSchema(
-        selectionInput!.codeMap.excerpts.map((e) => e.ref),
-        plan.registry.map((r) => r.ref),
+      const raw = (
+        audit.promptVersion === 'content-attachment.v59'
+          ? createContentAttachmentGroundedSchema(
+              createContentAttachmentGroundedInput(plan, unit),
+            )
+          : createContentAttachmentResponseSchema(
+              selectionInput!.codeMap.excerpts.map((e) => e.ref),
+              plan.registry.map((r) => r.ref),
+            )
       ).safeParse(audit.rawResponse);
       if (
         !raw.success ||
@@ -1407,6 +1449,18 @@ export function assembleContentAttachment(
         issue('Invalid required excerpt response or inconsistent projection');
         continue;
       }
+    }
+    if (audit.promptVersion === 'content-attachment.v59') {
+      const grounding = inspectContentAttachmentGrounding(
+        createContentAttachmentGroundedInput(plan, unit),
+        audit.rawResponse as ContentAttachmentGroundedResponse,
+      );
+      for (const reason of grounding.issues) issue(reason);
+      if (grounding.exclusions.length)
+        (result.exclusionEvidence ??= []).push(
+          ...grounding.exclusions.map((e) => ({ ...e, unitId: unit.unitId })),
+        );
+      if (grounding.issues.length) continue;
     }
     const parsed = selection
       ? null
@@ -1671,7 +1725,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v55' ||
           audit.promptVersion === 'content-attachment.v56' ||
           audit.promptVersion === 'content-attachment.v57' ||
-          audit.promptVersion === 'content-attachment.v58'
+          audit.promptVersion === 'content-attachment.v58' ||
+          audit.promptVersion === 'content-attachment.v59'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1792,7 +1847,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
       audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58'
+      audit.promptVersion === 'content-attachment.v58' ||
+      audit.promptVersion === 'content-attachment.v59'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1822,7 +1878,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v55' ||
           audit.promptVersion === 'content-attachment.v56' ||
           audit.promptVersion === 'content-attachment.v57' ||
-          audit.promptVersion === 'content-attachment.v58',
+          audit.promptVersion === 'content-attachment.v58' ||
+          audit.promptVersion === 'content-attachment.v59',
       ))
         issue(reason);
     }
@@ -1840,6 +1897,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
       audit.promptVersion === 'content-attachment.v57' ||
+      audit.promptVersion === 'content-attachment.v58' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(
@@ -1851,6 +1909,7 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v55' ||
           audit.promptVersion === 'content-attachment.v56' ||
           audit.promptVersion === 'content-attachment.v57' ||
+          audit.promptVersion === 'content-attachment.v58' ||
           audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION,
       ))
         issue(reason);
