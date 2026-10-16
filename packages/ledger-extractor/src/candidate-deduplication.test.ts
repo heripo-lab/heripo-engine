@@ -297,3 +297,40 @@ test('adds full-source layer and identity-conflict review while replaying immuta
     }).issues,
   ).toHaveLength(1);
 });
+
+test('replays archived v4 judgments without applying the new scope or distribution policy in code', () => {
+  const d = discovery(),
+    prior = createCandidateDeduplicationRequest(
+      plan,
+      d,
+      'candidate-deduplication.v4',
+    ),
+    current = createCandidateDeduplicationRequest(plan, d),
+    priorAudit = { ...prior, response: response(), usage },
+    before = structuredClone({ d, priorAudit });
+  expect(current.promptVersion).toBe('candidate-deduplication.v5');
+  expect(current.userPrompt).toBe(prior.userPrompt);
+  expect(current.systemPrompt.startsWith(prior.systemPrompt)).toBe(true);
+  expect(current.systemPrompt).toContain(
+    'LAYER-GROUP MEMBERSHIP VERSUS OBJECT IDENTITY',
+  );
+  expect(current.systemPrompt).toContain(
+    'QUALIFIED DISTRIBUTION IS NONEXCLUSIVE',
+  );
+  const historical = assembleCandidateDeduplication(plan, d, priorAudit);
+  expect(historical.issues).toEqual([]);
+  expect(historical).toEqual(
+    assembleCandidateDeduplication(plan, d, {
+      ...current,
+      response: priorAudit.response,
+      usage,
+    }),
+  );
+  expect(
+    assembleCandidateDeduplication(plan, d, {
+      ...priorAudit,
+      systemPrompt: current.systemPrompt,
+    }).issues,
+  ).toHaveLength(1);
+  expect({ d, priorAudit }).toEqual(before);
+});
