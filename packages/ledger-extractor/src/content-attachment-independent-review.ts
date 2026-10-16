@@ -7,6 +7,7 @@ import type { ContentAttachmentRequiredResponse } from './content-attachment-res
 import { z } from 'zod';
 
 import {
+  CONTENT_ATTACHMENT_AREA_SCOPE_POLICY,
   CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY,
   CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY,
   CONTENT_ATTACHMENT_RECIPIENT_REF_CHECK_POLICY,
@@ -58,6 +59,7 @@ export function createContentAttachmentIndependentReviewRequest(
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
     reconcileRecipientRefs?: boolean;
+    crossChapterAreas?: boolean;
   } = {},
 ) {
   const baseline = createContentAttachmentInventoryReviewRequest(
@@ -67,7 +69,11 @@ export function createContentAttachmentIndependentReviewRequest(
   const evidence = JSON.parse(baseline.userPrompt);
   delete evidence.decisions;
   const coverage = options.includeBodyContext
-    ? createContentAttachmentBodyReviewCoverage(input, baseline.required)
+    ? createContentAttachmentBodyReviewCoverage(
+        input,
+        baseline.required,
+        options.crossChapterAreas ? selection : undefined,
+      )
     : null;
   const required = coverage?.required ?? baseline.required;
   if (coverage) {
@@ -140,6 +146,9 @@ export function createContentAttachmentIndependentReviewRequest(
         : '') +
       (options.reconcileRecipientRefs
         ? '\n' + CONTENT_ATTACHMENT_RECIPIENT_REF_CHECK_POLICY
+        : '') +
+      (options.crossChapterAreas
+        ? '\n' + CONTENT_ATTACHMENT_AREA_SCOPE_POLICY
         : ''),
     userPrompt: JSON.stringify(evidence),
   };
@@ -154,6 +163,7 @@ export function inspectContentAttachmentIndependentReview(
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
     reconcileRecipientRefs?: boolean;
+    crossChapterAreas?: boolean;
   } = {},
 ): {
   issues: string[];

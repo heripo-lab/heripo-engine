@@ -1381,6 +1381,7 @@ describe('bounded content attachment', () => {
         includeBodyContext: true,
         qualifyBeforeIdentity: true,
         reconcileRecipientRefs: true,
+        crossChapterAreas: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
