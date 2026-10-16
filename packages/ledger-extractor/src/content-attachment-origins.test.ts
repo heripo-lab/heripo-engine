@@ -14,6 +14,7 @@ import {
 } from './content-attachment';
 import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import { createContentAttachmentIndependentReviewRequest } from './content-attachment-independent-review';
 import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -353,15 +354,62 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
       totalTokens: 2,
     },
   });
+  const reviewRequest = createContentAttachmentIndependentReviewRequest(
+    current,
+    output,
+    { includeBodyContext: true },
+  );
+  const reviewOutput = reviewRequest.schema.parse({
+    reviews: Object.fromEntries(
+      reviewRequest.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: ref === 'object-a' ? 'included' : 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                current.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason: 'Fixture review preserves the original target',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  });
+  const mockUsage = {
+    component: 'test',
+    phase: 'test',
+    model: 'primary' as const,
+    modelName: 'mock',
+    inputTokens: 1,
+    outputTokens: 1,
+    totalTokens: 2,
+  };
+  vi.mocked(LLMCaller.call)
+    .mockResolvedValueOnce({ output, usedFallback: false, usage: mockUsage })
+    .mockResolvedValueOnce({
+      output: reviewOutput,
+      usedFallback: false,
+      usage: mockUsage,
+    });
   const audit = await attachContentUnit(plan, unit, {
     model: {} as LanguageModel,
     maxRetries: 0,
   });
   expect(
-    JSON.parse(vi.mocked(LLMCaller.call).mock.lastCall![0].userPrompt),
+    JSON.parse(vi.mocked(LLMCaller.call).mock.calls[0][0].userPrompt),
   ).toEqual(current.payload);
   expect(audit.codeMap).toEqual(current.codeMap);
   const result = assembleContentAttachment(plan, [audit]);
+  const {
+    independentReviewFindings: _findings,
+    reviewDisagreements: _disagreements,
+    ...initialResult
+  } = result;
   expect(result.issues).toEqual([]);
   expect(result.contents.map((c) => c.registryRef)).toEqual(['object-a']);
   const old = {
@@ -371,7 +419,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     codeMap: legacy.codeMap,
   };
   expect(JSON.parse(old.userPrompt)).toEqual(legacy.payload);
-  expect(assembleContentAttachment(plan, [old])).toEqual(result);
+  expect(assembleContentAttachment(plan, [old])).toEqual(initialResult);
   const v55 = {
     ...audit,
     rawResponse: { decisions: audit.rawResponse!.decisions },
@@ -387,7 +435,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     'REGISTRATION CONTEXT IDENTIFIES CANDIDATES',
   );
   expect(audit.systemPrompt).toContain('CURRENT QUALIFIERS FIRST, THEN RETAIN');
-  expect(assembleContentAttachment(plan, [v55])).toEqual(result);
+  expect(assembleContentAttachment(plan, [v55])).toEqual(initialResult);
   const v56 = {
     ...audit,
     rawResponse: { decisions: audit.rawResponse!.decisions },
@@ -405,7 +453,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   expect(audit.systemPrompt).toContain(
     'AUDIT TENTATIVE MEMBERS ACROSS COLLECTIVE EVIDENCE',
   );
-  expect(assembleContentAttachment(plan, [v56])).toEqual(result);
+  expect(assembleContentAttachment(plan, [v56])).toEqual(initialResult);
   const v57 = {
     ...audit,
     rawResponse: { decisions: audit.rawResponse!.decisions },
@@ -423,13 +471,13 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     'never quote, repair, split or combine original text.',
   );
 
-  expect(assembleContentAttachment(plan, [v57])).toEqual(result);
+  expect(assembleContentAttachment(plan, [v57])).toEqual(initialResult);
   const v58 = {
     ...audit,
     rawResponse: { decisions: audit.rawResponse!.decisions },
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v58'),
   };
-  expect(assembleContentAttachment(plan, [v58])).toEqual(result);
+  expect(assembleContentAttachment(plan, [v58])).toEqual(initialResult);
   expect(v58.systemPrompt).toContain(
     'Inside an existing reason, brief unchanged original evidence phrases',
   );

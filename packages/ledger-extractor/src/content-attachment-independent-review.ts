@@ -6,6 +6,10 @@ import type { ContentAttachmentRequiredResponse } from './content-attachment-res
 
 import { z } from 'zod';
 
+import {
+  CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY,
+  createContentAttachmentBodyReviewCoverage,
+} from './content-attachment-body-review';
 import { createContentAttachmentInventoryReviewRequest } from './content-attachment-inventory-review';
 
 type Input = ReturnType<typeof createContentAttachmentGroundedInput>;
@@ -41,12 +45,14 @@ export interface ContentAttachmentReviewFinding {
   contextEvidence: CandidateEvidence[];
   candidateEvidence: CandidateEvidence[];
   changedFields: Array<'attachment' | 'unresolved'>;
+  reviewBasis?: 'inventory' | 'body_context';
 }
 
 /** Require original pool coverage while withholding earlier decisions from the independent judge. */
 export function createContentAttachmentIndependentReviewRequest(
   input: Input,
   selection: ContentAttachmentRequiredResponse,
+  options: { includeBodyContext?: boolean } = {},
 ) {
   const baseline = createContentAttachmentInventoryReviewRequest(
     input,
@@ -54,10 +60,26 @@ export function createContentAttachmentIndependentReviewRequest(
   );
   const evidence = JSON.parse(baseline.userPrompt);
   delete evidence.decisions;
+  const coverage = options.includeBodyContext
+    ? createContentAttachmentBodyReviewCoverage(input, baseline.required)
+    : null;
+  const required = coverage?.required ?? baseline.required;
+  if (coverage) {
+    const candidates = new Set(required.flatMap((r) => r.candidateRefs));
+    evidence.candidates = input.payload.candidates.filter((row) =>
+      candidates.has(row[0] as string),
+    );
+    evidence.bodyReviewPools = coverage.pools;
+    evidence.requiredReviews = required.map((r) => [
+      r.key,
+      r.excerptRef,
+      r.inventoryRef,
+    ]);
+  }
   const context = z
     .enum(input.codeMap.excerpts.map((e) => e.ref) as [string, ...string[]])
     .meta({ id: 'IndependentContext' });
-  const refs = [...new Set(baseline.required.flatMap((r) => r.candidateRefs))];
+  const refs = [...new Set(required.flatMap((r) => r.candidateRefs))];
   const members = new Map(
     refs.map((ref, index) => [
       ref,
@@ -84,7 +106,7 @@ export function createContentAttachmentIndependentReviewRequest(
     z.strictObject({
       reviews: z.strictObject(
         Object.fromEntries(
-          baseline.required.map((r) => [
+          required.map((r) => [
             r.key,
             z.strictObject(
               Object.fromEntries(
@@ -95,11 +117,17 @@ export function createContentAttachmentIndependentReviewRequest(
         ),
       ),
     });
+  const systemPrompt =
+    'Independently judge every required original excerpt/inventory member from the supplied original evidence. Earlier model selections are intentionally withheld. No inclusion or exclusion is predetermined by an earlier decision or by the schema. Return every review key and every candidate member key. The registration pool is a review baseline, not an automatically eligible set. For EACH member decide attachment as included, excluded or unresolved, then independently decide relationshipSubject as alternative or not_alternative. Included means the unchanged E directly describes this source-established member, including supported collective evidence; unresolved attachment means genuinely ambiguous recipient identity. Alternative means a genuinely unresolved subject of a relationship clause, not uncertain classification or uncertain existence of the relationship. Included attachment and alternative relationship subject may coexist on the SAME candidate. A relationship participant with resolved identity requires no subject alternatives.\nFirst establish the bounded original investigation set through the body, original rows and candidate evidence, then apply the CURRENT clause period, investigation, location and type qualifiers. Preserve every directly described verified member of a collective even without repeated numbers, including original tentative classifications. Candidate row context establishes identity and membership; it does not automatically describe the row owner or propagate an excerpt to all trenches, ancestors or same-type records. A directly described area is an additional recipient and never replaces a supported feature set. Collective evidence does not prove physical identity or every member participation in a later relationship. Evaluate all substantive clauses of the indivisible E: later uncertainty about one relationship subject does not erase an earlier collective description. Keep genuine role alternatives separately from collective recipients, without adding unsupported comparisons or previous-investigation objects. The lack of an individual identifier is not itself a reason to exclude a verified member of a collective.\nGive contextRef equal to the current E and one or more of the SAME candidate provided K evidence IDs for EVERY disposition, plus a concise Korean explanation grounded in that source context. Apply these grounds to qualifier-excluded candidates too; do not justify exclusion from an earlier model shortlist or fabricate absent evidence. If original membership or identity cannot actually be established, state that uncertainty rather than guessing. E and K select immutable original text and exact locations: never reproduce, normalize or invent source quotations, merge records or alter source boundaries. Code preserves both original responses and computes disagreement separately; your judgment is not required to agree with another response.';
   return {
-    required: baseline.required,
+    required,
     schema,
-    systemPrompt:
-      'Independently judge every required original excerpt/inventory member from the supplied original evidence. Earlier model selections are intentionally withheld. No inclusion or exclusion is predetermined by an earlier decision or by the schema. Return every review key and every candidate member key. The registration pool is a review baseline, not an automatically eligible set. For EACH member decide attachment as included, excluded or unresolved, then independently decide relationshipSubject as alternative or not_alternative. Included means the unchanged E directly describes this source-established member, including supported collective evidence; unresolved attachment means genuinely ambiguous recipient identity. Alternative means a genuinely unresolved subject of a relationship clause, not uncertain classification or uncertain existence of the relationship. Included attachment and alternative relationship subject may coexist on the SAME candidate. A relationship participant with resolved identity requires no subject alternatives.\nFirst establish the bounded original investigation set through the body, original rows and candidate evidence, then apply the CURRENT clause period, investigation, location and type qualifiers. Preserve every directly described verified member of a collective even without repeated numbers, including original tentative classifications. Candidate row context establishes identity and membership; it does not automatically describe the row owner or propagate an excerpt to all trenches, ancestors or same-type records. A directly described area is an additional recipient and never replaces a supported feature set. Collective evidence does not prove physical identity or every member participation in a later relationship. Evaluate all substantive clauses of the indivisible E: later uncertainty about one relationship subject does not erase an earlier collective description. Keep genuine role alternatives separately from collective recipients, without adding unsupported comparisons or previous-investigation objects. The lack of an individual identifier is not itself a reason to exclude a verified member of a collective.\nGive contextRef equal to the current E and one or more of the SAME candidate provided K evidence IDs for EVERY disposition, plus a concise Korean explanation grounded in that source context. Apply these grounds to qualifier-excluded candidates too; do not justify exclusion from an earlier model shortlist or fabricate absent evidence. If original membership or identity cannot actually be established, state that uncertainty rather than guessing. E and K select immutable original text and exact locations: never reproduce, normalize or invent source quotations, merge records or alter source boundaries. Code preserves both original responses and computes disagreement separately; your judgment is not required to agree with another response.',
+    systemPrompt: options.includeBodyContext
+      ? systemPrompt +
+        '\n' +
+        CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY +
+        '\nBody review pools use B refs for original body-grounded context candidates; U refs retain original table membership. Evaluate every supplied E/pool/member independently, including excluded or ignored passages. A pool is review coverage, not a claim of table membership or a preset inclusion. Explain all decisions with the current E and the candidate own K evidence.'
+      : systemPrompt,
     userPrompt: JSON.stringify(evidence),
   };
 }
@@ -109,6 +137,7 @@ export function inspectContentAttachmentIndependentReview(
   input: Input,
   selection: ContentAttachmentRequiredResponse,
   audit?: ContentAttachmentIndependentReviewAudit,
+  options: { includeBodyContext?: boolean } = {},
 ): {
   issues: string[];
   findings: ContentAttachmentReviewFinding[];
@@ -117,6 +146,7 @@ export function inspectContentAttachmentIndependentReview(
   const request = createContentAttachmentIndependentReviewRequest(
     input,
     selection,
+    options,
   );
   if (!audit && !request.required.length)
     return { issues: [], findings: [], disagreements: [] };
@@ -187,6 +217,13 @@ export function inspectContentAttachmentIndependentReview(
           (k) => input.citations.find((c) => c.ref === k)!.evidence,
         ),
         changedFields,
+        ...(options.includeBodyContext
+          ? {
+              reviewBasis: r.inventoryRef.startsWith('B')
+                ? ('body_context' as const)
+                : ('inventory' as const),
+            }
+          : {}),
       });
     }
   }

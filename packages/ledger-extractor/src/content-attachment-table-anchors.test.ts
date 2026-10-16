@@ -15,6 +15,7 @@ import {
 } from './content-attachment';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import { createContentAttachmentIndependentReviewRequest } from './content-attachment-independent-review';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -384,17 +385,75 @@ describe('candidate table source anchors', () => {
         totalTokens: 2,
       },
     });
+    const reviewRequest = createContentAttachmentIndependentReviewRequest(
+      current,
+      wireResponse,
+      { includeBodyContext: true },
+    );
+    const reviewOutput = reviewRequest.schema.parse({
+      reviews: Object.fromEntries(
+        reviewRequest.required.map((r) => [
+          r.key,
+          Object.fromEntries(
+            r.candidateRefs.map((ref) => [
+              ref,
+              {
+                attachment: response.assignments.some(
+                  (a) =>
+                    a.excerptRef === r.excerptRef &&
+                    a.candidateRefs.includes(ref),
+                )
+                  ? 'included'
+                  : 'excluded',
+                relationshipSubject: 'not_alternative',
+                contextRef: r.excerptRef,
+                candidateEvidenceRefs: [
+                  current.citations.find((c) => c.candidateRef === ref)!.ref,
+                ],
+                reason:
+                  'Fixture review preserves explicit original assignments',
+              },
+            ]),
+          ),
+        ]),
+      ),
+    });
+    const mockUsage = {
+      component: 'test',
+      phase: 'test',
+      model: 'primary' as const,
+      modelName: 'mock',
+      inputTokens: 1,
+      outputTokens: 1,
+      totalTokens: 2,
+    };
+    vi.mocked(LLMCaller.call)
+      .mockResolvedValueOnce({
+        output: wireResponse,
+        usedFallback: false,
+        usage: mockUsage,
+      })
+      .mockResolvedValueOnce({
+        output: reviewOutput,
+        usedFallback: false,
+        usage: mockUsage,
+      });
     const raw = await attachContentUnit(plan, unit, {
       model: {} as LanguageModel,
       maxRetries: 0,
     });
-    expect(LLMCaller.call).toHaveBeenCalledTimes(1);
+    expect(LLMCaller.call).toHaveBeenCalledTimes(2);
     expect(
       JSON.parse(vi.mocked(LLMCaller.call).mock.calls[0][0].userPrompt),
     ).toEqual(current.payload);
     expect(raw.codeMap).toEqual(current.codeMap);
     const before = structuredClone(raw),
       result = assembleContentAttachment(plan, [raw]);
+    const {
+      independentReviewFindings: _findings,
+      reviewDisagreements: _disagreements,
+      ...initialResult
+    } = result;
     expect(result.issues).toEqual([]);
     expect(
       result.contents.find((c) => c.registryRef === 'R2')!.excerpts[0]
@@ -408,7 +467,9 @@ describe('candidate table source anchors', () => {
       codeMap: old.codeMap,
     };
     expect(JSON.parse(historical.userPrompt)).toEqual(old.payload);
-    expect(assembleContentAttachment(plan, [historical])).toEqual(result);
+    expect(assembleContentAttachment(plan, [historical])).toEqual(
+      initialResult,
+    );
     const forged = structuredClone(raw);
     (forged.codeMap as typeof current.codeMap).candidateTableRows[0].rowIndex =
       99;

@@ -21,6 +21,8 @@ import {
   prepareContentAttachment,
 } from './content-attachment';
 import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
+import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import { createContentAttachmentIndependentReviewRequest } from './content-attachment-independent-review';
 import { createContentAttachmentInput } from './content-attachment-input';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
@@ -1371,6 +1373,40 @@ describe('bounded content attachment', () => {
       usage,
       usedFallback: false,
     });
+    const compiled = createContentAttachmentGroundedInput(p, p.units[0]);
+    const reviewRequest = createContentAttachmentIndependentReviewRequest(
+      compiled,
+      response,
+      { includeBodyContext: true },
+    );
+    const reviewOutput = reviewRequest.schema.parse({
+      reviews: Object.fromEntries(
+        reviewRequest.required.map((r) => [
+          r.key,
+          Object.fromEntries(
+            r.candidateRefs.map((ref) => [
+              ref,
+              {
+                attachment: 'excluded',
+                relationshipSubject: 'not_alternative',
+                contextRef: r.excerptRef,
+                candidateEvidenceRefs: [
+                  compiled.citations.find((c) => c.candidateRef === ref)!.ref,
+                ],
+                reason: 'Fixture cover is not an object description',
+              },
+            ]),
+          ),
+        ]),
+      ),
+    });
+    vi.mocked(LLMCaller.call)
+      .mockResolvedValueOnce({ output: response, usage, usedFallback: false })
+      .mockResolvedValueOnce({
+        output: reviewOutput,
+        usage,
+        usedFallback: false,
+      });
     const model = {} as LanguageModel;
     const onAttempt = vi.fn();
     const attempts = [
@@ -1403,7 +1439,7 @@ describe('bounded content attachment', () => {
     });
     expect(createAuditedModel).toHaveBeenCalledWith(model, onAttempt);
     expect(out.callAttempts).toBe(attempts);
-    expect(LLMCaller.call).toHaveBeenCalledTimes(1);
+    expect(LLMCaller.call).toHaveBeenCalledTimes(2);
     expect(out.rawResponse).toBe(response);
     expect(out.response).toEqual({
       assignments: [],
@@ -1411,6 +1447,11 @@ describe('bounded content attachment', () => {
       ignored: [{ excerptRef: 'E1', reason: '対象外' }],
     });
     const before = structuredClone(out);
+    const {
+      independentReviewFindings: _findings,
+      reviewDisagreements: _disagreements,
+      ...initialResult
+    } = assembleContentAttachment(p, [out]);
     expect(assembleContentAttachment(p, [out]).issues).toEqual([]);
     expect(out).toEqual(before);
     const archivedUserPrompt = createContentAttachmentRequest(
@@ -1438,9 +1479,7 @@ describe('bounded content attachment', () => {
     expect(v42.systemPrompt).not.toContain(
       'CARRY PREVIOUS-INVESTIGATION SUBJECTS THROUGH CATEGORY FRAGMENTS AND THEIR NEXT CONTEXT',
     );
-    expect(assembleContentAttachment(p, [v42])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v42])).toEqual(initialResult);
     const alteredHistoricalProjection = structuredClone(v42);
     alteredHistoricalProjection.response.ignored[0].reason = 'changed';
     expect(
@@ -1462,9 +1501,7 @@ describe('bounded content attachment', () => {
     expect(v43.systemPrompt).not.toContain(
       'RESOLVE DIFFERENT REGISTRY AND NARRATIVE NAMES THROUGH ORIGINAL IDENTITY EVIDENCE',
     );
-    expect(assembleContentAttachment(p, [v43])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v43])).toEqual(initialResult);
     const alteredV43Projection = structuredClone(v43);
     alteredV43Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1485,9 +1522,7 @@ describe('bounded content attachment', () => {
     expect(v45.systemPrompt).not.toContain('CURRENT CLAUSE PERIOD');
     expect(out.systemPrompt).toContain('CURRENT CLAUSE PERIOD');
     expect(out.systemPrompt).toContain('ELLIPTICAL TABLE WORK SUBJECTS');
-    expect(assembleContentAttachment(p, [v45])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v45])).toEqual(initialResult);
     const alteredV45Projection = structuredClone(v45);
     alteredV45Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1508,9 +1543,7 @@ describe('bounded content attachment', () => {
     expect(v46.systemPrompt).not.toContain('ESTABLISHED FEATURE GROUPS REMAIN');
     expect(out.systemPrompt).toContain('ESTABLISHED FEATURE GROUPS REMAIN');
     expect(out.systemPrompt).toContain('INVESTIGATION-STAGE IDENTITY BOUNDS');
-    expect(assembleContentAttachment(p, [v46])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v46])).toEqual(initialResult);
     const alteredV46Projection = structuredClone(v46);
     alteredV46Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1531,9 +1564,7 @@ describe('bounded content attachment', () => {
     expect(v47.systemPrompt).not.toContain('SET-LEVEL EVIDENCE ATTACHMENT');
     expect(out.systemPrompt).toContain('SET-LEVEL EVIDENCE ATTACHMENT');
     expect(out.systemPrompt).toContain('PARTIAL RELATION IDENTITY');
-    expect(assembleContentAttachment(p, [v47])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v47])).toEqual(initialResult);
     const alteredV47Projection = structuredClone(v47);
     alteredV47Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1556,9 +1587,7 @@ describe('bounded content attachment', () => {
     );
     expect(out.systemPrompt).toContain('QUANTITIES REMAIN WITH THEIR ORIGINAL');
     expect(out.systemPrompt).toContain('BOTH RELATION ENDPOINTS REQUIRE');
-    expect(assembleContentAttachment(p, [v48])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v48])).toEqual(initialResult);
     const alteredV48Projection = structuredClone(v48);
     alteredV48Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1579,9 +1608,7 @@ describe('bounded content attachment', () => {
     expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
     expect(out.systemPrompt).toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
     expect(out.systemPrompt).toContain('NEAREST EXPLICIT WORK SUBJECT LIMITS');
-    expect(assembleContentAttachment(p, [v49])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v49])).toEqual(initialResult);
     const alteredV49Projection = structuredClone(v49);
     alteredV49Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1603,9 +1630,7 @@ describe('bounded content attachment', () => {
       'NO STATED RESTRICTION IS NOT POSITIVE',
     );
     expect(out.systemPrompt).toContain('NO STATED RESTRICTION IS NOT POSITIVE');
-    expect(assembleContentAttachment(p, [v50])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v50])).toEqual(initialResult);
     const alteredV50Projection = structuredClone(v50);
     alteredV50Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1630,9 +1655,7 @@ describe('bounded content attachment', () => {
       'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
     );
     expect(out.systemPrompt).toContain('NARROW THE VERIFIED ANTECEDENT SET');
-    expect(assembleContentAttachment(p, [v51])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v51])).toEqual(initialResult);
     const alteredV51Projection = structuredClone(v51);
     alteredV51Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1656,9 +1679,7 @@ describe('bounded content attachment', () => {
     expect(out.systemPrompt).toContain(
       'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
     );
-    expect(assembleContentAttachment(p, [v52])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v52])).toEqual(initialResult);
     const alteredV52Projection = structuredClone(v52);
     alteredV52Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1683,9 +1704,7 @@ describe('bounded content attachment', () => {
     expect(out.systemPrompt).toContain(
       'COMPLETE COLLECTIVE RECIPIENTS AND RELATIONSHIP-SUBJECT ALTERNATIVES',
     );
-    expect(assembleContentAttachment(p, [v53])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v53])).toEqual(initialResult);
     const alteredV53Projection = structuredClone(v53);
     alteredV53Projection.response.ignored[0].reason = 'changed';
     expect(
