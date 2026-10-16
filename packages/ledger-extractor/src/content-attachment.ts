@@ -36,7 +36,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v57';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v58';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -539,11 +539,22 @@ const SCOPED_MEMBERS_SYSTEM_PROMPT_V56 =
 REGISTRATION CONTEXT IDENTIFIES CANDIDATES; THE CURRENT PASSAGE DETERMINES RECIPIENTS: Original read-only rows and their owners establish where a registered observation belongs, not which records every current body passage describes. For a body inventory, do not add all trenches, areas or row owners merely because those records share original registration rows with the listed features or belong to the investigation set. A phrase locating findings inside investigation units does not by itself make every unit the descriptive subject of that feature inventory. Identify the actual current claim independently of its registration context. Retain an investigation unit when the current E independently describes that identified unit's own layout, work, state, findspot or other substantive account; require that original descriptive link rather than registry membership alone. This does not weaken the existing rule for an ACTUALLY SELECTABLE original table occurrence cell: its identified row owner and listed features can both receive that table E. The read-only origin cell is not that selectable E and must not transfer its entire recipient set to a different body E. Before returning, separately justify any body-to-owner sharing through the current source claim; original row co-membership is identity context, not automatic evidence propagation.
 CURRENT QUALIFIERS FIRST, THEN RETAIN SOURCE-ESTABLISHED TENTATIVE MEMBERS AND ROLE ALTERNATIVES: Resolve the current original clause's investigation, period, location and type scope before selecting from an inventory that may mix periods or observation categories. Check every proposed recipient and unresolved alternative against its literal name, quote and original row; a shared table, chapter or matching noun does not lift the current qualifiers. After that narrowing, keep every originally established member genuinely described by the collective, including observations whose original category is marked tentative, estimated, possible or similar. Such a label preserves the report's classification uncertainty; it is not, by itself, a reason to remove an established observation from collective evidence or from a supported relationship-subject alternative set. Do not silently reinterpret an account of confirmed investigation results as excluding all tentative classifications in that same verified inventory. Preserve the unchanged tentative wording rather than asserting the classification as certain. Exclude a proposed member only on actual missing membership, an explicit current qualifier, contradictory original evidence or a genuinely unsupported role, not the tentative marker alone. Assess relationship roles separately from collective evidence; when the original subject remains unidentified among the scoped candidates, retain all genuinely supported alternatives, including scoped tentative observations and overlap with assigned refs, without guessing or creating uncertainty for unrelated objects. Before returning, recheck both members outside the current qualifiers and scoped tentative members missing from assignments or role alternatives. Keep original strings, all required E keys, explicit-number checks, local-work subjects and existing output/validation contracts; code never fills targets or repairs source/model output.`;
 
-const SYSTEM_PROMPT =
+const EXCLUSION_GROUNDS_SYSTEM_PROMPT_V57 =
   SCOPED_MEMBERS_SYSTEM_PROMPT_V56 +
   `
 EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET REQUIRE ORIGINAL GROUNDS IN THE EXISTING REASON: For an E describing a source-established inventory or its qualified follow-up, check the applicable bounded members against the supplied original account and registration evidence. When excluding an otherwise established member, name its candidate ref in the existing reason and cite a brief unchanged original phrase with its supplied E/context/row reference that actually establishes the exclusion, such as a different investigation, incompatible current period/location, explicit nonmembership or contradictory identification. Explain the connection between that evidence and the exclusion. Merely listing selected candidates, saying that only those candidates are confirmed, repeating a type label, or failing to find an individual number is not an exclusion ground. Do not invent an absent source restriction or treat a tentative classification word as evidence of nonmembership. Audit only the relevant originally bounded set, not every unrelated registry candidate; keep the explanation concise and group exclusions only when the same original ground applies. Put these grounds in the existing assigned/unresolved reason as appropriate, without adding fields, changing the fixed E text or returning replacement excerpts. A genuinely unknown membership link belongs in the existing unresolved handling with its actual missing evidence, rather than a fabricated categorical exclusion.
 AUDIT TENTATIVE MEMBERS ACROSS COLLECTIVE EVIDENCE AND RELATIONSHIP ROLE ALTERNATIVES: Within the current source-defined investigation/period/location/type scope, an originally recorded tentative observation remains a member of the verified observation inventory; verification of the observation does not certify its tentative classification. For each such member omitted from BOTH evidence recipients and applicable relationship-subject alternatives, identify an actual original exclusion ground under the preceding rule. If the only distinction is its tentative label or absent repeated individual identification, do not silently remove it: retain the supported collective evidence with original tentative wording, and independently retain it among genuinely unresolved role alternatives when that role is unidentified within the same supported set. Do not first narrow the inventory to non-tentative names and then reuse that unsupported shortlist as the entire relationship-subject set. Distinguish the report's classification uncertainty, the collective evidence link and the relationship participant's identity. This does not assign a relationship to every member or make unrelated candidates alternatives; preserve actual current qualifiers, positively supported exclusions and resolved roles. Before returning, compare the whole relevant original set with BOTH lists and justify genuine exclusions from original evidence, not from the earlier selected list. Keep all required E keys, original strings, local work subjects, explicit-number checks and existing schema/validation behavior; code never fills targets or repairs source/model output.`;
+
+const SYSTEM_PROMPT =
+  EXCLUSION_GROUNDS_SYSTEM_PROMPT_V57.replace(
+    'Never return quotes, source IDs, offsets or rewritten text.',
+    'Do not re-output E source text as excerpt selections or add quote/source-ID/offset fields. Inside an existing reason, brief unchanged original evidence phrases and supplied short references ARE allowed and required when explaining an exclusion. These reason citations never replace or modify the E text selected by code.',
+  ).replace(
+    'Return only the fixed ID selection schema; never quote, repair, split or combine original text.',
+    'Return only the fixed ID selection schema; never re-output, repair, split or combine E text as excerpt selections. The E-text re-output ban does not prohibit brief unchanged evidence citations inside an existing reason; include them when an exclusion requires original grounds.',
+  ) +
+  `
+AUDIT CURRENT-QUALIFIER EXCLUSIONS AGAINST THE ORIGINAL SET BEFORE NARROWING: For a source-established inventory or its qualified follow-up, use the original bounded inventory as the exclusion-audit baseline BEFORE applying the current period, investigation, location or type restrictions. Members removed by those restrictions still require an explanation; being outside the final eligible subset does not make them unrelated registry objects or exempt them from the audit. In the existing reason for that E, give both the supported assignment basis and the excluded member refs with brief unchanged original evidence for the narrowing: cite the current E's actual qualifier and the incompatible candidate quote/original-row phrase with its supplied short reference. Group excluded refs only when that same literal ground applies to every grouped member. Do not replace these grounds with a positive summary of selected candidates or a general assertion that the current scope was applied. Keep the explanation concise and bounded to this source-established inventory, without listing unrelated candidates or inventing absent exclusions. Quoted evidence inside reason is explicitly permitted by the preceding scoped quotation rules; it does not create a new excerpt, change a source, add fields or authorize response repair. Classifying a recorded observation as tentative alone is still not an exclusion ground: retain supported collective recipients and independently preserve genuine relationship-subject alternatives. Before returning, verify that the current-qualifier exclusions are explained even though their refs are absent from both target lists, while the fixed E text, every required E key, source-grounded scope, local work subjects and explicit-number checks remain unchanged.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -812,7 +823,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v54'
     | 'content-attachment.v55'
     | 'content-attachment.v56'
-    | 'content-attachment.v57' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v57'
+    | 'content-attachment.v58' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -970,11 +982,15 @@ export function createContentAttachmentRequest(
                                                                                                                   : promptVersion ===
                                                                                                                       'content-attachment.v56'
                                                                                                                     ? SCOPED_MEMBERS_SYSTEM_PROMPT_V56
-                                                                                                                    : SYSTEM_PROMPT,
+                                                                                                                    : promptVersion ===
+                                                                                                                        'content-attachment.v57'
+                                                                                                                      ? EXCLUSION_GROUNDS_SYSTEM_PROMPT_V57
+                                                                                                                      : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v55' ||
         promptVersion === 'content-attachment.v56' ||
-        promptVersion === 'content-attachment.v57'
+        promptVersion === 'content-attachment.v57' ||
+        promptVersion === 'content-attachment.v58'
         ? createContentAttachmentOriginInput(plan, unit).payload
         : promptVersion === 'content-attachment.v33' ||
             promptVersion === 'content-attachment.v34' ||
@@ -1163,6 +1179,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v54' &&
       audit.promptVersion !== 'content-attachment.v55' &&
       audit.promptVersion !== 'content-attachment.v56' &&
+      audit.promptVersion !== 'content-attachment.v57' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1218,11 +1235,13 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v54' ||
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57';
+      audit.promptVersion === 'content-attachment.v57' ||
+      audit.promptVersion === 'content-attachment.v58';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57'
+      audit.promptVersion === 'content-attachment.v57' ||
+      audit.promptVersion === 'content-attachment.v58'
         ? createContentAttachmentOriginInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v33' ||
             audit.promptVersion === 'content-attachment.v34' ||
@@ -1355,6 +1374,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v54' ||
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
+      audit.promptVersion === 'content-attachment.v57' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
@@ -1372,6 +1392,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v54' ||
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
+      audit.promptVersion === 'content-attachment.v57' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = createContentAttachmentResponseSchema(
@@ -1649,7 +1670,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v54' ||
           audit.promptVersion === 'content-attachment.v55' ||
           audit.promptVersion === 'content-attachment.v56' ||
-          audit.promptVersion === 'content-attachment.v57'
+          audit.promptVersion === 'content-attachment.v57' ||
+          audit.promptVersion === 'content-attachment.v58'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1769,7 +1791,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v54' ||
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57'
+      audit.promptVersion === 'content-attachment.v57' ||
+      audit.promptVersion === 'content-attachment.v58'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1798,7 +1821,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v54' ||
           audit.promptVersion === 'content-attachment.v55' ||
           audit.promptVersion === 'content-attachment.v56' ||
-          audit.promptVersion === 'content-attachment.v57',
+          audit.promptVersion === 'content-attachment.v57' ||
+          audit.promptVersion === 'content-attachment.v58',
       ))
         issue(reason);
     }
@@ -1815,6 +1839,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v54' ||
       audit.promptVersion === 'content-attachment.v55' ||
       audit.promptVersion === 'content-attachment.v56' ||
+      audit.promptVersion === 'content-attachment.v57' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(
@@ -1825,6 +1850,7 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v54' ||
           audit.promptVersion === 'content-attachment.v55' ||
           audit.promptVersion === 'content-attachment.v56' ||
+          audit.promptVersion === 'content-attachment.v57' ||
           audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION,
       ))
         issue(reason);

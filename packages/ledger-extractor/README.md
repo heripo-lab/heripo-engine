@@ -554,3 +554,11 @@ When an excerpt describes an originally established set or its scoped follow-up,
 Review tentative observations across both collective recipients and genuine relationship-subject alternatives. Do not remove a recorded observation solely because its classification is tentative, then reuse that unsupported shortlist to limit the role alternatives. Retain applicable collective evidence with unchanged tentative wording and assess role identity separately. This does not resolve the relationship or manufacture alternatives for unrelated objects.
 
 V57 adds generic English instructions only. Existing input/origin bindings, output fields/schema, validators and source assembly are unchanged; exact v1–v56 requests/audits/maps remain reproducible. Exclusion explanations use the existing reason field and are model judgments, not a new deterministic semantic guarantee. No source/response correction or automatic target filling occurs; cross-report generality remains unverified.
+
+### Scope the quotation ban and audit members removed by current qualifiers (prompt v58)
+
+The current prompt rewrites the two broad quotation bans: E source text must not be re-output as excerpt selections or extra source/offset fields, while brief unchanged evidence citations and supplied short references are allowed in the existing reason. This resolves the prior wording conflict with exclusion-ground citations without changing any E text or source binding.
+
+Use the originally verified inventory before current narrowing as the exclusion-audit baseline. A member removed by period/investigation/location/type restrictions still needs its ref and the current qualifier versus original candidate/row evidence in the same E reason; it is not exempt merely because it is outside the final eligible subset. Group only members sharing the literal ground, keep unrelated registry objects outside the audit and preserve tentative observations and genuine role alternatives.
+
+Input/schema/validation/assembly remain unchanged. Exact v1–v57 historical requests/audits remain reproducible with their original wording. Existing reason is still a free string; these instructions do not create a deterministic semantic guarantee or authorize target/source/response repair. Cross-report generality remains unverified.
