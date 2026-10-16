@@ -370,6 +370,18 @@ test('rejects missing named range members in current assembly while retaining ex
     assembleContentAttachment(plan, [audit]),
   );
   expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
+  const v50 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v50'),
+  };
+  expect(audit.systemPrompt.startsWith(v50.systemPrompt)).toBe(true);
+  expect(v50.userPrompt).toBe(audit.userPrompt);
+  expect(assembleContentAttachment(plan, [v50])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v50.systemPrompt).not.toContain(
+    'NO STATED RESTRICTION IS NOT POSITIVE',
+  );
   const forged = structuredClone(historical);
   forged.response.assignments[0].reason = 'Changed';
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(

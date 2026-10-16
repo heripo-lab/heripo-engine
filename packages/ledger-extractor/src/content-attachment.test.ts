@@ -1560,6 +1560,28 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV49Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v50 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v50',
+      ),
+    };
+    expect(out.userPrompt).toBe(v50.userPrompt);
+    expect(out.systemPrompt.startsWith(v50.systemPrompt)).toBe(true);
+    expect(v50.systemPrompt).not.toContain(
+      'NO STATED RESTRICTION IS NOT POSITIVE',
+    );
+    expect(out.systemPrompt).toContain('NO STATED RESTRICTION IS NOT POSITIVE');
+    expect(assembleContentAttachment(p, [v50])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV50Projection = structuredClone(v50);
+    alteredV50Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV50Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(
