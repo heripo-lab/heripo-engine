@@ -357,7 +357,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   const reviewRequest = createContentAttachmentIndependentReviewRequest(
     current,
     output,
-    { includeBodyContext: true },
+    { includeBodyContext: true, qualifyBeforeIdentity: true },
   );
   const reviewOutput = reviewRequest.schema.parse({
     reviews: Object.fromEntries(
