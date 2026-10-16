@@ -503,8 +503,10 @@ describe('original selectable body block input', () => {
     );
     expect(request.promptVersion).toBe('content-attachment.v41');
     const latest = createContentAttachmentRequest(plan, unit);
-    expect(latest.promptVersion).toBe('content-attachment.v54');
-    expect(latest.userPrompt).toBe(request.userPrompt);
+    expect(latest.promptVersion).toBe('content-attachment.v55');
+    expect(JSON.parse(latest.userPrompt).current).toEqual(
+      JSON.parse(request.userPrompt).current,
+    );
     expect(latest.systemPrompt.startsWith(request.systemPrompt)).toBe(true);
     expect(request.systemPrompt).not.toContain(
       'REQUIRED PER-E OUTPUT CONTRACT',
