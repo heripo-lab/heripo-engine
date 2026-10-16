@@ -718,6 +718,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         qualifyBeforeIdentity: true,
         reconcileRecipientRefs: true,
         crossChapterAreas: true,
+        preserveAreaWork: true,
       },
     ),
     review = request.schema.parse({
@@ -1454,7 +1455,10 @@ test('reviews whole and partial area definitions across chapters and proposed bo
     unit,
     'content-attachment.v64',
   );
-  expect(createContentAttachmentRequest(plan, unit).systemPrompt).toBe(
+  expect(
+    createContentAttachmentRequest(plan, unit, 'content-attachment.v65')
+      .systemPrompt,
+  ).toBe(
     archived.systemPrompt + '\n' + current.systemPrompt.split('\n').at(-1),
   );
   expect(current.systemPrompt).toContain(
@@ -1536,20 +1540,57 @@ test('reviews whole and partial area definitions across chapters and proposed bo
   ).toBe(true);
 });
 
-test('replays archived v64 request and independent coverage after the live version advances', () => {
+test('shares body inventory boundaries and area fieldwork criteria without changing coverage or adopting independent choices', () => {
   const { plan, unit } = fixture(),
     input = createContentAttachmentGroundedInput(plan, unit),
     selection = frozenSelection(),
-    request = createContentAttachmentRequest(
-      plan,
-      unit,
-      'content-attachment.v64',
-    ),
-    review = createContentAttachmentIndependentReviewRequest(input, selection, {
+    before = structuredClone({ input, selection }),
+    options = {
       includeBodyContext: true,
       qualifyBeforeIdentity: true,
       reconcileRecipientRefs: true,
+      crossChapterAreas: true,
+    },
+    historical = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v65',
+    ),
+    current = createContentAttachmentRequest(plan, unit),
+    historicalReview = createContentAttachmentIndependentReviewRequest(
+      input,
+      selection,
+      options,
+    ),
+    review = createContentAttachmentIndependentReviewRequest(input, selection, {
+      ...options,
+      preserveAreaWork: true,
     });
+  const addedSelection = current.systemPrompt.slice(
+      historical.systemPrompt.length + 1,
+    ),
+    addedReview = review.systemPrompt.slice(
+      historicalReview.systemPrompt.length + 1,
+    );
+  expect(current.systemPrompt).toBe(
+    historical.systemPrompt + '\n' + addedSelection,
+  );
+  expect(review.systemPrompt).toBe(
+    historicalReview.systemPrompt + '\n' + addedReview,
+  );
+  expect(addedSelection).toBe(addedReview);
+  expect(addedReview).toContain(
+    'never extend that cell-specific ownership rule to a body aggregate',
+  );
+  expect(addedReview).toContain(
+    'taking pre-investigation site photographs and making field records of that area',
+  );
+  expect(addedReview).toContain(
+    'Distinguishing whole-project and partial areas must identify WHICH area owns the described work',
+  );
+  expect(current.userPrompt).toBe(historical.userPrompt);
+  expect(review.userPrompt).toBe(historicalReview.userPrompt);
+  expect(review.required).toEqual(historicalReview.required);
   const rawResponse = review.schema.parse({
     reviews: Object.fromEntries(
       review.required.map((r) => [
@@ -1564,31 +1605,91 @@ test('replays archived v64 request and independent coverage after the live versi
               candidateEvidenceRefs: [
                 input.citations.find((c) => c.candidateRef === ref)!.ref,
               ],
-              reason: 'Independent archived judgment',
+              reason: 'Independent judgment remains selectable',
             },
           ]),
         ),
       ]),
     ),
   });
+  expect(historicalReview.schema.safeParse(rawResponse).success).toBe(true);
   const audit = {
-    unitId: unit.unitId,
-    ...request,
-    rawResponse: selection,
-    response: flattenContentAttachmentResponse(selection),
-    codeMap: input.codeMap,
+    systemPrompt: review.systemPrompt,
+    userPrompt: review.userPrompt,
+    rawResponse,
     usage: {} as never,
-    independentReview: {
-      systemPrompt: review.systemPrompt,
-      userPrompt: review.userPrompt,
-      rawResponse,
-      usage: {} as never,
-      callAttempts: [],
-    },
+    callAttempts: [],
   };
-  const before = structuredClone(audit);
-  const result = assembleContentAttachment(plan, [audit]);
-  expect(result.issues).toEqual([]);
-  expect(result.completedUnitIds).toEqual([unit.unitId]);
-  expect(audit).toEqual(before);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      ...options,
+      preserveAreaWork: true,
+    }).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, options)
+      .issues,
+  ).toHaveLength(1);
+  expect({ input, selection }).toEqual(before);
 });
+
+test.each(['content-attachment.v64', 'content-attachment.v65'] as const)(
+  'replays archived %s request and independent coverage after the live version advances',
+  (version) => {
+    const { plan, unit } = fixture(),
+      input = createContentAttachmentGroundedInput(plan, unit),
+      selection = frozenSelection(),
+      request = createContentAttachmentRequest(plan, unit, version),
+      review = createContentAttachmentIndependentReviewRequest(
+        input,
+        selection,
+        {
+          includeBodyContext: true,
+          qualifyBeforeIdentity: true,
+          reconcileRecipientRefs: true,
+          crossChapterAreas: version === 'content-attachment.v65',
+        },
+      );
+    const rawResponse = review.schema.parse({
+      reviews: Object.fromEntries(
+        review.required.map((r) => [
+          r.key,
+          Object.fromEntries(
+            r.candidateRefs.map((ref) => [
+              ref,
+              {
+                attachment: 'excluded',
+                relationshipSubject: 'not_alternative',
+                contextRef: r.excerptRef,
+                candidateEvidenceRefs: [
+                  input.citations.find((c) => c.candidateRef === ref)!.ref,
+                ],
+                reason: 'Independent archived judgment',
+              },
+            ]),
+          ),
+        ]),
+      ),
+    });
+    const audit = {
+      unitId: unit.unitId,
+      ...request,
+      rawResponse: selection,
+      response: flattenContentAttachmentResponse(selection),
+      codeMap: input.codeMap,
+      usage: {} as never,
+      independentReview: {
+        systemPrompt: review.systemPrompt,
+        userPrompt: review.userPrompt,
+        rawResponse,
+        usage: {} as never,
+        callAttempts: [],
+      },
+    };
+    const before = structuredClone(audit);
+    const result = assembleContentAttachment(plan, [audit]);
+    expect(result.issues).toEqual([]);
+    expect(result.completedUnitIds).toEqual([unit.unitId]);
+    expect(audit).toEqual(before);
+  },
+);
