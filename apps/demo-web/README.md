@@ -506,3 +506,7 @@ New content-attachment calls use prompt v5 to preserve supported numbered object
 Content-attachment execution also checkpoints each provider invocation as `first-unit-api-attempt-<sequence>.json` before structured parsing can trigger another attempt. These files survive final failure; a successful `first-unit-audit.json` includes the same records in `callAttempts`. Records preserve complete SDK response bodies and provider termination metadata without changing the selected text or retry policy.
 
 The audit download also includes the checkpointed `callAttempts` when the final structured audit is absent after failure.
+
+### Grouped identity uncertainty display
+
+The duplicate-review panel counts uncertain identity by unordered candidate-group pairs and also shows the original supporting candidate-pair count. Expand an uncertainty to inspect every original candidate pair, reason, exact quotes and source locations. The library derives this view directly from the retained result, so older saved runs use the same display without a new model call, attachment run or file migration. Raw model candidate pairs and group memberships remain unchanged.
