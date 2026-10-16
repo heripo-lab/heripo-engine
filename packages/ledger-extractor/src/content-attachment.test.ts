@@ -1539,6 +1539,27 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV48Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v49 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v49',
+      ),
+    };
+    expect(out.userPrompt).toBe(v49.userPrompt);
+    expect(out.systemPrompt.startsWith(v49.systemPrompt)).toBe(true);
+    expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
+    expect(out.systemPrompt).toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
+    expect(out.systemPrompt).toContain('NEAREST EXPLICIT WORK SUBJECT LIMITS');
+    expect(assembleContentAttachment(p, [v49])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV49Projection = structuredClone(v49);
+    alteredV49Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV49Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(

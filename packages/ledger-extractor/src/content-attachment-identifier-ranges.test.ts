@@ -360,6 +360,16 @@ test('rejects missing named range members in current assembly while retaining ex
   expect(v48.systemPrompt).not.toContain(
     'QUANTITIES REMAIN WITH THEIR ORIGINAL',
   );
+  const v49 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v49'),
+  };
+  expect(audit.systemPrompt.startsWith(v49.systemPrompt)).toBe(true);
+  expect(v49.userPrompt).toBe(audit.userPrompt);
+  expect(assembleContentAttachment(plan, [v49])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
   const forged = structuredClone(historical);
   forged.response.assignments[0].reason = 'Changed';
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
