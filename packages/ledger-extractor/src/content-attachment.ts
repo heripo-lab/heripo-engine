@@ -35,7 +35,7 @@ import {
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { validateContentAttachmentTables } from './content-attachment-table-validation';
 
-export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v49';
+export const CONTENT_ATTACHMENT_PROMPT_VERSION = 'content-attachment.v50';
 type TextSource = Extract<DocumentResource, { kind: 'text' | 'tableCell' }>;
 export interface AttachmentSource {
   sourceId: string;
@@ -492,11 +492,17 @@ const RELATION_IDENTITY_SYSTEM_PROMPT_V48 =
 SET-LEVEL EVIDENCE ATTACHMENT DOES NOT RESOLVE RELATION-PARTICIPANT IDENTITY: Evaluate independently (a) which identified records a fixed original E describes as members of an established set and (b) which specific member or members participate in each relationship clause. Preserve the unchanged E on all source-supported set members when its collective account describes them. This evidence attachment does not merge the records, prove that observations are one physical object, or establish every clause's predicate for every member. A later relationship clause may still have an unresolved descriptive subject even though the same E clearly belongs on those records through its earlier collective clause. For example, 'The inspected features occur here, and the feature may adjoin an earlier enclosure.' can preserve the set account on its verified members while leaving the participating member's identity unresolved if original context identifies neither an individual nor the whole set as that relationship subject. Do not convert a singular or ambiguous relation subject into all members merely because they already receive the E. Conversely, do not invent uncertainty when original evidence clearly identifies the participant or explicitly relates the entire set. A purely collective inventory with established members needs no identity alternatives simply because it lacks repeated individual identifiers.
 USE THE SAME REQUIRED E DECISION FOR CONFIRMED SET EVIDENCE AND PARTIAL RELATION IDENTITY: In that mixed case return status assigned with the verified evidence targets, and preserve the relation-subject alternatives in that SAME decision's existing unresolved field. The assigned reason must explain the supported set/other description; the unresolved reason must identify the unresolved relationship role, distinguish it from confirmed membership and explain the missing identity evidence. Those unresolved candidateRefs may overlap assigned candidateRefs: they are confirmed recipients of the set evidence but unresolved alternatives for a different role in the same original E. Earlier instructions about 'uncertain targets only' or 'additional targets' do not require disjoint ref lists in this case. Do not erase role uncertainty merely because all plausible participants already have assigned evidence. Keep alternatives within the original investigation and supported local subject set, retaining excluded/nonregistered counterparts as discourse context without substituting an unrelated registered object. Preserve every original qualifier such as 'may' or 'possibility': preserving its evidence does not confirm the proposed relationship. Do not split, rewrite or complete E, return clause text, add fields, create relationship structures or repair saved responses. Before returning a collective-plus-relationship E with unresolved null, verify that the relationship subject is actually identified by original evidence rather than by the fact that its candidate received the collective excerpt. Retain existing source boundaries, backfill sharing, ranges and every required E key; code never supplies semantic assignments or unresolved alternatives.`;
 
-const SYSTEM_PROMPT =
+const QUANTITY_ENDPOINT_SYSTEM_PROMPT_V49 =
   RELATION_IDENTITY_SYSTEM_PROMPT_V48 +
   `
 QUANTITIES REMAIN WITH THEIR ORIGINAL SUBJECT AND OBSERVATION SCOPE: Distinguish a count in one candidate's literal name, quote or table row from a total explicitly stated for the current original account. An entry recording one feature at one observation location does not establish that the investigation, a wider category or a later collective has exactly one such feature. Do not import that count into an unquantified category noun in the body, transfer a neighboring category's quantity to it, or treat a local count as an individual identifier. A singular grammatical noun or a candidate with a written count does not impose a numerical cap on a source-defined inventory. Before excluding a verified member to satisfy an alleged total, check that original evidence actually states that total for THAT category and investigation scope. If no such total is supplied, do not invent it or select only the candidate whose quote happens to include a count. Preserve all originally established set members within the current qualifiers, including tentative observations with their original wording, without deciding that multiple observations are either one physical object or distinct objects. Apply real source totals and explicit exclusions only within their actual scope; counts alone still do not establish membership, cross-location continuity or identity. Keep the original grouped records and fixed E text unchanged.
 BOTH RELATION ENDPOINTS REQUIRE AN ORIGINAL REFERENT-TO-RECORD LINK: Identify the descriptive subject and the counterpart independently from the actual original discourse, investigation stage, identifiers, location continuity, definitions or explicit cross-references. A statement that one feature may connect to another establishes a relationship account, not the mapping of either expression to an available registered candidate. A matching name, type, period, project/report context or being the only registered alternative does not prove that mapping. Calling a candidate 'the counterpart' in the reason does not supply missing source evidence. In particular, do not substitute a later-stage or unrelated registered feature for an earlier, cited, comparative or nonregistered counterpart; a next section or a shared archaeological category is not that identity link. Genuine source-established relationships can still describe participants across stages. When the relationship subject is not identified among a supported local set, retain its alternatives in the SAME E's existing nested unresolved field while preserving independently established set evidence, including overlapping assigned refs where their grounds differ. Do not resolve that subject through an invented category total, or clear its uncertainty just because a counterpart has been selected. Track intentionally nonregistered counterparts in discourse without inventing a record or missing-candidate uncertainty solely for their absence. Distinguish uncertainty about which object participates from tentative wording about whether the relationship holds; neither resolves the other. Before returning unresolved null for a mixed set/relationship account, verify the source link for each supposedly identified endpoint and recheck existing plausible subject alternatives. Do not guess either endpoint, alter E, create relation structures or repair output; keep original scope, set sharing, all required keys, backfill and range rules.`;
+
+const SYSTEM_PROMPT =
+  QUANTITY_ENDPOINT_SYSTEM_PROMPT_V49 +
+  `
+CONFIRMED SET MEMBERSHIP SUPPORTS COLLECTIVE EVIDENCE WITHOUT REPEATED INDIVIDUAL IDENTIFIERS: First decide whether the original account describes an already source-defined investigation set or asks which particular object a distinct description refers to. A collective inventory or follow-up can describe all originally verified members without repeating each name or number. Do not turn such collective evidence into a one-of-the-candidates identity problem solely because the sentence lacks individual identifying details. Verified membership supplies the collective link; it does not prove that different observations are the same physical object, nor that every clause predicate applies to every member. Preserve tentative observations within their originally established set with their unchanged tentative wording; their uncertain classification alone does not erase their original evidence membership. Do not silently drop them from both assignments and uncertainty. A set-only account with established membership needs no individual-identity alternatives merely for being collective. Membership still requires original investigation/inventory links, not matching type, period, count, chapter, registry availability or a prior model response alone. If membership itself is genuinely ambiguous, explain that original membership gap. Independently retain partial identity uncertainty when a later relationship or individual-description clause leaves its participant unidentified; collective assignment and unresolved role alternatives may coexist on the same fixed E and overlapping R refs under existing rules.
+NEAREST EXPLICIT WORK SUBJECT LIMITS ELLIPTICAL DIARY ACTIONS UNLESS ORIGINAL EVIDENCE EXPANDS IT: In a dated task cell, identify each clause's closest explicitly named work subject before inheriting a broader body set. When a named investigation unit is followed by surveying, recording, photography or another action with an omitted or generic subject, prefer continuation of that local named unit unless original wording or a clear same-event source link establishes a broader scope. A comma or the generic plural category does not by itself reset the work subject to every registered member. The existence of a whole-investigation set, a general methods account or shared action vocabulary alone does not establish that a specific dated task covered that entire set. To add members outside the local named scope, require original evidence tying the broader action and those members to this same event and explain that link in the reason; do not assert that surveying or recording is inherently global. This does not disable supported body-to-table inheritance: an independently established set-wide action can still identify the participants of its corresponding unnumbered diary entry. Keep independently described participants from every clause when original evidence really changes the work scope, without propagating a local action to all members. Preserve the whole indivisible original cell and its date/row context; do not split or rewrite it or convert adjacent dates/weather into object properties. Before returning a full-set diary assignment, check the nearest named subject and the actual source evidence for expansion. Keep relationship-subject uncertainty separate, all required E keys, supported backfill/action inheritance and range checks unchanged; code never repairs semantic targets or source/response text.`;
 
 async function digest(value: string) {
   const hash = await crypto.subtle.digest(
@@ -757,7 +763,8 @@ export function createContentAttachmentRequest(
     | 'content-attachment.v46'
     | 'content-attachment.v47'
     | 'content-attachment.v48'
-    | 'content-attachment.v49' = CONTENT_ATTACHMENT_PROMPT_VERSION,
+    | 'content-attachment.v49'
+    | 'content-attachment.v50' = CONTENT_ATTACHMENT_PROMPT_VERSION,
 ) {
   if (!plan.units.some((u) => JSON.stringify(u) === JSON.stringify(unit)))
     throw new Error('Unknown attachment unit');
@@ -891,7 +898,10 @@ export function createContentAttachmentRequest(
                                                                                                   : promptVersion ===
                                                                                                       'content-attachment.v48'
                                                                                                     ? RELATION_IDENTITY_SYSTEM_PROMPT_V48
-                                                                                                    : SYSTEM_PROMPT,
+                                                                                                    : promptVersion ===
+                                                                                                        'content-attachment.v49'
+                                                                                                      ? QUANTITY_ENDPOINT_SYSTEM_PROMPT_V49
+                                                                                                      : SYSTEM_PROMPT,
     userPrompt: JSON.stringify(
       promptVersion === 'content-attachment.v33' ||
         promptVersion === 'content-attachment.v34' ||
@@ -909,7 +919,8 @@ export function createContentAttachmentRequest(
         promptVersion === 'content-attachment.v46' ||
         promptVersion === 'content-attachment.v47' ||
         promptVersion === 'content-attachment.v48' ||
-        promptVersion === 'content-attachment.v49'
+        promptVersion === 'content-attachment.v49' ||
+        promptVersion === 'content-attachment.v50'
         ? createContentAttachmentBodyBlockInput(plan, unit).payload
         : promptVersion === 'content-attachment.v31' ||
             promptVersion === 'content-attachment.v32'
@@ -1067,6 +1078,7 @@ export function assembleContentAttachment(
       audit.promptVersion !== 'content-attachment.v46' &&
       audit.promptVersion !== 'content-attachment.v47' &&
       audit.promptVersion !== 'content-attachment.v48' &&
+      audit.promptVersion !== 'content-attachment.v49' &&
       audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       issue('Unsupported attachment prompt version');
@@ -1114,7 +1126,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v46' ||
       audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49';
+      audit.promptVersion === 'content-attachment.v49' ||
+      audit.promptVersion === 'content-attachment.v50';
     const selectionInput =
       audit.promptVersion === 'content-attachment.v33' ||
       audit.promptVersion === 'content-attachment.v34' ||
@@ -1132,7 +1145,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v46' ||
       audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49'
+      audit.promptVersion === 'content-attachment.v49' ||
+      audit.promptVersion === 'content-attachment.v50'
         ? createContentAttachmentBodyBlockInput(plan, unit)
         : audit.promptVersion === 'content-attachment.v31' ||
             audit.promptVersion === 'content-attachment.v32'
@@ -1234,6 +1248,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v46' ||
       audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === 'content-attachment.v48' ||
+      audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
       audit.promptVersion === 'content-attachment.v42' ||
@@ -1243,6 +1258,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v46' ||
       audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === 'content-attachment.v48' ||
+      audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = createContentAttachmentResponseSchema(
@@ -1512,7 +1528,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v46' ||
           audit.promptVersion === 'content-attachment.v47' ||
           audit.promptVersion === 'content-attachment.v48' ||
-          audit.promptVersion === 'content-attachment.v49'
+          audit.promptVersion === 'content-attachment.v49' ||
+          audit.promptVersion === 'content-attachment.v50'
         ) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
@@ -1624,7 +1641,8 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v46' ||
       audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49'
+      audit.promptVersion === 'content-attachment.v49' ||
+      audit.promptVersion === 'content-attachment.v50'
     ) {
       for (const reason of validateContentAttachmentTables(
         plan,
@@ -1645,7 +1663,8 @@ export function assembleContentAttachment(
           audit.promptVersion === 'content-attachment.v46' ||
           audit.promptVersion === 'content-attachment.v47' ||
           audit.promptVersion === 'content-attachment.v48' ||
-          audit.promptVersion === 'content-attachment.v49',
+          audit.promptVersion === 'content-attachment.v49' ||
+          audit.promptVersion === 'content-attachment.v50',
       ))
         issue(reason);
     }
@@ -1654,6 +1673,7 @@ export function assembleContentAttachment(
       audit.promptVersion === 'content-attachment.v46' ||
       audit.promptVersion === 'content-attachment.v47' ||
       audit.promptVersion === 'content-attachment.v48' ||
+      audit.promptVersion === 'content-attachment.v49' ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(
