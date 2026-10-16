@@ -725,6 +725,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         traceAreaRecording: true,
         boundAreaRecording: true,
         checkClauseGrounds: true,
+        gateQualifierStage: true,
       },
     ),
     review = request.schema.parse({
@@ -1839,6 +1840,7 @@ test.each([
   'content-attachment.v69',
   'content-attachment.v70',
   'content-attachment.v71',
+  'content-attachment.v72',
 ] as const)(
   'replays archived %s request and independent coverage after the live version advances',
   (version) => {
@@ -1862,20 +1864,27 @@ test.each([
             version === 'content-attachment.v68' ||
             version === 'content-attachment.v69' ||
             version === 'content-attachment.v70' ||
-            version === 'content-attachment.v71',
+            version === 'content-attachment.v71' ||
+            version === 'content-attachment.v72',
           boundAreaResultRecipients:
             version === 'content-attachment.v68' ||
             version === 'content-attachment.v69' ||
             version === 'content-attachment.v70' ||
-            version === 'content-attachment.v71',
+            version === 'content-attachment.v71' ||
+            version === 'content-attachment.v72',
           reviewTableWork:
             version === 'content-attachment.v69' ||
             version === 'content-attachment.v70' ||
-            version === 'content-attachment.v71',
+            version === 'content-attachment.v71' ||
+            version === 'content-attachment.v72',
           traceAreaRecording:
             version === 'content-attachment.v70' ||
-            version === 'content-attachment.v71',
-          boundAreaRecording: version === 'content-attachment.v71',
+            version === 'content-attachment.v71' ||
+            version === 'content-attachment.v72',
+          boundAreaRecording:
+            version === 'content-attachment.v71' ||
+            version === 'content-attachment.v72',
+          checkClauseGrounds: version === 'content-attachment.v72',
         },
       );
     const rawResponse = review.schema.parse({
@@ -2255,7 +2264,11 @@ test('shares meeting-only exclusion and actual recipient K qualifier checks with
     unit,
     'content-attachment.v71',
   );
-  const current = createContentAttachmentRequest(plan, unit);
+  const current = createContentAttachmentRequest(
+    plan,
+    unit,
+    'content-attachment.v72',
+  );
   const oldReview = createContentAttachmentIndependentReviewRequest(
     input,
     selection,
@@ -2326,6 +2339,113 @@ test('shares meeting-only exclusion and actual recipient K qualifier checks with
     inspectContentAttachmentIndependentReview(input, selection, audit, {
       ...options,
       checkClauseGrounds: true,
+    }).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, options)
+      .issues,
+  ).toHaveLength(1);
+  expect({ input, selection }).toEqual(before);
+});
+
+test('shares per-candidate current qualifier and original cross-stage identity gates while preserving immutable evidence and independent judgment freedom', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const before = structuredClone({ input, selection });
+  const options = {
+    includeBodyContext: true,
+    qualifyBeforeIdentity: true,
+    reconcileRecipientRefs: true,
+    crossChapterAreas: true,
+    preserveAreaWork: true,
+    preserveAreaResults: true,
+    boundAreaResultRecipients: true,
+    reviewTableWork: true,
+    traceAreaRecording: true,
+    boundAreaRecording: true,
+    checkClauseGrounds: true,
+  };
+  const old = createContentAttachmentRequest(
+    plan,
+    unit,
+    'content-attachment.v72',
+  );
+  const current = createContentAttachmentRequest(plan, unit);
+  const oldReview = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    options,
+  );
+  const review = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    {
+      ...options,
+      gateQualifierStage: true,
+    },
+  );
+  const added = current.systemPrompt.slice(old.systemPrompt.length + 1);
+  expect(current.promptVersion).toBe('content-attachment.v73');
+  expect(current.systemPrompt).toBe(old.systemPrompt + '\n' + added);
+  expect(review.systemPrompt).toBe(oldReview.systemPrompt + '\n' + added);
+  expect(added).toContain(
+    'CANDIDATE-LOCAL CURRENT QUALIFIER AND CROSS-STAGE IDENTITY GATES',
+  );
+  expect(added).toContain('BEFORE using a broader group or regional inventory');
+  expect(added).toContain(
+    'same current restriction to every comparable member',
+  );
+  expect(added).toContain(
+    'original bridge between the actual relation referent and that candidate',
+  );
+  expect(added).toContain('not the bridge');
+  expect(added).toContain(
+    'Independently described areas without a period label',
+  );
+  expect(added).toContain(
+    'original candidate names/numbers to decode opaque refs',
+  );
+  expect(added).not.toMatch(/E10|E7|R12|R13|R16|R30|화지산|백제|조선/);
+  expect(current.userPrompt).toBe(old.userPrompt);
+  expect(review.userPrompt).toBe(oldReview.userPrompt);
+  expect(review.required).toEqual(oldReview.required);
+  expect(JSON.parse(review.userPrompt)).not.toHaveProperty('decisions');
+  const output = {
+    reviews: Object.fromEntries(
+      review.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason:
+                'Current clause and this candidate original evidence do not establish the required link',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(oldReview.schema.safeParse(output).success).toBe(true);
+  expect(review.schema.safeParse(output).success).toBe(true);
+  const audit = {
+    systemPrompt: review.systemPrompt,
+    userPrompt: review.userPrompt,
+    rawResponse: review.schema.parse(output),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      ...options,
+      gateQualifierStage: true,
     }).issues,
   ).toEqual([]);
   expect(

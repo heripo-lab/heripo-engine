@@ -1389,6 +1389,7 @@ describe('bounded content attachment', () => {
         traceAreaRecording: true,
         boundAreaRecording: true,
         checkClauseGrounds: true,
+        gateQualifierStage: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
