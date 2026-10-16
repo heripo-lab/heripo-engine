@@ -16,6 +16,13 @@ export function createContentAttachmentGroundedInput(
   unit: AttachmentUnit,
 ) {
   const base = createContentAttachmentOriginInput(plan, unit);
+  const bodyKeys = new Set(
+    plan.units.flatMap((u) =>
+      u.sources
+        .filter((s) => s.resource.kind === 'text')
+        .map((s) => s.resource.key),
+    ),
+  );
   const citations = base.codeMap.candidateRows.flatMap((row, rowIndex) =>
     row.evidence.map((evidence, quoteIndex) => ({
       ref: `K${rowIndex + 1}.${quoteIndex + 1}`,
@@ -55,6 +62,17 @@ export function createContentAttachmentGroundedInput(
     codeMap: base.codeMap,
     citations,
     inventories,
+    bodyCandidateContexts: base.codeMap.candidateRows.flatMap(
+      (row, rowIndex) =>
+        row.evidence.some((e) => bodyKeys.has(e.resourceKey))
+          ? [
+              [row.ref, base.payload.candidates[rowIndex][2]] as [
+                string,
+                string,
+              ],
+            ]
+          : [],
+    ),
   };
 }
 

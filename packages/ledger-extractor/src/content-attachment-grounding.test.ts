@@ -712,9 +712,19 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
   const request = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
+      { includeBodyContext: true },
     ),
     review = request.schema.parse({
       reviews: {
+        'E1:B1': {
+          area: {
+            ...independentMember('included', 'not_alternative', 'K3.1'),
+            contextRef: 'E1',
+          },
+        },
+        'E2:B1': {
+          area: independentMember('included', 'not_alternative', 'K3.1'),
+        },
         'E2:U1': {
           'opaque-nine': independentMember('included', 'alternative', 'K1.1'),
           'opaque-two': independentMember('included', 'alternative', 'K2.1'),
@@ -1047,7 +1057,7 @@ test('preserves original assembled contents alongside independent disagreements 
   });
   const audit: ContentAttachmentSelectionAudit = {
     unitId: unit.unitId,
-    ...createContentAttachmentRequest(plan, unit),
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v61'),
     codeMap: input.codeMap,
     rawResponse: selection,
     response: flattenContentAttachmentResponse(selection),
@@ -1076,4 +1086,134 @@ test('preserves original assembled contents alongside independent disagreements 
     'provenance',
   );
   expect(assembleContentAttachment(plan, [audit]).completedUnitIds).toEqual([]);
+});
+
+test('requires separately grounded body-context candidates even when the initial assignment omits them', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  selection.decisions.E2.candidateRefs = ['opaque-nine'];
+  input.bodyCandidateContexts.push(
+    ['area', 'C1'],
+    ['opaque-nine', 'C1'],
+    ['area', 'unrelated-context'],
+  );
+  const original = structuredClone(selection),
+    options = { includeBodyContext: true };
+  const request = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    options,
+  );
+  expect(request.required.map((r) => r.key)).toEqual([
+    'E2:U1',
+    'E1:B1',
+    'E2:B1',
+  ]);
+  expect(JSON.parse(request.userPrompt).bodyReviewPools).toEqual([
+    { ref: 'B1', context: 'C1', candidateRefs: ['area'] },
+  ]);
+  expect(JSON.parse(request.userPrompt)).not.toHaveProperty('decisions');
+  const raw = {
+    reviews: {
+      'E2:U1': {
+        'opaque-nine': independentMember('included', 'alternative', 'K1.1'),
+        'opaque-two': independentMember('excluded', 'alternative', 'K2.1'),
+      },
+      'E1:B1': {
+        area: {
+          ...independentMember('included', 'not_alternative', 'K3.1'),
+          contextRef: 'E1',
+        },
+      },
+      'E2:B1': {
+        area: independentMember('included', 'not_alternative', 'K3.1'),
+      },
+    },
+  };
+  expect(request.schema.safeParse(raw).success).toBe(true);
+  const missing = structuredClone(raw);
+  delete (missing.reviews as Record<string, unknown>)['E2:B1'];
+  expect(request.schema.safeParse(missing).success).toBe(false);
+  const inspected = inspectContentAttachmentIndependentReview(
+    input,
+    selection,
+    {
+      systemPrompt: request.systemPrompt,
+      userPrompt: request.userPrompt,
+      rawResponse: request.schema.parse(raw),
+      usage: {} as never,
+      callAttempts: [],
+    },
+    options,
+  );
+  expect(inspected.issues).toEqual([]);
+  expect(inspected.disagreements).toMatchObject([
+    {
+      candidateRef: 'area',
+      inventoryRef: 'B1',
+      reviewBasis: 'body_context',
+      changedFields: ['attachment'],
+      original: { assigned: false },
+    },
+  ]);
+  expect(
+    inspected.findings.find((f) => f.inventoryRef === 'U1')!.reviewBasis,
+  ).toBe('inventory');
+  expect(
+    inspected.findings.find((f) => f.candidateRef === 'area')!
+      .candidateEvidence[0].quote,
+  ).toBe('Area work. Period A features.');
+  expect(selection).toEqual(original);
+  const current = createContentAttachmentRequest(plan, unit),
+    archived = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v61',
+    );
+  expect(current.userPrompt).toBe(archived.userPrompt);
+  expect(current.systemPrompt).toContain(
+    'A generic conservation, protection or safety purpose does not by itself',
+  );
+  expect(request.systemPrompt).toContain(
+    'a tentative, estimated or possible classification alone does not exclude',
+  );
+  expect(archived.systemPrompt).not.toContain(
+    'BODY-GROUNDED REFERENTS, TENTATIVE MEMBERS AND WORK PURPOSE',
+  );
+});
+
+test('reviews body-only contexts without any initial inventory selections and retains a genuinely empty coverage case', () => {
+  const { plan, unit } = fixture();
+  plan.registry = plan.registry.filter((r) => r.ref === 'area');
+  const input = createContentAttachmentGroundedInput(plan, unit),
+    ignored = {
+      decisions: {
+        E1: { status: 'ignored' as const, reason: 'Original omission' },
+        E2: { status: 'ignored' as const, reason: 'Original omission' },
+      },
+    };
+  const request = createContentAttachmentIndependentReviewRequest(
+    input,
+    ignored,
+    { includeBodyContext: true },
+  );
+  expect(request.required.map((r) => r.key)).toEqual(['E1:B1', 'E2:B1']);
+  expect(
+    JSON.parse(request.userPrompt).candidates.map((r: string[]) => r[0]),
+  ).toEqual(['area']);
+  plan.registry = [];
+  const emptyInput = createContentAttachmentGroundedInput(plan, unit),
+    empty = createContentAttachmentIndependentReviewRequest(
+      emptyInput,
+      ignored,
+      { includeBodyContext: true },
+    );
+  expect(empty.required).toEqual([]);
+  expect(empty.schema.safeParse({ reviews: {} }).success).toBe(true);
+  expect(
+    inspectContentAttachmentIndependentReview(emptyInput, ignored, undefined, {
+      includeBodyContext: true,
+    }),
+  ).toEqual({ issues: [], findings: [], disagreements: [] });
 });
