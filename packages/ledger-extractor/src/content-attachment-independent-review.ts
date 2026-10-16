@@ -13,6 +13,7 @@ import {
   CONTENT_ATTACHMENT_AREA_RESULTS_POLICY,
   CONTENT_ATTACHMENT_AREA_SCOPE_POLICY,
   CONTENT_ATTACHMENT_AREA_WORK_POLICY,
+  CONTENT_ATTACHMENT_CLAUSE_GROUNDS_POLICY,
   CONTENT_ATTACHMENT_CONTEXT_REVIEW_POLICY,
   CONTENT_ATTACHMENT_FIELDWORK_CONTINUITY_POLICY,
   CONTENT_ATTACHMENT_QUALIFIED_COLLECTIVE_POLICY,
@@ -72,6 +73,7 @@ export function createContentAttachmentIndependentReviewRequest(
     reviewTableWork?: boolean;
     traceAreaRecording?: boolean;
     boundAreaRecording?: boolean;
+    checkClauseGrounds?: boolean;
   } = {},
 ) {
   const baseline = createContentAttachmentInventoryReviewRequest(
@@ -195,6 +197,9 @@ export function createContentAttachmentIndependentReviewRequest(
         : '') +
       (options.boundAreaRecording
         ? '\n' + CONTENT_ATTACHMENT_AREA_RECORD_BOUNDARY_POLICY
+        : '') +
+      (options.checkClauseGrounds
+        ? '\n' + CONTENT_ATTACHMENT_CLAUSE_GROUNDS_POLICY
         : ''),
     userPrompt: JSON.stringify(evidence),
   };
@@ -216,6 +221,7 @@ export function inspectContentAttachmentIndependentReview(
     reviewTableWork?: boolean;
     traceAreaRecording?: boolean;
     boundAreaRecording?: boolean;
+    checkClauseGrounds?: boolean;
   } = {},
 ): {
   issues: string[];
