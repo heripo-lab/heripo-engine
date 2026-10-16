@@ -1,4 +1,5 @@
 import type { ProcessedDocument } from '@heripo/model';
+import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateEvidence } from './candidate-discovery';
@@ -17,7 +18,8 @@ import { createContentAttachmentGroundedInput } from './content-attachment-groun
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({
+vi.mock('@heripo/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof Shared>()),
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
@@ -354,8 +356,6 @@ describe('candidate table source anchors', () => {
         .map((e) => ({ excerptRef: e.ref, reason: 'Other' })),
     };
     const wireResponse = {
-      inventoryAudits: [],
-      exclusions: [],
       decisions: Object.fromEntries([
         ...response.assignments.map(({ excerptRef, ...item }) => [
           excerptRef,

@@ -1,4 +1,5 @@
 import type { ProcessedDocument } from '@heripo/model';
+import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateDeduplicationResult } from './candidate-deduplication';
@@ -23,7 +24,8 @@ import { createContentAttachmentBodyBlockInput } from './content-attachment-body
 import { createContentAttachmentInput } from './content-attachment-input';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({
+vi.mock('@heripo/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof Shared>()),
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
@@ -1362,8 +1364,6 @@ describe('bounded content attachment', () => {
   test('runs exactly one selected unit, constrains source/candidate choices and propagates model failure', async () => {
     const p = await prepare();
     const response = {
-      inventoryAudits: [],
-      exclusions: [],
       decisions: { E1: { status: 'ignored' as const, reason: '対象外' } },
     };
     vi.mocked(LLMCaller.call).mockResolvedValue({

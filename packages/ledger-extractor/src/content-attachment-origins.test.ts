@@ -1,4 +1,5 @@
 import type { ProcessedDocument } from '@heripo/model';
+import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { ContentAttachmentPlan } from './content-attachment';
@@ -16,7 +17,8 @@ import { createContentAttachmentGroundedInput } from './content-attachment-groun
 import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({
+vi.mock('@heripo/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof Shared>()),
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
@@ -329,8 +331,6 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     current = createContentAttachmentGroundedInput(plan, unit),
     legacy = createContentAttachmentBodyBlockInput(plan, unit);
   const output = {
-    inventoryAudits: [],
-    exclusions: [],
     decisions: {
       E1: {
         status: 'assigned' as const,
@@ -436,7 +436,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   expect(v58.systemPrompt).toContain(
     'AUDIT CURRENT-QUALIFIER EXCLUSIONS AGAINST THE ORIGINAL SET BEFORE NARROWING',
   );
-  expect(audit.systemPrompt).toContain('REQUIRED GROUNDED OUTPUT CONTRACT');
+  expect(audit.systemPrompt).toContain('SELECTION OUTPUT CONTRACT');
   const forged = structuredClone(audit);
   (forged.codeMap as typeof current.codeMap).originRows[0].rowIndex = 99;
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
