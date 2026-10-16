@@ -1631,6 +1631,31 @@ describe('bounded content attachment', () => {
     expect(
       assembleContentAttachment(p, [alteredV52Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
+    const v53 = {
+      ...out,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v53',
+      ),
+    };
+    expect(out.userPrompt).toBe(v53.userPrompt);
+    expect(out.systemPrompt.startsWith(v53.systemPrompt)).toBe(true);
+    expect(v53.systemPrompt).not.toContain(
+      'IDENTIFIER CROSS-CHECKING IS LOCAL',
+    );
+    expect(out.systemPrompt).toContain('IDENTIFIER CROSS-CHECKING IS LOCAL');
+    expect(out.systemPrompt).toContain(
+      'COMPLETE COLLECTIVE RECIPIENTS AND RELATIONSHIP-SUBJECT ALTERNATIVES',
+    );
+    expect(assembleContentAttachment(p, [v53])).toEqual(
+      assembleContentAttachment(p, [out]),
+    );
+    const alteredV53Projection = structuredClone(v53);
+    alteredV53Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV53Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;
     expect(
