@@ -723,6 +723,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         boundAreaResultRecipients: true,
         reviewTableWork: true,
         traceAreaRecording: true,
+        boundAreaRecording: true,
       },
     ),
     review = request.schema.parse({
@@ -1835,6 +1836,7 @@ test.each([
   'content-attachment.v67',
   'content-attachment.v68',
   'content-attachment.v69',
+  'content-attachment.v70',
 ] as const)(
   'replays archived %s request and independent coverage after the live version advances',
   (version) => {
@@ -1856,11 +1858,16 @@ test.each([
           preserveAreaResults:
             version === 'content-attachment.v67' ||
             version === 'content-attachment.v68' ||
-            version === 'content-attachment.v69',
+            version === 'content-attachment.v69' ||
+            version === 'content-attachment.v70',
           boundAreaResultRecipients:
             version === 'content-attachment.v68' ||
-            version === 'content-attachment.v69',
-          reviewTableWork: version === 'content-attachment.v69',
+            version === 'content-attachment.v69' ||
+            version === 'content-attachment.v70',
+          reviewTableWork:
+            version === 'content-attachment.v69' ||
+            version === 'content-attachment.v70',
+          traceAreaRecording: version === 'content-attachment.v70',
         },
       );
     const rawResponse = review.schema.parse({
@@ -2046,7 +2053,11 @@ test('shares an explicit original area-definition layout-recording check without
       unit,
       'content-attachment.v69',
     ),
-    current = createContentAttachmentRequest(plan, unit);
+    current = createContentAttachmentRequest(
+      plan,
+      unit,
+      'content-attachment.v70',
+    );
   const oldReview = createContentAttachmentIndependentReviewRequest(
       input,
       selection,
@@ -2105,6 +2116,102 @@ test('shares an explicit original area-definition layout-recording check without
     inspectContentAttachmentIndependentReview(input, selection, audit, {
       ...options,
       traceAreaRecording: true,
+    }).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, options)
+      .issues,
+  ).toHaveLength(1);
+  expect({ input, selection }).toEqual(before);
+});
+
+test('shares the area layout versus local unit work boundary while preserving historical prompts and independent judgment freedom', () => {
+  const { plan, unit } = fixture(),
+    input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const before = structuredClone({ input, selection });
+  const options = {
+    includeBodyContext: true,
+    qualifyBeforeIdentity: true,
+    reconcileRecipientRefs: true,
+    crossChapterAreas: true,
+    preserveAreaWork: true,
+    preserveAreaResults: true,
+    boundAreaResultRecipients: true,
+    reviewTableWork: true,
+    traceAreaRecording: true,
+  };
+  const old = createContentAttachmentRequest(
+    plan,
+    unit,
+    'content-attachment.v70',
+  );
+  const current = createContentAttachmentRequest(plan, unit);
+  const oldReview = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    options,
+  );
+  const review = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    {
+      ...options,
+      boundAreaRecording: true,
+    },
+  );
+  const added = current.systemPrompt.slice(old.systemPrompt.length + 1);
+  expect(current.promptVersion).toBe('content-attachment.v71');
+  expect(current.systemPrompt).toBe(old.systemPrompt + '\n' + added);
+  expect(review.systemPrompt).toBe(oldReview.systemPrompt + '\n' + added);
+  expect(added).toContain('AREA OWN LAYOUT/RECORD VS UNIT WORK BOUNDARY');
+  expect(added).toContain('collective layout plan');
+  expect(added).toContain('nearest explicit unit work subject');
+  expect(added).toContain('involve several or all units');
+  expect(added).toContain('not extra containing areas');
+  expect(added).toContain(
+    'Do not omit positively linked area layout documentation',
+  );
+  expect(added).not.toMatch(/E29|E34|E39|E44|E7|R1|화지산|2,776/);
+  expect(current.userPrompt).toBe(old.userPrompt);
+  expect(review.userPrompt).toBe(oldReview.userPrompt);
+  expect(review.required).toEqual(oldReview.required);
+  expect(JSON.parse(review.userPrompt)).not.toHaveProperty('decisions');
+  const output = {
+    reviews: Object.fromEntries(
+      review.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason:
+                'Original evidence identifies unit work without area layout documentation',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(oldReview.schema.safeParse(output).success).toBe(true);
+  expect(review.schema.safeParse(output).success).toBe(true);
+  const audit = {
+    systemPrompt: review.systemPrompt,
+    userPrompt: review.userPrompt,
+    rawResponse: review.schema.parse(output),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, audit, {
+      ...options,
+      boundAreaRecording: true,
     }).issues,
   ).toEqual([]);
   expect(
