@@ -382,6 +382,22 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
   );
   expect(audit.systemPrompt).toContain('CURRENT QUALIFIERS FIRST, THEN RETAIN');
   expect(assembleContentAttachment(plan, [v55])).toEqual(result);
+  const v56 = {
+    ...audit,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v56'),
+  };
+  expect(v56.userPrompt).toBe(audit.userPrompt);
+  expect(audit.systemPrompt.startsWith(v56.systemPrompt)).toBe(true);
+  expect(v56.systemPrompt).not.toContain(
+    'EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET',
+  );
+  expect(audit.systemPrompt).toContain(
+    'EXCLUSIONS FROM AN ORIGINALLY VERIFIED SET',
+  );
+  expect(audit.systemPrompt).toContain(
+    'AUDIT TENTATIVE MEMBERS ACROSS COLLECTIVE EVIDENCE',
+  );
+  expect(assembleContentAttachment(plan, [v56])).toEqual(result);
   const forged = structuredClone(audit);
   (forged.codeMap as typeof current.codeMap).originRows[0].rowIndex = 99;
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
