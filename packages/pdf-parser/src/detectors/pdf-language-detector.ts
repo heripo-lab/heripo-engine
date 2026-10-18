@@ -43,6 +43,10 @@ export interface PdfLanguageDetectionOptions {
   aggregator?: LLMTokenUsageAggregator;
 }
 
+interface PdfLanguageDetectionModelOptions extends PdfLanguageDetectionOptions {
+  model: LanguageModel;
+}
+
 export interface PdfLanguageDetectionResult {
   detectedLanguages: Bcp47LanguageTag[];
   reason: string;
@@ -157,8 +161,7 @@ export class PdfLanguageDetector {
   private async detectFromSampledPages(
     pdfPath: string,
     outputDir: string,
-    options: Required<Pick<PdfLanguageDetectionOptions, 'model'>> &
-      PdfLanguageDetectionOptions,
+    options: PdfLanguageDetectionModelOptions,
   ): Promise<PdfLanguageDetectionResult> {
     const renderResult = await this.pageRenderer.renderPages(
       pdfPath,
@@ -263,8 +266,7 @@ export class PdfLanguageDetector {
   private async analyzeSamplePage(
     pageFile: string,
     pageNo: number,
-    options: Required<Pick<PdfLanguageDetectionOptions, 'model'>> &
-      PdfLanguageDetectionOptions,
+    options: PdfLanguageDetectionModelOptions,
   ): Promise<Bcp47LanguageTag[]> {
     this.logger.debug(
       `[PdfLanguageDetector] Analyzing page ${pageNo} for language...`,

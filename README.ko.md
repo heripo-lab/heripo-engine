@@ -229,7 +229,7 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/log
 | [@heripo/model](./packages/model/README.ko.md)                           | 0.1.x | 데이터 모델 및 타입 정의   |
 | [@heripo/logger](./packages/logger/README.ko.md)                         | 0.1.x | 로거 인터페이스 및 adapter |
 
-파서와 문서 프로세서는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 루트 워크스페이스는 Node.js 24 이상과 pnpm 12를 사용합니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
+파서와 문서 프로세서는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 워크스페이스 개발·빌드에는 tsup 9의 요구사항에 맞는 Node.js `^24.11.0 || >=26.0.0`과 pnpm 12가 필요합니다. 배포 라이브러리의 런타임 요구사항은 Node.js 24 이상으로 유지됩니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
 
 ```bash
 pnpm add @ai-sdk/openai

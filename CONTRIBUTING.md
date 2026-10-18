@@ -4,10 +4,12 @@ Thank you for your interest in this project! This guide explains local developme
 
 ## Development Environment
 
-- Node.js: >= 24
+- Node.js: `^24.11.0 || >=26.0.0` for workspace development and builds (required by tsup 9)
 - Package manager: pnpm 12
 - Monorepo: pnpm workspaces with Turbo
 - Language/Runtime: TypeScript, ESM (ES2022)
+
+Run `nvm install && nvm use` to select the latest Node.js 24 release using `.nvmrc`. Published libraries retain their Node.js >= 24 runtime requirement.
 
 ### Project Setup
 
@@ -181,8 +183,8 @@ git push origin main
 
 - Location: `.github/workflows/ci.yml`
 - Triggers: Pull Request, manual
-- Steps: Lint → Typecheck → Build → Test (coverage)
-- Node version: 24, pnpm version: 11
+- Steps: Format check → Lint → Build → Typecheck → Test (coverage)
+- Node version: latest 24.x, pnpm version: 12.14.0 (declared in `package.json`)
 
 ## Issues / Questions
 
