@@ -1,4 +1,5 @@
 import type { ProcessedDocument } from '@heripo/model';
+import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateDeduplicationResult } from './candidate-deduplication';
@@ -19,10 +20,14 @@ import {
   createContentAttachmentRequest,
   prepareContentAttachment,
 } from './content-attachment';
+import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
+import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import { createContentAttachmentIndependentReviewRequest } from './content-attachment-independent-review';
 import { createContentAttachmentInput } from './content-attachment-input';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({
+vi.mock('@heripo/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof Shared>()),
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
@@ -1368,6 +1373,81 @@ describe('bounded content attachment', () => {
       usage,
       usedFallback: false,
     });
+    const compiled = createContentAttachmentGroundedInput(p, p.units[0]);
+    const reviewRequest = createContentAttachmentIndependentReviewRequest(
+      compiled,
+      response,
+      {
+        segmentReview: true,
+        wordEvidence: true,
+        sourceGroundedCoverage: true,
+        includeBodyContext: true,
+        qualifyBeforeIdentity: true,
+        reconcileRecipientRefs: true,
+        crossChapterAreas: true,
+        preserveAreaWork: true,
+        preserveAreaResults: true,
+        boundAreaResultRecipients: true,
+        reviewTableWork: true,
+        traceAreaRecording: true,
+        boundAreaRecording: true,
+        checkClauseGrounds: true,
+        gateQualifierStage: true,
+        preserveTentativeMembership: true,
+      },
+    );
+    const reviewOutput = reviewRequest.schema.parse({
+      segments: Object.fromEntries(
+        reviewRequest
+          .wordEvidence!.sources.filter((source) =>
+            reviewRequest.required.some((r) => r.excerptRef === source.ref),
+          )
+          .map((source) => [
+            source.ref,
+            [
+              {
+                kind: 'substantive',
+                wordRanges: [`${source.ref}:W1-${source.words.at(-1)!.ref}`],
+              },
+            ],
+          ]),
+      ),
+      reviews: Object.fromEntries(
+        reviewRequest.required.map((r) => [
+          r.key,
+          Object.fromEntries(
+            r.candidateRefs.map((ref) => [
+              ref,
+              {
+                segmentDecisions: [
+                  {
+                    segment: 1,
+                    attachment: 'excluded',
+                    relationshipSubject: 'not_alternative',
+                    reason: 'Fixture non-object judgment',
+                  },
+                ],
+                wordRanges: [],
+                attachment: 'excluded',
+                relationshipSubject: 'not_alternative',
+                contextRef: r.excerptRef,
+                candidateEvidenceRefs: [
+                  compiled.citations.find((c) => c.candidateRef === ref)!.ref,
+                ],
+                reason: 'Fixture cover is not an object description',
+              },
+            ]),
+          ),
+        ]),
+      ),
+    });
+    vi.mocked(LLMCaller.call)
+      .mockResolvedValueOnce({ output: response, usage, usedFallback: false })
+      .mockResolvedValueOnce({
+        output: reviewOutput,
+        usage,
+        usedFallback: false,
+      });
     const model = {} as LanguageModel;
     const onAttempt = vi.fn();
     const attempts = [
@@ -1400,7 +1480,7 @@ describe('bounded content attachment', () => {
     });
     expect(createAuditedModel).toHaveBeenCalledWith(model, onAttempt);
     expect(out.callAttempts).toBe(attempts);
-    expect(LLMCaller.call).toHaveBeenCalledTimes(1);
+    expect(LLMCaller.call).toHaveBeenCalledTimes(2);
     expect(out.rawResponse).toBe(response);
     expect(out.response).toEqual({
       assignments: [],
@@ -1408,24 +1488,39 @@ describe('bounded content attachment', () => {
       ignored: [{ excerptRef: 'E1', reason: '対象外' }],
     });
     const before = structuredClone(out);
+    const {
+      independentReviewFindings: _findings,
+      reviewDisagreements: _disagreements,
+      ...initialResult
+    } = assembleContentAttachment(p, [out]);
     expect(assembleContentAttachment(p, [out]).issues).toEqual([]);
     expect(out).toEqual(before);
+    const archivedUserPrompt = createContentAttachmentRequest(
+      p,
+      p.units[0],
+      'content-attachment.v54',
+    ).userPrompt;
+    const preservedPrompt = createContentAttachmentRequest(
+      p,
+      p.units[0],
+      'content-attachment.v57',
+    ).systemPrompt;
     const v42 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v42',
       ),
     };
-    expect(out.userPrompt).toBe(v42.userPrompt);
-    expect(out.systemPrompt.startsWith(v42.systemPrompt)).toBe(true);
+    expect(archivedUserPrompt).toBe(v42.userPrompt);
+    expect(preservedPrompt.startsWith(v42.systemPrompt)).toBe(true);
     expect(v42.systemPrompt).not.toContain(
       'CARRY PREVIOUS-INVESTIGATION SUBJECTS THROUGH CATEGORY FRAGMENTS AND THEIR NEXT CONTEXT',
     );
-    expect(assembleContentAttachment(p, [v42])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v42])).toEqual(initialResult);
     const alteredHistoricalProjection = structuredClone(v42);
     alteredHistoricalProjection.response.ignored[0].reason = 'changed';
     expect(
@@ -1434,20 +1529,20 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v43 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v43',
       ),
     };
-    expect(out.userPrompt).toBe(v43.userPrompt);
-    expect(out.systemPrompt.startsWith(v43.systemPrompt)).toBe(true);
+    expect(archivedUserPrompt).toBe(v43.userPrompt);
+    expect(preservedPrompt.startsWith(v43.systemPrompt)).toBe(true);
     expect(v43.systemPrompt).not.toContain(
       'RESOLVE DIFFERENT REGISTRY AND NARRATIVE NAMES THROUGH ORIGINAL IDENTITY EVIDENCE',
     );
-    expect(assembleContentAttachment(p, [v43])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v43])).toEqual(initialResult);
     const alteredV43Projection = structuredClone(v43);
     alteredV43Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1455,20 +1550,20 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v45 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v45',
       ),
     };
-    expect(out.userPrompt).toBe(v45.userPrompt);
-    expect(out.systemPrompt.startsWith(v45.systemPrompt)).toBe(true);
+    expect(archivedUserPrompt).toBe(v45.userPrompt);
+    expect(preservedPrompt.startsWith(v45.systemPrompt)).toBe(true);
     expect(v45.systemPrompt).not.toContain('CURRENT CLAUSE PERIOD');
     expect(out.systemPrompt).toContain('CURRENT CLAUSE PERIOD');
     expect(out.systemPrompt).toContain('ELLIPTICAL TABLE WORK SUBJECTS');
-    expect(assembleContentAttachment(p, [v45])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v45])).toEqual(initialResult);
     const alteredV45Projection = structuredClone(v45);
     alteredV45Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1476,20 +1571,20 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v46 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v46',
       ),
     };
-    expect(out.userPrompt).toBe(v46.userPrompt);
-    expect(out.systemPrompt.startsWith(v46.systemPrompt)).toBe(true);
+    expect(archivedUserPrompt).toBe(v46.userPrompt);
+    expect(preservedPrompt.startsWith(v46.systemPrompt)).toBe(true);
     expect(v46.systemPrompt).not.toContain('ESTABLISHED FEATURE GROUPS REMAIN');
     expect(out.systemPrompt).toContain('ESTABLISHED FEATURE GROUPS REMAIN');
     expect(out.systemPrompt).toContain('INVESTIGATION-STAGE IDENTITY BOUNDS');
-    expect(assembleContentAttachment(p, [v46])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v46])).toEqual(initialResult);
     const alteredV46Projection = structuredClone(v46);
     alteredV46Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1497,20 +1592,20 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v47 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v47',
       ),
     };
-    expect(out.userPrompt).toBe(v47.userPrompt);
-    expect(out.systemPrompt.startsWith(v47.systemPrompt)).toBe(true);
+    expect(archivedUserPrompt).toBe(v47.userPrompt);
+    expect(preservedPrompt.startsWith(v47.systemPrompt)).toBe(true);
     expect(v47.systemPrompt).not.toContain('SET-LEVEL EVIDENCE ATTACHMENT');
     expect(out.systemPrompt).toContain('SET-LEVEL EVIDENCE ATTACHMENT');
     expect(out.systemPrompt).toContain('PARTIAL RELATION IDENTITY');
-    expect(assembleContentAttachment(p, [v47])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v47])).toEqual(initialResult);
     const alteredV47Projection = structuredClone(v47);
     alteredV47Projection.response.ignored[0].reason = 'changed';
     expect(
@@ -1518,26 +1613,143 @@ describe('bounded content attachment', () => {
     ).toContain('inconsistent projection');
     const v48 = {
       ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
       ...createContentAttachmentRequest(
         p,
         p.units[0],
         'content-attachment.v48',
       ),
     };
-    expect(out.userPrompt).toBe(v48.userPrompt);
-    expect(out.systemPrompt.startsWith(v48.systemPrompt)).toBe(true);
+    expect(archivedUserPrompt).toBe(v48.userPrompt);
+    expect(preservedPrompt.startsWith(v48.systemPrompt)).toBe(true);
     expect(v48.systemPrompt).not.toContain(
       'QUANTITIES REMAIN WITH THEIR ORIGINAL',
     );
     expect(out.systemPrompt).toContain('QUANTITIES REMAIN WITH THEIR ORIGINAL');
     expect(out.systemPrompt).toContain('BOTH RELATION ENDPOINTS REQUIRE');
-    expect(assembleContentAttachment(p, [v48])).toEqual(
-      assembleContentAttachment(p, [out]),
-    );
+    expect(assembleContentAttachment(p, [v48])).toEqual(initialResult);
     const alteredV48Projection = structuredClone(v48);
     alteredV48Projection.response.ignored[0].reason = 'changed';
     expect(
       assembleContentAttachment(p, [alteredV48Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
+    const v49 = {
+      ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v49',
+      ),
+    };
+    expect(archivedUserPrompt).toBe(v49.userPrompt);
+    expect(preservedPrompt.startsWith(v49.systemPrompt)).toBe(true);
+    expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
+    expect(out.systemPrompt).toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
+    expect(out.systemPrompt).toContain('NEAREST EXPLICIT WORK SUBJECT LIMITS');
+    expect(assembleContentAttachment(p, [v49])).toEqual(initialResult);
+    const alteredV49Projection = structuredClone(v49);
+    alteredV49Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV49Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
+    const v50 = {
+      ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v50',
+      ),
+    };
+    expect(archivedUserPrompt).toBe(v50.userPrompt);
+    expect(preservedPrompt.startsWith(v50.systemPrompt)).toBe(true);
+    expect(v50.systemPrompt).not.toContain(
+      'NO STATED RESTRICTION IS NOT POSITIVE',
+    );
+    expect(out.systemPrompt).toContain('NO STATED RESTRICTION IS NOT POSITIVE');
+    expect(assembleContentAttachment(p, [v50])).toEqual(initialResult);
+    const alteredV50Projection = structuredClone(v50);
+    alteredV50Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV50Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
+    const v51 = {
+      ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v51',
+      ),
+    };
+    expect(archivedUserPrompt).toBe(v51.userPrompt);
+    expect(preservedPrompt.startsWith(v51.systemPrompt)).toBe(true);
+    expect(v51.systemPrompt).not.toContain(
+      'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
+    );
+    expect(out.systemPrompt).toContain(
+      'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
+    );
+    expect(out.systemPrompt).toContain('NARROW THE VERIFIED ANTECEDENT SET');
+    expect(assembleContentAttachment(p, [v51])).toEqual(initialResult);
+    const alteredV51Projection = structuredClone(v51);
+    alteredV51Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV51Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
+    const v52 = {
+      ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v52',
+      ),
+    };
+    expect(archivedUserPrompt).toBe(v52.userPrompt);
+    expect(preservedPrompt.startsWith(v52.systemPrompt)).toBe(true);
+    expect(v52.systemPrompt).not.toContain(
+      'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
+    );
+    expect(out.systemPrompt).toContain(
+      'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
+    );
+    expect(assembleContentAttachment(p, [v52])).toEqual(initialResult);
+    const alteredV52Projection = structuredClone(v52);
+    alteredV52Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV52Projection]).issues[0].reason,
+    ).toContain('inconsistent projection');
+    const v53 = {
+      ...out,
+      rawResponse: { decisions: out.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(p, p.units[0]).codeMap,
+      ...createContentAttachmentRequest(
+        p,
+        p.units[0],
+        'content-attachment.v53',
+      ),
+    };
+    expect(archivedUserPrompt).toBe(v53.userPrompt);
+    expect(preservedPrompt.startsWith(v53.systemPrompt)).toBe(true);
+    expect(v53.systemPrompt).not.toContain(
+      'IDENTIFIER CROSS-CHECKING IS LOCAL',
+    );
+    expect(out.systemPrompt).toContain('IDENTIFIER CROSS-CHECKING IS LOCAL');
+    expect(out.systemPrompt).toContain(
+      'COMPLETE COLLECTIVE RECIPIENTS AND RELATIONSHIP-SUBJECT ALTERNATIVES',
+    );
+    expect(assembleContentAttachment(p, [v53])).toEqual(initialResult);
+    const alteredV53Projection = structuredClone(v53);
+    alteredV53Projection.response.ignored[0].reason = 'changed';
+    expect(
+      assembleContentAttachment(p, [alteredV53Projection]).issues[0].reason,
     ).toContain('inconsistent projection');
     const withoutRaw = structuredClone(out);
     delete withoutRaw.rawResponse;

@@ -1,4 +1,5 @@
 import type { ProcessedDocument } from '@heripo/model';
+import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type {
@@ -18,9 +19,12 @@ import {
 import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
 import { createContentAttachmentSelectionInput } from './content-attachment-excerpts';
+import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({
+vi.mock('@heripo/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof Shared>()),
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
@@ -154,7 +158,7 @@ describe('mention-scoped registration decisions', () => {
     expect(plan).toEqual(before);
     const request = createContentAttachmentRequest(plan, unit);
     expect(JSON.parse(request.userPrompt)).toEqual(
-      createContentAttachmentBodyBlockInput(plan, unit).payload,
+      createContentAttachmentGroundedInput(plan, unit).payload,
     );
     const response = {
       assignments: [
@@ -218,7 +222,7 @@ describe('mention-scoped registration decisions', () => {
     expect(audit.response).toEqual(response);
     expect(audit.rawResponse).toBe(wireResponse);
     expect(audit.codeMap).toEqual(
-      createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+      createContentAttachmentOriginInput(plan, unit).codeMap,
     );
     const saved = structuredClone(audit);
     const result = assembleContentAttachment(plan, [audit]);
@@ -245,6 +249,7 @@ describe('mention-scoped registration decisions', () => {
     const unresolved = {
       ...structuredClone(audit),
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v41'),
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     };
     unresolved.response.unresolved.push({
       excerptRef: 'E1',
@@ -325,14 +330,53 @@ describe('mention-scoped registration decisions', () => {
     expect({ plan, audit }).toEqual(before);
     const historical = {
       ...audit,
+      rawResponse: { decisions: audit.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
     };
     expect(assembleContentAttachment(plan, [historical])).toEqual(result);
     const v48 = {
       ...audit,
+      rawResponse: { decisions: audit.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
       ...createContentAttachmentRequest(plan, unit, 'content-attachment.v48'),
     };
     expect(assembleContentAttachment(plan, [v48])).toEqual(result);
+    const v49 = {
+      ...audit,
+      rawResponse: { decisions: audit.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v49'),
+    };
+    expect(assembleContentAttachment(plan, [v49])).toEqual(result);
+    const v50 = {
+      ...audit,
+      rawResponse: { decisions: audit.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v50'),
+    };
+    expect(assembleContentAttachment(plan, [v50])).toEqual(result);
+    const v51 = {
+      ...audit,
+      rawResponse: { decisions: audit.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v51'),
+    };
+    expect(assembleContentAttachment(plan, [v51])).toEqual(result);
+    const v52 = {
+      ...audit,
+      rawResponse: { decisions: audit.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v52'),
+    };
+    expect(assembleContentAttachment(plan, [v52])).toEqual(result);
+    const v53 = {
+      ...audit,
+      rawResponse: { decisions: audit.rawResponse!.decisions },
+      codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+      ...createContentAttachmentRequest(plan, unit, 'content-attachment.v53'),
+    };
+    expect(assembleContentAttachment(plan, [v53])).toEqual(result);
   });
 
   test('rejects foreign, ambiguous, inexact or cross-sentence decisions before calling a model', async () => {

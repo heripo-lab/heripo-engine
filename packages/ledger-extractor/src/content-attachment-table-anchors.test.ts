@@ -1,4 +1,5 @@
 import type { ProcessedDocument } from '@heripo/model';
+import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateEvidence } from './candidate-discovery';
@@ -12,12 +13,14 @@ import {
   attachContentUnit,
   createContentAttachmentRequest,
 } from './content-attachment';
-import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { createContentAttachmentDecisionInput } from './content-attachment-decisions';
+import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import { createContentAttachmentIndependentReviewRequest } from './content-attachment-independent-review';
 import { createContentAttachmentTableAnchorInput } from './content-attachment-table-anchors';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
-vi.mock('@heripo/shared', () => ({
+vi.mock('@heripo/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof Shared>()),
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
@@ -324,7 +327,7 @@ describe('candidate table source anchors', () => {
 
   test('sends anchors to the model, replays historical input, rejects forged maps, and preserves a model decision rather than repairing it', async () => {
     const { plan, unit } = fixture();
-    const current = createContentAttachmentBodyBlockInput(plan, unit);
+    const current = createContentAttachmentGroundedInput(plan, unit);
     const response = {
       assignments: [
         ...['E7', 'E8', 'E9'].map((excerptRef) => ({
@@ -382,17 +385,128 @@ describe('candidate table source anchors', () => {
         totalTokens: 2,
       },
     });
+    const reviewRequest = createContentAttachmentIndependentReviewRequest(
+      current,
+      wireResponse,
+      {
+        includeBodyContext: true,
+        qualifyBeforeIdentity: true,
+        reconcileRecipientRefs: true,
+        crossChapterAreas: true,
+        preserveAreaWork: true,
+        preserveAreaResults: true,
+        boundAreaResultRecipients: true,
+        reviewTableWork: true,
+        traceAreaRecording: true,
+        boundAreaRecording: true,
+        checkClauseGrounds: true,
+        gateQualifierStage: true,
+        preserveTentativeMembership: true,
+        segmentReview: true,
+        wordEvidence: true,
+        sourceGroundedCoverage: true,
+      },
+    );
+    const reviewOutput = reviewRequest.schema.parse({
+      segments: Object.fromEntries(
+        reviewRequest
+          .wordEvidence!.sources.filter((source) =>
+            reviewRequest.required.some((r) => r.excerptRef === source.ref),
+          )
+          .map((source) => [
+            source.ref,
+            [
+              {
+                kind: 'substantive',
+                wordRanges: [`${source.ref}:W1-${source.words.at(-1)!.ref}`],
+              },
+            ],
+          ]),
+      ),
+      reviews: Object.fromEntries(
+        reviewRequest.required.map((r) => [
+          r.key,
+          Object.fromEntries(
+            r.candidateRefs.map((ref) => [
+              ref,
+              {
+                segmentDecisions: [
+                  {
+                    segment: 1,
+                    attachment: response.assignments.some(
+                      (a) =>
+                        a.excerptRef === r.excerptRef &&
+                        a.candidateRefs.includes(ref),
+                    )
+                      ? 'included'
+                      : 'excluded',
+                    relationshipSubject: 'not_alternative',
+                    reason: 'Fixture segment judgment',
+                  },
+                ],
+                wordRanges: response.assignments.some(
+                  (a) =>
+                    a.excerptRef === r.excerptRef &&
+                    a.candidateRefs.includes(ref),
+                )
+                  ? [`${r.excerptRef}:W1-W1`]
+                  : [],
+                attachment: response.assignments.some(
+                  (a) =>
+                    a.excerptRef === r.excerptRef &&
+                    a.candidateRefs.includes(ref),
+                )
+                  ? 'included'
+                  : 'excluded',
+                relationshipSubject: 'not_alternative',
+                contextRef: r.excerptRef,
+                candidateEvidenceRefs: [
+                  current.citations.find((c) => c.candidateRef === ref)!.ref,
+                ],
+                reason:
+                  'Fixture review preserves explicit original assignments',
+              },
+            ]),
+          ),
+        ]),
+      ),
+    });
+    const mockUsage = {
+      component: 'test',
+      phase: 'test',
+      model: 'primary' as const,
+      modelName: 'mock',
+      inputTokens: 1,
+      outputTokens: 1,
+      totalTokens: 2,
+    };
+    vi.mocked(LLMCaller.call)
+      .mockResolvedValueOnce({
+        output: wireResponse,
+        usedFallback: false,
+        usage: mockUsage,
+      })
+      .mockResolvedValueOnce({
+        output: reviewOutput,
+        usedFallback: false,
+        usage: mockUsage,
+      });
     const raw = await attachContentUnit(plan, unit, {
       model: {} as LanguageModel,
       maxRetries: 0,
     });
-    expect(LLMCaller.call).toHaveBeenCalledTimes(1);
+    expect(LLMCaller.call).toHaveBeenCalledTimes(2);
     expect(
       JSON.parse(vi.mocked(LLMCaller.call).mock.calls[0][0].userPrompt),
     ).toEqual(current.payload);
     expect(raw.codeMap).toEqual(current.codeMap);
     const before = structuredClone(raw),
       result = assembleContentAttachment(plan, [raw]);
+    const {
+      independentReviewFindings: _findings,
+      reviewDisagreements: _disagreements,
+      ...initialResult
+    } = result;
     expect(result.issues).toEqual([]);
     expect(
       result.contents.find((c) => c.registryRef === 'R2')!.excerpts[0]
@@ -406,7 +520,9 @@ describe('candidate table source anchors', () => {
       codeMap: old.codeMap,
     };
     expect(JSON.parse(historical.userPrompt)).toEqual(old.payload);
-    expect(assembleContentAttachment(plan, [historical])).toEqual(result);
+    expect(assembleContentAttachment(plan, [historical])).toEqual(
+      initialResult,
+    );
     const forged = structuredClone(raw);
     (forged.codeMap as typeof current.codeMap).candidateTableRows[0].rowIndex =
       99;

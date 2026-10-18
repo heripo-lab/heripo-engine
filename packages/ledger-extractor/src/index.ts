@@ -60,12 +60,14 @@ export {
   deduplicateCandidates,
   assembleCandidateDeduplication,
   getCandidateGroupMembers,
+  groupCandidateUncertainties,
   CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
 } from './candidate-deduplication';
 export type {
   CandidateDeduplicationAudit,
   CandidateDeduplicationResult,
   CandidateGroup,
+  CandidateGroupUncertainty,
 } from './candidate-deduplication';
 
 export {
@@ -97,3 +99,46 @@ export { createContentAttachmentContextInput } from './content-attachment-contex
 export { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 
 export type { ContentAttachmentRequiredResponse } from './content-attachment-response';
+
+export { createContentAttachmentOriginInput } from './content-attachment-origins';
+
+export {
+  createContentAttachmentGroundedInput,
+  createContentAttachmentGroundedSchema,
+  inspectContentAttachmentGrounding,
+} from './content-attachment-grounding';
+export type {
+  ContentAttachmentGroundedResponse,
+  ContentAttachmentExclusion,
+} from './content-attachment-grounding';
+
+export {
+  createContentAttachmentInventoryReviewRequest,
+  inspectContentAttachmentInventoryReview,
+} from './content-attachment-inventory-review';
+export type {
+  ContentAttachmentInventoryReviewAudit,
+  ContentAttachmentInventoryReviewResponse,
+} from './content-attachment-inventory-review';
+
+export {
+  createContentAttachmentIndependentReviewRequest,
+  inspectContentAttachmentIndependentReview,
+} from './content-attachment-independent-review';
+export type {
+  ContentAttachmentIndependentMember,
+  ContentAttachmentIndependentReviewAudit,
+  ContentAttachmentIndependentReviewResponse,
+  ContentAttachmentReviewFinding,
+} from './content-attachment-independent-review';
+
+export type {
+  ContentAttachmentWordEvidenceSnapshot,
+  ContentAttachmentWordRangeEvidence,
+} from './content-attachment-word-evidence';
+
+export type {
+  ContentAttachmentReviewSegment,
+  ContentAttachmentSegmentDecision,
+  ContentAttachmentSegmentFinding,
+} from './content-attachment-segment-review';

@@ -14,6 +14,7 @@ import {
 } from './content-attachment';
 import { createContentAttachmentBodyBlockInput } from './content-attachment-body-blocks';
 import { validateContentAttachmentIdentifierRanges } from './content-attachment-identifier-ranges';
+import { createContentAttachmentOriginInput } from './content-attachment-origins';
 import { buildDocumentResourceIndex } from './document-resource-index';
 
 function fixture(text = 'TR6 ~ TR9, TR12 excavation') {
@@ -272,7 +273,7 @@ test('rejects missing named range members in current assembly while retaining ex
     },
   ];
   const unit = plan.units[0],
-    compiled = createContentAttachmentBodyBlockInput(plan, unit);
+    compiled = createContentAttachmentOriginInput(plan, unit);
   const rawResponse = {
     decisions: {
       E1: {
@@ -308,61 +309,347 @@ test('rejects missing named range members in current assembly while retaining ex
   ]);
   expect(assembleContentAttachment(plan, [audit]).completedUnitIds).toEqual([]);
   expect(audit).toEqual(before);
+  const preservedPrompt = createContentAttachmentRequest(
+    plan,
+    unit,
+    'content-attachment.v57',
+  ).systemPrompt;
   const historical = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v44'),
   };
-  expect(audit.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
+  expect(preservedPrompt.startsWith(historical.systemPrompt)).toBe(true);
   expect(historical.systemPrompt).not.toContain(
     'INCLUSIVE EXPLICIT IDENTIFIER RANGES',
   );
-  expect(historical.userPrompt).toBe(audit.userPrompt);
+  expect(historical.userPrompt).toBe(
+    JSON.stringify(createContentAttachmentBodyBlockInput(plan, unit).payload),
+  );
   expect(assembleContentAttachment(plan, [historical]).issues).toEqual([]);
   const v45 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v45'),
   };
-  expect(audit.systemPrompt.startsWith(v45.systemPrompt)).toBe(true);
-  expect(v45.userPrompt).toBe(audit.userPrompt);
+  expect(preservedPrompt.startsWith(v45.systemPrompt)).toBe(true);
+  expect(v45.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v45])).toEqual(
     assembleContentAttachment(plan, [audit]),
   );
   expect(v45.systemPrompt).not.toContain('CURRENT CLAUSE PERIOD');
   const v46 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v46'),
   };
-  expect(audit.systemPrompt.startsWith(v46.systemPrompt)).toBe(true);
-  expect(v46.userPrompt).toBe(audit.userPrompt);
+  expect(preservedPrompt.startsWith(v46.systemPrompt)).toBe(true);
+  expect(v46.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v46])).toEqual(
     assembleContentAttachment(plan, [audit]),
   );
   expect(v46.systemPrompt).not.toContain('ESTABLISHED FEATURE GROUPS REMAIN');
   const v47 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v47'),
   };
-  expect(audit.systemPrompt.startsWith(v47.systemPrompt)).toBe(true);
-  expect(v47.userPrompt).toBe(audit.userPrompt);
+  expect(preservedPrompt.startsWith(v47.systemPrompt)).toBe(true);
+  expect(v47.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v47])).toEqual(
     assembleContentAttachment(plan, [audit]),
   );
   expect(v47.systemPrompt).not.toContain('SET-LEVEL EVIDENCE ATTACHMENT');
   const v48 = {
     ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
     ...createContentAttachmentRequest(plan, unit, 'content-attachment.v48'),
   };
-  expect(audit.systemPrompt.startsWith(v48.systemPrompt)).toBe(true);
-  expect(v48.userPrompt).toBe(audit.userPrompt);
+  expect(preservedPrompt.startsWith(v48.systemPrompt)).toBe(true);
+  expect(v48.userPrompt).toBe(historical.userPrompt);
   expect(assembleContentAttachment(plan, [v48])).toEqual(
     assembleContentAttachment(plan, [audit]),
   );
   expect(v48.systemPrompt).not.toContain(
     'QUANTITIES REMAIN WITH THEIR ORIGINAL',
   );
+  const v49 = {
+    ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v49'),
+  };
+  expect(preservedPrompt.startsWith(v49.systemPrompt)).toBe(true);
+  expect(v49.userPrompt).toBe(historical.userPrompt);
+  expect(assembleContentAttachment(plan, [v49])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v49.systemPrompt).not.toContain('CONFIRMED SET MEMBERSHIP SUPPORTS');
+  const v50 = {
+    ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v50'),
+  };
+  expect(preservedPrompt.startsWith(v50.systemPrompt)).toBe(true);
+  expect(v50.userPrompt).toBe(historical.userPrompt);
+  expect(assembleContentAttachment(plan, [v50])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v50.systemPrompt).not.toContain(
+    'NO STATED RESTRICTION IS NOT POSITIVE',
+  );
+  const v51 = {
+    ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v51'),
+  };
+  expect(preservedPrompt.startsWith(v51.systemPrompt)).toBe(true);
+  expect(v51.userPrompt).toBe(historical.userPrompt);
+  expect(assembleContentAttachment(plan, [v51])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  expect(v51.systemPrompt).not.toContain(
+    'DO NOT REQUIRE INDIVIDUAL REIDENTIFICATION',
+  );
+  const v52 = {
+    ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v52'),
+  };
+  expect(preservedPrompt.startsWith(v52.systemPrompt)).toBe(true);
+  expect(v52.systemPrompt).not.toContain(
+    'CROSS-CHECK EACH EXPLICITLY LISTED IDENTIFIER',
+  );
+  expect(assembleContentAttachment(plan, [v52])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
+  const v53 = {
+    ...audit,
+    rawResponse: { decisions: audit.rawResponse!.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(plan, unit).codeMap,
+    ...createContentAttachmentRequest(plan, unit, 'content-attachment.v53'),
+  };
+  expect(preservedPrompt.startsWith(v53.systemPrompt)).toBe(true);
+  expect(v53.systemPrompt).not.toContain('IDENTIFIER CROSS-CHECKING IS LOCAL');
+  expect(assembleContentAttachment(plan, [v53])).toEqual(
+    assembleContentAttachment(plan, [audit]),
+  );
   const forged = structuredClone(historical);
   forged.response.assignments[0].reason = 'Changed';
   expect(assembleContentAttachment(plan, [forged]).issues[0].reason).toContain(
     'inconsistent projection',
   );
+
+  const singletonPlan = structuredClone(plan),
+    singletonUnit = singletonPlan.units[0];
+  singletonUnit.sources[0].resource.data.text = 'TR6 ~ TR9, TR12';
+  singletonUnit.tables[0].data.grid[0][0].text = 'TR6 ~ TR9, TR12';
+  const singletonRefs = ['object-6', 'object-7', 'object-8', 'object-9'];
+  const singletonAudit = {
+    ...audit,
+    ...createContentAttachmentRequest(singletonPlan, singletonUnit),
+    codeMap: createContentAttachmentOriginInput(singletonPlan, singletonUnit)
+      .codeMap,
+    rawResponse: {
+      decisions: {
+        E1: {
+          status: 'assigned' as const,
+          candidateRefs: singletonRefs,
+          reason: 'Original named members',
+          unresolved: null,
+        },
+      },
+    },
+    response: {
+      assignments: [
+        {
+          excerptRef: 'E1',
+          candidateRefs: singletonRefs,
+          reason: 'Original named members',
+        },
+      ],
+      unresolved: [],
+      ignored: [],
+    },
+  };
+  const untouched = structuredClone(singletonAudit);
+  expect(
+    assembleContentAttachment(singletonPlan, [singletonAudit]).issues.map(
+      (i) => i.reason,
+    ),
+  ).toEqual(['Explicit identifier must include object-12: E1 (TR12)']);
+  expect(
+    assembleContentAttachment(singletonPlan, [singletonAudit]).completedUnitIds,
+  ).toEqual([]);
+  expect(singletonAudit).toEqual(untouched);
+  const v53SingletonAudit = {
+    ...singletonAudit,
+    rawResponse: { decisions: singletonAudit.rawResponse.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(singletonPlan, singletonUnit)
+      .codeMap,
+    ...createContentAttachmentRequest(
+      singletonPlan,
+      singletonUnit,
+      'content-attachment.v53',
+    ),
+  };
+  expect(assembleContentAttachment(singletonPlan, [v53SingletonAudit])).toEqual(
+    assembleContentAttachment(singletonPlan, [singletonAudit]),
+  );
+  const oldSingletonAudit = {
+    ...singletonAudit,
+    rawResponse: { decisions: singletonAudit.rawResponse.decisions },
+    codeMap: createContentAttachmentBodyBlockInput(singletonPlan, singletonUnit)
+      .codeMap,
+    ...createContentAttachmentRequest(
+      singletonPlan,
+      singletonUnit,
+      'content-attachment.v52',
+    ),
+  };
+  expect(
+    assembleContentAttachment(singletonPlan, [oldSingletonAudit]).issues,
+  ).toEqual([]);
+});
+
+test('checks individually named list members against original numbers rather than opaque refs', () => {
+  const f = fixture('TR6 ~ TR9, TR12 excavation');
+  const refs = ['entry-z', 'entry-a', 'entry-y', 'entry-b', 'entry-x'];
+  for (const [i, candidate] of f.plan.registry.entries())
+    candidate.ref = refs[i];
+  f.response.assignments[0].candidateRefs = refs.slice(0, 4);
+  const before = structuredClone(f);
+  expect(
+    validateContentAttachmentIdentifierRanges(f.plan, f.excerpts, f.response),
+  ).toEqual([]);
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual(['Explicit identifier must include entry-x: E1 (TR12)']);
+  expect(f).toEqual(before);
+  f.response.assignments[0].candidateRefs.push('entry-x');
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual([]);
+  f.excerpts[0].evidence[0].quote = 'TR6, Trench 9, 트렌치 12';
+  f.response.assignments[0].candidateRefs = ['entry-z'];
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual([
+    'Explicit identifier must include entry-b: E1 (Trench 9)',
+    'Explicit identifier must include entry-x: E1 (트렌치 12)',
+  ]);
+});
+
+test('keeps named singleton checks bounded by original scope and unique identity', () => {
+  const f = fixture('TR6, TR12');
+  f.response.assignments[0].candidateRefs = ['object-6'];
+  const other = structuredClone(f.plan.registry[4]);
+  other.ref = 'other12';
+  other.mentions[0].chapterPath[0].id = 'other';
+  f.plan.registry.push(other);
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual(['Explicit identifier must include object-12: E1 (TR12)']);
+  f.response.assignments[0].candidateRefs.push('other12');
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual([]);
+  f.response.assignments[0].candidateRefs = ['object-6'];
+  other.mentions[0].chapterPath[0].id = 'survey';
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual([]);
+  f.excerpts[0].evidence[0].quote = 'TR12';
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual([]);
+  f.response.assignments = [];
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      f.plan,
+      f.excerpts,
+      f.response,
+      true,
+    ),
+  ).toEqual([]);
+  const different = fixture('Pit 6, Trench 12');
+  different.plan.registry[0].recordKind = 'feature';
+  different.plan.registry[0].mentions[0].sourceName = 'Pit';
+  different.response.assignments[0].candidateRefs = ['object-6'];
+  expect(
+    validateContentAttachmentIdentifierRanges(
+      different.plan,
+      different.excerpts,
+      different.response,
+      true,
+    ),
+  ).toEqual([]);
+});
+
+test('does not reinterpret malformed ranges, measurements or unlabeled numbers as singleton lists', () => {
+  for (const text of [
+    'TR6~9cm',
+    'TR6~9007199254740992',
+    'TR9~6',
+    'XTR6, 12',
+    'TR6.2, 12',
+    '6, 12 cm',
+    '2020, 2024',
+    'TR6 ~ Pit9',
+    'TR9007199254740992',
+  ]) {
+    const f = fixture(text);
+    f.response.assignments[0].candidateRefs = ['object-6'];
+    expect(
+      validateContentAttachmentIdentifierRanges(
+        f.plan,
+        f.excerpts,
+        f.response,
+        true,
+      ),
+    ).toEqual([]);
+  }
 });

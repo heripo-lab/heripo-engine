@@ -1,5 +1,6 @@
 import type { LanguageModel } from 'ai';
 
+import type { CandidateDeduplicationAudit } from './candidate-deduplication';
 import type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
@@ -14,6 +15,7 @@ import {
   createCandidateDeduplicationRequest,
   deduplicateCandidates,
   getCandidateGroupMembers,
+  groupCandidateUncertainties,
 } from './candidate-deduplication';
 
 vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
@@ -129,7 +131,7 @@ const response = () => ({
   ],
   uncertainMatches: [{ left: 'C2', right: 'C3', reason: '번호만 같음' }],
 });
-const audit = (d = discovery()) => ({
+const audit = (d = discovery()): CandidateDeduplicationAudit => ({
   ...createCandidateDeduplicationRequest(plan, d),
   response: response(),
   usage,
@@ -247,4 +249,148 @@ describe('whole-pool candidate deduplication', () => {
       ),
     ).rejects.toThrow('No candidates');
   });
+});
+
+test('adds full-source layer and identity-conflict review while replaying immutable v3 partitions', () => {
+  const d = discovery();
+  d.candidates.forEach((c) => {
+    c.recordKind = 'layer';
+    c.evidence[0].quote = '원문';
+  });
+  const fullPlan = structuredClone(plan);
+  fullPlan.units[0].resources[0].data.text =
+    '원문 그대로: 정의된 층은 동측 사면부의 풍화암반에 해당한다.';
+  const oldRequest = createCandidateDeduplicationRequest(
+      fullPlan,
+      d,
+      'candidate-deduplication.v3',
+    ),
+    current = createCandidateDeduplicationRequest(fullPlan, d),
+    oldAudit = { ...oldRequest, response: response(), usage },
+    newAudit = { ...current, response: response(), usage },
+    before = structuredClone({ d, fullPlan, oldAudit, newAudit });
+  expect(current.userPrompt).toBe(oldRequest.userPrompt);
+  expect(JSON.parse(current.userPrompt).units[0].sources[0].text).toBe(
+    fullPlan.units[0].resources[0].data.text,
+  );
+  expect(current.systemPrompt).toContain('FULL-SOURCE LAYER IDENTITY REVIEW');
+  expect(current.systemPrompt).toContain(
+    'RELATIONS ARE NOT IDENTITY UNCERTAINTY',
+  );
+  expect(current.systemPrompt).toContain('FINAL CONFLICT AND COVERAGE AUDIT');
+  expect(oldRequest.systemPrompt).not.toContain(
+    'FULL-SOURCE LAYER IDENTITY REVIEW',
+  );
+  const historical = assembleCandidateDeduplication(fullPlan, d, oldAudit),
+    result = assembleCandidateDeduplication(fullPlan, d, newAudit);
+  expect(result.issues).toEqual([]);
+  expect(result).toEqual(historical);
+  expect(result.uncertainMatches).toHaveLength(1);
+  expect(
+    getCandidateGroupMembers(result.groups[0], d.candidates)[0].evidence[0]
+      .quote,
+  ).toBe('원문');
+  expect({ d, fullPlan, oldAudit, newAudit }).toEqual(before);
+  expect(
+    assembleCandidateDeduplication(fullPlan, d, {
+      ...oldAudit,
+      systemPrompt: current.systemPrompt,
+    }).issues,
+  ).toHaveLength(1);
+});
+
+test('replays archived v4 judgments without applying the new scope or distribution policy in code', () => {
+  const d = discovery(),
+    prior = createCandidateDeduplicationRequest(
+      plan,
+      d,
+      'candidate-deduplication.v4',
+    ),
+    current = createCandidateDeduplicationRequest(plan, d),
+    priorAudit = { ...prior, response: response(), usage },
+    before = structuredClone({ d, priorAudit });
+  expect(current.promptVersion).toBe('candidate-deduplication.v5');
+  expect(current.userPrompt).toBe(prior.userPrompt);
+  expect(current.systemPrompt.startsWith(prior.systemPrompt)).toBe(true);
+  expect(current.systemPrompt).toContain(
+    'LAYER-GROUP MEMBERSHIP VERSUS OBJECT IDENTITY',
+  );
+  expect(current.systemPrompt).toContain(
+    'QUALIFIED DISTRIBUTION IS NONEXCLUSIVE',
+  );
+  const historical = assembleCandidateDeduplication(plan, d, priorAudit);
+  expect(historical.issues).toEqual([]);
+  expect(historical).toEqual(
+    assembleCandidateDeduplication(plan, d, {
+      ...current,
+      response: priorAudit.response,
+      usage,
+    }),
+  );
+  expect(
+    assembleCandidateDeduplication(plan, d, {
+      ...priorAudit,
+      systemPrompt: current.systemPrompt,
+    }).issues,
+  ).toHaveLength(1);
+  expect({ d, priorAudit }).toEqual(before);
+});
+
+test('groups unordered identity pairs while retaining every source pair, reason and original candidate', () => {
+  const d = discovery();
+  d.candidates.push(candidate('d'));
+  const a = audit(d);
+  a.response.groups.push({ members: ['C4'], reason: 'another object' });
+  a.response.uncertainMatches = [
+    { left: 'C1', right: 'C3', reason: 'definition conflict' },
+    { left: 'C4', right: 'C1', reason: 'different identity gap' },
+    { left: 'C3', right: 'C2', reason: 'local occurrence conflict' },
+  ];
+  const result = assembleCandidateDeduplication(plan, d, a),
+    before = structuredClone({ result, d, a });
+  const grouped = groupCandidateUncertainties(result, d.candidates);
+  expect(grouped).toHaveLength(2);
+  expect(grouped.map((g) => g.candidateMatches.length)).toEqual([2, 1]);
+  expect(grouped[0]).toMatchObject({
+    leftGroupId: 'group-a',
+    rightGroupId: 'group-c',
+  });
+  expect(grouped[0].candidateMatches[1]).toEqual({
+    ...result.uncertainMatches[2],
+    sourceMatchIndex: 2,
+    leftCandidate: d.candidates[2],
+    rightCandidate: d.candidates[1],
+  });
+  for (const match of grouped.flatMap((g) => g.candidateMatches)) {
+    expect(match.reason).toBe(
+      result.uncertainMatches[match.sourceMatchIndex].reason,
+    );
+    expect(match.leftCandidate).toBe(
+      d.candidates.find((c) => c.candidateId === match.leftCandidateId),
+    );
+    expect(match.rightCandidate).toBe(
+      d.candidates.find((c) => c.candidateId === match.rightCandidateId),
+    );
+  }
+  expect({ result, d, a }).toEqual(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+  expect(
+    groupCandidateUncertainties({ ...result, uncertainMatches: [] }, []),
+  ).toEqual([]);
+});
+
+test('rejects missing provenance and intra-group doubts instead of silently dropping them', () => {
+  const d = discovery(),
+    result = assembleCandidateDeduplication(plan, d, audit(d));
+  expect(() =>
+    groupCandidateUncertainties({ ...result, groups: [] }, d.candidates),
+  ).toThrow('Missing uncertainty candidate group');
+  expect(() => groupCandidateUncertainties(result, [])).toThrow(
+    'Missing original candidate',
+  );
+  const invalid = structuredClone(result);
+  invalid.uncertainMatches[0].rightCandidateId = 'a';
+  expect(() => groupCandidateUncertainties(invalid, d.candidates)).toThrow(
+    'Identity uncertainty must link distinct groups',
+  );
 });
