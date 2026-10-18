@@ -727,6 +727,7 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         checkClauseGrounds: true,
         gateQualifierStage: true,
         preserveTentativeMembership: true,
+        segmentReview: true,
         wordEvidence: true,
         sourceGroundedCoverage: true,
       },
@@ -762,6 +763,21 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
       },
     };
   const review = request.schema.parse({
+    segments: Object.fromEntries(
+      request
+        .wordEvidence!.sources.filter((source) =>
+          request.required.some((r) => r.excerptRef === source.ref),
+        )
+        .map((source) => [
+          source.ref,
+          [
+            {
+              kind: 'substantive',
+              wordRanges: [`${source.ref}:W1-${source.words.at(-1)!.ref}`],
+            },
+          ],
+        ]),
+    ),
     reviews: Object.fromEntries(
       Object.entries(legacyReview.reviews).map(([key, members]) => [
         key,
@@ -770,6 +786,14 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
             ref,
             {
               ...answer,
+              segmentDecisions: [
+                {
+                  segment: 1,
+                  attachment: answer.attachment,
+                  relationshipSubject: answer.relationshipSubject,
+                  reason: answer.reason,
+                },
+              ],
               wordRanges:
                 answer.attachment === 'included' ||
                 answer.relationshipSubject === 'alternative'
@@ -2944,4 +2968,203 @@ test('grounds independent word ranges in immutable current excerpts and read-onl
     ).issues.length,
   ).toBeGreaterThan(0);
   expect({ input, selection }).toEqual(before);
+});
+
+test('requires segment-first review with complete word and candidate coverage while retaining older word-only audits', async () => {
+  const { plan, unit } = fixture();
+  const input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const options = {
+    includeBodyContext: true,
+    crossChapterAreas: true,
+    reviewTableWork: true,
+    sourceGroundedCoverage: true,
+  };
+  const legacy = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { ...options, wordEvidence: true },
+  );
+  const request = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { ...options, segmentReview: true },
+  );
+  expect(request.segmentReview).toEqual({ version: 'segment-review.v1' });
+  expect(request.wordEvidence!.version).toBe('word-ranges.v1');
+  expect(request.required).toEqual(legacy.required);
+  expect(request.userPrompt).toBe(legacy.userPrompt);
+  expect(request.systemPrompt.startsWith(legacy.systemPrompt)).toBe(true);
+  expect(request.systemPrompt).toContain(
+    'Before candidate judgments, return segments',
+  );
+  const segments = Object.fromEntries(
+    request
+      .wordEvidence!.sources.filter((source) =>
+        request.required.some((r) => r.excerptRef === source.ref),
+      )
+      .map((source) => [
+        source.ref,
+        source.ref === 'E1'
+          ? [
+              { kind: 'substantive', wordRanges: ['E1:W1-W1'] },
+              { kind: 'substantive', wordRanges: ['E1:W2-W2'] },
+            ]
+          : [
+              {
+                kind: 'substantive',
+                wordRanges: [`${source.ref}:W1-${source.words.at(-1)!.ref}`],
+              },
+            ],
+      ]),
+  );
+  const reviews = Object.fromEntries(
+    request.required.map((r) => [
+      r.key,
+      Object.fromEntries(
+        r.candidateRefs.map((ref) => {
+          const included = r.excerptRef === 'E1' && ref === 'area';
+          return [
+            ref,
+            {
+              segmentDecisions: segments[r.excerptRef].map((_, i) => ({
+                segment: i + 1,
+                attachment: included && i === 0 ? 'included' : 'excluded',
+                relationshipSubject: 'not_alternative',
+                reason: 'This action subject is judged independently',
+              })),
+              attachment: included ? 'included' : 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason: 'Aggregate independent verdict',
+              wordRanges: included ? ['E1:W1-W1'] : [],
+            },
+          ];
+        }),
+      ),
+    ]),
+  );
+  const audit = {
+    segmentReview: request.segmentReview,
+    wordEvidence: request.wordEvidence,
+    coverage: request.coverage,
+    systemPrompt: request.systemPrompt,
+    userPrompt: request.userPrompt,
+    rawResponse: request.schema.parse({ segments, reviews }),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  const before = structuredClone({ input, selection, audit });
+  const result = inspectContentAttachmentIndependentReview(
+    input,
+    selection,
+    audit,
+    options,
+  );
+  expect(result.issues).toEqual([]);
+  expect(
+    result.findings
+      .find((f) => f.excerptRef === 'E1' && f.candidateRef === 'area')!
+      .segmentEvidence!.map((s) => [
+        s.segment,
+        s.decision.attachment,
+        s.evidence[0].text,
+      ]),
+  ).toEqual([
+    [1, 'included', 'Area'],
+    [2, 'excluded', 'work.'],
+  ]);
+  expect({ input, selection, audit }).toEqual(before);
+  const format = await Output.object({ schema: request.schema }).responseFormat;
+  expect(format?.type).toBe('json');
+  const schema = JSON.parse(JSON.stringify(format)).schema;
+  expect(schema.required).toEqual(['segments', 'reviews']);
+  expect(schema.properties.segments.required.toSorted()).toEqual(['E1', 'E2']);
+  const absent = structuredClone(audit.rawResponse);
+  delete absent.segments!.E1;
+  expect(request.schema.safeParse(absent).success).toBe(false);
+  delete absent.segments;
+  expect(request.schema.safeParse(absent).success).toBe(false);
+  const missingDecision = structuredClone(audit);
+  delete missingDecision.rawResponse.reviews['E1:B1'].area.segmentDecisions;
+  expect(request.schema.safeParse(missingDecision.rawResponse).success).toBe(
+    false,
+  );
+  const uncovered = structuredClone(audit);
+  uncovered.rawResponse.segments!.E1.pop();
+  const uncoveredResult = inspectContentAttachmentIndependentReview(
+    input,
+    selection,
+    uncovered,
+    options,
+  );
+  expect(uncoveredResult.issues).toContain('Invalid independent segments: E1');
+  expect(uncoveredResult.findings.every((f) => f.excerptRef !== 'E1')).toBe(
+    true,
+  );
+  const incomplete = structuredClone(audit);
+  incomplete.rawResponse.reviews['E1:B1'].area.segmentDecisions!.pop();
+  expect(
+    inspectContentAttachmentIndependentReview(
+      input,
+      selection,
+      incomplete,
+      options,
+    ).issues,
+  ).toContain('Invalid independent segment decisions: E1:B1:area');
+  const contradictory = structuredClone(audit);
+  contradictory.rawResponse.reviews['E1:B1'].area.attachment = 'excluded';
+  expect(
+    inspectContentAttachmentIndependentReview(
+      input,
+      selection,
+      contradictory,
+      options,
+    ).issues,
+  ).toContain('Invalid independent segment decisions: E1:B1:area');
+  expect(
+    inspectContentAttachmentIndependentReview(
+      input,
+      selection,
+      { ...audit, segmentReview: undefined },
+      { ...options, segmentReview: true },
+    ).issues,
+  ).toHaveLength(1);
+  // The word-only contract still accepts the exact pre-segmentation shape.
+  const oldRaw = structuredClone(audit.rawResponse);
+  delete oldRaw.segments;
+  for (const members of Object.values(oldRaw.reviews))
+    for (const answer of Object.values(members)) delete answer.segmentDecisions;
+  const oldAudit = {
+    ...audit,
+    segmentReview: undefined,
+    systemPrompt: legacy.systemPrompt,
+    rawResponse: legacy.schema.parse(oldRaw),
+  };
+  expect(
+    inspectContentAttachmentIndependentReview(
+      input,
+      selection,
+      oldAudit,
+      options,
+    ).issues,
+  ).toEqual([]);
+  const emptyInput = structuredClone(input);
+  emptyInput.payload.current.excerpts = emptyInput.payload.current.excerpts.map(
+    (e) => [e[0], e[1], e[2], e[3], ''],
+  );
+  for (const e of emptyInput.payload.current.excerpts) {
+    const binding = emptyInput.codeMap.excerpts.find((b) => b.ref === e[0])!;
+    binding.evidence[0].quote = '';
+    binding.evidence[0].charEnd = binding.evidence[0].charStart;
+  }
+  expect(
+    createContentAttachmentIndependentReviewRequest(emptyInput, selection, {
+      ...options,
+      segmentReview: true,
+    }).wordEvidence!.sources.every((s) => s.words.length === 0),
+  ).toBe(true);
 });

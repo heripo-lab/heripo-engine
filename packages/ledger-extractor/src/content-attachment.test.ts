@@ -1378,6 +1378,7 @@ describe('bounded content attachment', () => {
       compiled,
       response,
       {
+        segmentReview: true,
         wordEvidence: true,
         sourceGroundedCoverage: true,
         includeBodyContext: true,
@@ -1396,6 +1397,21 @@ describe('bounded content attachment', () => {
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
+      segments: Object.fromEntries(
+        reviewRequest
+          .wordEvidence!.sources.filter((source) =>
+            reviewRequest.required.some((r) => r.excerptRef === source.ref),
+          )
+          .map((source) => [
+            source.ref,
+            [
+              {
+                kind: 'substantive',
+                wordRanges: [`${source.ref}:W1-${source.words.at(-1)!.ref}`],
+              },
+            ],
+          ]),
+      ),
       reviews: Object.fromEntries(
         reviewRequest.required.map((r) => [
           r.key,
@@ -1403,6 +1419,14 @@ describe('bounded content attachment', () => {
             r.candidateRefs.map((ref) => [
               ref,
               {
+                segmentDecisions: [
+                  {
+                    segment: 1,
+                    attachment: 'excluded',
+                    relationshipSubject: 'not_alternative',
+                    reason: 'Fixture non-object judgment',
+                  },
+                ],
                 wordRanges: [],
                 attachment: 'excluded',
                 relationshipSubject: 'not_alternative',

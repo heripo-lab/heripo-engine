@@ -136,3 +136,9 @@ export type {
   ContentAttachmentWordEvidenceSnapshot,
   ContentAttachmentWordRangeEvidence,
 } from './content-attachment-word-evidence';
+
+export type {
+  ContentAttachmentReviewSegment,
+  ContentAttachmentSegmentDecision,
+  ContentAttachmentSegmentFinding,
+} from './content-attachment-segment-review';

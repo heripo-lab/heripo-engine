@@ -402,11 +402,27 @@ describe('candidate table source anchors', () => {
         checkClauseGrounds: true,
         gateQualifierStage: true,
         preserveTentativeMembership: true,
+        segmentReview: true,
         wordEvidence: true,
         sourceGroundedCoverage: true,
       },
     );
     const reviewOutput = reviewRequest.schema.parse({
+      segments: Object.fromEntries(
+        reviewRequest
+          .wordEvidence!.sources.filter((source) =>
+            reviewRequest.required.some((r) => r.excerptRef === source.ref),
+          )
+          .map((source) => [
+            source.ref,
+            [
+              {
+                kind: 'substantive',
+                wordRanges: [`${source.ref}:W1-${source.words.at(-1)!.ref}`],
+              },
+            ],
+          ]),
+      ),
       reviews: Object.fromEntries(
         reviewRequest.required.map((r) => [
           r.key,
@@ -414,6 +430,20 @@ describe('candidate table source anchors', () => {
             r.candidateRefs.map((ref) => [
               ref,
               {
+                segmentDecisions: [
+                  {
+                    segment: 1,
+                    attachment: response.assignments.some(
+                      (a) =>
+                        a.excerptRef === r.excerptRef &&
+                        a.candidateRefs.includes(ref),
+                    )
+                      ? 'included'
+                      : 'excluded',
+                    relationshipSubject: 'not_alternative',
+                    reason: 'Fixture segment judgment',
+                  },
+                ],
                 wordRanges: response.assignments.some(
                   (a) =>
                     a.excerptRef === r.excerptRef &&

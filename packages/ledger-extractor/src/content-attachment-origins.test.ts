@@ -358,6 +358,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     current,
     output,
     {
+      segmentReview: true,
       wordEvidence: true,
       sourceGroundedCoverage: true,
       includeBodyContext: true,
@@ -376,6 +377,21 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     },
   );
   const reviewOutput = reviewRequest.schema.parse({
+    segments: Object.fromEntries(
+      reviewRequest
+        .wordEvidence!.sources.filter((source) =>
+          reviewRequest.required.some((r) => r.excerptRef === source.ref),
+        )
+        .map((source) => [
+          source.ref,
+          [
+            {
+              kind: 'substantive',
+              wordRanges: [`${source.ref}:W1-${source.words.at(-1)!.ref}`],
+            },
+          ],
+        ]),
+    ),
     reviews: Object.fromEntries(
       reviewRequest.required.map((r) => [
         r.key,
@@ -383,6 +399,14 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
           r.candidateRefs.map((ref) => [
             ref,
             {
+              segmentDecisions: [
+                {
+                  segment: 1,
+                  attachment: ref === 'object-a' ? 'included' : 'excluded',
+                  relationshipSubject: 'not_alternative',
+                  reason: 'Fixture segment judgment',
+                },
+              ],
               wordRanges: ref === 'object-a' ? [`${r.excerptRef}:W1-W1`] : [],
               attachment: ref === 'object-a' ? 'included' : 'excluded',
               relationshipSubject: 'not_alternative',

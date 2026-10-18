@@ -1306,6 +1306,7 @@ export async function attachContentUnit(
     input,
     output,
     {
+      segmentReview: true,
       wordEvidence: true,
       sourceGroundedCoverage: true,
       includeBodyContext: true,
@@ -1344,6 +1345,7 @@ export async function attachContentUnit(
       },
     });
     independentReview = {
+      segmentReview: reviewRequest.segmentReview,
       wordEvidence: reviewRequest.wordEvidence,
       coverage: reviewRequest.coverage,
       systemPrompt: reviewRequest.systemPrompt,
