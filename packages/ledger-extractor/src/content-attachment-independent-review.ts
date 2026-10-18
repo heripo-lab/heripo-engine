@@ -248,7 +248,10 @@ export function createContentAttachmentIndependentReviewRequest(
   const segment = z
     .strictObject({
       kind: z.enum(['substantive', 'non_substantive']),
-      wordRanges: wordRanges.min(1),
+      wordRanges: z
+        .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
+        .min(1)
+        .meta({ id: 'IndependentSegmentWordRanges' }),
     })
     .meta({ id: 'IndependentSegment' });
   const schema: z.ZodType<ContentAttachmentIndependentReviewResponse> =

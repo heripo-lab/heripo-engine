@@ -3083,6 +3083,19 @@ test('requires segment-first review with complete word and candidate coverage wh
   const schema = JSON.parse(JSON.stringify(format)).schema;
   expect(schema.required).toEqual(['segments', 'reviews']);
   expect(schema.properties.segments.required.toSorted()).toEqual(['E1', 'E2']);
+  expect(schema.definitions.IndependentSegment.properties.wordRanges).toEqual({
+    $ref: '#/definitions/IndependentSegmentWordRanges',
+  });
+  expect(schema.definitions.IndependentSegmentWordRanges.minItems).toBe(1);
+  const inspectRefs = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    if ('$ref' in node) expect(Object.keys(node)).toEqual(['$ref']);
+    for (const child of Object.values(node)) inspectRefs(child);
+  };
+  inspectRefs(schema);
+  const emptyRange = structuredClone(audit.rawResponse);
+  emptyRange.segments!.E1[0].wordRanges = [];
+  expect(request.schema.safeParse(emptyRange).success).toBe(false);
   const absent = structuredClone(audit.rawResponse);
   delete absent.segments!.E1;
   expect(request.schema.safeParse(absent).success).toBe(false);
