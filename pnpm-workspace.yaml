@@ -11,9 +11,8 @@ catalog:
   '@ai-sdk/togetherai': ^3.0.72
   '@vitest/coverage-v8': ^5.0.5
   '@vitest/expect': ^5.0.5
-  # Keep compatible model types and the matching Ollama adapter.
-  'ai': 7.0.127
-  'ai-sdk-ollama': 4.4.0
+  'ai': ^7.0.143
+  'ai-sdk-ollama': ^4.5.0
   'es-toolkit': '^1.52.0'
   'tsup': '^9.0.0'
   'tsx': '^4.21.0'
