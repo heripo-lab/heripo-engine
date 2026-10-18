@@ -402,6 +402,7 @@ describe('candidate table source anchors', () => {
         checkClauseGrounds: true,
         gateQualifierStage: true,
         preserveTentativeMembership: true,
+        wordEvidence: true,
         sourceGroundedCoverage: true,
       },
     );
@@ -413,6 +414,13 @@ describe('candidate table source anchors', () => {
             r.candidateRefs.map((ref) => [
               ref,
               {
+                wordRanges: response.assignments.some(
+                  (a) =>
+                    a.excerptRef === r.excerptRef &&
+                    a.candidateRefs.includes(ref),
+                )
+                  ? [`${r.excerptRef}:W1-W1`]
+                  : [],
                 attachment: response.assignments.some(
                   (a) =>
                     a.excerptRef === r.excerptRef &&

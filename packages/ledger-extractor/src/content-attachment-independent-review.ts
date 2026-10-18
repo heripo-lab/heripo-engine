@@ -4,6 +4,10 @@ import type { CandidateEvidence } from './candidate-discovery';
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
 import type { ContentAttachmentRequiredResponse } from './content-attachment-response';
 import type { ReviewReferentMatch } from './content-attachment-review-retrieval';
+import type {
+  ContentAttachmentWordEvidenceSnapshot,
+  ContentAttachmentWordRangeEvidence,
+} from './content-attachment-word-evidence';
 
 import { z } from 'zod';
 
@@ -24,6 +28,13 @@ import {
   createContentAttachmentBodyReviewCoverage,
 } from './content-attachment-body-review';
 import { createContentAttachmentInventoryReviewRequest } from './content-attachment-inventory-review';
+import {
+  CONTENT_ATTACHMENT_WORD_EVIDENCE_POLICY,
+  CONTENT_ATTACHMENT_WORD_RANGE_PATTERN,
+  contentAttachmentWordRows,
+  createContentAttachmentWordEvidence,
+  resolveContentAttachmentWordRange,
+} from './content-attachment-word-evidence';
 
 type Input = ReturnType<typeof createContentAttachmentGroundedInput>;
 const attachment = z
@@ -33,6 +44,7 @@ const relationshipSubject = z
   .enum(['alternative', 'not_alternative'])
   .meta({ id: 'IndependentSubject' });
 export interface ContentAttachmentIndependentMember {
+  wordRanges?: string[];
   attachment: z.infer<typeof attachment>;
   relationshipSubject: z.infer<typeof relationshipSubject>;
   contextRef: string;
@@ -47,6 +59,7 @@ export interface ContentAttachmentReviewCoverage {
   referentMatches: ReviewReferentMatch[];
 }
 export interface ContentAttachmentIndependentReviewAudit {
+  wordEvidence?: ContentAttachmentWordEvidenceSnapshot;
   coverage?: ContentAttachmentReviewCoverage;
   systemPrompt: string;
   userPrompt: string;
@@ -55,6 +68,7 @@ export interface ContentAttachmentIndependentReviewAudit {
   callAttempts: LLMCallAttempt[];
 }
 export interface ContentAttachmentReviewFinding {
+  wordEvidence?: ContentAttachmentWordRangeEvidence[];
   excerptRef: string;
   inventoryRef: string;
   candidateRef: string;
@@ -71,6 +85,7 @@ export function createContentAttachmentIndependentReviewRequest(
   input: Input,
   selection: ContentAttachmentRequiredResponse,
   options: {
+    wordEvidence?: boolean;
     sourceGroundedCoverage?: boolean;
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
@@ -130,31 +145,63 @@ export function createContentAttachmentIndependentReviewRequest(
       rows.has(a[1]),
     );
   }
+  const wordEvidence = options.wordEvidence
+    ? createContentAttachmentWordEvidence(
+        input,
+        new Set(evidence.excerpts.map((e: [string]) => e[0])),
+      )
+    : undefined;
+  if (wordEvidence) {
+    evidence.excerpts = evidence.excerpts.map((e: unknown[]) => [
+      ...e.slice(0, 4),
+      contentAttachmentWordRows(
+        wordEvidence.sources.find((s) => s.ref === e[0])!,
+      ),
+    ]);
+    evidence.readOnlyContext = wordEvidence.sources
+      .filter((s) => s.kind === 'read_only')
+      .map((s) => [
+        s.ref,
+        input.payload.current.readOnlyContext.find(
+          (r) => r[0] === s.originalRef,
+        )![1],
+        contentAttachmentWordRows(s),
+      ]);
+    evidence.excerptColumns = ['ref', 'kind', 'contexts', 'tableCell', 'words'];
+    evidence.readOnlyContextColumns = ['ref', 'contexts', 'words'];
+    evidence.wordColumns = ['ref', 'literalSurfaceUnit'];
+  }
   const context = z
     .enum(input.codeMap.excerpts.map((e) => e.ref) as [string, ...string[]])
     .meta({ id: 'IndependentContext' });
   const refs = [...new Set(required.flatMap((r) => r.candidateRefs))];
+  const wordRanges = z
+    .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
+    .meta({ id: 'IndependentWordRanges' });
   const members = new Map(
-    refs.map((ref, index) => [
-      ref,
-      z
-        .strictObject({
-          attachment,
-          relationshipSubject,
-          contextRef: context,
-          candidateEvidenceRefs: z
-            .array(
-              z.enum(
-                input.citations
-                  .filter((c) => c.candidateRef === ref)
-                  .map((c) => c.ref) as [string, ...string[]],
-              ),
-            )
-            .min(1),
-          reason: z.string().min(1),
-        })
-        .meta({ id: `IndependentMember${index + 1}` }),
-    ]),
+    refs.map((ref, index) => {
+      const member = z.strictObject({
+        attachment,
+        relationshipSubject,
+        contextRef: context,
+        candidateEvidenceRefs: z
+          .array(
+            z.enum(
+              input.citations
+                .filter((c) => c.candidateRef === ref)
+                .map((c) => c.ref) as [string, ...string[]],
+            ),
+          )
+          .min(1),
+        reason: z.string().min(1),
+      });
+      return [
+        ref,
+        (wordEvidence ? member.extend({ wordRanges }) : member).meta({
+          id: `IndependentMember${index + 1}`,
+        }),
+      ];
+    }),
   );
   const schema: z.ZodType<ContentAttachmentIndependentReviewResponse> =
     z.strictObject({
@@ -174,6 +221,7 @@ export function createContentAttachmentIndependentReviewRequest(
   const systemPrompt =
     'Independently judge every required original excerpt/inventory member from the supplied original evidence. Earlier model selections are intentionally withheld. No inclusion or exclusion is predetermined by an earlier decision or by the schema. Return every review key and every candidate member key. The registration pool is a review baseline, not an automatically eligible set. For EACH member decide attachment as included, excluded or unresolved, then independently decide relationshipSubject as alternative or not_alternative. Included means the unchanged E directly describes this source-established member, including supported collective evidence; unresolved attachment means genuinely ambiguous recipient identity. Alternative means a genuinely unresolved subject of a relationship clause, not uncertain classification or uncertain existence of the relationship. Included attachment and alternative relationship subject may coexist on the SAME candidate. A relationship participant with resolved identity requires no subject alternatives.\nFirst establish the bounded original investigation set through the body, original rows and candidate evidence, then apply the CURRENT clause period, investigation, location and type qualifiers. Preserve every directly described verified member of a collective even without repeated numbers, including original tentative classifications. Candidate row context establishes identity and membership; it does not automatically describe the row owner or propagate an excerpt to all trenches, ancestors or same-type records. A directly described area is an additional recipient and never replaces a supported feature set. Collective evidence does not prove physical identity or every member participation in a later relationship. Evaluate all substantive clauses of the indivisible E: later uncertainty about one relationship subject does not erase an earlier collective description. Keep genuine role alternatives separately from collective recipients, without adding unsupported comparisons or previous-investigation objects. The lack of an individual identifier is not itself a reason to exclude a verified member of a collective.\nGive contextRef equal to the current E and one or more of the SAME candidate provided K evidence IDs for EVERY disposition, plus a concise Korean explanation grounded in that source context. Apply these grounds to qualifier-excluded candidates too; do not justify exclusion from an earlier model shortlist or fabricate absent evidence. If original membership or identity cannot actually be established, state that uncertainty rather than guessing. E and K select immutable original text and exact locations: never reproduce, normalize or invent source quotations, merge records or alter source boundaries. Code preserves both original responses and computes disagreement separately; your judgment is not required to agree with another response.';
   return {
+    wordEvidence,
     coverage: options.sourceGroundedCoverage
       ? {
           version: 'source-grounded.v1' as const,
@@ -224,7 +272,8 @@ export function createContentAttachmentIndependentReviewRequest(
         : '') +
       (options.preserveTentativeMembership
         ? '\n' + CONTENT_ATTACHMENT_TENTATIVE_MEMBERSHIP_POLICY
-        : ''),
+        : '') +
+      (wordEvidence ? '\n' + CONTENT_ATTACHMENT_WORD_EVIDENCE_POLICY : ''),
     userPrompt: JSON.stringify(evidence),
   };
 }
@@ -235,6 +284,7 @@ export function inspectContentAttachmentIndependentReview(
   selection: ContentAttachmentRequiredResponse,
   audit?: ContentAttachmentIndependentReviewAudit,
   options: {
+    wordEvidence?: boolean;
     sourceGroundedCoverage?: boolean;
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
@@ -260,6 +310,9 @@ export function inspectContentAttachmentIndependentReview(
     selection,
     {
       ...options,
+      wordEvidence:
+        options.wordEvidence ||
+        audit?.wordEvidence?.version === 'word-ranges.v1',
       sourceGroundedCoverage:
         options.sourceGroundedCoverage ||
         audit?.coverage?.version === 'source-grounded.v1',
@@ -270,6 +323,8 @@ export function inspectContentAttachmentIndependentReview(
   const parsed = request.schema.safeParse(audit?.rawResponse);
   if (
     !parsed.success ||
+    JSON.stringify(audit?.wordEvidence) !==
+      JSON.stringify(request.wordEvidence) ||
     audit!.systemPrompt !== request.systemPrompt ||
     audit!.userPrompt !== request.userPrompt
   )
@@ -308,6 +363,29 @@ export function inspectContentAttachmentIndependentReview(
         issues.push(`Invalid independent review provenance: ${r.key}:${ref}`);
         continue;
       }
+      let wordEvidence: ContentAttachmentWordRangeEvidence[] | undefined;
+      if (request.wordEvidence) {
+        try {
+          wordEvidence = review.wordRanges!.map((range) =>
+            resolveContentAttachmentWordRange(
+              request.wordEvidence!,
+              range,
+              r.excerptRef,
+            ),
+          );
+          if (new Set(review.wordRanges).size !== review.wordRanges!.length)
+            throw new Error('Repeated word range');
+          if (
+            (review.attachment !== 'excluded' ||
+              review.relationshipSubject === 'alternative') &&
+            !wordEvidence.some((range) => range.basis === 'direct')
+          )
+            throw new Error('Missing current-excerpt word evidence');
+        } catch {
+          issues.push(`Invalid independent word evidence: ${r.key}:${ref}`);
+          continue;
+        }
+      }
       const original = {
         assigned: assigned.includes(ref),
         unresolved: unresolved.includes(ref),
@@ -322,6 +400,7 @@ export function inspectContentAttachmentIndependentReview(
       )
         changedFields.push('unresolved');
       findings.push({
+        ...(wordEvidence ? { wordEvidence } : {}),
         excerptRef: r.excerptRef,
         inventoryRef: r.inventoryRef,
         candidateRef: ref,

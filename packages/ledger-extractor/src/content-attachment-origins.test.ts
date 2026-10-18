@@ -358,6 +358,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     current,
     output,
     {
+      wordEvidence: true,
       sourceGroundedCoverage: true,
       includeBodyContext: true,
       qualifyBeforeIdentity: true,
@@ -382,6 +383,7 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
           r.candidateRefs.map((ref) => [
             ref,
             {
+              wordRanges: ref === 'object-a' ? [`${r.excerptRef}:W1-W1`] : [],
               attachment: ref === 'object-a' ? 'included' : 'excluded',
               relationshipSubject: 'not_alternative',
               contextRef: r.excerptRef,

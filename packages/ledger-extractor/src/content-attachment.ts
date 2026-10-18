@@ -1306,6 +1306,7 @@ export async function attachContentUnit(
     input,
     output,
     {
+      wordEvidence: true,
       sourceGroundedCoverage: true,
       includeBodyContext: true,
       qualifyBeforeIdentity: true,
@@ -1343,6 +1344,7 @@ export async function attachContentUnit(
       },
     });
     independentReview = {
+      wordEvidence: reviewRequest.wordEvidence,
       coverage: reviewRequest.coverage,
       systemPrompt: reviewRequest.systemPrompt,
       userPrompt: reviewRequest.userPrompt,

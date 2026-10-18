@@ -1378,6 +1378,8 @@ describe('bounded content attachment', () => {
       compiled,
       response,
       {
+        wordEvidence: true,
+        sourceGroundedCoverage: true,
         includeBodyContext: true,
         qualifyBeforeIdentity: true,
         reconcileRecipientRefs: true,
@@ -1401,6 +1403,7 @@ describe('bounded content attachment', () => {
             r.candidateRefs.map((ref) => [
               ref,
               {
+                wordRanges: [],
                 attachment: 'excluded',
                 relationshipSubject: 'not_alternative',
                 contextRef: r.excerptRef,

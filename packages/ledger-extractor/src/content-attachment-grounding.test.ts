@@ -727,10 +727,11 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         checkClauseGrounds: true,
         gateQualifierStage: true,
         preserveTentativeMembership: true,
+        wordEvidence: true,
         sourceGroundedCoverage: true,
       },
     ),
-    review = request.schema.parse({
+    legacyReview = {
       reviews: {
         'E1:U1': Object.fromEntries(
           ['opaque-nine', 'opaque-two'].map((ref, i) => [
@@ -759,7 +760,27 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
           'opaque-two': independentMember('included', 'alternative', 'K2.1'),
         },
       },
-    });
+    };
+  const review = request.schema.parse({
+    reviews: Object.fromEntries(
+      Object.entries(legacyReview.reviews).map(([key, members]) => [
+        key,
+        Object.fromEntries(
+          Object.entries(members).map(([ref, answer]) => [
+            ref,
+            {
+              ...answer,
+              wordRanges:
+                answer.attachment === 'included' ||
+                answer.relationshipSubject === 'alternative'
+                  ? [`${key.split(':')[0]}:W1-W1`]
+                  : [],
+            },
+          ]),
+        ),
+      ]),
+    ),
+  });
   const usage = {
     component: 'test',
     phase: 'test',
@@ -2777,4 +2798,150 @@ test('expands a proposed singleton to its original inventory without claiming un
       sourceGroundedCoverage: true,
     }).coverage,
   ).toEqual({ version: 'source-grounded.v1', referentMatches: [] });
+});
+
+test('grounds independent word ranges in immutable current excerpts and read-only context, replaying a separate evidence version', async () => {
+  const { plan, unit } = fixture();
+  unit.readOnlyContext = [
+    {
+      resourceKey: '/chapters/0/textBlocks/0',
+      text: 'Area work. Period A features.',
+    },
+  ];
+  const input = createContentAttachmentGroundedInput(plan, unit),
+    selection = frozenSelection();
+  const options = {
+    includeBodyContext: true,
+    crossChapterAreas: true,
+    sourceGroundedCoverage: true,
+    reviewTableWork: true,
+  };
+  const before = structuredClone({ input, selection });
+  const legacy = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    options,
+  );
+  const request = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { ...options, wordEvidence: true },
+  );
+  expect(request.required).toEqual(legacy.required);
+  expect(request.wordEvidence?.version).toBe('word-ranges.v1');
+  expect(request.systemPrompt).toContain(
+    'For EACH candidate independently inspect ALL substantive clauses/actions',
+  );
+  expect(request.systemPrompt.startsWith(legacy.systemPrompt)).toBe(true);
+  const payload = JSON.parse(request.userPrompt);
+  expect(payload.excerpts[0][4]).toEqual([
+    ['W1', 'Area'],
+    ['W2', 'work.'],
+  ]);
+  expect(payload.readOnlyContext[0][0]).toBe('X1');
+  expect(payload.candidates).toEqual(JSON.parse(legacy.userPrompt).candidates);
+  expect(payload).not.toHaveProperty('decisions');
+  const reviews = Object.fromEntries(
+    request.required.map((r) => [
+      r.key,
+      Object.fromEntries(
+        r.candidateRefs.map((ref) => [
+          ref,
+          {
+            attachment: 'excluded',
+            relationshipSubject: 'not_alternative',
+            contextRef: r.excerptRef,
+            candidateEvidenceRefs: [
+              input.citations.find((c) => c.candidateRef === ref)!.ref,
+            ],
+            reason: 'Independent source judgment',
+            wordRanges: [] as string[],
+          },
+        ]),
+      ),
+    ]),
+  );
+  reviews['E1:B1'].area.attachment = 'included';
+  reviews['E1:B1'].area.wordRanges = ['E1:W1-W2', 'E2:W1-W1', 'X1:W1-W2'];
+  reviews['E2:U1']['opaque-nine'].relationshipSubject = 'alternative';
+  reviews['E2:U1']['opaque-nine'].wordRanges = ['E2:W1-W1'];
+  const audit = {
+    coverage: request.coverage,
+    wordEvidence: request.wordEvidence,
+    systemPrompt: request.systemPrompt,
+    userPrompt: request.userPrompt,
+    rawResponse: request.schema.parse({ reviews }),
+    usage: {} as never,
+    callAttempts: [],
+  };
+  const inspected = inspectContentAttachmentIndependentReview(
+    input,
+    selection,
+    audit,
+    options,
+  );
+  expect(inspected.issues).toEqual([]);
+  expect(
+    inspected.findings
+      .find((f) => f.excerptRef === 'E1' && f.candidateRef === 'area')
+      ?.wordEvidence?.map((r) => [r.basis, r.text]),
+  ).toEqual([
+    ['direct', 'Area work.'],
+    ['context', 'Period'],
+    ['context', 'Area work.'],
+  ]);
+  const format = await Output.object({ schema: request.schema }).responseFormat;
+  expect(format?.type).toBe('json');
+  const missing = structuredClone(audit.rawResponse);
+  delete missing.reviews['E1:B1'].area.wordRanges;
+  expect(request.schema.safeParse(missing).success).toBe(false);
+  for (const ranges of [
+    [],
+    ['X1:W1-W2'],
+    ['E99:W1-W1'],
+    ['E1:W2-W1'],
+    ['E1:W1-W99'],
+    ['E1:W1-W1', 'E1:W1-W1'],
+  ]) {
+    const invalid = structuredClone(audit);
+    invalid.rawResponse.reviews['E1:B1'].area.wordRanges = ranges;
+    expect(
+      inspectContentAttachmentIndependentReview(
+        input,
+        selection,
+        invalid,
+        options,
+      ).issues,
+    ).toContain('Invalid independent word evidence: E1:B1:area');
+  }
+  for (const attachment of ['unresolved', 'excluded'] as const) {
+    const invalid = structuredClone(audit);
+    invalid.rawResponse.reviews['E1:B1'].area.attachment = attachment;
+    invalid.rawResponse.reviews['E1:B1'].area.relationshipSubject =
+      'alternative';
+    invalid.rawResponse.reviews['E1:B1'].area.wordRanges = [];
+    expect(
+      inspectContentAttachmentIndependentReview(
+        input,
+        selection,
+        invalid,
+        options,
+      ).issues.length,
+    ).toBeGreaterThan(0);
+  }
+  const forged = structuredClone(audit);
+  forged.wordEvidence!.sources[0].words[0].charEnd++;
+  expect(
+    inspectContentAttachmentIndependentReview(input, selection, forged, options)
+      .issues.length,
+  ).toBeGreaterThan(0);
+  expect(
+    inspectContentAttachmentIndependentReview(
+      input,
+      selection,
+      { ...audit, wordEvidence: undefined },
+      { ...options, wordEvidence: true },
+    ).issues.length,
+  ).toBeGreaterThan(0);
+  expect({ input, selection }).toEqual(before);
 });

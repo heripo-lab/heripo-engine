@@ -131,3 +131,8 @@ export type {
   ContentAttachmentIndependentReviewResponse,
   ContentAttachmentReviewFinding,
 } from './content-attachment-independent-review';
+
+export type {
+  ContentAttachmentWordEvidenceSnapshot,
+  ContentAttachmentWordRangeEvidence,
+} from './content-attachment-word-evidence';
