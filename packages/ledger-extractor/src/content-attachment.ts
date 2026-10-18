@@ -1306,6 +1306,7 @@ export async function attachContentUnit(
     input,
     output,
     {
+      sourceGroundedCoverage: true,
       includeBodyContext: true,
       qualifyBeforeIdentity: true,
       reconcileRecipientRefs: true,
@@ -1342,6 +1343,7 @@ export async function attachContentUnit(
       },
     });
     independentReview = {
+      coverage: reviewRequest.coverage,
       systemPrompt: reviewRequest.systemPrompt,
       userPrompt: reviewRequest.userPrompt,
       rawResponse: review.output,

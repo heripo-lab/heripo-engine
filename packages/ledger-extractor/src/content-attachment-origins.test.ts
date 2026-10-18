@@ -358,9 +358,20 @@ test('sends compact origin context, replays v54 exactly and retains model decisi
     current,
     output,
     {
+      sourceGroundedCoverage: true,
       includeBodyContext: true,
       qualifyBeforeIdentity: true,
       reconcileRecipientRefs: true,
+      crossChapterAreas: true,
+      preserveAreaWork: true,
+      preserveAreaResults: true,
+      boundAreaResultRecipients: true,
+      reviewTableWork: true,
+      traceAreaRecording: true,
+      boundAreaRecording: true,
+      checkClauseGrounds: true,
+      gateQualifierStage: true,
+      preserveTentativeMembership: true,
     },
   );
   const reviewOutput = reviewRequest.schema.parse({

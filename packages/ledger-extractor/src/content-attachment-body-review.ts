@@ -2,6 +2,8 @@ import type { createContentAttachmentGroundedInput } from './content-attachment-
 import type { createContentAttachmentInventoryReviewRequest } from './content-attachment-inventory-review';
 import type { ContentAttachmentRequiredResponse } from './content-attachment-response';
 
+import { retrieveContentAttachmentReviewReferents } from './content-attachment-review-retrieval';
+
 type Input = ReturnType<typeof createContentAttachmentGroundedInput>;
 type Required = ReturnType<
   typeof createContentAttachmentInventoryReviewRequest
@@ -55,6 +57,7 @@ export function createContentAttachmentBodyReviewCoverage(
   inventoryRequired: Required[],
   selection?: ContentAttachmentRequiredResponse,
   includeTableCells = false,
+  sourceGroundedCoverage = false,
 ) {
   const body = input.payload.current.excerpts.filter((e) => e[1] === 'text');
   const dataRefs = new Set(
@@ -67,34 +70,92 @@ export function createContentAttachmentBodyReviewCoverage(
       : [],
   );
   const data = input.payload.current.excerpts.filter((e) => dataRefs.has(e[0]));
-  const contexts = new Set([...body, ...data].flatMap((e) => e[2]));
-  const tableInventories = includeTableCells
-    ? input.inventories.filter(
-        (inventory) =>
-          inventoryRequired.some((r) => r.inventoryRef === inventory.ref) ||
-          input.payload.originTables
-            .find((t) => t.ref === inventory.ref)!
-            .contexts.some((c) => contexts.has(c)) ||
-          input.codeMap.originTables.some(
-            (origin) =>
-              origin.ref === inventory.ref &&
-              input.codeMap.tables.some(
-                (current) => current.table.key === origin.table.key,
-              ),
-          ),
+  const current = [...body, ...data];
+  const contexts = new Set(current.flatMap((e) => e[2]));
+  const referentMatches = sourceGroundedCoverage
+    ? retrieveContentAttachmentReviewReferents(input).filter((m) =>
+        current.some((e) => e[0] === m.excerptRef),
       )
     : [];
-  const tableRequired: ContextReviewSlot[] = data.flatMap((e) =>
-    tableInventories.map((inventory) => ({
-      key: `${e[0]}:${inventory.ref}`,
-      excerptRef: e[0],
-      inventoryRef: inventory.ref,
-      candidateRefs: inventory.candidateRefs,
-      selected: [],
-      basis: 'inventory' as const,
-    })),
+  const proposed = new Set(
+    (sourceGroundedCoverage ? current : body).flatMap((e) => {
+      const decision = selection?.decisions[e[0]];
+      return decision?.status === 'assigned'
+        ? [
+            ...decision.candidateRefs,
+            ...(decision.unresolved?.candidateRefs ?? []),
+          ]
+        : decision?.status === 'unresolved'
+          ? decision.candidateRefs
+          : [];
+    }),
   );
-  const allInventoryRequired = [...inventoryRequired, ...tableRequired];
+  const sourceRefs = new Set([
+    ...proposed,
+    ...referentMatches.map((m) => m.candidateRef),
+  ]);
+  const tableInventories =
+    includeTableCells || sourceGroundedCoverage
+      ? input.inventories.filter(
+          (inventory) =>
+            inventoryRequired.some((r) => r.inventoryRef === inventory.ref) ||
+            input.payload.originTables
+              .find((t) => t.ref === inventory.ref)!
+              .contexts.some((c) => contexts.has(c)) ||
+            input.codeMap.originTables.some(
+              (origin) =>
+                origin.ref === inventory.ref &&
+                input.codeMap.tables.some(
+                  (current) => current.table.key === origin.table.key,
+                ),
+            ) ||
+            (sourceGroundedCoverage &&
+              inventory.candidateRefs.some((ref) => sourceRefs.has(ref))),
+        )
+      : [];
+  const tableRequired: ContextReviewSlot[] = (
+    sourceGroundedCoverage ? current : data
+  ).flatMap((e) =>
+    tableInventories
+      .filter((inventory) => {
+        if (!sourceGroundedCoverage || dataRefs.has(e[0])) return true;
+        const decision = selection?.decisions[e[0]];
+        const proposedHere =
+          decision?.status === 'assigned'
+            ? [
+                ...decision.candidateRefs,
+                ...(decision.unresolved?.candidateRefs ?? []),
+              ]
+            : decision?.status === 'unresolved'
+              ? decision.candidateRefs
+              : [];
+        return (
+          input.payload.originTables
+            .find((t) => t.ref === inventory.ref)!
+            .contexts.some((context) => e[2].includes(context)) ||
+          inventory.candidateRefs.some(
+            (ref) =>
+              proposedHere.includes(ref) ||
+              referentMatches.some(
+                (m) => m.excerptRef === e[0] && m.candidateRef === ref,
+              ),
+          )
+        );
+      })
+      .map((inventory) => ({
+        key: `${e[0]}:${inventory.ref}`,
+        excerptRef: e[0],
+        inventoryRef: inventory.ref,
+        candidateRefs: inventory.candidateRefs,
+        selected: [],
+        basis: 'inventory' as const,
+      })),
+  );
+  const inventorySlots = new Map(inventoryRequired.map((r) => [r.key, r]));
+  for (const required of tableRequired)
+    if (!inventorySlots.has(required.key))
+      inventorySlots.set(required.key, required);
+  const allInventoryRequired = [...inventorySlots.values()];
   for (const r of allInventoryRequired)
     for (const context of input.payload.originTables.find(
       (t) => t.ref === r.inventoryRef,
@@ -109,17 +170,7 @@ export function createContentAttachmentBodyReviewCoverage(
           ...input.payload.candidates
             .filter((r) => r[1] === 'area')
             .map((r) => r[0]),
-          ...body.flatMap((e) => {
-            const decision = selection.decisions[e[0]];
-            return decision.status === 'assigned'
-              ? [
-                  ...decision.candidateRefs,
-                  ...(decision.unresolved?.candidateRefs ?? []),
-                ]
-              : decision.status === 'unresolved'
-                ? decision.candidateRefs
-                : [];
-          }),
+          ...proposed,
         ]
       : [],
   );
@@ -138,9 +189,43 @@ export function createContentAttachmentBodyReviewCoverage(
     context,
     candidateRefs: [...refs],
   }));
+  const existingRefs = new Set([
+    ...inventoryMembers,
+    ...pools.flatMap((p) => p.candidateRefs),
+  ]);
+  const retrieved = new Map<
+    string,
+    {
+      context: string;
+      candidateRefs: string[];
+      excerpts: string[];
+    }
+  >();
+  for (const e of current) {
+    const matches = referentMatches.filter(
+      (m) => m.excerptRef === e[0] && !existingRefs.has(m.candidateRef),
+    );
+    for (const context of new Set(matches.map((m) => m.contextRef))) {
+      const refs = [
+        ...new Set(
+          matches
+            .filter((m) => m.contextRef === context)
+            .map((m) => m.candidateRef),
+        ),
+      ];
+      const key = JSON.stringify([context, refs]);
+      if (!retrieved.has(key))
+        retrieved.set(key, { context, candidateRefs: refs, excerpts: [] });
+      retrieved.get(key)!.excerpts.push(e[0]);
+    }
+  }
+  const retrievedPools = [...retrieved.values()].map((p, i) => ({
+    ...p,
+    ref: `B${pools.length + i + 1}`,
+  }));
   const required: ContextReviewSlot[] = [
     ...allInventoryRequired.map((r) => ({ ...r, basis: 'inventory' as const })),
-    ...[...body, ...data].flatMap((e) =>
+    ...current.flatMap((e) =>
       pools.map((pool) => ({
         key: `${e[0]}:${pool.ref}`,
         excerptRef: e[0],
@@ -150,6 +235,23 @@ export function createContentAttachmentBodyReviewCoverage(
         basis: 'body_context' as const,
       })),
     ),
+    ...retrievedPools.flatMap((pool) =>
+      pool.excerpts.map((excerptRef) => ({
+        key: `${excerptRef}:${pool.ref}`,
+        excerptRef,
+        inventoryRef: pool.ref,
+        candidateRefs: pool.candidateRefs,
+        selected: [],
+        basis: 'body_context' as const,
+      })),
+    ),
   ];
-  return { required, pools };
+  return {
+    required,
+    pools: [
+      ...pools,
+      ...retrievedPools.map(({ excerpts: _, ...pool }) => pool),
+    ],
+    referentMatches,
+  };
 }

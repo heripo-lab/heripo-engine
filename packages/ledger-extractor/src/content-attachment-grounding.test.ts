@@ -727,10 +727,24 @@ test('runs immutable selection then a mandatory bounded review, checkpoints dist
         checkClauseGrounds: true,
         gateQualifierStage: true,
         preserveTentativeMembership: true,
+        sourceGroundedCoverage: true,
       },
     ),
     review = request.schema.parse({
       reviews: {
+        'E1:U1': Object.fromEntries(
+          ['opaque-nine', 'opaque-two'].map((ref, i) => [
+            ref,
+            {
+              ...independentMember(
+                'excluded',
+                'not_alternative',
+                `K${i + 1}.1`,
+              ),
+              contextRef: 'E1',
+            },
+          ]),
+        ),
         'E1:B1': {
           area: {
             ...independentMember('included', 'not_alternative', 'K3.1'),
@@ -2576,4 +2590,191 @@ test('shares tentative inventory membership and separate attachment/role criteri
       .issues,
   ).toHaveLength(1);
   expect({ input, selection }).toEqual(before);
+});
+
+test('retrieves cross-chapter review alternatives from source names and complete source-linked inventories without initial semantic choices', () => {
+  const { plan, unit } = fixture();
+  for (const [ref, name] of [
+    ['alternative-campaign', 'Period A'],
+    ['unrelated', 'Stone bridge'],
+  ]) {
+    plan.registry.push({
+      ...structuredClone(plan.registry[2]),
+      ref,
+      groupId: ref,
+      recordKind: 'feature',
+      mentions: [
+        {
+          ...structuredClone(plan.registry[2].mentions[0]),
+          candidateId: ref,
+          sourceName: name,
+          chapterPath: [
+            { id: 'other-campaign', originTitle: 'Other campaign' },
+          ],
+        },
+      ],
+    });
+  }
+  const input = createContentAttachmentGroundedInput(plan, unit);
+  input.payload.current.bodyBlocks = [['bounded', ['E2']]];
+  const selection: ContentAttachmentRequiredResponse = {
+    decisions: {
+      E1: { status: 'ignored', reason: 'First answer' },
+      E2: { status: 'ignored', reason: 'First answer' },
+    },
+  };
+  const before = structuredClone({ input, selection });
+  const options = { includeBodyContext: true, crossChapterAreas: true };
+  const legacy = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    options,
+  );
+  const request = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { ...options, sourceGroundedCoverage: true },
+  );
+  expect(request.systemPrompt).toBe(legacy.systemPrompt);
+  expect(request.coverage).toEqual({
+    version: 'source-grounded.v1',
+    referentMatches: [
+      {
+        excerptRef: 'E1',
+        contextExcerptRefs: ['E1'],
+        candidateRef: 'area',
+        contextRef: 'C1',
+        sourceName: 'area',
+      },
+      {
+        excerptRef: 'E2',
+        contextExcerptRefs: ['E2'],
+        candidateRef: 'alternative-campaign',
+        contextRef: 'C2',
+        sourceName: 'Period A',
+      },
+    ],
+  });
+  expect(
+    request.required
+      .filter((r) => r.inventoryRef === 'U1')
+      .map((r) => [r.excerptRef, r.candidateRefs]),
+  ).toEqual([
+    ['E1', ['opaque-nine', 'opaque-two']],
+    ['E2', ['opaque-nine', 'opaque-two']],
+  ]);
+  expect(
+    request.required
+      .filter((r) => r.candidateRefs.includes('alternative-campaign'))
+      .map((r) => r.excerptRef),
+  ).toEqual(['E2']);
+  expect(
+    request.required.some((r) => r.candidateRefs.includes('unrelated')),
+  ).toBe(false);
+  const payload = JSON.parse(request.userPrompt);
+  expect(payload).not.toHaveProperty('decisions');
+  expect(
+    payload.candidates.some((r: string[]) => r[0] === 'alternative-campaign'),
+  ).toBe(true);
+  const rawResponse = {
+    reviews: Object.fromEntries(
+      request.required.map((r) => [
+        r.key,
+        Object.fromEntries(
+          r.candidateRefs.map((ref) => [
+            ref,
+            {
+              attachment: 'excluded',
+              relationshipSubject: 'not_alternative',
+              contextRef: r.excerptRef,
+              candidateEvidenceRefs: [
+                input.citations.find((c) => c.candidateRef === ref)!.ref,
+              ],
+              reason:
+                'Independent source comparison, not a predetermined inclusion',
+            },
+          ]),
+        ),
+      ]),
+    ),
+  };
+  expect(request.schema.safeParse(rawResponse).success).toBe(true);
+  const missing = structuredClone(rawResponse);
+  const extra = request.required.find((r) =>
+    r.candidateRefs.includes('alternative-campaign'),
+  )!;
+  delete missing.reviews[extra.key]['alternative-campaign'];
+  expect(request.schema.safeParse(missing).success).toBe(false);
+  const inspected = inspectContentAttachmentIndependentReview(
+    input,
+    selection,
+    {
+      coverage: request.coverage,
+      systemPrompt: request.systemPrompt,
+      userPrompt: request.userPrompt,
+      rawResponse: request.schema.parse(rawResponse),
+      usage: {} as never,
+      callAttempts: [],
+    },
+    options,
+  );
+  expect(inspected.issues).toEqual([]);
+  expect(
+    inspected.findings.some((f) => f.candidateRef === 'alternative-campaign'),
+  ).toBe(true);
+  expect({ input, selection }).toEqual(before);
+  input.payload.current.bodyBlocks = [['bounded', ['E1', 'E2']]];
+  const continuation = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { ...options, sourceGroundedCoverage: true },
+  );
+  expect(
+    continuation.required
+      .filter((r) => r.candidateRefs.includes('alternative-campaign'))
+      .map((r) => r.excerptRef),
+  ).toEqual(['E1', 'E2']);
+});
+
+test('expands a proposed singleton to its original inventory without claiming unrelated passages describe that remote inventory', () => {
+  const { plan, unit } = fixture();
+  const input = createContentAttachmentGroundedInput(plan, unit);
+  input.payload.originTables[0].contexts = ['remote-table'];
+  const selection: ContentAttachmentRequiredResponse = {
+    decisions: {
+      E1: {
+        status: 'unresolved',
+        candidateRefs: ['opaque-nine'],
+        reason: 'Uncertain original choice',
+      },
+      E2: {
+        status: 'assigned',
+        candidateRefs: ['area'],
+        reason: 'Independent body choice',
+        unresolved: null,
+      },
+    },
+  };
+  const options = { includeBodyContext: true, crossChapterAreas: true };
+  const before = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    options,
+  );
+  const after = createContentAttachmentIndependentReviewRequest(
+    input,
+    selection,
+    { ...options, sourceGroundedCoverage: true },
+  );
+  expect(before.required.some((r) => r.inventoryRef === 'U1')).toBe(false);
+  expect(
+    after.required
+      .filter((r) => r.inventoryRef === 'U1')
+      .map((r) => [r.excerptRef, r.candidateRefs]),
+  ).toEqual([['E1', ['opaque-nine', 'opaque-two']]]);
+  expect(
+    createContentAttachmentIndependentReviewRequest(input, selection, {
+      sourceGroundedCoverage: true,
+    }).coverage,
+  ).toEqual({ version: 'source-grounded.v1', referentMatches: [] });
 });

@@ -3,6 +3,7 @@ import type { ExtendedTokenUsage, LLMCallAttempt } from '@heripo/shared';
 import type { CandidateEvidence } from './candidate-discovery';
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
 import type { ContentAttachmentRequiredResponse } from './content-attachment-response';
+import type { ReviewReferentMatch } from './content-attachment-review-retrieval';
 
 import { z } from 'zod';
 
@@ -41,7 +42,12 @@ export interface ContentAttachmentIndependentMember {
 export interface ContentAttachmentIndependentReviewResponse {
   reviews: Record<string, Record<string, ContentAttachmentIndependentMember>>;
 }
+export interface ContentAttachmentReviewCoverage {
+  version: 'source-grounded.v1';
+  referentMatches: ReviewReferentMatch[];
+}
 export interface ContentAttachmentIndependentReviewAudit {
+  coverage?: ContentAttachmentReviewCoverage;
   systemPrompt: string;
   userPrompt: string;
   rawResponse: ContentAttachmentIndependentReviewResponse;
@@ -65,6 +71,7 @@ export function createContentAttachmentIndependentReviewRequest(
   input: Input,
   selection: ContentAttachmentRequiredResponse,
   options: {
+    sourceGroundedCoverage?: boolean;
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
     reconcileRecipientRefs?: boolean;
@@ -92,6 +99,7 @@ export function createContentAttachmentIndependentReviewRequest(
         baseline.required,
         options.crossChapterAreas ? selection : undefined,
         options.reviewTableWork,
+        options.sourceGroundedCoverage,
       )
     : null;
   const required = coverage?.required ?? baseline.required;
@@ -166,6 +174,12 @@ export function createContentAttachmentIndependentReviewRequest(
   const systemPrompt =
     'Independently judge every required original excerpt/inventory member from the supplied original evidence. Earlier model selections are intentionally withheld. No inclusion or exclusion is predetermined by an earlier decision or by the schema. Return every review key and every candidate member key. The registration pool is a review baseline, not an automatically eligible set. For EACH member decide attachment as included, excluded or unresolved, then independently decide relationshipSubject as alternative or not_alternative. Included means the unchanged E directly describes this source-established member, including supported collective evidence; unresolved attachment means genuinely ambiguous recipient identity. Alternative means a genuinely unresolved subject of a relationship clause, not uncertain classification or uncertain existence of the relationship. Included attachment and alternative relationship subject may coexist on the SAME candidate. A relationship participant with resolved identity requires no subject alternatives.\nFirst establish the bounded original investigation set through the body, original rows and candidate evidence, then apply the CURRENT clause period, investigation, location and type qualifiers. Preserve every directly described verified member of a collective even without repeated numbers, including original tentative classifications. Candidate row context establishes identity and membership; it does not automatically describe the row owner or propagate an excerpt to all trenches, ancestors or same-type records. A directly described area is an additional recipient and never replaces a supported feature set. Collective evidence does not prove physical identity or every member participation in a later relationship. Evaluate all substantive clauses of the indivisible E: later uncertainty about one relationship subject does not erase an earlier collective description. Keep genuine role alternatives separately from collective recipients, without adding unsupported comparisons or previous-investigation objects. The lack of an individual identifier is not itself a reason to exclude a verified member of a collective.\nGive contextRef equal to the current E and one or more of the SAME candidate provided K evidence IDs for EVERY disposition, plus a concise Korean explanation grounded in that source context. Apply these grounds to qualifier-excluded candidates too; do not justify exclusion from an earlier model shortlist or fabricate absent evidence. If original membership or identity cannot actually be established, state that uncertainty rather than guessing. E and K select immutable original text and exact locations: never reproduce, normalize or invent source quotations, merge records or alter source boundaries. Code preserves both original responses and computes disagreement separately; your judgment is not required to agree with another response.';
   return {
+    coverage: options.sourceGroundedCoverage
+      ? {
+          version: 'source-grounded.v1' as const,
+          referentMatches: coverage?.referentMatches ?? [],
+        }
+      : undefined,
     required,
     schema,
     systemPrompt:
@@ -221,6 +235,7 @@ export function inspectContentAttachmentIndependentReview(
   selection: ContentAttachmentRequiredResponse,
   audit?: ContentAttachmentIndependentReviewAudit,
   options: {
+    sourceGroundedCoverage?: boolean;
     includeBodyContext?: boolean;
     qualifyBeforeIdentity?: boolean;
     reconcileRecipientRefs?: boolean;
@@ -243,7 +258,12 @@ export function inspectContentAttachmentIndependentReview(
   const request = createContentAttachmentIndependentReviewRequest(
     input,
     selection,
-    options,
+    {
+      ...options,
+      sourceGroundedCoverage:
+        options.sourceGroundedCoverage ||
+        audit?.coverage?.version === 'source-grounded.v1',
+    },
   );
   if (!audit && !request.required.length)
     return { issues: [], findings: [], disagreements: [] };
