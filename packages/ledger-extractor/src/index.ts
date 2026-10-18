@@ -142,3 +142,15 @@ export type {
   ContentAttachmentSegmentDecision,
   ContentAttachmentSegmentFinding,
 } from './content-attachment-segment-review';
+
+export {
+  CONTENT_ATTACHMENT_SEGMENTATION_VERSION,
+  createContentAttachmentSegmentationRequest,
+  identifyContentAttachmentSegments,
+  inspectContentAttachmentSegmentation,
+} from './content-attachment-segmentation';
+export type {
+  ContentAttachmentSegmentationAudit,
+  ContentAttachmentSegmentationResponse,
+  ContentAttachmentIdentifiedSegment,
+} from './content-attachment-segmentation';
