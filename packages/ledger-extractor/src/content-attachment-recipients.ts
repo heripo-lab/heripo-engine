@@ -10,6 +10,7 @@ import type {
   ContentAttachmentSegmentationAudit,
 } from './content-attachment-segmentation';
 import type { ContentAttachmentWordRangeEvidence } from './content-attachment-word-evidence';
+import type { ContentAttachmentWorkScopeAssessment } from './content-attachment-work-scope';
 
 import { LLMCaller, createAuditedModel } from '@heripo/shared';
 import { z } from 'zod';
@@ -34,6 +35,11 @@ import {
   contentAttachmentWordRows,
   resolveContentAttachmentWordRange,
 } from './content-attachment-word-evidence';
+import {
+  CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY,
+  createContentAttachmentWorkScopeSchema,
+  inspectContentAttachmentWorkScope,
+} from './content-attachment-work-scope';
 
 type Input = ReturnType<typeof createContentAttachmentGroundedInput>;
 type CandidateRow = [
@@ -45,7 +51,7 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v7' as const;
+  'segment-recipients.v8' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
@@ -53,6 +59,7 @@ type RecipientVersion =
   | 'segment-recipients.v4'
   | 'segment-recipients.v5'
   | 'segment-recipients.v6'
+  | 'segment-recipients.v7'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -67,6 +74,7 @@ export interface ContentAttachmentRecipientAlternative extends ContentAttachment
   candidateRefs: string[];
 }
 export interface ContentAttachmentRecipientDecision extends Partial<ContentAttachmentCollectiveTrace> {
+  workScopeAssessment?: ContentAttachmentWorkScopeAssessment;
   attachments: ContentAttachmentRecipientAttachment[];
   recipientIdentityAlternatives: ContentAttachmentRecipientAlternative[];
   relationshipSubjectAlternatives: Array<
@@ -100,6 +108,7 @@ export interface ContentAttachmentResolvedRecipientSupport {
   originRowRefs: string[];
 }
 export interface ContentAttachmentRecipientFinding {
+  workScopeAssessment?: ContentAttachmentWorkScopeAssessment;
   collectiveTrace?: ContentAttachmentCollectiveTrace;
   inventoryContexts?: Record<string, ContentAttachmentInventoryContext>;
   segmentRef: string;
@@ -125,6 +134,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v4' &&
     version !== 'segment-recipients.v5' &&
     version !== 'segment-recipients.v6' &&
+    version !== 'segment-recipients.v7' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -237,6 +247,12 @@ export function createContentAttachmentRecipientRequest(
           .meta({ id: 'RecipientSubjectAlternative' }),
       ),
       reason: z.string().min(1),
+      ...(version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+        ? {
+            workScopeAssessment:
+              createContentAttachmentWorkScopeSchema(candidateRefs),
+          }
+        : {}),
       ...(version === 'segment-recipients.v1'
         ? {}
         : createContentAttachmentCollectiveTraceSchema(input)),
@@ -244,6 +260,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v4' ||
       version === 'segment-recipients.v5' ||
       version === 'segment-recipients.v6' ||
+      version === 'segment-recipients.v7' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -285,7 +302,12 @@ export function createContentAttachmentRecipientRequest(
                       CONTENT_ATTACHMENT_CURRENT_TYPE_BOUNDARY_POLICY +
                       (version === 'segment-recipients.v6'
                         ? ''
-                        : '\n' + CONTENT_ATTACHMENT_WORK_SCOPE_POLICY))),
+                        : '\n' +
+                          CONTENT_ATTACHMENT_WORK_SCOPE_POLICY +
+                          (version === 'segment-recipients.v7'
+                            ? ''
+                            : '\n' +
+                              CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY)))),
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -307,7 +329,8 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v3' ||
         audit.version === 'segment-recipients.v4' ||
         audit.version === 'segment-recipients.v5' ||
-        audit.version === 'segment-recipients.v6'
+        audit.version === 'segment-recipients.v6' ||
+        audit.version === 'segment-recipients.v7'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -417,6 +440,20 @@ export function inspectContentAttachmentRecipients(
           originRowRefs: support.originRowRefs,
         };
       };
+      if (audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION) {
+        try {
+          inspectContentAttachmentWorkScope(
+            decision.workScopeAssessment!,
+            attachmentRefs,
+            resolve,
+          );
+        } catch (error) {
+          issues.push(
+            `Invalid recipient work scope: ${segment.ref}: ${(error as Error).message}`,
+          );
+          continue;
+        }
+      }
       if (audit.version !== 'segment-recipients.v1')
         inspectContentAttachmentCollectiveTrace(
           input,
@@ -428,9 +465,13 @@ export function inspectContentAttachmentRecipients(
         );
       findings.push({
         segmentRef: segment.ref,
+        ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+          ? { workScopeAssessment: decision.workScopeAssessment }
+          : {}),
         ...(audit.version === 'segment-recipients.v4' ||
         audit.version === 'segment-recipients.v5' ||
         audit.version === 'segment-recipients.v6' ||
+        audit.version === 'segment-recipients.v7' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:

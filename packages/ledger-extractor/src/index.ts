@@ -181,3 +181,5 @@ export type {
   ContentAttachmentInventoryReview,
   ContentAttachmentInventoryContext,
 } from './content-attachment-inventory-reviews';
+
+export type { ContentAttachmentWorkScopeAssessment } from './content-attachment-work-scope';
