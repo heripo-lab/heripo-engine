@@ -2,6 +2,7 @@ import type { ExtendedTokenUsage, LLMCallAttempt } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateEvidence } from './candidate-discovery';
+import type { ContentAttachmentCollectiveTrace } from './content-attachment-collective-trace';
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
 import type {
   ContentAttachmentIdentifiedSegment,
@@ -12,6 +13,11 @@ import type { ContentAttachmentWordRangeEvidence } from './content-attachment-wo
 import { LLMCaller, createAuditedModel } from '@heripo/shared';
 import { z } from 'zod';
 
+import {
+  CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY,
+  createContentAttachmentCollectiveTraceSchema,
+  inspectContentAttachmentCollectiveTrace,
+} from './content-attachment-collective-trace';
 import { inspectContentAttachmentSegmentation } from './content-attachment-segmentation';
 import {
   CONTENT_ATTACHMENT_WORD_RANGE_PATTERN,
@@ -29,7 +35,9 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v1' as const;
+  'segment-recipients.v2' as const;
+type RecipientVersion =
+  'segment-recipients.v1' | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
   contextWordRanges: string[];
@@ -42,7 +50,7 @@ export interface ContentAttachmentRecipientAttachment extends ContentAttachmentR
 export interface ContentAttachmentRecipientAlternative extends ContentAttachmentRecipientSupport {
   candidateRefs: string[];
 }
-export interface ContentAttachmentRecipientDecision {
+export interface ContentAttachmentRecipientDecision extends Partial<ContentAttachmentCollectiveTrace> {
   attachments: ContentAttachmentRecipientAttachment[];
   recipientIdentityAlternatives: ContentAttachmentRecipientAlternative[];
   relationshipSubjectAlternatives: Array<
@@ -59,7 +67,7 @@ interface CandidateBinding {
   evidence: CandidateEvidence;
 }
 export interface ContentAttachmentRecipientAudit {
-  version: typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
+  version: RecipientVersion;
   segmentSnapshot: ContentAttachmentIdentifiedSegment[];
   candidateEvidence: CandidateBinding[];
   systemPrompt: string;
@@ -76,6 +84,7 @@ export interface ContentAttachmentResolvedRecipientSupport {
   originRowRefs: string[];
 }
 export interface ContentAttachmentRecipientFinding {
+  collectiveTrace?: ContentAttachmentCollectiveTrace;
   segmentRef: string;
   excerptRef: string;
   attachments: ContentAttachmentResolvedRecipientSupport[];
@@ -83,14 +92,20 @@ export interface ContentAttachmentRecipientFinding {
   relationshipSubjectAlternatives: ContentAttachmentResolvedRecipientSupport[];
 }
 
-const SYSTEM_PROMPT =
+const V1_SYSTEM_PROMPT =
   'Judge recipients for the supplied, already inspected original source segments. Do not segment again, rewrite source text or infer expected answers. Inspect each segment in its unchanged whole E, original body/table boundaries and neighboring source context. Return every required segment key, with attachments, recipientIdentityAlternatives and relationshipSubjectAlternatives independently. Empty lists are meaningful; do not force attachment. Use compact IDs only for evidence, never reproduce or normalize quotations. Give a concise reason for the segment disposition, including the source-based boundary of any relevant exclusion. Consider the entire supplied registry; unselected candidates are not confirmed recipients.\nAn attachment means this segment independently describes the candidate. Identify candidates from their own names, numbers, K grounds, original rows, chapter and investigation scope. Origin rows establish membership, not automatic propagation to containing trenches or areas. Preserve a source-established collective description on its identified members even without repeated numbers. Apply current period/type/scope qualifiers before broader antecedent membership. A tentative classification is not by itself evidence against membership or a relationship-subject alternative. Local row counts do not establish a global count or unique relation subject. Do not enlarge a collective to unrelated same-type candidates. General type summaries alone cannot identify individual artifacts.\nPreserve an identified investigation area own boundary, layout, recording and finding results when supported by its definition and original body continuity, separately from contained-unit work. Keep whole project areas distinct from partial survey areas. Same-cell or body-to-table continuation may supply a common action scope; local excavation/backfill does not automatically describe the area. Do not propagate the action object of a later local task backwards into preceding common work. Retain substantive object descriptions even when introduced by a meeting; meeting-only events, generic headers and pure table navigation need no recipients. Respect source-bound nonregistration decisions.\nKeep collective attachment independent of individual relationship-subject identity. A collective clause can have confirmed recipients while a separate relationship clause with an unidentified individual subject has NO confirmed attachment and only alternative subjects. Do not turn collective membership into confirmation of that individual relationship. Merely being a possible relationship subject does not justify a confirmed attachment for that relationship segment. Recipient-identity alternatives mean uncertainty about who receives this description, not uncertainty about which already identified collective member participates in an individual relationship. A road relation must not gain pit/area subject alternatives. Do not identify a relationship counterpart across investigation stages without original linking evidence. Use the original qualifiers and retain genuine uncertainty; never choose a candidate just because it is registered.\nFor every attachment or alternative, select nonempty currentWordRanges contained in that segment. Other current-E segments and E/X sources may supply contextWordRanges but cannot alone justify the current action. Supply each selected candidate own candidateEvidenceRefs; a group needs grounds for every member. originRowRefs may select supporting original O rows bound to the candidates; use an empty list if no such row is needed. Relation alternatives use role subject. Attachments and recipient-identity alternatives cannot assert both certainty and uncertainty for the same candidate in the same segment. Do not copy earlier answers or invent missing IDs. Code resolves provenance and separately previews whole-E preservation without changing your response or applying it to the ledger.';
 
 /** Compile all frozen candidate grounds and inspected segments without earlier recipient answers. */
 export function createContentAttachmentRecipientRequest(
   input: Input,
   segmentation: ContentAttachmentSegmentationAudit,
+  version: RecipientVersion = CONTENT_ATTACHMENT_RECIPIENT_VERSION,
 ) {
+  if (
+    version !== 'segment-recipients.v1' &&
+    version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
+  )
+    throw new Error('Unsupported recipient version');
   const inspected = inspectContentAttachmentSegmentation(input, segmentation);
   if (inspected.issues.length || !inspected.segments.length)
     throw new Error('Expected valid nonempty inspected segmentation');
@@ -200,18 +215,26 @@ export function createContentAttachmentRecipientRequest(
           .meta({ id: 'RecipientSubjectAlternative' }),
       ),
       reason: z.string().min(1),
+      ...(version === 'segment-recipients.v1'
+        ? {}
+        : createContentAttachmentCollectiveTraceSchema(input)),
     })
-    .meta({ id: 'RecipientDecision' });
+    .meta({
+      id: 'RecipientDecision',
+    }) as z.ZodType<ContentAttachmentRecipientDecision>;
   const schema: z.ZodType<ContentAttachmentRecipientResponse> = z.strictObject({
     decisions: z.strictObject(
       Object.fromEntries(inspected.segments.map((s) => [s.ref, decision])),
     ),
   });
   return {
-    version: CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+    version,
     segmentSnapshot: inspected.segments,
     candidateEvidence,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt:
+      version === 'segment-recipients.v1'
+        ? V1_SYSTEM_PROMPT
+        : V1_SYSTEM_PROMPT + '\n' + CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY,
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -225,7 +248,13 @@ export function inspectContentAttachmentRecipients(
 ): { issues: string[]; findings: ContentAttachmentRecipientFinding[] } {
   let request: ReturnType<typeof createContentAttachmentRecipientRequest>;
   try {
-    request = createContentAttachmentRecipientRequest(input, segmentation);
+    request = createContentAttachmentRecipientRequest(
+      input,
+      segmentation,
+      audit.version === 'segment-recipients.v1'
+        ? audit.version
+        : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+    );
   } catch {
     return { issues: ['Invalid recipient source input'], findings: [] };
   }
@@ -332,8 +361,26 @@ export function inspectContentAttachmentRecipients(
           originRowRefs: support.originRowRefs,
         };
       };
+      if (audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION)
+        inspectContentAttachmentCollectiveTrace(
+          input,
+          segmentation,
+          segment,
+          decision as ContentAttachmentCollectiveTrace,
+          request.candidateEvidence,
+          decision,
+        );
       findings.push({
         segmentRef: segment.ref,
+        ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+          ? {
+              collectiveTrace: {
+                collectiveAssessment: decision.collectiveAssessment!,
+                qualifierAssessment: decision.qualifierAssessment!,
+                inventoryMembershipLinks: decision.inventoryMembershipLinks!,
+              },
+            }
+          : {}),
         excerptRef: segment.excerptRef,
         attachments: decision.attachments.map((a) =>
           resolve(a, [a.candidateRef]),

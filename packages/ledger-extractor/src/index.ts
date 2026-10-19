@@ -171,3 +171,8 @@ export type {
   ContentAttachmentResolvedRecipientSupport,
   ContentAttachmentRecipientFinding,
 } from './content-attachment-recipients';
+
+export type {
+  ContentAttachmentCollectiveMember,
+  ContentAttachmentCollectiveTrace,
+} from './content-attachment-collective-trace';
