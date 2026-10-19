@@ -34,6 +34,7 @@ export const CONTENT_ATTACHMENT_WORK_SCOPE_EVIDENCE_BOUNDARY_POLICY =
 export function createContentAttachmentWorkScopeSchema(
   candidateRefs: string[],
   workGroupRefs?: string[],
+  legacyExclusive = false,
 ) {
   const ranges = z
     .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
@@ -67,19 +68,25 @@ export function createContentAttachmentWorkScopeSchema(
     })
     .meta({ id: 'WorkScopeAssessment' });
   if (workGroupRefs === undefined) return schema;
-  return z.discriminatedUnion('state', [
+  const options = [
     z.strictObject({
       ...schema.shape,
       state: z.literal('operation'),
-      groupReviews:
-        createContentAttachmentWorkGroupReviewsSchema(workGroupRefs),
+      groupReviews: createContentAttachmentWorkGroupReviewsSchema(
+        workGroupRefs,
+        legacyExclusive,
+      ),
     }),
     z.strictObject({
       ...schema.shape,
       state: z.literal('not_applicable'),
       groupReviews: z.strictObject({}),
     }),
-  ]);
+  ] as const;
+  // Literal states are mutually exclusive, so anyOf retains the same contract.
+  return legacyExclusive
+    ? z.discriminatedUnion('state', options)
+    : z.union(options);
 }
 
 /** Validate declared task coverage without interpreting source meaning or modifying final recipients. */

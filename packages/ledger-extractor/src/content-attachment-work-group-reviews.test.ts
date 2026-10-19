@@ -247,3 +247,63 @@ test('requires empty review objects for non-work and inventories without groups'
     createContentAttachmentWorkGroupReviewsSchema([]).safeParse({}).success,
   ).toBe(true);
 });
+
+test('preserves v14 acceptance and rejection under v15 inclusive unions without weakening mandatory reviews', () => {
+  const legacy = createContentAttachmentWorkScopeSchema(
+    ['R1', 'R2', 'R3', 'R4'],
+    ['G1', 'G2'],
+    true,
+  );
+  const current = schema();
+  const valid = assessment();
+  const cases: unknown[] = [
+    valid,
+    { ...valid, state: 'not_applicable', targetGroups: [], groupReviews: {} },
+    { ...valid, state: 'unknown' },
+    { ...valid, groupReviews: undefined },
+  ];
+  const mutate = (fn: (a: ContentAttachmentWorkScopeAssessment) => void) => {
+    const a = assessment();
+    fn(a);
+    cases.push(a);
+  };
+  mutate((a) => {
+    delete a.groupReviews!.G1;
+  });
+  mutate((a) => {
+    a.groupReviews!.G99 = a.groupReviews!.G1;
+  });
+  mutate((a) => {
+    a.groupReviews!.G1.targetGroupIndexes = [];
+  });
+  mutate((a) => {
+    a.groupReviews!.G1.targetGroupIndexes = ['1'] as never;
+  });
+  mutate((a) => {
+    a.groupReviews!.G1.targetGroupIndexes = [-1];
+  });
+  mutate((a) => {
+    a.groupReviews!.G1.targetGroupIndexes = [0.5];
+  });
+  mutate((a) => {
+    a.groupReviews!.G2.targetGroupIndexes = [1];
+  });
+  mutate((a) => {
+    a.groupReviews!.G1.relevance = 'unknown' as never;
+  });
+  mutate((a) => {
+    a.groupReviews!.G1.reason = '';
+  });
+  mutate((a) => {
+    a.state = 'not_applicable';
+  });
+  for (const candidate of cases) {
+    const before = JSON.stringify(candidate);
+    expect(current.safeParse(candidate).success).toBe(
+      legacy.safeParse(candidate).success,
+    );
+    expect(JSON.stringify(candidate)).toBe(before);
+  }
+  expect(current.safeParse(valid).success).toBe(true);
+  expect(current.safeParse({ ...valid, groupReviews: {} }).success).toBe(false);
+});

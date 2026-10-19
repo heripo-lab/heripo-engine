@@ -186,10 +186,12 @@ function fixture(
       request.version === 'segment-recipients.v11' ||
       request.version === 'segment-recipients.v12' ||
       request.version === 'segment-recipients.v13' ||
-      request.version === 'segment-recipients.v14'
+      request.version === 'segment-recipients.v14' ||
+      request.version === 'segment-recipients.v15'
     )
       audit.rawResponse.decisions[segment.ref].workScopeAssessment = {
-        ...(request.version === 'segment-recipients.v14'
+        ...(request.version === 'segment-recipients.v14' ||
+        request.version === 'segment-recipients.v15'
           ? { groupReviews: {} }
           : {}),
         state: 'not_applicable',
@@ -204,7 +206,8 @@ function fixture(
       request.version === 'segment-recipients.v11' ||
       request.version === 'segment-recipients.v12' ||
       request.version === 'segment-recipients.v13' ||
-      request.version === 'segment-recipients.v14'
+      request.version === 'segment-recipients.v14' ||
+      request.version === 'segment-recipients.v15'
     ) {
       const decision = audit.rawResponse.decisions[segment.ref];
       decision.areaAssessments = Object.fromEntries(
@@ -482,7 +485,7 @@ test('rejects duplicate/conflicting recipients and fabricated, out-of-segment or
 });
 
 test('makes only the recipient call and preserves its original response, attempts and usage', async () => {
-  const { input, segmentation, audit } = fixture('segment-recipients.v14');
+  const { input, segmentation, audit } = fixture('segment-recipients.v15');
   const usage = { inputTokens: 12, outputTokens: 6, totalTokens: 18 } as never;
   vi.mocked(LLMCaller.call).mockResolvedValue({
     output: audit.rawResponse,
@@ -1873,70 +1876,243 @@ test('adds required work reviews in v14 without changing v13 prompt, source fiel
   expect(LLMCaller.call).not.toHaveBeenCalled();
 });
 
-test('inspects v14 references per segment and preserves raw R1 when rejecting an invalid work review', () => {
-  const f = fixture('segment-recipients.v14');
-  f.input.payload.inventoryMembers = [['U1', ['R2']]];
-  const request = createContentAttachmentRecipientRequest(
-    f.input,
-    f.segmentation,
-  );
-  Object.assign(f.audit, request);
-  const d = f.audit.rawResponse.decisions['E1:S1'];
-  const target = (ref: string, established: boolean) => ({
-    targetIdentification: {
-      candidateRefs: [ref],
-      currentWordRanges: ['E1:W1-W2'],
-      contextWordRanges: [],
-      candidateEvidenceRefs: [ref === 'R1' ? 'K1.1' : 'K2.1'],
-      originRowRefs: [],
-    },
-    operationCoverage: {
-      state: established
-        ? ('established' as const)
-        : ('not_established' as const),
-      supportingWordRanges: established ? ['E1:W1-W2'] : [],
-      consideredWordRanges: [],
-      reason: 'Synthetic source judgment.',
-    },
-  });
-  d.workScopeAssessment = {
-    state: 'operation',
-    currentWordRanges: ['E1:W1-W2'],
-    targetGroups: [target('R1', true), target('R2', false)],
-    groupReviews: {
-      G1: {
-        relevance: 'relevant',
-        targetGroupIndexes: [1],
-        reason: 'Inspect the original registered group.',
+test.each(['segment-recipients.v14', 'segment-recipients.v15'] as const)(
+  'inspects %s references per segment and preserves raw R1 when rejecting an invalid work review',
+  (version) => {
+    const f = fixture(version);
+    f.input.payload.inventoryMembers = [['U1', ['R2']]];
+    const request = createContentAttachmentRecipientRequest(
+      f.input,
+      f.segmentation,
+      version,
+    );
+    Object.assign(f.audit, request);
+    const d = f.audit.rawResponse.decisions['E1:S1'];
+    const target = (ref: string, established: boolean) => ({
+      targetIdentification: {
+        candidateRefs: [ref],
+        currentWordRanges: ['E1:W1-W2'],
+        contextWordRanges: [],
+        candidateEvidenceRefs: [ref === 'R1' ? 'K1.1' : 'K2.1'],
+        originRowRefs: [],
       },
-    },
-    reason: 'Independent area work.',
-  };
-  let inspected = inspectContentAttachmentRecipients(
-    f.input,
-    f.segmentation,
-    f.audit,
+      operationCoverage: {
+        state: established
+          ? ('established' as const)
+          : ('not_established' as const),
+        supportingWordRanges: established ? ['E1:W1-W2'] : [],
+        consideredWordRanges: [],
+        reason: 'Synthetic source judgment.',
+      },
+    });
+    d.workScopeAssessment = {
+      state: 'operation',
+      currentWordRanges: ['E1:W1-W2'],
+      targetGroups: [target('R1', true), target('R2', false)],
+      groupReviews: {
+        G1: {
+          relevance: 'relevant',
+          targetGroupIndexes: [1],
+          reason: 'Inspect the original registered group.',
+        },
+      },
+      reason: 'Independent area work.',
+    };
+    let inspected = inspectContentAttachmentRecipients(
+      f.input,
+      f.segmentation,
+      f.audit,
+    );
+    expect(inspected.issues).toEqual([]);
+    expect(inspected.findings[0].attachments[0].candidateRefs).toEqual(['R1']);
+    d.workScopeAssessment.groupReviews!.G1.targetGroupIndexes = [0];
+    const before = JSON.stringify(f.audit);
+    inspected = inspectContentAttachmentRecipients(
+      f.input,
+      f.segmentation,
+      f.audit,
+    );
+    expect(inspected.issues).toEqual([
+      'Invalid recipient work scope: E1:S1: G1[0]: Work group member mismatch',
+    ]);
+    expect(inspected.findings).toHaveLength(3);
+    expect(d.attachments.map((a) => a.candidateRef)).toEqual(['R1']);
+    expect(JSON.stringify(f.audit)).toBe(before);
+    delete d.workScopeAssessment.groupReviews!.G1;
+    expect(
+      inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit)
+        .issues,
+    ).toEqual([
+      expect.stringContaining(
+        version === 'segment-recipients.v14'
+          ? 'E1:S1.workScopeAssessment.groupReviews.G1'
+          : 'E1:S1.workScopeAssessment',
+      ),
+    ]);
+    expect(d.attachments.map((a) => a.candidateRef)).toEqual(['R1']);
+  },
+);
+
+/** Inspect schema locations, not literal property names or source strings containing keywords. */
+function providerSchemaIssues(value: unknown, path = '$'): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const schema = value as Record<string, unknown>;
+  const issues = [
+    'oneOf',
+    'allOf',
+    'not',
+    'dependentRequired',
+    'dependentSchemas',
+    'if',
+    'then',
+    'else',
+  ]
+    .filter((key) => key in schema)
+    .map((key) => `${path}.${key}`);
+  if (path === '$' && 'anyOf' in schema) issues.push('$.anyOf');
+  if ('$ref' in schema && Object.keys(schema).length !== 1)
+    issues.push(`${path}.$ref siblings`);
+  for (const key of [
+    'properties',
+    'definitions',
+    '$defs',
+    'patternProperties',
+    'dependentSchemas',
+  ]) {
+    const entries = schema[key];
+    if (entries && typeof entries === 'object')
+      for (const [name, child] of Object.entries(entries))
+        issues.push(...providerSchemaIssues(child, `${path}.${key}.${name}`));
+  }
+  for (const key of [
+    'items',
+    'additionalProperties',
+    'not',
+    'if',
+    'then',
+    'else',
+  ])
+    issues.push(...providerSchemaIssues(schema[key], `${path}.${key}`));
+  for (const key of ['anyOf', 'oneOf', 'allOf']) {
+    const branches = schema[key];
+    if (Array.isArray(branches))
+      branches.forEach((child, i) =>
+        issues.push(...providerSchemaIssues(child, `${path}.${key}[${i}]`)),
+      );
+  }
+  return issues;
+}
+
+function inclusiveSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(inclusiveSchema);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key === 'oneOf' ? 'anyOf' : key,
+      inclusiveSchema(child),
+    ]),
   );
-  expect(inspected.issues).toEqual([]);
-  expect(inspected.findings[0].attachments[0].candidateRefs).toEqual(['R1']);
-  d.workScopeAssessment.groupReviews!.G1.targetGroupIndexes = [0];
-  const before = JSON.stringify(f.audit);
-  inspected = inspectContentAttachmentRecipients(
-    f.input,
-    f.segmentation,
-    f.audit,
+}
+
+test('changes only exclusive schema composition in v15 while preserving the v14 prompt, input, decisions and R1', async () => {
+  const old = fixture('segment-recipients.v14');
+  const request = createContentAttachmentRecipientRequest(
+    old.input,
+    old.segmentation,
   );
-  expect(inspected.issues).toEqual([
-    'Invalid recipient work scope: E1:S1: G1[0]: Work group member mismatch',
+  expect(request.version).toBe('segment-recipients.v15');
+  expect(request.systemPrompt).toBe(old.request.systemPrompt);
+  expect(request.userPrompt).toBe(old.request.userPrompt);
+  const previousFormat = await Output.object({ schema: old.request.schema })
+    .responseFormat;
+  const currentFormat = await Output.object({ schema: request.schema })
+    .responseFormat;
+  const previous =
+    previousFormat?.type === 'json' ? previousFormat.schema : undefined;
+  const current =
+    currentFormat?.type === 'json' ? currentFormat.schema : undefined;
+  expect(previous).toBeDefined();
+  expect(current).toBeDefined();
+  expect(providerSchemaIssues(previous)).toEqual([
+    '$.definitions.RecipientDecision.properties.workScopeAssessment.oneOf',
+    '$.definitions.RecipientDecision.properties.workScopeAssessment.oneOf[0].properties.groupReviews.properties.G1.oneOf',
   ]);
-  expect(inspected.findings).toHaveLength(3);
-  expect(d.attachments.map((a) => a.candidateRef)).toEqual(['R1']);
-  expect(JSON.stringify(f.audit)).toBe(before);
-  delete d.workScopeAssessment.groupReviews!.G1;
+  expect(current).toEqual(inclusiveSchema(previous));
+  expect(providerSchemaIssues(current)).toEqual([]);
+  const before = JSON.stringify(old.audit);
+  expect(request.schema.safeParse(old.audit.rawResponse).success).toBe(true);
+  const currentInspection = inspectContentAttachmentRecipients(
+    old.input,
+    old.segmentation,
+    { ...old.audit, ...request },
+  );
+  expect(currentInspection).toEqual(
+    inspectContentAttachmentRecipients(old.input, old.segmentation, old.audit),
+  );
+  expect(currentInspection.findings[0].attachments[0].candidateRefs).toEqual([
+    'R1',
+  ]);
+  expect(JSON.stringify(old.audit)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test.each([
+  'oneOf',
+  'allOf',
+  'not',
+  'dependentRequired',
+  'dependentSchemas',
+  'if',
+  'then',
+  'else',
+])(
+  'detects forbidden %s inside definitions, array items and nested union branches',
+  (keyword) => {
+    const synthetic = {
+      type: 'object',
+      properties: { decision: { $ref: '#/$defs/Decision' } },
+      $defs: {
+        Decision: {
+          type: 'object',
+          properties: {
+            groups: {
+              type: 'array',
+              items: { anyOf: [{ type: 'null' }, { [keyword]: [] }] },
+            },
+          },
+        },
+      },
+    };
+    expect(providerSchemaIssues(synthetic)).toEqual([
+      `$.$defs.Decision.properties.groups.items.anyOf[1].${keyword}`,
+    ]);
+  },
+);
+
+test('rejects a root union and reference siblings without mistaking literal keys or text for schema syntax', () => {
   expect(
-    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
-  ).toEqual([
-    expect.stringContaining('E1:S1.workScopeAssessment.groupReviews.G1'),
-  ]);
-  expect(d.attachments.map((a) => a.candidateRef)).toEqual(['R1']);
+    providerSchemaIssues({ anyOf: [{ type: 'string' }, { type: 'null' }] }),
+  ).toEqual(['$.anyOf']);
+  expect(
+    providerSchemaIssues({
+      type: 'object',
+      properties: { nested: { $ref: '#/$defs/X', description: 'Sibling' } },
+      $defs: { X: { type: 'string' } },
+    }),
+  ).toEqual(['$.properties.nested.$ref siblings']);
+  expect(
+    providerSchemaIssues({
+      type: 'object',
+      properties: {
+        oneOf: { type: 'string', enum: ['allOf'] },
+        not: {
+          type: 'array',
+          items: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        },
+      },
+      definitions: { allOf: { type: 'string' } },
+      description: 'oneOf is a literal here',
+      additionalProperties: false,
+    }),
+  ).toEqual([]);
 });

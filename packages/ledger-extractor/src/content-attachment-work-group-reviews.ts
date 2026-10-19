@@ -50,8 +50,11 @@ export function createContentAttachmentWorkGroups(
 }
 
 /** Require a verdict for each supplied group; absence is never a negative verdict. */
-export function createContentAttachmentWorkGroupReviewsSchema(refs: string[]) {
-  const review = z.discriminatedUnion('relevance', [
+export function createContentAttachmentWorkGroupReviewsSchema(
+  refs: string[],
+  legacyExclusive = false,
+) {
+  const options = [
     z.strictObject({
       relevance: z.literal('relevant'),
       targetGroupIndexes: z.array(z.int().nonnegative()).min(1),
@@ -62,7 +65,11 @@ export function createContentAttachmentWorkGroupReviewsSchema(refs: string[]) {
       targetGroupIndexes: z.array(z.int().nonnegative()).max(0),
       reason: z.string().min(1),
     }),
-  ]);
+  ] as const;
+  // Distinct literal verdicts keep these branches disjoint under inclusive anyOf.
+  const review = legacyExclusive
+    ? z.discriminatedUnion('relevance', options)
+    : z.union(options);
   return z.strictObject(Object.fromEntries(refs.map((ref) => [ref, review])));
 }
 
