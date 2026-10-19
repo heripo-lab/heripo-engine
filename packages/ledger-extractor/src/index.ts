@@ -154,3 +154,20 @@ export type {
   ContentAttachmentSegmentationResponse,
   ContentAttachmentIdentifiedSegment,
 } from './content-attachment-segmentation';
+
+export {
+  CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+  createContentAttachmentRecipientRequest,
+  inspectContentAttachmentRecipients,
+  judgeContentAttachmentRecipients,
+} from './content-attachment-recipients';
+export type {
+  ContentAttachmentRecipientSupport,
+  ContentAttachmentRecipientAttachment,
+  ContentAttachmentRecipientAlternative,
+  ContentAttachmentRecipientDecision,
+  ContentAttachmentRecipientResponse,
+  ContentAttachmentRecipientAudit,
+  ContentAttachmentResolvedRecipientSupport,
+  ContentAttachmentRecipientFinding,
+} from './content-attachment-recipients';
