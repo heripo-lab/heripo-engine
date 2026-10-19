@@ -2725,18 +2725,19 @@ test('adds only the independent uncertainty wording in v19 while preserving v18 
   );
   const policy =
     'When the sole uncertainty is which candidate is the individual subject of a relationship, return only relationshipSubjectAlternatives; do not duplicate that uncertainty in recipientIdentityAlternatives.\n\nIf both uncertainty types are returned, ground each in a distinct unresolved source referent or independent predicate. Select its supporting evidence IDs in the existing fields and explain the distinction in the existing reason. Repeating the same uncertainty under another role does not establish a second uncertainty. Candidate overlap alone neither establishes nor invalidates two independent judgments.';
-  const defaultRequest = createContentAttachmentRecipientRequest(
+  const historicalRequest = createContentAttachmentRecipientRequest(
     current.input,
     current.segmentation,
+    'segment-recipients.v19',
   );
-  expect(defaultRequest.version).toBe('segment-recipients.v19');
+  expect(historicalRequest.version).toBe('segment-recipients.v19');
   expect(current.request.systemPrompt).toBe(
     previous.request.systemPrompt.replace(
       '\nFor every attachment or alternative,',
       '\n' + policy + '\nFor every attachment or alternative,',
     ),
   );
-  expect(defaultRequest.systemPrompt).toBe(current.request.systemPrompt);
+  expect(historicalRequest.systemPrompt).toBe(current.request.systemPrompt);
   expect(current.request.userPrompt).toBe(previous.request.userPrompt);
   expect(current.request.segmentSnapshot).toEqual(
     previous.request.segmentSnapshot,
@@ -2749,6 +2750,58 @@ test('adds only the independent uncertainty wording in v19 while preserving v18 
   const newFormat = await Output.object({ schema: current.request.schema })
     .responseFormat;
   expect(newFormat).toEqual(oldFormat);
+  const before = JSON.stringify(current.audit.rawResponse);
+  expect(
+    inspectContentAttachmentRecipients(
+      current.input,
+      current.segmentation,
+      current.audit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(
+      previous.input,
+      previous.segmentation,
+      previous.audit,
+    ),
+  );
+  expect(JSON.stringify(current.audit.rawResponse)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('adds only the operation target coverage wording in v20 while preserving v19 input, schema and derived judgments', async () => {
+  const previous = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v19',
+  );
+  const current = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v20',
+  );
+  const policy =
+    "Identify the current operation's source-defined targets separately from the group's membership. Return established whole-group coverage only when the operation's targets are supported as covering the full identified group. Plural wording, matching counts, method definitions or inventory membership alone do not establish this connection; no particular word is required.\n\nUse the existing evidence IDs and reason to explain the operation-to-target connection or gap. Keep group-identification grounds in targetIdentification, positive coverage grounds in supportingWordRanges, and inspected but insufficient grounds in consideredWordRanges. If whole-group coverage is not established, retain group relevance and independently supported area or subset attachments.";
+  const anchor =
+    '\n\nThese work-assessment rules do not narrow source-established collective findings';
+  expect(current.request.systemPrompt).toBe(
+    previous.request.systemPrompt.replace(anchor, '\n\n' + policy + anchor),
+  );
+  const defaultRequest = createContentAttachmentRecipientRequest(
+    current.input,
+    current.segmentation,
+  );
+  expect(defaultRequest.version).toBe('segment-recipients.v20');
+  expect(defaultRequest.systemPrompt).toBe(current.request.systemPrompt);
+  expect(current.request.userPrompt).toBe(previous.request.userPrompt);
+  expect(current.request.segmentSnapshot).toEqual(
+    previous.request.segmentSnapshot,
+  );
+  expect(current.request.candidateEvidence).toEqual(
+    previous.request.candidateEvidence,
+  );
+  expect(
+    await Output.object({ schema: current.request.schema }).responseFormat,
+  ).toEqual(
+    await Output.object({ schema: previous.request.schema }).responseFormat,
+  );
   const before = JSON.stringify(current.audit.rawResponse);
   expect(
     inspectContentAttachmentRecipients(
