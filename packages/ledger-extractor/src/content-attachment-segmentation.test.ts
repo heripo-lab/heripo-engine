@@ -279,3 +279,60 @@ test('runs exactly the standalone segmentation call and retains the unmodified r
   expect(audit.callAttempts).toEqual([]);
   expect(inspectContentAttachmentSegmentation(input, audit).issues).toEqual([]);
 });
+
+test('replays the historical prompt separately from the current shared-scope policy without changing input or schema', () => {
+  const { input, raw } = fixture();
+  const old = createContentAttachmentSegmentationRequest(
+    input,
+    ['E1', 'E2'],
+    'content-segmentation.v1',
+  );
+  const current = createContentAttachmentSegmentationRequest(input, [
+    'E1',
+    'E2',
+  ]);
+  expect(current.version).toBe('content-segmentation.v2');
+  expect(current.systemPrompt.startsWith(old.systemPrompt + '\n')).toBe(true);
+  expect(old.systemPrompt).not.toContain('do not isolate it');
+  expect(current.userPrompt).toBe(old.userPrompt);
+  expect(current.wordEvidence).toEqual(old.wordEvidence);
+  const historical = {
+    ...old,
+    rawResponse: raw,
+    usage: {} as never,
+    callAttempts: [],
+  };
+  expect(
+    inspectContentAttachmentSegmentation(input, historical).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentSegmentation(input, {
+      ...historical,
+      version: current.version,
+    }).issues,
+  ).toHaveLength(1);
+  expect(() =>
+    createContentAttachmentSegmentationRequest(
+      input,
+      ['E1'],
+      'unknown' as never,
+    ),
+  ).toThrow('Unsupported segmentation version');
+});
+
+test('resolves shared original subjects across overlapping segments without supplying missing semantic scope', () => {
+  const { input, audit } = fixture();
+  audit.rawResponse.segments.E1 = [
+    { wordRanges: ['E1:W1-W2'] },
+    { wordRanges: ['E1:W1-W1', 'E1:W3-W4'] },
+  ];
+  const before = structuredClone(audit);
+  const result = inspectContentAttachmentSegmentation(input, audit);
+  expect(result.issues).toEqual([]);
+  expect(
+    result.segments
+      .filter((s) => s.excerptRef === 'E1')
+      .map((s) => s.evidence.map((e) => e.text)),
+  ).toEqual([['범위 측량'], ['범위', 'TR7 제토.']]);
+  expect(audit).toEqual(before);
+});

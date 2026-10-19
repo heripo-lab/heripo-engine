@@ -19,13 +19,15 @@ import {
 
 type Input = ReturnType<typeof createContentAttachmentGroundedInput>;
 export const CONTENT_ATTACHMENT_SEGMENTATION_VERSION =
-  'content-segmentation.v1' as const;
+  'content-segmentation.v2' as const;
+type SegmentationVersion =
+  'content-segmentation.v1' | typeof CONTENT_ATTACHMENT_SEGMENTATION_VERSION;
 
 export interface ContentAttachmentSegmentationResponse {
   segments: Record<string, Array<{ wordRanges: string[] }>>;
 }
 export interface ContentAttachmentSegmentationAudit {
-  version: typeof CONTENT_ATTACHMENT_SEGMENTATION_VERSION;
+  version: SegmentationVersion;
   excerptRefs: string[];
   wordEvidence: ContentAttachmentWordEvidenceSnapshot;
   systemPrompt: string;
@@ -40,14 +42,23 @@ export interface ContentAttachmentIdentifiedSegment {
   evidence: ContentAttachmentWordRangeEvidence[];
 }
 
-const SYSTEM_PROMPT =
+const V1_SYSTEM_PROMPT =
   'Identify independently meaningful actions and assertions within each CURRENT excerpt. This is source segmentation only. Candidate identities, earlier recipient judgments and expected answers are intentionally absent. Return only original word-ID ranges grouped into segments for every required current E. Different action subjects or a change from a collective observation to an individual relationship claim should be represented separately, even within one unchanged sentence or table cell. Do not let a later local action absorb an earlier independent action. Shared predicates may overlap and a segment may use disjoint ranges. A single segment is appropriate for a single independent claim/action or an indivisible fragment, not as a shortcut for multiple independent subjects or claims.\nUse original whole text, body-block boundaries, table headers/row context and read-only neighboring source text to interpret the boundaries. W numbering restarts within each E and endpoints are inclusive, for example E3:W2-W5. Select only ranges in the SAME current E, never ranges from another excerpt or read-only passage. Every current word must be covered, including introductions, headers and incomplete fragments. Preserve original punctuation, split words/numbers, decimals and incomplete parentheses without repair or normalization. Do not classify or discard titles or administrative material here: retain their ranges for the later recipient judgment.\nDo not return recipients, candidate references, classifications, reasons, new text, normalized quotations or rewritten sentences. Code assigns segment IDs after validating ranges and word coverage. Original E text and saved responses remain unchanged. Valid coverage is not proof of semantically correct segmentation. No candidate judgment or ledger assembly occurs at this stage.';
+
+const SHARED_SCOPE_POLICY =
+  'Split only where actions or assertions are clearly independently interpretable in the supplied original context. Punctuation, commas, conjunctions and noun lists alone do not establish an independent action. Keep a subject, object or scope phrase with the predicate/action it qualifies; do not isolate it as an incomplete fragment when its governing action is available in the same current E. Keeping all words is necessary but does not justify orphaning a dependent phrase. When coordinated actions depend on a common subject, object or scope and its distribution is unclear, preserve the connected work as one segment rather than forcing finer splits. If separate actions are clearly supported, retain their necessary shared original words using overlapping or disjoint ranges; never invent an omitted phrase or extend a scope without source support. A genuinely incomplete source fragment remains unchanged. Keep a separately identified local action apart from preceding shared work. Continue to separate a collective observation from an individual relationship assertion when each is independently interpretable; segmentation does not decide recipients or relationship identity. Before returning, check that each proposed split preserves the original dependency between participants, scope and action. Do not force a target segment count.';
 
 /** Project only current source text and bounded unit context, never candidate or prior-answer data. */
 export function createContentAttachmentSegmentationRequest(
   input: Input,
   excerptRefs: readonly string[],
+  version: SegmentationVersion = CONTENT_ATTACHMENT_SEGMENTATION_VERSION,
 ) {
+  if (
+    version !== 'content-segmentation.v1' &&
+    version !== CONTENT_ATTACHMENT_SEGMENTATION_VERSION
+  )
+    throw new Error('Unsupported segmentation version');
   const selected = new Set(excerptRefs);
   const excerpts = input.payload.current.excerpts;
   if (
@@ -131,10 +142,13 @@ export function createContentAttachmentSegmentationRequest(
       ),
     });
   return {
-    version: CONTENT_ATTACHMENT_SEGMENTATION_VERSION,
+    version,
     excerptRefs: refs,
     wordEvidence,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt:
+      version === 'content-segmentation.v1'
+        ? V1_SYSTEM_PROMPT
+        : V1_SYSTEM_PROMPT + '\n' + SHARED_SCOPE_POLICY,
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -150,6 +164,7 @@ export function inspectContentAttachmentSegmentation(
     request = createContentAttachmentSegmentationRequest(
       input,
       audit.excerptRefs,
+      audit.version,
     );
   } catch {
     return { issues: ['Invalid segmentation excerpt selection'], segments: [] };
