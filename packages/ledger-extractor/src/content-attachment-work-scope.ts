@@ -6,20 +6,22 @@ import { z } from 'zod';
 import { CONTENT_ATTACHMENT_WORD_RANGE_PATTERN } from './content-attachment-word-evidence';
 import { createContentAttachmentWorkGroupReviewsSchema } from './content-attachment-work-group-reviews';
 
+export interface ContentAttachmentWorkTarget {
+  targetIdentification: ContentAttachmentRecipientSupport & {
+    candidateRefs: string[];
+  };
+  operationCoverage: {
+    state: 'established' | 'not_established';
+    supportingWordRanges: string[];
+    consideredWordRanges: string[];
+    reason: string;
+  };
+}
+
 export interface ContentAttachmentWorkScopeAssessment {
   state: 'operation' | 'not_applicable';
   currentWordRanges: string[];
-  targetGroups: Array<{
-    targetIdentification: ContentAttachmentRecipientSupport & {
-      candidateRefs: string[];
-    };
-    operationCoverage: {
-      state: 'established' | 'not_established';
-      supportingWordRanges: string[];
-      consideredWordRanges: string[];
-      reason: string;
-    };
-  }>;
+  targetGroups: ContentAttachmentWorkTarget[];
   reason: string;
   groupReviews?: Record<string, ContentAttachmentWorkGroupReview>;
 }
@@ -38,35 +40,35 @@ export function createContentAttachmentWorkScopeSchema(
   candidateRefs: string[],
   workGroupRefs?: string[],
   legacyExclusive = false,
+  inlineFullGroups = false,
 ) {
   const ranges = z
     .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
     .meta({ id: 'WorkScopeRanges' });
+  const target = z.strictObject({
+    targetIdentification: z.strictObject({
+      candidateRefs: z
+        .array(z.enum(candidateRefs as [string, ...string[]]))
+        .min(1),
+      currentWordRanges: z
+        .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
+        .min(1),
+      contextWordRanges: ranges,
+      candidateEvidenceRefs: z.array(z.string()).min(1),
+      originRowRefs: z.array(z.string()),
+    }),
+    operationCoverage: z.strictObject({
+      state: z.enum(['established', 'not_established']),
+      supportingWordRanges: ranges,
+      consideredWordRanges: ranges,
+      reason: z.string().min(1),
+    }),
+  });
   const schema = z
     .strictObject({
       state: z.enum(['operation', 'not_applicable']),
       currentWordRanges: ranges,
-      targetGroups: z.array(
-        z.strictObject({
-          targetIdentification: z.strictObject({
-            candidateRefs: z
-              .array(z.enum(candidateRefs as [string, ...string[]]))
-              .min(1),
-            currentWordRanges: z
-              .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
-              .min(1),
-            contextWordRanges: ranges,
-            candidateEvidenceRefs: z.array(z.string()).min(1),
-            originRowRefs: z.array(z.string()),
-          }),
-          operationCoverage: z.strictObject({
-            state: z.enum(['established', 'not_established']),
-            supportingWordRanges: ranges,
-            consideredWordRanges: ranges,
-            reason: z.string().min(1),
-          }),
-        }),
-      ),
+      targetGroups: z.array(target),
       reason: z.string().min(1),
     })
     .meta({ id: 'WorkScopeAssessment' });
@@ -78,6 +80,7 @@ export function createContentAttachmentWorkScopeSchema(
       groupReviews: createContentAttachmentWorkGroupReviewsSchema(
         workGroupRefs,
         legacyExclusive,
+        inlineFullGroups ? target : undefined,
       ),
     }),
     z.strictObject({
@@ -100,6 +103,7 @@ export function inspectContentAttachmentWorkScope(
     support: ContentAttachmentRecipientSupport,
     refs: string[],
   ) => unknown,
+  inlineFullGroups = false,
 ) {
   const checkRanges = (ranges: string[], direct = false) =>
     resolve(
@@ -120,10 +124,21 @@ export function inspectContentAttachmentWorkScope(
   if (!assessment.currentWordRanges.length)
     throw new Error('Operation lacks current evidence');
   const established = new Set<string>();
-  for (const {
-    targetIdentification: target,
-    operationCoverage: coverage,
-  } of assessment.targetGroups) {
+  const fullGroups = inlineFullGroups
+    ? Object.values(assessment.groupReviews!).flatMap((review) =>
+        review.fullGroupAssessment ? [review.fullGroupAssessment] : [],
+      )
+    : [];
+  for (const target of fullGroups)
+    if (
+      target.operationCoverage.state === 'not_established' &&
+      !target.operationCoverage.consideredWordRanges.length
+    )
+      throw new Error('Full work group lacks considered coverage evidence');
+  for (const { targetIdentification: target, operationCoverage: coverage } of [
+    ...assessment.targetGroups,
+    ...fullGroups,
+  ]) {
     resolve(target, target.candidateRefs);
     checkRanges(coverage.supportingWordRanges);
     checkRanges(coverage.consideredWordRanges);

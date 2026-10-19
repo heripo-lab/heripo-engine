@@ -189,12 +189,14 @@ function fixture(
       request.version === 'segment-recipients.v13' ||
       request.version === 'segment-recipients.v14' ||
       request.version === 'segment-recipients.v15' ||
-      request.version === 'segment-recipients.v16'
+      request.version === 'segment-recipients.v16' ||
+      request.version === 'segment-recipients.v17'
     )
       audit.rawResponse.decisions[segment.ref].workScopeAssessment = {
         ...(request.version === 'segment-recipients.v14' ||
         request.version === 'segment-recipients.v15' ||
-        request.version === 'segment-recipients.v16'
+        request.version === 'segment-recipients.v16' ||
+        request.version === 'segment-recipients.v17'
           ? { groupReviews: {} }
           : {}),
         state: 'not_applicable',
@@ -211,7 +213,8 @@ function fixture(
       request.version === 'segment-recipients.v13' ||
       request.version === 'segment-recipients.v14' ||
       request.version === 'segment-recipients.v15' ||
-      request.version === 'segment-recipients.v16'
+      request.version === 'segment-recipients.v16' ||
+      request.version === 'segment-recipients.v17'
     ) {
       const decision = audit.rawResponse.decisions[segment.ref];
       decision.areaAssessments = Object.fromEntries(
@@ -489,7 +492,7 @@ test('rejects duplicate/conflicting recipients and fabricated, out-of-segment or
 });
 
 test('makes only the recipient call and preserves its original response, attempts and usage', async () => {
-  const { input, segmentation, audit } = fixture('segment-recipients.v16');
+  const { input, segmentation, audit } = fixture('segment-recipients.v17');
   const usage = { inputTokens: 12, outputTokens: 6, totalTokens: 18 } as never;
   vi.mocked(LLMCaller.call).mockResolvedValue({
     output: audit.rawResponse,
@@ -2157,5 +2160,125 @@ test('extends only the generic work relevance policy in v16 while preserving v15
     }),
   ).toEqual(current);
   expect(JSON.stringify(f.audit)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('requires inline whole-group objects in v17 while retaining the exact v16 prompt and input', async () => {
+  const f = fixture('segment-recipients.v17');
+  const previous = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v16',
+  );
+  expect(f.request.version).toBe('segment-recipients.v17');
+  expect(f.request.systemPrompt).toBe(previous.systemPrompt);
+  expect(f.request.userPrompt).toBe(previous.userPrompt);
+  expect(f.request.workGroups).toEqual(previous.workGroups);
+  const format = await Output.object({ schema: f.request.schema })
+    .responseFormat;
+  expect(format?.type).toBe('json');
+  expect(
+    providerSchemaIssues(format?.type === 'json' ? format.schema : null),
+  ).toEqual([]);
+  expect(JSON.stringify(format)).toContain('fullGroupAssessment');
+  expect(JSON.stringify(format)).not.toContain('targetGroupIndexes');
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('inspects inline group membership, original evidence and coverage through the recipient API without repairing R1', () => {
+  const f = fixture('segment-recipients.v17');
+  f.input.payload.inventoryMembers = [['U1', ['R2']]];
+  Object.assign(
+    f.audit,
+    createContentAttachmentRecipientRequest(f.input, f.segmentation),
+  );
+  const d = f.audit.rawResponse.decisions['E1:S1'];
+  const target = (ref: string, established: boolean) => ({
+    targetIdentification: {
+      candidateRefs: [ref],
+      currentWordRanges: ['E1:W1-W2'],
+      contextWordRanges: [],
+      candidateEvidenceRefs: [ref === 'R1' ? 'K1.1' : 'K2.1'],
+      originRowRefs: [],
+    },
+    operationCoverage: {
+      state: established
+        ? ('established' as const)
+        : ('not_established' as const),
+      supportingWordRanges: established ? ['E1:W1-W2'] : [],
+      consideredWordRanges: ['E3:W1-W2'],
+      reason: 'Synthetic source judgment.',
+    },
+  });
+  d.workScopeAssessment = {
+    state: 'operation',
+    currentWordRanges: ['E1:W1-W2'],
+    targetGroups: [target('R1', true)],
+    reason: 'Independent area work.',
+    groupReviews: {
+      G1: {
+        relevance: 'relevant',
+        reason: 'Inspect the original whole group.',
+        fullGroupAssessment: target('R2', false),
+      },
+    },
+  };
+  const valid = structuredClone(d.workScopeAssessment);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  for (const [mutate, message] of [
+    [
+      (a: ContentAttachmentWorkScopeAssessment) => {
+        a.groupReviews!.G1.fullGroupAssessment = target('R1', false);
+      },
+      'G1: Full work group member mismatch',
+    ],
+    [
+      (a: ContentAttachmentWorkScopeAssessment) => {
+        a.groupReviews!.G1.fullGroupAssessment!.targetIdentification.candidateEvidenceRefs =
+          ['K1.1'];
+      },
+      'Foreign candidate grounds',
+    ],
+    [
+      (a: ContentAttachmentWorkScopeAssessment) => {
+        a.groupReviews!.G1.fullGroupAssessment!.targetIdentification.currentWordRanges =
+          ['E1:W3-W4'];
+      },
+      'Evidence outside segment',
+    ],
+    [
+      (a: ContentAttachmentWorkScopeAssessment) => {
+        a.groupReviews!.G1.fullGroupAssessment!.operationCoverage.consideredWordRanges =
+          [];
+      },
+      'Full work group lacks considered coverage evidence',
+    ],
+  ] as const) {
+    d.workScopeAssessment = structuredClone(valid);
+    mutate(d.workScopeAssessment);
+    const before = JSON.stringify(f.audit);
+    expect(
+      inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit)
+        .issues,
+    ).toEqual([expect.stringContaining(message)]);
+    expect(JSON.stringify(f.audit)).toBe(before);
+  }
+  d.workScopeAssessment = structuredClone(valid);
+  delete d.workScopeAssessment.groupReviews!.G1.fullGroupAssessment;
+  const before = JSON.stringify(f.audit);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([
+    expect.stringContaining(
+      'Invalid recipient response: decisions.E1:S1.workScopeAssessment',
+    ),
+  ]);
+  expect(JSON.stringify(f.audit)).toBe(before);
+  expect(d.attachments.map((a) => a.candidateRef)).toEqual(['R1']);
   expect(LLMCaller.call).not.toHaveBeenCalled();
 });

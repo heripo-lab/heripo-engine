@@ -1,5 +1,8 @@
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
-import type { ContentAttachmentWorkScopeAssessment } from './content-attachment-work-scope';
+import type {
+  ContentAttachmentWorkScopeAssessment,
+  ContentAttachmentWorkTarget,
+} from './content-attachment-work-scope';
 
 import { z } from 'zod';
 
@@ -12,7 +15,8 @@ export interface ContentAttachmentWorkGroup {
 
 export interface ContentAttachmentWorkGroupReview {
   relevance: 'relevant' | 'not_relevant';
-  targetGroupIndexes: number[];
+  targetGroupIndexes?: number[];
+  fullGroupAssessment?: ContentAttachmentWorkTarget;
   reason: string;
 }
 
@@ -53,7 +57,22 @@ export function createContentAttachmentWorkGroups(
 export function createContentAttachmentWorkGroupReviewsSchema(
   refs: string[],
   legacyExclusive = false,
+  fullGroupSchema?: z.ZodType<ContentAttachmentWorkTarget>,
 ) {
+  if (fullGroupSchema) {
+    const review = z.union([
+      z.strictObject({
+        relevance: z.literal('relevant'),
+        reason: z.string().min(1),
+        fullGroupAssessment: fullGroupSchema,
+      }),
+      z.strictObject({
+        relevance: z.literal('not_relevant'),
+        reason: z.string().min(1),
+      }),
+    ]);
+    return z.strictObject(Object.fromEntries(refs.map((ref) => [ref, review])));
+  }
   const options = [
     z.strictObject({
       relevance: z.literal('relevant'),
@@ -73,13 +92,14 @@ export function createContentAttachmentWorkGroupReviewsSchema(
   return z.strictObject(Object.fromEntries(refs.map((ref) => [ref, review])));
 }
 
-/** Resolve zero-based references without repairing, filling or reinterpreting model output. */
+/** Inspect inline full groups or legacy zero-based references without repairing model output. */
 export function inspectContentAttachmentWorkGroupReviews(
   groups: ContentAttachmentWorkGroup[],
   assessment: ContentAttachmentWorkScopeAssessment,
   attachments: string[],
+  inlineFullGroups = false,
 ) {
-  // The versioned schema has already checked exact keys and verdict/index shapes.
+  // The versioned schema has already checked exact keys and verdict/object shapes.
   if (assessment.state === 'not_applicable') return;
   for (const group of groups) {
     const review = assessment.groupReviews![group.ref];
@@ -90,9 +110,21 @@ export function inspectContentAttachmentWorkGroupReviews(
         );
       continue;
     }
+    if (inlineFullGroups) {
+      const refs =
+        review.fullGroupAssessment!.targetIdentification.candidateRefs;
+      const members = new Set(refs);
+      if (
+        members.size !== refs.length ||
+        members.size !== group.candidateRefs.length ||
+        group.candidateRefs.some((ref) => !members.has(ref))
+      )
+        throw new Error(`${group.ref}: Full work group member mismatch`);
+      continue;
+    }
     const seen = new Set<number>();
     let full = false;
-    for (const index of review.targetGroupIndexes) {
+    for (const index of review.targetGroupIndexes!) {
       if (seen.has(index))
         throw new Error(`${group.ref}[${index}]: Duplicate work target index`);
       seen.add(index);
