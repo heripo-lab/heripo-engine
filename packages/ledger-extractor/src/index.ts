@@ -167,6 +167,10 @@ export type {
   ContentAttachmentRecipientAlternative,
   ContentAttachmentRecipientDecision,
   ContentAttachmentRecipientResponse,
+  ContentAttachmentAreaRecipientDecision,
+  ContentAttachmentAreaRecipientResponse,
+  ContentAttachmentRecipientAttachmentOrigin,
+  ContentAttachmentDerivedRecipientResponse,
   ContentAttachmentRecipientAudit,
   ContentAttachmentResolvedRecipientSupport,
   ContentAttachmentRecipientFinding,
@@ -187,6 +191,9 @@ export type {
   ContentAttachmentWorkTarget,
 } from './content-attachment-work-scope';
 
-export type { ContentAttachmentAreaAssessment } from './content-attachment-area-assessments';
+export type {
+  ContentAttachmentAreaAssessment,
+  ContentAttachmentGroundedAreaAssessment,
+} from './content-attachment-area-assessments';
 
 export type { ContentAttachmentWorkGroupReview } from './content-attachment-work-group-reviews';

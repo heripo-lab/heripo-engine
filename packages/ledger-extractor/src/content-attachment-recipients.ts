@@ -2,7 +2,10 @@ import type { ExtendedTokenUsage, LLMCallAttempt } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateEvidence } from './candidate-discovery';
-import type { ContentAttachmentAreaAssessment } from './content-attachment-area-assessments';
+import type {
+  ContentAttachmentAreaAssessment,
+  ContentAttachmentGroundedAreaAssessment,
+} from './content-attachment-area-assessments';
 import type { ContentAttachmentCollectiveTrace } from './content-attachment-collective-trace';
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
 import type { ContentAttachmentInventoryContext } from './content-attachment-inventory-reviews';
@@ -19,10 +22,12 @@ import { z } from 'zod';
 import {
   CONTENT_ATTACHMENT_AREA_ASSESSMENT_POLICY,
   CONTENT_ATTACHMENT_AREA_FINDING_RESULTS_POLICY,
+  CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY,
   CONTENT_ATTACHMENT_INVENTORY_MEMBER_AREA_POLICY,
   createContentAttachmentAreaAssessmentsSchema,
   inspectContentAttachmentAreaAssessments,
 } from './content-attachment-area-assessments';
+import { assembleContentAttachmentAreaRecipientDecision } from './content-attachment-area-recipient-assembly';
 import {
   CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY,
   CONTENT_ATTACHMENT_CURRENT_PERIOD_MEMBER_POLICY,
@@ -66,7 +71,7 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v17' as const;
+  'segment-recipients.v18' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
@@ -84,6 +89,7 @@ type RecipientVersion =
   | 'segment-recipients.v14'
   | 'segment-recipients.v15'
   | 'segment-recipients.v16'
+  | 'segment-recipients.v17'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -110,18 +116,39 @@ export interface ContentAttachmentRecipientDecision extends Partial<ContentAttac
 export interface ContentAttachmentRecipientResponse {
   decisions: Record<string, ContentAttachmentRecipientDecision>;
 }
+export interface ContentAttachmentAreaRecipientDecision extends Omit<
+  ContentAttachmentRecipientDecision,
+  'attachments' | 'areaAssessments'
+> {
+  nonAreaAttachments: ContentAttachmentRecipientAttachment[];
+  areaAssessments: Record<string, ContentAttachmentGroundedAreaAssessment>;
+}
+export interface ContentAttachmentAreaRecipientResponse {
+  decisions: Record<string, ContentAttachmentAreaRecipientDecision>;
+}
+export type ContentAttachmentRecipientAttachmentOrigin =
+  | { candidateRef: string; field: 'nonAreaAttachments'; index: number }
+  | { candidateRef: string; field: 'areaAssessments'; areaRef: string };
+export interface ContentAttachmentDerivedRecipientResponse extends ContentAttachmentRecipientResponse {
+  attachmentOrigins: Record<
+    string,
+    ContentAttachmentRecipientAttachmentOrigin[]
+  >;
+}
 interface CandidateBinding {
   ref: string;
   candidateRef: string;
   evidence: CandidateEvidence;
 }
-export interface ContentAttachmentRecipientAudit {
+export interface ContentAttachmentRecipientAudit<
+  Response = ContentAttachmentRecipientResponse,
+> {
   version: RecipientVersion;
   segmentSnapshot: ContentAttachmentIdentifiedSegment[];
   candidateEvidence: CandidateBinding[];
   systemPrompt: string;
   userPrompt: string;
-  rawResponse: ContentAttachmentRecipientResponse;
+  rawResponse: Response;
   usage: ExtendedTokenUsage;
   callAttempts: LLMCallAttempt[];
 }
@@ -170,6 +197,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v14' &&
     version !== 'segment-recipients.v15' &&
     version !== 'segment-recipients.v16' &&
+    version !== 'segment-recipients.v17' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -231,6 +259,7 @@ export function createContentAttachmentRecipientRequest(
     version === 'segment-recipients.v14' ||
     version === 'segment-recipients.v15' ||
     version === 'segment-recipients.v16' ||
+    version === 'segment-recipients.v17' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? createContentAttachmentWorkGroups(input)
       : undefined;
@@ -288,13 +317,36 @@ export function createContentAttachmentRecipientRequest(
   const alternative = z
     .strictObject({ candidateRefs: z.array(ref).min(1), ...support })
     .meta({ id: 'RecipientIdentityAlternative' });
+  const singleAreaDecision = version === CONTENT_ATTACHMENT_RECIPIENT_VERSION;
+  const nonAreaRefs = candidateRefs.filter((id) => !areaRefs.includes(id));
+  const nonAreaAttachment = z.array(
+    z
+      .strictObject({
+        candidateRef: z.enum(
+          (nonAreaRefs.length ? nonAreaRefs : candidateRefs) as [
+            string,
+            ...string[],
+          ],
+        ),
+        ...support,
+      })
+      .meta({ id: 'NonAreaRecipientAttachment' }),
+  );
   const decision = z
     .strictObject({
-      attachments: z.array(
-        z
-          .strictObject({ candidateRef: ref, ...support })
-          .meta({ id: 'RecipientAttachment' }),
-      ),
+      ...(singleAreaDecision
+        ? {
+            nonAreaAttachments: nonAreaRefs.length
+              ? nonAreaAttachment
+              : nonAreaAttachment.max(0),
+          }
+        : {
+            attachments: z.array(
+              z
+                .strictObject({ candidateRef: ref, ...support })
+                .meta({ id: 'RecipientAttachment' }),
+            ),
+          }),
       recipientIdentityAlternatives: z.array(alternative),
       relationshipSubjectAlternatives: z.array(
         z
@@ -311,13 +363,15 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v14' ||
       version === 'segment-recipients.v15' ||
       version === 'segment-recipients.v16' ||
+      version === 'segment-recipients.v17' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             workScopeAssessment: createContentAttachmentWorkScopeSchema(
               candidateRefs,
               workGroups?.map((g) => g.ref),
               version === 'segment-recipients.v14',
-              version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+              version === 'segment-recipients.v17' ||
+                version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
             ),
           }
         : {}),
@@ -329,10 +383,13 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v14' ||
       version === 'segment-recipients.v15' ||
       version === 'segment-recipients.v16' ||
+      version === 'segment-recipients.v17' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
-            areaAssessments:
-              createContentAttachmentAreaAssessmentsSchema(areaRefs),
+            areaAssessments: createContentAttachmentAreaAssessmentsSchema(
+              areaRefs,
+              singleAreaDecision,
+            ),
           }
         : {}),
       ...(version === 'segment-recipients.v1'
@@ -352,6 +409,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v14' ||
       version === 'segment-recipients.v15' ||
       version === 'segment-recipients.v16' ||
+      version === 'segment-recipients.v17' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -363,13 +421,17 @@ export function createContentAttachmentRecipientRequest(
     })
     .meta({
       id: 'RecipientDecision',
-    }) as z.ZodType<ContentAttachmentRecipientDecision>;
-  const schema: z.ZodType<ContentAttachmentRecipientResponse> = z.strictObject({
+    }) as z.ZodType<
+    ContentAttachmentRecipientDecision | ContentAttachmentAreaRecipientDecision
+  >;
+  const schema = z.strictObject({
     decisions: z.strictObject(
       Object.fromEntries(inspected.segments.map((s) => [s.ref, decision])),
     ),
-  });
-  return {
+  }) as z.ZodType<
+    ContentAttachmentRecipientResponse | ContentAttachmentAreaRecipientResponse
+  >;
+  const request = {
     version,
     ...(workGroups ? { workGroups } : {}),
     segmentSnapshot: inspected.segments,
@@ -424,6 +486,8 @@ export function createContentAttachmentRecipientRequest(
                                                   (version ===
                                                     'segment-recipients.v16' ||
                                                   version ===
+                                                    'segment-recipients.v17' ||
+                                                  version ===
                                                     CONTENT_ATTACHMENT_RECIPIENT_VERSION
                                                     ? '\n' +
                                                       CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY
@@ -431,14 +495,36 @@ export function createContentAttachmentRecipientRequest(
     userPrompt: JSON.stringify(payload),
     schema,
   };
+  return {
+    ...request,
+    systemPrompt: singleAreaDecision
+      ? request.systemPrompt
+          .replace(
+            'with attachments, recipientIdentityAlternatives',
+            'with nonAreaAttachments, recipientIdentityAlternatives',
+          )
+          .replace(
+            'and never adds/removes recipients, repairs source or changes raw output.',
+            'and never revises recipient judgments, repairs source or changes raw output.',
+          ) +
+        '\n' +
+        CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY
+      : request.systemPrompt,
+  };
 }
 
 /** Validate references and preview recipients while preserving the raw response and original E text. */
 export function inspectContentAttachmentRecipients(
   input: Input,
   segmentation: ContentAttachmentSegmentationAudit,
-  audit: ContentAttachmentRecipientAudit,
-): { issues: string[]; findings: ContentAttachmentRecipientFinding[] } {
+  audit: ContentAttachmentRecipientAudit<
+    ContentAttachmentRecipientResponse | ContentAttachmentAreaRecipientResponse
+  >,
+): {
+  issues: string[];
+  findings: ContentAttachmentRecipientFinding[];
+  derivedResponse?: ContentAttachmentDerivedRecipientResponse;
+} {
   let request: ReturnType<typeof createContentAttachmentRecipientRequest>;
   try {
     request = createContentAttachmentRecipientRequest(
@@ -459,7 +545,8 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v13' ||
         audit.version === 'segment-recipients.v14' ||
         audit.version === 'segment-recipients.v15' ||
-        audit.version === 'segment-recipients.v16'
+        audit.version === 'segment-recipients.v16' ||
+        audit.version === 'segment-recipients.v17'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -472,6 +559,7 @@ export function inspectContentAttachmentRecipients(
     (audit.version === 'segment-recipients.v14' ||
       audit.version === 'segment-recipients.v15' ||
       audit.version === 'segment-recipients.v16' ||
+      audit.version === 'segment-recipients.v17' ||
       audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION)
   )
     return {
@@ -497,9 +585,26 @@ export function inspectContentAttachmentRecipients(
     };
   const findings: ContentAttachmentRecipientFinding[] = [],
     issues: string[] = [];
+  const derivedResponse: ContentAttachmentDerivedRecipientResponse = {
+    decisions: {},
+    attachmentOrigins: {},
+  };
+  const kinds = new Map(
+    (input.payload.candidates as CandidateRow[]).map((row) => [row[0], row[1]]),
+  );
   for (const segment of request.segmentSnapshot) {
     try {
-      const decision = parsed.data.decisions[segment.ref];
+      const rawDecision = parsed.data.decisions[segment.ref];
+      const assembled =
+        audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+          ? assembleContentAttachmentAreaRecipientDecision(
+              kinds,
+              rawDecision as ContentAttachmentAreaRecipientDecision,
+            )
+          : undefined;
+      const decision = assembled
+        ? assembled.decision
+        : (rawDecision as ContentAttachmentRecipientDecision);
       const attachmentRefs = decision.attachments.map((a) => a.candidateRef);
       if (
         new Set(attachmentRefs).size !== attachmentRefs.length ||
@@ -592,6 +697,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v14' ||
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
+        audit.version === 'segment-recipients.v17' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
@@ -617,6 +723,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v14' ||
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
+        audit.version === 'segment-recipients.v17' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
@@ -624,19 +731,22 @@ export function inspectContentAttachmentRecipients(
             audit.version === 'segment-recipients.v14' ||
             audit.version === 'segment-recipients.v15' ||
             audit.version === 'segment-recipients.v16' ||
+            audit.version === 'segment-recipients.v17' ||
             audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           )
             inspectContentAttachmentWorkGroupReviews(
               request.workGroups!,
               decision.workScopeAssessment!,
               attachmentRefs,
-              audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+              audit.version === 'segment-recipients.v17' ||
+                audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
             );
           inspectContentAttachmentWorkScope(
             decision.workScopeAssessment!,
             attachmentRefs,
             resolve,
-            audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+            audit.version === 'segment-recipients.v17' ||
+              audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
           );
         } catch (error) {
           issues.push(
@@ -664,6 +774,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v14' ||
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
+        audit.version === 'segment-recipients.v17' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { areaAssessments: decision.areaAssessments }
           : {}),
@@ -676,6 +787,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v14' ||
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
+        audit.version === 'segment-recipients.v17' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { workScopeAssessment: decision.workScopeAssessment }
           : {}),
@@ -692,6 +804,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v14' ||
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
+        audit.version === 'segment-recipients.v17' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:
@@ -723,11 +836,22 @@ export function inspectContentAttachmentRecipients(
             resolve(a, a.candidateRefs),
           ),
       });
+      if (assembled) {
+        derivedResponse.decisions[segment.ref] = assembled.decision;
+        derivedResponse.attachmentOrigins[segment.ref] =
+          assembled.attachmentOrigins;
+      }
     } catch {
       issues.push(`Invalid recipient evidence or dispositions: ${segment.ref}`);
     }
   }
-  return { issues, findings };
+  return {
+    issues,
+    findings,
+    ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? { derivedResponse }
+      : {}),
+  };
 }
 
 /** Call only the recipient stage; do not rerun segmentation, earlier selection or ledger assembly. */
@@ -740,11 +864,13 @@ export async function judgeContentAttachmentRecipients(
     abortSignal?: AbortSignal;
     onAttempt?: (attempt: LLMCallAttempt) => void | Promise<void>;
   },
-): Promise<ContentAttachmentRecipientAudit> {
+): Promise<
+  ContentAttachmentRecipientAudit<ContentAttachmentAreaRecipientResponse>
+> {
   const request = createContentAttachmentRecipientRequest(input, segmentation);
   const model = createAuditedModel(options.model, options.onAttempt);
   const result = await LLMCaller.call({
-    schema: request.schema,
+    schema: request.schema as z.ZodType<ContentAttachmentAreaRecipientResponse>,
     systemPrompt: request.systemPrompt,
     userPrompt: request.userPrompt,
     primaryModel: model.model,

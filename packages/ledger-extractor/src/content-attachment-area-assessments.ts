@@ -9,8 +9,16 @@ export interface ContentAttachmentAreaAssessment {
   currentWordRanges: string[];
   contextWordRanges: string[];
   candidateEvidenceRefs: string[];
+  originRowRefs?: string[];
   reason: string;
 }
+
+export interface ContentAttachmentGroundedAreaAssessment extends ContentAttachmentAreaAssessment {
+  originRowRefs: string[];
+}
+
+export const CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY =
+  "SINGLE AREA RECIPIENT CONTRACT: Return nonAreaAttachments instead of an attachments field. That list accepts only candidates whose registered kind is not area. Return every registry-derived area exactly once in areaAssessments, with its disposition, currentWordRanges, contextWordRanges, own candidateEvidenceRefs, originRowRefs and reason. Keep original row grounds when used; otherwise return an empty row list. Do not repeat confirmed area recipients in nonAreaAttachments or return the derived final attachments field. Code separately constructs final attachments from nonAreaAttachments plus included areas, using each area assessment's unchanged source support. Earlier references to final attachments describe this derived list; area inclusion is not a second model choice. Excluded and unresolved areas produce no confirmed attachment. Preserve explicitly returned recipientIdentityAlternatives groups: included/excluded areas cannot belong to them, and unresolved areas must belong to an explicit group. Preserve relationshipSubjectAlternatives independently. Do not invent, split or merge uncertainty groups. Existing own-source, current-segment, inventory and independent work-coverage requirements still apply to the derived recipients. A semantic inclusion error remains an error; code does not revise it from expected answers, repair raw output, infer operation coverage or adopt the derived preview into the ledger.";
 
 export const CONTENT_ATTACHMENT_AREA_ASSESSMENT_POLICY =
   'INDEPENDENT AREA ASSESSMENTS: For EVERY segment return areaAssessments with EVERY area candidate key required by the schema. Code derives these keys from the entire supplied registry, deduplicating original mentions; neither chapter paths, inventory membership nor workScopeAssessment selects or removes them. Do not add another model call or repeat source quotations. For each area independently return included, excluded or unresolved, its own candidateEvidenceRefs, currentWordRanges, contextWordRanges and a concise source-grounded reason. The K grounds are required even for exclusions. Included or unresolved recipients require nonempty current words in THIS segment; exclusions may have no current words when the area is not described, while explaining the source boundary or lack of a link.\nDetermine whether the current statement independently describes this identified area, including its own finding results, boundary, layout or recording supported by original definition and source continuity. An inventory collective and a directly described area are separate recipient judgments. Current feature-type restrictions limit the described feature set, not automatically the independently described area whose findings are reported. Preserve whole-project versus partial-investigation definitions. Do not propagate findings or local work to every containing area merely because it contains the objects. A location reference alone does not independently describe the area. Explain exclusions and genuine recipient-identity uncertainty instead of silently omitting an area.\nAn included area must be a final attachment and not a recipient-identity alternative; an excluded area must be neither; an unresolved area must remain a recipient-identity alternative and not a confirmed attachment. Preserve alternative grouping and judge relationship-subject alternatives independently. Findings or relationships classified as not_applicable for work coverage still require areaAssessments. Work descriptions must also satisfy their separate operation-coverage contract. Code checks completeness, provenance and agreement with final recipients, not semantic correctness, and never adds/removes recipients, repairs source or changes raw output.';
@@ -24,6 +32,7 @@ export const CONTENT_ATTACHMENT_INVENTORY_MEMBER_AREA_POLICY =
 /** Require one independent judgment for each registry-derived area, including exclusions. */
 export function createContentAttachmentAreaAssessmentsSchema(
   areaRefs: string[],
+  includeOriginRows = false,
 ) {
   const ranges = z
     .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
@@ -34,6 +43,7 @@ export function createContentAttachmentAreaAssessmentsSchema(
       currentWordRanges: ranges,
       contextWordRanges: ranges,
       candidateEvidenceRefs: z.array(z.string()).min(1),
+      ...(includeOriginRows ? { originRowRefs: z.array(z.string()) } : {}),
       reason: z.string().min(1),
     })
     .meta({ id: 'AreaAssessment' });
@@ -62,7 +72,9 @@ export function inspectContentAttachmentAreaAssessments(
       throw new Error(
         `Area inclusion or uncertainty lacks current evidence: ${ref}`,
       );
-    resolve({ ...assessment, originRowRefs: [] }, [ref]);
+    resolve({ ...assessment, originRowRefs: assessment.originRowRefs ?? [] }, [
+      ref,
+    ]);
     const attached = final.attachments.some((a) => a.candidateRef === ref);
     const uncertain = final.recipientIdentityAlternatives.some((a) =>
       a.candidateRefs.includes(ref),
