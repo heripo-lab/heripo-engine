@@ -184,7 +184,8 @@ function fixture(
       request.version === 'segment-recipients.v9' ||
       request.version === 'segment-recipients.v10' ||
       request.version === 'segment-recipients.v11' ||
-      request.version === 'segment-recipients.v12'
+      request.version === 'segment-recipients.v12' ||
+      request.version === 'segment-recipients.v13'
     )
       audit.rawResponse.decisions[segment.ref].workScopeAssessment = {
         state: 'not_applicable',
@@ -197,7 +198,8 @@ function fixture(
       request.version === 'segment-recipients.v9' ||
       request.version === 'segment-recipients.v10' ||
       request.version === 'segment-recipients.v11' ||
-      request.version === 'segment-recipients.v12'
+      request.version === 'segment-recipients.v12' ||
+      request.version === 'segment-recipients.v13'
     ) {
       const decision = audit.rawResponse.decisions[segment.ref];
       decision.areaAssessments = Object.fromEntries(
@@ -475,7 +477,7 @@ test('rejects duplicate/conflicting recipients and fabricated, out-of-segment or
 });
 
 test('makes only the recipient call and preserves its original response, attempts and usage', async () => {
-  const { input, segmentation, audit } = fixture('segment-recipients.v12');
+  const { input, segmentation, audit } = fixture('segment-recipients.v13');
   const usage = { inputTokens: 12, outputTokens: 6, totalTokens: 18 } as never;
   vi.mocked(LLMCaller.call).mockResolvedValue({
     output: audit.rawResponse,
@@ -1777,6 +1779,7 @@ test.each([
   ['segment-recipients.v9', 'segment-recipients.v10'],
   ['segment-recipients.v10', 'segment-recipients.v11'],
   ['segment-recipients.v11', 'segment-recipients.v12'],
+  ['segment-recipients.v12', 'segment-recipients.v13'],
 ] as const)(
   'preserves %s schema, input and raw inspection while %s extends only interpretation',
   async (oldVersion, currentVersion) => {
