@@ -23,15 +23,18 @@ vi.mock('@heripo/shared', async (importOriginal) => ({
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
 function fixture(
-  version?: Parameters<typeof createContentAttachmentRecipientRequest>[2],
+  version: Parameters<
+    typeof createContentAttachmentRecipientRequest
+  >[2] = 'segment-recipients.v8',
   workSource = '범위 측량. TR1 제토.',
+  groundQuotes = ['시굴범위', '트렌치 1'],
 ) {
   const excerpts = [
     ['E1', 'text', ['C1'], null, workSource],
     ['E2', 'text', ['C1'], null, '도로 수혈 존재. 도로 연결.'],
     ['E3', 'text', ['C1'], null, '앞 문맥.'],
   ];
-  const grounds = ['시굴범위', '트렌치 1'].map((quote, i) => ({
+  const grounds = groundQuotes.map((quote, i) => ({
     sourceId: 'K' + i,
     resourceKey: '/candidate/' + i,
     resourceId: null,
@@ -176,13 +179,47 @@ function fixture(
     callAttempts: [],
   };
   for (const segment of request.segmentSnapshot) {
-    if (request.version === 'segment-recipients.v8')
+    if (
+      request.version === 'segment-recipients.v8' ||
+      request.version === 'segment-recipients.v9'
+    )
       audit.rawResponse.decisions[segment.ref].workScopeAssessment = {
         state: 'not_applicable',
         currentWordRanges: segment.evidence.map((e) => e.range),
         targetGroups: [],
         reason: 'Synthetic baseline; operation coverage is tested separately.',
       };
+
+    if (request.version === 'segment-recipients.v9') {
+      const decision = audit.rawResponse.decisions[segment.ref];
+      decision.areaAssessments = Object.fromEntries(
+        ['R1', 'R2'].map((ref, i) => {
+          const included = decision.attachments.some(
+            (a) => a.candidateRef === ref,
+          );
+          const unresolved = decision.recipientIdentityAlternatives.some((a) =>
+            a.candidateRefs.includes(ref),
+          );
+          return [
+            ref,
+            {
+              disposition: included
+                ? 'included'
+                : unresolved
+                  ? 'unresolved'
+                  : 'excluded',
+              currentWordRanges:
+                included || unresolved
+                  ? segment.evidence.map((e) => e.range)
+                  : [],
+              contextWordRanges: [],
+              candidateEvidenceRefs: [`K${i + 1}.1`],
+              reason: 'Synthetic independent area disposition.',
+            },
+          ];
+        }),
+      );
+    }
 
     audit.rawResponse.decisions[segment.ref] = structuredClone(
       audit.rawResponse.decisions[segment.ref],
@@ -310,7 +347,11 @@ test('rejects invalid sources, empty registry and mismatched or duplicate origin
     const f = fixture();
     mutate(f);
     expect(() =>
-      createContentAttachmentRecipientRequest(f.input, f.segmentation),
+      createContentAttachmentRecipientRequest(
+        f.input,
+        f.segmentation,
+        f.audit.version,
+      ),
     ).toThrow();
     expect(
       inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit),
@@ -426,7 +467,7 @@ test('rejects duplicate/conflicting recipients and fabricated, out-of-segment or
 });
 
 test('makes only the recipient call and preserves its original response, attempts and usage', async () => {
-  const { input, segmentation, audit } = fixture();
+  const { input, segmentation, audit } = fixture('segment-recipients.v9');
   const usage = { inputTokens: 12, outputTokens: 6, totalTokens: 18 } as never;
   vi.mocked(LLMCaller.call).mockResolvedValue({
     output: audit.rawResponse,
@@ -581,7 +622,11 @@ test('supports body-only collectives without inventing an inventory and rejects 
   f.input.payload.originTables = [];
   for (const d of Object.values(f.audit.rawResponse.decisions))
     d.inventoryReviews = {};
-  const req = createContentAttachmentRecipientRequest(f.input, f.segmentation);
+  const req = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    f.audit.version,
+  );
   Object.assign(f.audit, req);
   const d = f.audit.rawResponse.decisions['E1:S1'];
   d.collectiveAssessment = {
@@ -647,7 +692,11 @@ test('checks intermediate dispositions independently and reconciles included, un
   f.input.payload.originAnchors.push(['R2', 'O3', 0]);
   Object.assign(
     f.audit,
-    createContentAttachmentRecipientRequest(f.input, f.segmentation),
+    createContentAttachmentRecipientRequest(
+      f.input,
+      f.segmentation,
+      f.audit.version,
+    ),
   );
   d.inventoryMembershipLinks!.push({
     inventoryRef: 'U2',
@@ -719,7 +768,11 @@ test('rejects forged intermediate source links, incomplete support and contradic
       f.input.payload.originAnchors.push(['R1', 'O3', 0]);
       Object.assign(
         f.audit,
-        createContentAttachmentRecipientRequest(f.input, f.segmentation),
+        createContentAttachmentRecipientRequest(
+          f.input,
+          f.segmentation,
+          f.audit.version,
+        ),
       );
       member(f).originRowRefs = ['O3'];
     },
@@ -882,7 +935,11 @@ test('reports foreign inventory-review evidence and review/conclusion/membership
       delete f.trace.inventoryMembershipLinks[0].members.R2;
       Object.assign(
         f.audit,
-        createContentAttachmentRecipientRequest(f.input, f.segmentation),
+        createContentAttachmentRecipientRequest(
+          f.input,
+          f.segmentation,
+          f.audit.version,
+        ),
       );
     },
   ]) {
@@ -1262,7 +1319,7 @@ test('rejects work classification gaps, foreign target provenance and invalid co
   }
 });
 
-test('replays v7 without work-scope fields while new requests preserve source input and require those fields', async () => {
+test('replays v7 without work-scope fields while v8 requests preserve source input and require those fields', async () => {
   const old = fixture('segment-recipients.v7');
   const original = JSON.stringify(old.audit);
   const oldInspection = inspectContentAttachmentRecipients(
@@ -1275,6 +1332,7 @@ test('replays v7 without work-scope fields while new requests preserve source in
   const current = createContentAttachmentRecipientRequest(
     old.input,
     old.segmentation,
+    'segment-recipients.v8',
   );
   expect(current.version).toBe('segment-recipients.v8');
   expect(current.userPrompt).toBe(old.request.userPrompt);
@@ -1284,4 +1342,424 @@ test('replays v7 without work-scope fields while new requests preserve source in
     .responseFormat;
   expect(JSON.stringify(oldFormat)).not.toContain('workScopeAssessment');
   expect(JSON.stringify(old.audit)).toBe(original);
+});
+
+function areaFixture() {
+  return fixture('segment-recipients.v9', '부분범위 측량. 전체범위 조사.', [
+    '부분범위 80㎡',
+    '전체범위 200㎡',
+  ]);
+}
+
+test('requires every area judgment and its own grounds and reason even for non-work or excluded recipients', () => {
+  const f = areaFixture();
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  expect(
+    f.audit.rawResponse.decisions['E2:S1'].workScopeAssessment!.state,
+  ).toBe('not_applicable');
+  for (const mutate of [
+    (raw: typeof f.audit.rawResponse) => {
+      delete raw.decisions['E1:S1'].areaAssessments;
+    },
+    (raw: typeof f.audit.rawResponse) => {
+      delete raw.decisions['E1:S1'].areaAssessments!.R1;
+    },
+    (raw: typeof f.audit.rawResponse) => {
+      raw.decisions['E1:S1'].areaAssessments!.R2.candidateEvidenceRefs = [];
+    },
+    (raw: typeof f.audit.rawResponse) => {
+      raw.decisions['E1:S1'].areaAssessments!.R1.candidateEvidenceRefs = [];
+    },
+    (raw: typeof f.audit.rawResponse) => {
+      raw.decisions['E1:S1'].areaAssessments!.R2.reason = '';
+    },
+    (raw: typeof f.audit.rawResponse) => {
+      raw.decisions['E1:S1'].areaAssessments!.foreign = structuredClone(
+        raw.decisions['E1:S1'].areaAssessments!.R1,
+      );
+    },
+  ]) {
+    const raw = structuredClone(f.audit.rawResponse);
+    mutate(raw);
+    expect(f.request.schema.safeParse(raw).success).toBe(false);
+    const audit = { ...f.audit, rawResponse: raw };
+    const before = JSON.stringify(audit);
+    expect(
+      inspectContentAttachmentRecipients(f.input, f.segmentation, audit),
+    ).toEqual({
+      issues: ['Invalid recipient response, request or source snapshot'],
+      findings: [],
+    });
+    expect(JSON.stringify(audit)).toBe(before);
+  }
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('reports area inclusion or uncertainty without direct evidence and rejects foreign or duplicate provenance', () => {
+  type F = ReturnType<typeof areaFixture>;
+  const cases: Array<[(f: F) => void, string]> = [
+    [
+      (f) => {
+        f.audit.rawResponse.decisions[
+          'E1:S1'
+        ].areaAssessments!.R1.currentWordRanges = [];
+      },
+      'Area inclusion or uncertainty lacks current evidence: R1',
+    ],
+    [
+      (f) => {
+        const a = f.audit.rawResponse.decisions['E1:S1'].areaAssessments!.R1;
+        a.disposition = 'unresolved';
+        a.currentWordRanges = [];
+      },
+      'Area inclusion or uncertainty lacks current evidence: R1',
+    ],
+    [
+      (f) => {
+        f.audit.rawResponse.decisions[
+          'E1:S1'
+        ].areaAssessments!.R1.candidateEvidenceRefs = ['K2.1'];
+      },
+      'Foreign candidate grounds',
+    ],
+    [
+      (f) => {
+        f.audit.rawResponse.decisions[
+          'E1:S1'
+        ].areaAssessments!.R1.candidateEvidenceRefs = ['K1.1', 'K1.1'];
+      },
+      'Duplicate support',
+    ],
+    [
+      (f) => {
+        f.audit.rawResponse.decisions[
+          'E1:S1'
+        ].areaAssessments!.R2.currentWordRanges = ['E1:W3-W4'];
+      },
+      'Evidence outside segment',
+    ],
+    [
+      (f) => {
+        f.audit.rawResponse.decisions[
+          'E1:S1'
+        ].areaAssessments!.R1.contextWordRanges = ['E999:W1-W1'];
+      },
+      'Unknown or reversed word range',
+    ],
+  ];
+  for (const [mutate, reason] of cases) {
+    const f = areaFixture();
+    mutate(f);
+    const before = JSON.stringify(f.audit);
+    const inspection = inspectContentAttachmentRecipients(
+      f.input,
+      f.segmentation,
+      f.audit,
+    );
+    expect(inspection.issues).toEqual([
+      `Invalid recipient area assessment: E1:S1: ${reason}`,
+    ]);
+    expect(inspection.findings).toHaveLength(3);
+    expect(JSON.stringify(f.audit)).toBe(before);
+  }
+});
+
+test('detects area judgment versus final attachment and identity-uncertainty conflicts without filling omissions', () => {
+  type F = ReturnType<typeof areaFixture>;
+  const cases: Array<[(f: F) => void, string]> = [
+    [
+      (f) => {
+        f.audit.rawResponse.decisions['E1:S1'].attachments = [];
+      },
+      'R1',
+    ],
+    [
+      (f) => {
+        f.audit.rawResponse.decisions['E1:S1'].areaAssessments!.R1.disposition =
+          'excluded';
+      },
+      'R1',
+    ],
+    [
+      (f) => {
+        f.audit.rawResponse.decisions['E1:S1'].areaAssessments!.R1.disposition =
+          'unresolved';
+      },
+      'R1',
+    ],
+    [
+      (f) => {
+        const d = f.audit.rawResponse.decisions['E1:S1'];
+        d.attachments = [];
+        const { candidateRef, ...s } = f.support('R1', 'E1:W1-W2');
+        d.recipientIdentityAlternatives = [
+          { ...s, candidateRefs: [candidateRef] },
+        ];
+      },
+      'R1',
+    ],
+    [
+      (f) => {
+        const { candidateRef, ...s } = f.support('R2', 'E1:W1-W2');
+        f.audit.rawResponse.decisions['E1:S1'].recipientIdentityAlternatives = [
+          { ...s, candidateRefs: [candidateRef] },
+        ];
+      },
+      'R2',
+    ],
+  ];
+  for (const [mutate, ref] of cases) {
+    const f = areaFixture();
+    mutate(f);
+    const before = JSON.stringify(f.audit);
+    const inspection = inspectContentAttachmentRecipients(
+      f.input,
+      f.segmentation,
+      f.audit,
+    );
+    expect(inspection.issues).toEqual([
+      `Invalid recipient area assessment: E1:S1: Area judgment and final recipients disagree: ${ref}`,
+    ]);
+    expect(inspection.findings.map((x) => x.segmentRef)).not.toContain('E1:S1');
+    expect(JSON.stringify(f.audit)).toBe(before);
+  }
+});
+
+test('preserves unresolved area grouping independently of relationship roles and retains rejected grounds', () => {
+  const f = areaFixture(),
+    d = f.audit.rawResponse.decisions['E2:S1'];
+  d.attachments = [];
+  d.recipientIdentityAlternatives = [
+    {
+      candidateRefs: ['R1', 'R2'],
+      currentWordRanges: ['E2:W1-W3'],
+      contextWordRanges: [],
+      candidateEvidenceRefs: ['K1.1', 'K2.1'],
+      originRowRefs: [],
+    },
+  ];
+  for (const assessment of Object.values(d.areaAssessments!))
+    assessment.disposition = 'unresolved';
+  const before = JSON.stringify(f.audit);
+  const result = inspectContentAttachmentRecipients(
+    f.input,
+    f.segmentation,
+    f.audit,
+  );
+  expect(result.issues).toEqual([]);
+  expect(
+    result.findings[2].recipientIdentityAlternatives.map(
+      (g) => g.candidateRefs,
+    ),
+  ).toEqual([['R1', 'R2']]);
+  expect(result.findings[3].areaAssessments!.R1.disposition).toBe('excluded');
+  expect(
+    result.findings[3].relationshipSubjectAlternatives[0].candidateRefs,
+  ).toEqual(['R1', 'R2']);
+  expect(result.findings[0].areaAssessments!.R2).toEqual(
+    f.audit.rawResponse.decisions['E1:S1'].areaAssessments!.R2,
+  );
+  expect(JSON.stringify(f.audit)).toBe(before);
+  d.recipientIdentityAlternatives = [];
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([
+    'Invalid recipient area assessment: E2:S1: Area judgment and final recipients disagree: R1',
+  ]);
+});
+
+test('assesses area work independently while retaining its separate operation-coverage requirement', () => {
+  const f = areaFixture(),
+    d = f.audit.rawResponse.decisions['E1:S1'];
+  d.workScopeAssessment = {
+    state: 'operation',
+    currentWordRanges: ['E1:W1-W2'],
+    reason: 'Independent boundary work.',
+    targetGroups: [
+      {
+        targetIdentification: {
+          candidateRefs: ['R1'],
+          currentWordRanges: ['E1:W1-W2'],
+          contextWordRanges: [],
+          candidateEvidenceRefs: ['K1.1'],
+          originRowRefs: [],
+        },
+        operationCoverage: {
+          state: 'established',
+          supportingWordRanges: ['E1:W1-W2'],
+          consideredWordRanges: [],
+          reason: 'Current action names this area.',
+        },
+      },
+    ],
+  };
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  d.workScopeAssessment.targetGroups[0].operationCoverage.supportingWordRanges =
+    [];
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([
+    'Invalid recipient work scope: E1:S1: Established operation lacks coverage evidence',
+  ]);
+});
+
+test('derives complete area keys from the full registry, deduplicates mentions and permits an empty area set', () => {
+  const f = areaFixture();
+  f.input.payload.contexts.C2 = ['Other investigation chapter'];
+  f.input.payload.candidates.push([
+    'R1',
+    'area',
+    'C2',
+    'Another area mention',
+    null,
+    [['K3.1', '부분범위 80㎡']],
+  ]);
+  f.input.codeMap.candidateRows.push({ ...f.input.codeMap.candidateRows[0] });
+  f.input.payload.candidates.push([
+    'R3',
+    'feature',
+    'C1',
+    'Feature',
+    null,
+    [['K4.1', '유구 A']],
+  ]);
+  f.input.codeMap.candidateRows.push({
+    ref: 'R3',
+    groupId: 'synthetic-feature-group',
+    candidateId: 'synthetic-feature-mention',
+    evidence: [
+      {
+        ...f.input.codeMap.candidateRows[0].evidence[0],
+        quote: '유구 A',
+        charEnd: 4,
+      },
+    ],
+  });
+  f.input.payload.candidates.push([
+    'R4',
+    'area',
+    'C2',
+    'Outside area',
+    null,
+    [['K5.1', '외곽범위 50㎡']],
+  ]);
+  f.input.codeMap.candidateRows.push({
+    ref: 'R4',
+    groupId: 'synthetic-area-group',
+    candidateId: 'synthetic-area-mention',
+    evidence: [
+      {
+        ...f.input.codeMap.candidateRows[0].evidence[0],
+        quote: '외곽범위 50㎡',
+        charEnd: '외곽범위 50㎡'.length,
+      },
+    ],
+  });
+  const request = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+  );
+  Object.assign(f.audit, request);
+  expect(request.schema.safeParse(f.audit.rawResponse).success).toBe(false);
+  for (const decision of Object.values(f.audit.rawResponse.decisions))
+    decision.areaAssessments!.R4 = {
+      disposition: 'excluded',
+      currentWordRanges: [],
+      contextWordRanges: [],
+      candidateEvidenceRefs: ['K5.1'],
+      reason:
+        'Other area in a different chapter still receives a source-grounded review.',
+    };
+  expect(request.schema.safeParse(f.audit.rawResponse).success).toBe(true);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  const raw = structuredClone(f.audit.rawResponse);
+  raw.decisions['E1:S1'].areaAssessments!.R3 = structuredClone(
+    raw.decisions['E1:S1'].areaAssessments!.R1,
+  );
+  expect(request.schema.safeParse(raw).success).toBe(false);
+  f.input.payload.candidates = f.input.payload.candidates.map((r) => [
+    r[0],
+    'feature',
+    ...r.slice(2),
+  ]);
+  const emptyRequest = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+  );
+  Object.assign(f.audit, emptyRequest);
+  for (const d of Object.values(f.audit.rawResponse.decisions))
+    d.areaAssessments = {};
+  expect(emptyRequest.schema.safeParse(f.audit.rawResponse).success).toBe(true);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+});
+
+test('replays v8 source and inspection unchanged while v9 adds only required area judgments', async () => {
+  const old = fixture('segment-recipients.v8');
+  const before = JSON.stringify(old.audit);
+  const inspected = inspectContentAttachmentRecipients(
+    old.input,
+    old.segmentation,
+    old.audit,
+  );
+  expect(inspected.issues).toEqual([]);
+  expect(inspected.findings[0]).not.toHaveProperty('areaAssessments');
+  expect(inspected.findings[0]).toHaveProperty('workScopeAssessment');
+  const current = createContentAttachmentRecipientRequest(
+    old.input,
+    old.segmentation,
+  );
+  expect(current.version).toBe('segment-recipients.v9');
+  expect(current.userPrompt).toBe(old.request.userPrompt);
+  expect(current.systemPrompt.startsWith(old.request.systemPrompt)).toBe(true);
+  expect(current.schema.safeParse(old.audit.rawResponse).success).toBe(false);
+  const historicalFormat = await Output.object({ schema: old.request.schema })
+    .responseFormat;
+  expect(JSON.stringify(historicalFormat)).not.toContain('areaAssessments');
+  const currentFormat = await Output.object({ schema: current.schema })
+    .responseFormat;
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    expect(node).not.toHaveProperty('allOf');
+    if ('$ref' in node) expect(Object.keys(node)).toEqual(['$ref']);
+    Object.values(node).forEach(visit);
+  };
+  visit(currentFormat);
+  expect(JSON.stringify(old.audit)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('retains an independently described area outside an accepted inventory and detects its otherwise silent omission', () => {
+  const f = collectiveFixture('segment-recipients.v9');
+  f.input.payload.candidates[1][1] = 'feature';
+  f.input.payload.inventoryMembers = [['U1', ['R2']]];
+  delete f.trace.inventoryMembershipLinks[0].members.R1;
+  f.trace.inventoryReviews!.U1.candidateEvidenceRefs = ['K2.1'];
+  f.trace.inventoryReviews!.U1.originRowRefs = ['O1'];
+  for (const d of Object.values(f.audit.rawResponse.decisions))
+    delete d.areaAssessments!.R2;
+  Object.assign(
+    f.audit,
+    createContentAttachmentRecipientRequest(f.input, f.segmentation),
+  );
+  const d = f.audit.rawResponse.decisions['E2:S1'];
+  expect(d.workScopeAssessment!.state).toBe('not_applicable');
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  d.attachments = d.attachments.filter((a) => a.candidateRef !== 'R1');
+  const before = JSON.stringify(f.audit);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([
+    'Invalid recipient area assessment: E2:S1: Area judgment and final recipients disagree: R1',
+  ]);
+  expect(JSON.stringify(f.audit)).toBe(before);
 });

@@ -2,6 +2,7 @@ import type { ExtendedTokenUsage, LLMCallAttempt } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateEvidence } from './candidate-discovery';
+import type { ContentAttachmentAreaAssessment } from './content-attachment-area-assessments';
 import type { ContentAttachmentCollectiveTrace } from './content-attachment-collective-trace';
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
 import type { ContentAttachmentInventoryContext } from './content-attachment-inventory-reviews';
@@ -15,6 +16,11 @@ import type { ContentAttachmentWorkScopeAssessment } from './content-attachment-
 import { LLMCaller, createAuditedModel } from '@heripo/shared';
 import { z } from 'zod';
 
+import {
+  CONTENT_ATTACHMENT_AREA_ASSESSMENT_POLICY,
+  createContentAttachmentAreaAssessmentsSchema,
+  inspectContentAttachmentAreaAssessments,
+} from './content-attachment-area-assessments';
 import {
   CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY,
   createContentAttachmentCollectiveTraceSchema,
@@ -51,7 +57,7 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v8' as const;
+  'segment-recipients.v9' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
@@ -60,6 +66,7 @@ type RecipientVersion =
   | 'segment-recipients.v5'
   | 'segment-recipients.v6'
   | 'segment-recipients.v7'
+  | 'segment-recipients.v8'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -74,6 +81,7 @@ export interface ContentAttachmentRecipientAlternative extends ContentAttachment
   candidateRefs: string[];
 }
 export interface ContentAttachmentRecipientDecision extends Partial<ContentAttachmentCollectiveTrace> {
+  areaAssessments?: Record<string, ContentAttachmentAreaAssessment>;
   workScopeAssessment?: ContentAttachmentWorkScopeAssessment;
   attachments: ContentAttachmentRecipientAttachment[];
   recipientIdentityAlternatives: ContentAttachmentRecipientAlternative[];
@@ -108,6 +116,7 @@ export interface ContentAttachmentResolvedRecipientSupport {
   originRowRefs: string[];
 }
 export interface ContentAttachmentRecipientFinding {
+  areaAssessments?: Record<string, ContentAttachmentAreaAssessment>;
   workScopeAssessment?: ContentAttachmentWorkScopeAssessment;
   collectiveTrace?: ContentAttachmentCollectiveTrace;
   inventoryContexts?: Record<string, ContentAttachmentInventoryContext>;
@@ -135,6 +144,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v5' &&
     version !== 'segment-recipients.v6' &&
     version !== 'segment-recipients.v7' &&
+    version !== 'segment-recipients.v8' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -169,6 +179,9 @@ export function createContentAttachmentRecipientRequest(
   const candidateRows = registry.candidates as CandidateRow[];
   const candidateRefs = [...new Set(candidateRows.map((c) => c[0]))];
   if (!candidateRefs.length) throw new Error('Expected candidate registry');
+  const areaRefs = [
+    ...new Set(candidateRows.filter((r) => r[1] === 'area').map((r) => r[0])),
+  ];
   const candidateEvidence: CandidateBinding[] = [];
   for (const [index, row] of candidateRows.entries()) {
     const binding = input.codeMap.candidateRows[index];
@@ -247,10 +260,17 @@ export function createContentAttachmentRecipientRequest(
           .meta({ id: 'RecipientSubjectAlternative' }),
       ),
       reason: z.string().min(1),
-      ...(version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ...(version === 'segment-recipients.v8' ||
+      version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             workScopeAssessment:
               createContentAttachmentWorkScopeSchema(candidateRefs),
+          }
+        : {}),
+      ...(version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+        ? {
+            areaAssessments:
+              createContentAttachmentAreaAssessmentsSchema(areaRefs),
           }
         : {}),
       ...(version === 'segment-recipients.v1'
@@ -261,6 +281,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v5' ||
       version === 'segment-recipients.v6' ||
       version === 'segment-recipients.v7' ||
+      version === 'segment-recipients.v8' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -307,7 +328,11 @@ export function createContentAttachmentRecipientRequest(
                           (version === 'segment-recipients.v7'
                             ? ''
                             : '\n' +
-                              CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY)))),
+                              CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY +
+                              (version === 'segment-recipients.v8'
+                                ? ''
+                                : '\n' +
+                                  CONTENT_ATTACHMENT_AREA_ASSESSMENT_POLICY))))),
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -330,7 +355,8 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v4' ||
         audit.version === 'segment-recipients.v5' ||
         audit.version === 'segment-recipients.v6' ||
-        audit.version === 'segment-recipients.v7'
+        audit.version === 'segment-recipients.v7' ||
+        audit.version === 'segment-recipients.v8'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -442,6 +468,23 @@ export function inspectContentAttachmentRecipients(
       };
       if (audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION) {
         try {
+          inspectContentAttachmentAreaAssessments(
+            decision.areaAssessments!,
+            decision,
+            resolve,
+          );
+        } catch (error) {
+          issues.push(
+            `Invalid recipient area assessment: ${segment.ref}: ${(error as Error).message}`,
+          );
+          continue;
+        }
+      }
+      if (
+        audit.version === 'segment-recipients.v8' ||
+        audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ) {
+        try {
           inspectContentAttachmentWorkScope(
             decision.workScopeAssessment!,
             attachmentRefs,
@@ -466,12 +509,17 @@ export function inspectContentAttachmentRecipients(
       findings.push({
         segmentRef: segment.ref,
         ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+          ? { areaAssessments: decision.areaAssessments }
+          : {}),
+        ...(audit.version === 'segment-recipients.v8' ||
+        audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { workScopeAssessment: decision.workScopeAssessment }
           : {}),
         ...(audit.version === 'segment-recipients.v4' ||
         audit.version === 'segment-recipients.v5' ||
         audit.version === 'segment-recipients.v6' ||
         audit.version === 'segment-recipients.v7' ||
+        audit.version === 'segment-recipients.v8' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:
