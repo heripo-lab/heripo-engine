@@ -1,8 +1,10 @@
 import type { ContentAttachmentRecipientSupport } from './content-attachment-recipients';
+import type { ContentAttachmentWorkGroupReview } from './content-attachment-work-group-reviews';
 
 import { z } from 'zod';
 
 import { CONTENT_ATTACHMENT_WORD_RANGE_PATTERN } from './content-attachment-word-evidence';
+import { createContentAttachmentWorkGroupReviewsSchema } from './content-attachment-work-group-reviews';
 
 export interface ContentAttachmentWorkScopeAssessment {
   state: 'operation' | 'not_applicable';
@@ -19,6 +21,7 @@ export interface ContentAttachmentWorkScopeAssessment {
     };
   }>;
   reason: string;
+  groupReviews?: Record<string, ContentAttachmentWorkGroupReview>;
 }
 
 export const CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY =
@@ -30,11 +33,12 @@ export const CONTENT_ATTACHMENT_WORK_SCOPE_EVIDENCE_BOUNDARY_POLICY =
 /** Require a visible work classification and separate identity/coverage judgments for each operation group. */
 export function createContentAttachmentWorkScopeSchema(
   candidateRefs: string[],
+  workGroupRefs?: string[],
 ) {
   const ranges = z
     .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
     .meta({ id: 'WorkScopeRanges' });
-  return z
+  const schema = z
     .strictObject({
       state: z.enum(['operation', 'not_applicable']),
       currentWordRanges: ranges,
@@ -62,6 +66,20 @@ export function createContentAttachmentWorkScopeSchema(
       reason: z.string().min(1),
     })
     .meta({ id: 'WorkScopeAssessment' });
+  if (workGroupRefs === undefined) return schema;
+  return z.discriminatedUnion('state', [
+    z.strictObject({
+      ...schema.shape,
+      state: z.literal('operation'),
+      groupReviews:
+        createContentAttachmentWorkGroupReviewsSchema(workGroupRefs),
+    }),
+    z.strictObject({
+      ...schema.shape,
+      state: z.literal('not_applicable'),
+      groupReviews: z.strictObject({}),
+    }),
+  ]);
 }
 
 /** Validate declared task coverage without interpreting source meaning or modifying final recipients. */

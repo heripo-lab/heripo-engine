@@ -185,3 +185,5 @@ export type {
 export type { ContentAttachmentWorkScopeAssessment } from './content-attachment-work-scope';
 
 export type { ContentAttachmentAreaAssessment } from './content-attachment-area-assessments';
+
+export type { ContentAttachmentWorkGroupReview } from './content-attachment-work-group-reviews';

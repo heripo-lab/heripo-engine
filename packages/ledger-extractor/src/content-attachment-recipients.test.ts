@@ -185,9 +185,13 @@ function fixture(
       request.version === 'segment-recipients.v10' ||
       request.version === 'segment-recipients.v11' ||
       request.version === 'segment-recipients.v12' ||
-      request.version === 'segment-recipients.v13'
+      request.version === 'segment-recipients.v13' ||
+      request.version === 'segment-recipients.v14'
     )
       audit.rawResponse.decisions[segment.ref].workScopeAssessment = {
+        ...(request.version === 'segment-recipients.v14'
+          ? { groupReviews: {} }
+          : {}),
         state: 'not_applicable',
         currentWordRanges: segment.evidence.map((e) => e.range),
         targetGroups: [],
@@ -199,7 +203,8 @@ function fixture(
       request.version === 'segment-recipients.v10' ||
       request.version === 'segment-recipients.v11' ||
       request.version === 'segment-recipients.v12' ||
-      request.version === 'segment-recipients.v13'
+      request.version === 'segment-recipients.v13' ||
+      request.version === 'segment-recipients.v14'
     ) {
       const decision = audit.rawResponse.decisions[segment.ref];
       decision.areaAssessments = Object.fromEntries(
@@ -477,7 +482,7 @@ test('rejects duplicate/conflicting recipients and fabricated, out-of-segment or
 });
 
 test('makes only the recipient call and preserves its original response, attempts and usage', async () => {
-  const { input, segmentation, audit } = fixture('segment-recipients.v13');
+  const { input, segmentation, audit } = fixture('segment-recipients.v14');
   const usage = { inputTokens: 12, outputTokens: 6, totalTokens: 18 } as never;
   vi.mocked(LLMCaller.call).mockResolvedValue({
     output: audit.rawResponse,
@@ -1672,6 +1677,7 @@ test('derives complete area keys from the full registry, deduplicates mentions a
   const request = createContentAttachmentRecipientRequest(
     f.input,
     f.segmentation,
+    f.request.version,
   );
   Object.assign(f.audit, request);
   expect(request.schema.safeParse(f.audit.rawResponse).success).toBe(false);
@@ -1701,6 +1707,7 @@ test('derives complete area keys from the full registry, deduplicates mentions a
   const emptyRequest = createContentAttachmentRecipientRequest(
     f.input,
     f.segmentation,
+    f.request.version,
   );
   Object.assign(f.audit, emptyRequest);
   for (const d of Object.values(f.audit.rawResponse.decisions))
@@ -1758,7 +1765,11 @@ test('retains an independently described area outside an accepted inventory and 
     delete d.areaAssessments!.R2;
   Object.assign(
     f.audit,
-    createContentAttachmentRecipientRequest(f.input, f.segmentation),
+    createContentAttachmentRecipientRequest(
+      f.input,
+      f.segmentation,
+      f.request.version,
+    ),
   );
   const d = f.audit.rawResponse.decisions['E2:S1'];
   expect(d.workScopeAssessment!.state).toBe('not_applicable');
@@ -1816,3 +1827,116 @@ test.each([
     expect(LLMCaller.call).not.toHaveBeenCalled();
   },
 );
+
+test('adds required work reviews in v14 without changing v13 prompt, source fields or historical inspection', async () => {
+  const f = fixture('segment-recipients.v14');
+  const historical = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v13',
+  );
+  expect(f.request.systemPrompt).toBe(historical.systemPrompt);
+  const { workGroupColumns, workGroups, ...source } = JSON.parse(
+    f.request.userPrompt,
+  );
+  expect(workGroupColumns).toEqual(['ref', 'inventoryRef', 'recordKind']);
+  expect(workGroups).toEqual([['G1', 'U1', 'area']]);
+  expect(source).toEqual(JSON.parse(historical.userPrompt));
+  expect(f.request.workGroups![0].candidateRefs).toEqual(['R1', 'R2']);
+  const before = JSON.stringify(f.audit);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  const oldResponse = structuredClone(f.audit.rawResponse);
+  for (const d of Object.values(oldResponse.decisions))
+    delete d.workScopeAssessment!.groupReviews;
+  expect(historical.schema.safeParse(oldResponse).success).toBe(true);
+  expect(f.request.schema.safeParse(oldResponse).success).toBe(false);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, {
+      ...f.audit,
+      ...historical,
+      rawResponse: oldResponse,
+    }).issues,
+  ).toEqual([]);
+  const format = await Output.object({ schema: f.request.schema })
+    .responseFormat;
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    expect(node).not.toHaveProperty('allOf');
+    if ('$ref' in node) expect(Object.keys(node)).toEqual(['$ref']);
+    Object.values(node).forEach(visit);
+  };
+  visit(format);
+  expect(JSON.stringify(format)).toContain('groupReviews');
+  expect(JSON.stringify(f.audit)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('inspects v14 references per segment and preserves raw R1 when rejecting an invalid work review', () => {
+  const f = fixture('segment-recipients.v14');
+  f.input.payload.inventoryMembers = [['U1', ['R2']]];
+  const request = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+  );
+  Object.assign(f.audit, request);
+  const d = f.audit.rawResponse.decisions['E1:S1'];
+  const target = (ref: string, established: boolean) => ({
+    targetIdentification: {
+      candidateRefs: [ref],
+      currentWordRanges: ['E1:W1-W2'],
+      contextWordRanges: [],
+      candidateEvidenceRefs: [ref === 'R1' ? 'K1.1' : 'K2.1'],
+      originRowRefs: [],
+    },
+    operationCoverage: {
+      state: established
+        ? ('established' as const)
+        : ('not_established' as const),
+      supportingWordRanges: established ? ['E1:W1-W2'] : [],
+      consideredWordRanges: [],
+      reason: 'Synthetic source judgment.',
+    },
+  });
+  d.workScopeAssessment = {
+    state: 'operation',
+    currentWordRanges: ['E1:W1-W2'],
+    targetGroups: [target('R1', true), target('R2', false)],
+    groupReviews: {
+      G1: {
+        relevance: 'relevant',
+        targetGroupIndexes: [1],
+        reason: 'Inspect the original registered group.',
+      },
+    },
+    reason: 'Independent area work.',
+  };
+  let inspected = inspectContentAttachmentRecipients(
+    f.input,
+    f.segmentation,
+    f.audit,
+  );
+  expect(inspected.issues).toEqual([]);
+  expect(inspected.findings[0].attachments[0].candidateRefs).toEqual(['R1']);
+  d.workScopeAssessment.groupReviews!.G1.targetGroupIndexes = [0];
+  const before = JSON.stringify(f.audit);
+  inspected = inspectContentAttachmentRecipients(
+    f.input,
+    f.segmentation,
+    f.audit,
+  );
+  expect(inspected.issues).toEqual([
+    'Invalid recipient work scope: E1:S1: G1[0]: Work group member mismatch',
+  ]);
+  expect(inspected.findings).toHaveLength(3);
+  expect(d.attachments.map((a) => a.candidateRef)).toEqual(['R1']);
+  expect(JSON.stringify(f.audit)).toBe(before);
+  delete d.workScopeAssessment.groupReviews!.G1;
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([
+    expect.stringContaining('E1:S1.workScopeAssessment.groupReviews.G1'),
+  ]);
+  expect(d.attachments.map((a) => a.candidateRef)).toEqual(['R1']);
+});
