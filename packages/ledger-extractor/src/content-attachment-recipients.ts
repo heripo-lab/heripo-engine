@@ -20,6 +20,7 @@ import {
   inspectContentAttachmentCollectiveTrace,
 } from './content-attachment-collective-trace';
 import {
+  CONTENT_ATTACHMENT_COLLECTIVE_SOURCE_SHARING_POLICY,
   CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY,
   CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
   createContentAttachmentInventoryReviewsSchema,
@@ -42,11 +43,12 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v4' as const;
+  'segment-recipients.v5' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
   | 'segment-recipients.v3'
+  | 'segment-recipients.v4'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -116,6 +118,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v1' &&
     version !== 'segment-recipients.v2' &&
     version !== 'segment-recipients.v3' &&
+    version !== 'segment-recipients.v4' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -232,6 +235,7 @@ export function createContentAttachmentRecipientRequest(
         ? {}
         : createContentAttachmentCollectiveTraceSchema(input)),
       ...(version === 'segment-recipients.v3' ||
+      version === 'segment-recipients.v4' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -262,7 +266,11 @@ export function createContentAttachmentRecipientRequest(
             ? CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY
             : version === 'segment-recipients.v3'
               ? CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY
-              : CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY),
+              : version === 'segment-recipients.v4'
+                ? CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY
+                : CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY +
+                  '\n' +
+                  CONTENT_ATTACHMENT_COLLECTIVE_SOURCE_SHARING_POLICY),
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -281,7 +289,8 @@ export function inspectContentAttachmentRecipients(
       segmentation,
       audit.version === 'segment-recipients.v1' ||
         audit.version === 'segment-recipients.v2' ||
-        audit.version === 'segment-recipients.v3'
+        audit.version === 'segment-recipients.v3' ||
+        audit.version === 'segment-recipients.v4'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -402,7 +411,8 @@ export function inspectContentAttachmentRecipients(
         );
       findings.push({
         segmentRef: segment.ref,
-        ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+        ...(audit.version === 'segment-recipients.v4' ||
+        audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:
                 resolveContentAttachmentInventoryContexts(input),

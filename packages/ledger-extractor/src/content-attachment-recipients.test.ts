@@ -912,9 +912,15 @@ test('maps original inventory contexts in code without adding them to raw model 
     'segment-recipients.v3',
   );
   expect(f.request.userPrompt).toBe(old.userPrompt);
-  expect(f.request.systemPrompt).toBe(
+  const mapped = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v4',
+  );
+  expect(mapped.systemPrompt).toBe(
     old.systemPrompt.replace('table-owned inventoryContextRefs, ', ''),
   );
+  expect(f.request.systemPrompt.startsWith(mapped.systemPrompt)).toBe(true);
 });
 
 test('replays v3 context selection and rejects its foreign or duplicate context references without mapping them', () => {
@@ -945,4 +951,47 @@ test('replays v3 context selection and rejects its foreign or duplicate context 
   const raw = structuredClone(f.audit.rawResponse);
   delete raw.decisions['E1:S1'].inventoryReviews!.U1.inventoryContextRefs;
   expect(f.request.schema.safeParse(raw).success).toBe(false);
+});
+
+test('keeps established membership independent of unresolved individual dating and still rejects explicit period conflicts', async () => {
+  const f = collectiveFixture();
+  const member = f.trace.inventoryMembershipLinks[0].members.R1;
+  member.periodStatus = 'unresolved';
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  expect(member.membership).toBe('linked');
+  expect(member.disposition).toBe('included');
+  const old = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v4',
+  );
+  expect(f.request.userPrompt).toBe(old.userPrompt);
+  const currentFormat = await Output.object({ schema: f.request.schema })
+    .responseFormat;
+  const oldFormat = await Output.object({ schema: old.schema }).responseFormat;
+  expect(currentFormat).toEqual(oldFormat);
+  expect(f.request.systemPrompt).toContain(
+    'Do not convert chronology precision alone into recipientIdentityAlternatives',
+  );
+  expect(f.request.systemPrompt).toContain(
+    'exclude members with explicit incompatible grounds',
+  );
+  const historicalAudit = { ...f.audit, ...old };
+  const before = JSON.stringify(historicalAudit);
+  expect(
+    inspectContentAttachmentRecipients(
+      f.input,
+      f.segmentation,
+      historicalAudit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit),
+  );
+  expect(JSON.stringify(historicalAudit)).toBe(before);
+  member.periodStatus = 'incompatible';
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toHaveLength(1);
 });
