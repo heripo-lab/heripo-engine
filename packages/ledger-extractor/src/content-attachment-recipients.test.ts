@@ -182,7 +182,8 @@ function fixture(
     if (
       request.version === 'segment-recipients.v8' ||
       request.version === 'segment-recipients.v9' ||
-      request.version === 'segment-recipients.v10'
+      request.version === 'segment-recipients.v10' ||
+      request.version === 'segment-recipients.v11'
     )
       audit.rawResponse.decisions[segment.ref].workScopeAssessment = {
         state: 'not_applicable',
@@ -193,7 +194,8 @@ function fixture(
 
     if (
       request.version === 'segment-recipients.v9' ||
-      request.version === 'segment-recipients.v10'
+      request.version === 'segment-recipients.v10' ||
+      request.version === 'segment-recipients.v11'
     ) {
       const decision = audit.rawResponse.decisions[segment.ref];
       decision.areaAssessments = Object.fromEntries(
@@ -471,7 +473,7 @@ test('rejects duplicate/conflicting recipients and fabricated, out-of-segment or
 });
 
 test('makes only the recipient call and preserves its original response, attempts and usage', async () => {
-  const { input, segmentation, audit } = fixture('segment-recipients.v10');
+  const { input, segmentation, audit } = fixture('segment-recipients.v11');
   const usage = { inputTokens: 12, outputTokens: 6, totalTokens: 18 } as never;
   vi.mocked(LLMCaller.call).mockResolvedValue({
     output: audit.rawResponse,
@@ -1769,34 +1771,42 @@ test('retains an independently described area outside an accepted inventory and 
   expect(JSON.stringify(f.audit)).toBe(before);
 });
 
-test('preserves the v9 schema, input and raw inspection while v10 extends only area interpretation', async () => {
-  const f = fixture('segment-recipients.v10');
-  const before = JSON.stringify(f.audit);
-  const historical = createContentAttachmentRecipientRequest(
-    f.input,
-    f.segmentation,
-    'segment-recipients.v9',
-  );
-  const oldAudit = { ...f.audit, ...historical };
-  const current = inspectContentAttachmentRecipients(
-    f.input,
-    f.segmentation,
-    f.audit,
-  );
-  expect(f.request.version).toBe('segment-recipients.v10');
-  expect(f.request.userPrompt).toBe(historical.userPrompt);
-  expect(f.request.systemPrompt.startsWith(historical.systemPrompt)).toBe(true);
-  expect(f.request.systemPrompt).not.toBe(historical.systemPrompt);
-  const currentFormat = await Output.object({ schema: f.request.schema })
-    .responseFormat;
-  const oldFormat = await Output.object({ schema: historical.schema })
-    .responseFormat;
-  expect(currentFormat).toEqual(oldFormat);
-  expect(historical.schema.safeParse(f.audit.rawResponse).success).toBe(true);
-  expect(current.issues).toEqual([]);
-  expect(
-    inspectContentAttachmentRecipients(f.input, f.segmentation, oldAudit),
-  ).toEqual(current);
-  expect(JSON.stringify(f.audit)).toBe(before);
-  expect(LLMCaller.call).not.toHaveBeenCalled();
-});
+test.each([
+  ['segment-recipients.v9', 'segment-recipients.v10'],
+  ['segment-recipients.v10', 'segment-recipients.v11'],
+] as const)(
+  'preserves %s schema, input and raw inspection while %s extends only interpretation',
+  async (oldVersion, currentVersion) => {
+    const f = fixture(currentVersion);
+    const before = JSON.stringify(f.audit);
+    const historical = createContentAttachmentRecipientRequest(
+      f.input,
+      f.segmentation,
+      oldVersion,
+    );
+    const oldAudit = { ...f.audit, ...historical };
+    const current = inspectContentAttachmentRecipients(
+      f.input,
+      f.segmentation,
+      f.audit,
+    );
+    expect(f.request.version).toBe(currentVersion);
+    expect(f.request.userPrompt).toBe(historical.userPrompt);
+    expect(f.request.systemPrompt.startsWith(historical.systemPrompt)).toBe(
+      true,
+    );
+    expect(f.request.systemPrompt).not.toBe(historical.systemPrompt);
+    const currentFormat = await Output.object({ schema: f.request.schema })
+      .responseFormat;
+    const oldFormat = await Output.object({ schema: historical.schema })
+      .responseFormat;
+    expect(currentFormat).toEqual(oldFormat);
+    expect(historical.schema.safeParse(f.audit.rawResponse).success).toBe(true);
+    expect(current.issues).toEqual([]);
+    expect(
+      inspectContentAttachmentRecipients(f.input, f.segmentation, oldAudit),
+    ).toEqual(current);
+    expect(JSON.stringify(f.audit)).toBe(before);
+    expect(LLMCaller.call).not.toHaveBeenCalled();
+  },
+);
