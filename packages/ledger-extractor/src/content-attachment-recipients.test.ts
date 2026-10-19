@@ -21,7 +21,9 @@ vi.mock('@heripo/shared', async (importOriginal) => ({
   LLMCaller: { call: vi.fn() },
   createAuditedModel: vi.fn((model) => ({ model, attempts: [] })),
 }));
-function fixture() {
+function fixture(
+  version?: Parameters<typeof createContentAttachmentRecipientRequest>[2],
+) {
   const excerpts = [
     ['E1', 'text', ['C1'], null, '범위 측량. TR1 제토.'],
     ['E2', 'text', ['C1'], null, '도로 수혈 존재. 도로 연결.'],
@@ -104,7 +106,11 @@ function fixture() {
     usage: {} as never,
     callAttempts: [],
   };
-  const request = createContentAttachmentRecipientRequest(input, segmentation);
+  const request = createContentAttachmentRecipientRequest(
+    input,
+    segmentation,
+    version,
+  );
   const support = (candidateRef: string, range: string) => ({
     candidateRef,
     currentWordRanges: [range],
@@ -176,7 +182,9 @@ function fixture() {
         decision: 'rejected',
         currentWordRanges: segment.evidence.map((e) => e.range),
         contextWordRanges: [],
-        inventoryContextRefs: ['C1'],
+        ...(request.version === 'segment-recipients.v3'
+          ? { inventoryContextRefs: ['C1'] }
+          : {}),
         candidateEvidenceRefs: [],
         originRowRefs: [],
         reason: 'Direct work or relationship, not an inventory collective.',
@@ -557,6 +565,7 @@ test('replays original v1 responses exactly and rejects unsupported request vers
 test('supports body-only collectives without inventing an inventory and rejects any table selection for an empty registry', async () => {
   const f = fixture();
   f.input.payload.inventoryMembers = [];
+  f.input.payload.originTables = [];
   for (const d of Object.values(f.audit.rawResponse.decisions))
     d.inventoryReviews = {};
   const req = createContentAttachmentRecipientRequest(f.input, f.segmentation);
@@ -816,16 +825,10 @@ test('reports foreign inventory-review evidence and review/conclusion/membership
   const review = (f: F) => f.trace.inventoryReviews!.U1;
   for (const mutate of [
     (f: F) => {
-      review(f).inventoryContextRefs = ['C1', 'C1'];
-    },
-    (f: F) => {
       review(f).candidateEvidenceRefs = ['K1.1', 'K1.1'];
     },
     (f: F) => {
       review(f).originRowRefs = ['O1', 'O1'];
-    },
-    (f: F) => {
-      review(f).inventoryContextRefs = ['foreign'];
     },
     (f: F) => {
       review(f).candidateEvidenceRefs = ['foreign'];
@@ -876,4 +879,70 @@ test('reports foreign inventory-review evidence and review/conclusion/membership
     ).toHaveLength(1);
     expect(JSON.stringify(f.audit)).toBe(before);
   }
+});
+
+test('maps original inventory contexts in code without adding them to raw model reviews', () => {
+  const f = fixture();
+  const before = JSON.stringify(f.audit);
+  const inspected = inspectContentAttachmentRecipients(
+    f.input,
+    f.segmentation,
+    f.audit,
+  );
+  expect(inspected.issues).toEqual([]);
+  for (const finding of inspected.findings) {
+    expect(finding.inventoryContexts).toEqual({
+      U1: { contextRefs: ['C1'], chapterPaths: [['Survey']] },
+    });
+    expect(finding.collectiveTrace!.inventoryReviews!.U1).not.toHaveProperty(
+      'inventoryContextRefs',
+    );
+  }
+  expect(JSON.stringify(f.audit)).toBe(before);
+  const format = structuredClone(f.audit.rawResponse);
+  for (const value of ['C1', 'U1']) {
+    format.decisions['E1:S1'].inventoryReviews!.U1.inventoryContextRefs = [
+      value,
+    ];
+    expect(f.request.schema.safeParse(format).success).toBe(false);
+  }
+  const old = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v3',
+  );
+  expect(f.request.userPrompt).toBe(old.userPrompt);
+  expect(f.request.systemPrompt).toBe(
+    old.systemPrompt.replace('table-owned inventoryContextRefs, ', ''),
+  );
+});
+
+test('replays v3 context selection and rejects its foreign or duplicate context references without mapping them', () => {
+  const f = fixture('segment-recipients.v3');
+  const original = JSON.stringify(f.audit);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit)
+      .findings[0],
+  ).not.toHaveProperty('inventoryContexts');
+  expect(JSON.stringify(f.audit)).toBe(original);
+  for (const values of [['C1', 'C1'], ['foreign'], ['U1']]) {
+    const audit = {
+      ...f.audit,
+      rawResponse: structuredClone(f.audit.rawResponse),
+    };
+    audit.rawResponse.decisions[
+      'E1:S1'
+    ].inventoryReviews!.U1.inventoryContextRefs = values;
+    const before = JSON.stringify(audit);
+    expect(
+      inspectContentAttachmentRecipients(f.input, f.segmentation, audit).issues,
+    ).toHaveLength(1);
+    expect(JSON.stringify(audit)).toBe(before);
+  }
+  const raw = structuredClone(f.audit.rawResponse);
+  delete raw.decisions['E1:S1'].inventoryReviews!.U1.inventoryContextRefs;
+  expect(f.request.schema.safeParse(raw).success).toBe(false);
 });

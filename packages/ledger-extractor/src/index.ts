@@ -177,4 +177,7 @@ export type {
   ContentAttachmentCollectiveTrace,
 } from './content-attachment-collective-trace';
 
-export type { ContentAttachmentInventoryReview } from './content-attachment-inventory-reviews';
+export type {
+  ContentAttachmentInventoryReview,
+  ContentAttachmentInventoryContext,
+} from './content-attachment-inventory-reviews';

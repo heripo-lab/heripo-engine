@@ -10,7 +10,8 @@ export interface ContentAttachmentInventoryReview {
   decision: 'accepted' | 'rejected' | 'uncertain';
   currentWordRanges: string[];
   contextWordRanges: string[];
-  inventoryContextRefs: string[];
+  /** Present only in historical v3 model responses. */
+  inventoryContextRefs?: string[];
   candidateEvidenceRefs: string[];
   originRowRefs: string[];
   reason: string;
@@ -19,8 +20,39 @@ export interface ContentAttachmentInventoryReview {
 export const CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY =
   'INVENTORY CONSIDERATION BEFORE COLLECTIVE CONCLUSION: In this SAME response return inventoryReviews, collectiveAssessment, qualifierAssessment and inventoryMembershipLinks for EVERY fixed segment. inventoryReviews requires every supplied original inventory key, including rejected tables, irrespective of the eventual collective state. First examine the current segment in its whole E and investigation/body continuity, including an earlier findings account and a subsequent statement based on those findings when supplied. For each original inventory record accepted, rejected or uncertain, current word evidence, supporting context words, table-owned inventoryContextRefs, optional candidate-owned K grounds and original rows, and a concise source-grounded reason. The inventory key itself identifies its original caption, headers and context without rewriting them. Explain the specific failed link when rejecting: investigation scope, current period/type restriction, source continuity, or why the CURRENT statement is not a collective account. Missing individual numbers alone cannot reject a source-established inventory set. If the source bridge is unclear, record uncertain rather than silently dropping the table. Do not infer identity across investigation stages from period/type alone. These are judgments of the table connection for THIS segment, not removal of registry candidates.\nThen return the actual period/type/scope qualifier words and the final collectiveAssessment after considering those reviews. An accepted inventory establishes a collective connection and requires state collective. A not_collective verdict preserves all table reviews as rejected and has no inventoryMembershipLinks. An uncertain table connection requires state uncertain unless another accepted inventory establishes the collective. A collective may have no accepted inventory when its source basis is genuinely body-only; explain that basis and retain all table reviews.\nFor EVERY accepted inventory, return one inventoryMembershipLinks entry with EVERY original registered member key listed by the schema, including containing row owners and incompatible members. Rejected or uncertain inventories have no adopted membership entry. Each member selects its own K grounds and original rows and records period/type compatibility, tentative-label preservation, membership, disposition and a source-grounded reason. Original row membership does not automatically attach containing units. Apply current restrictions to each member; do not expand a bounded set to unrelated candidates or infer a precise individual date from a broad compatible period. A tentative classification alone is not a membership exclusion. Collective source sharing does not identify the individual subject of a separate relationship claim.\nKeep directly described areas and other independent recipients on their own original grounds outside inventory membership. Included members must remain attachments; unresolved members must remain recipient-identity alternatives; excluded members must not attach by that collective. For overlapping inventories included takes precedence, then unresolved, then excluded. Keep relationship-subject alternatives independent and preserve the alternatives of one unknown referent as one group. Code reports missing reviews, foreign evidence and inconsistent decisions; it never adds/removes recipients or repairs source text or raw output. Do not add another model call or return sample-specific expectations.';
 
+export const CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY =
+  CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY.replace(
+    'table-owned inventoryContextRefs, ',
+    '',
+  );
+
+export interface ContentAttachmentInventoryContext {
+  contextRefs: string[];
+  chapterPaths: string[][];
+}
+
+/** Resolve fixed original table context separately from model-selected review evidence. */
+export function resolveContentAttachmentInventoryContexts(
+  input: Input,
+): Record<string, ContentAttachmentInventoryContext> {
+  return Object.fromEntries(
+    input.payload.originTables.map((table) => [
+      table.ref,
+      {
+        contextRefs: [...table.contexts],
+        chapterPaths: table.contexts.map((ref) => [
+          ...input.payload.contexts[ref],
+        ]),
+      },
+    ]),
+  );
+}
+
 /** Require consideration of every supplied table, not just model-adopted memberships. */
-export function createContentAttachmentInventoryReviewsSchema(input: Input) {
+export function createContentAttachmentInventoryReviewsSchema(
+  input: Input,
+  includeContextRefs = true,
+) {
   const review = z
     .strictObject({
       decision: z.enum(['accepted', 'rejected', 'uncertain']),
@@ -30,7 +62,9 @@ export function createContentAttachmentInventoryReviewsSchema(input: Input) {
       contextWordRanges: z.array(
         z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN),
       ),
-      inventoryContextRefs: z.array(z.string()),
+      ...(includeContextRefs
+        ? { inventoryContextRefs: z.array(z.string()) }
+        : {}),
       candidateEvidenceRefs: z.array(z.string()),
       originRowRefs: z.array(z.string()),
       reason: z.string().min(1),
@@ -69,13 +103,13 @@ export function inspectContentAttachmentInventoryReviews(
       ([ref]) => ref === inventoryRef,
     )![1];
     for (const values of [
-      review.inventoryContextRefs,
+      review.inventoryContextRefs ?? [],
       review.candidateEvidenceRefs,
       review.originRowRefs,
     ])
       if (new Set(values).size !== values.length)
         throw new Error('Duplicate inventory review support');
-    if (review.inventoryContextRefs.some((c) => !table.contexts.includes(c)))
+    if (review.inventoryContextRefs?.some((c) => !table.contexts.includes(c)))
       throw new Error('Foreign inventory review context');
     if (
       review.candidateEvidenceRefs.some(

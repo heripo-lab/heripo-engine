@@ -4,6 +4,7 @@ import type { LanguageModel } from 'ai';
 import type { CandidateEvidence } from './candidate-discovery';
 import type { ContentAttachmentCollectiveTrace } from './content-attachment-collective-trace';
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import type { ContentAttachmentInventoryContext } from './content-attachment-inventory-reviews';
 import type {
   ContentAttachmentIdentifiedSegment,
   ContentAttachmentSegmentationAudit,
@@ -20,7 +21,9 @@ import {
 } from './content-attachment-collective-trace';
 import {
   CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY,
+  CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
   createContentAttachmentInventoryReviewsSchema,
+  resolveContentAttachmentInventoryContexts,
 } from './content-attachment-inventory-reviews';
 import { inspectContentAttachmentSegmentation } from './content-attachment-segmentation';
 import {
@@ -39,10 +42,11 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v3' as const;
+  'segment-recipients.v4' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
+  | 'segment-recipients.v3'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -91,6 +95,7 @@ export interface ContentAttachmentResolvedRecipientSupport {
 }
 export interface ContentAttachmentRecipientFinding {
   collectiveTrace?: ContentAttachmentCollectiveTrace;
+  inventoryContexts?: Record<string, ContentAttachmentInventoryContext>;
   segmentRef: string;
   excerptRef: string;
   attachments: ContentAttachmentResolvedRecipientSupport[];
@@ -110,6 +115,7 @@ export function createContentAttachmentRecipientRequest(
   if (
     version !== 'segment-recipients.v1' &&
     version !== 'segment-recipients.v2' &&
+    version !== 'segment-recipients.v3' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -225,10 +231,13 @@ export function createContentAttachmentRecipientRequest(
       ...(version === 'segment-recipients.v1'
         ? {}
         : createContentAttachmentCollectiveTraceSchema(input)),
-      ...(version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ...(version === 'segment-recipients.v3' ||
+      version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
-            inventoryReviews:
-              createContentAttachmentInventoryReviewsSchema(input),
+            inventoryReviews: createContentAttachmentInventoryReviewsSchema(
+              input,
+              version === 'segment-recipients.v3',
+            ),
           }
         : {}),
     })
@@ -251,7 +260,9 @@ export function createContentAttachmentRecipientRequest(
           '\n' +
           (version === 'segment-recipients.v2'
             ? CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY
-            : CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY),
+            : version === 'segment-recipients.v3'
+              ? CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY
+              : CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY),
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -269,7 +280,8 @@ export function inspectContentAttachmentRecipients(
       input,
       segmentation,
       audit.version === 'segment-recipients.v1' ||
-        audit.version === 'segment-recipients.v2'
+        audit.version === 'segment-recipients.v2' ||
+        audit.version === 'segment-recipients.v3'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -390,6 +402,12 @@ export function inspectContentAttachmentRecipients(
         );
       findings.push({
         segmentRef: segment.ref,
+        ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+          ? {
+              inventoryContexts:
+                resolveContentAttachmentInventoryContexts(input),
+            }
+          : {}),
         ...(audit.version !== 'segment-recipients.v1'
           ? {
               collectiveTrace: {
