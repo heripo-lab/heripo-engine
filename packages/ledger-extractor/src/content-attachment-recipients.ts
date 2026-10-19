@@ -49,6 +49,7 @@ import {
   inspectContentAttachmentWorkGroupReviews,
 } from './content-attachment-work-group-reviews';
 import {
+  CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY,
   CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY,
   CONTENT_ATTACHMENT_WORK_SCOPE_EVIDENCE_BOUNDARY_POLICY,
   createContentAttachmentWorkScopeSchema,
@@ -65,7 +66,7 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v15' as const;
+  'segment-recipients.v16' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
@@ -81,6 +82,7 @@ type RecipientVersion =
   | 'segment-recipients.v12'
   | 'segment-recipients.v13'
   | 'segment-recipients.v14'
+  | 'segment-recipients.v15'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -165,6 +167,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v12' &&
     version !== 'segment-recipients.v13' &&
     version !== 'segment-recipients.v14' &&
+    version !== 'segment-recipients.v15' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -224,6 +227,7 @@ export function createContentAttachmentRecipientRequest(
   const sourcePayload = JSON.parse(segmentation.userPrompt);
   const workGroups =
     version === 'segment-recipients.v14' ||
+    version === 'segment-recipients.v15' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? createContentAttachmentWorkGroups(input)
       : undefined;
@@ -302,6 +306,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v12' ||
       version === 'segment-recipients.v13' ||
       version === 'segment-recipients.v14' ||
+      version === 'segment-recipients.v15' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             workScopeAssessment: createContentAttachmentWorkScopeSchema(
@@ -317,6 +322,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v12' ||
       version === 'segment-recipients.v13' ||
       version === 'segment-recipients.v14' ||
+      version === 'segment-recipients.v15' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             areaAssessments:
@@ -338,6 +344,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v12' ||
       version === 'segment-recipients.v13' ||
       version === 'segment-recipients.v14' ||
+      version === 'segment-recipients.v15' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -406,7 +413,12 @@ export function createContentAttachmentRecipientRequest(
                                               'segment-recipients.v12'
                                                 ? ''
                                                 : '\n' +
-                                                  CONTENT_ATTACHMENT_CURRENT_PERIOD_MEMBER_POLICY))))))))),
+                                                  CONTENT_ATTACHMENT_CURRENT_PERIOD_MEMBER_POLICY +
+                                                  (version ===
+                                                  CONTENT_ATTACHMENT_RECIPIENT_VERSION
+                                                    ? '\n' +
+                                                      CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY
+                                                    : '')))))))))),
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -436,7 +448,8 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v11' ||
         audit.version === 'segment-recipients.v12' ||
         audit.version === 'segment-recipients.v13' ||
-        audit.version === 'segment-recipients.v14'
+        audit.version === 'segment-recipients.v14' ||
+        audit.version === 'segment-recipients.v15'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -447,6 +460,7 @@ export function inspectContentAttachmentRecipients(
   if (
     !parsed.success &&
     (audit.version === 'segment-recipients.v14' ||
+      audit.version === 'segment-recipients.v15' ||
       audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION)
   )
     return {
@@ -565,6 +579,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v12' ||
         audit.version === 'segment-recipients.v13' ||
         audit.version === 'segment-recipients.v14' ||
+        audit.version === 'segment-recipients.v15' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
@@ -588,11 +603,13 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v12' ||
         audit.version === 'segment-recipients.v13' ||
         audit.version === 'segment-recipients.v14' ||
+        audit.version === 'segment-recipients.v15' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
           if (
             audit.version === 'segment-recipients.v14' ||
+            audit.version === 'segment-recipients.v15' ||
             audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           )
             inspectContentAttachmentWorkGroupReviews(
@@ -629,6 +646,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v12' ||
         audit.version === 'segment-recipients.v13' ||
         audit.version === 'segment-recipients.v14' ||
+        audit.version === 'segment-recipients.v15' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { areaAssessments: decision.areaAssessments }
           : {}),
@@ -639,6 +657,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v12' ||
         audit.version === 'segment-recipients.v13' ||
         audit.version === 'segment-recipients.v14' ||
+        audit.version === 'segment-recipients.v15' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { workScopeAssessment: decision.workScopeAssessment }
           : {}),
@@ -653,6 +672,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v12' ||
         audit.version === 'segment-recipients.v13' ||
         audit.version === 'segment-recipients.v14' ||
+        audit.version === 'segment-recipients.v15' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:

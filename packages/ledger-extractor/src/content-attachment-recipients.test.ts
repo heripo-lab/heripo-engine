@@ -15,6 +15,7 @@ import {
   judgeContentAttachmentRecipients,
 } from './content-attachment-recipients';
 import { createContentAttachmentSegmentationRequest } from './content-attachment-segmentation';
+import { CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY } from './content-attachment-work-scope';
 
 type Input = Parameters<typeof createContentAttachmentRecipientRequest>[0];
 vi.mock('@heripo/shared', async (importOriginal) => ({
@@ -187,11 +188,13 @@ function fixture(
       request.version === 'segment-recipients.v12' ||
       request.version === 'segment-recipients.v13' ||
       request.version === 'segment-recipients.v14' ||
-      request.version === 'segment-recipients.v15'
+      request.version === 'segment-recipients.v15' ||
+      request.version === 'segment-recipients.v16'
     )
       audit.rawResponse.decisions[segment.ref].workScopeAssessment = {
         ...(request.version === 'segment-recipients.v14' ||
-        request.version === 'segment-recipients.v15'
+        request.version === 'segment-recipients.v15' ||
+        request.version === 'segment-recipients.v16'
           ? { groupReviews: {} }
           : {}),
         state: 'not_applicable',
@@ -207,7 +210,8 @@ function fixture(
       request.version === 'segment-recipients.v12' ||
       request.version === 'segment-recipients.v13' ||
       request.version === 'segment-recipients.v14' ||
-      request.version === 'segment-recipients.v15'
+      request.version === 'segment-recipients.v15' ||
+      request.version === 'segment-recipients.v16'
     ) {
       const decision = audit.rawResponse.decisions[segment.ref];
       decision.areaAssessments = Object.fromEntries(
@@ -485,7 +489,7 @@ test('rejects duplicate/conflicting recipients and fabricated, out-of-segment or
 });
 
 test('makes only the recipient call and preserves its original response, attempts and usage', async () => {
-  const { input, segmentation, audit } = fixture('segment-recipients.v15');
+  const { input, segmentation, audit } = fixture('segment-recipients.v16');
   const usage = { inputTokens: 12, outputTokens: 6, totalTokens: 18 } as never;
   vi.mocked(LLMCaller.call).mockResolvedValue({
     output: audit.rawResponse,
@@ -1876,7 +1880,11 @@ test('adds required work reviews in v14 without changing v13 prompt, source fiel
   expect(LLMCaller.call).not.toHaveBeenCalled();
 });
 
-test.each(['segment-recipients.v14', 'segment-recipients.v15'] as const)(
+test.each([
+  'segment-recipients.v14',
+  'segment-recipients.v15',
+  'segment-recipients.v16',
+] as const)(
   'inspects %s references per segment and preserves raw R1 when rejecting an invalid work review',
   (version) => {
     const f = fixture(version);
@@ -2019,6 +2027,7 @@ test('changes only exclusive schema composition in v15 while preserving the v14 
   const request = createContentAttachmentRecipientRequest(
     old.input,
     old.segmentation,
+    'segment-recipients.v15',
   );
   expect(request.version).toBe('segment-recipients.v15');
   expect(request.systemPrompt).toBe(old.request.systemPrompt);
@@ -2115,4 +2124,38 @@ test('rejects a root union and reference siblings without mistaking literal keys
       additionalProperties: false,
     }),
   ).toEqual([]);
+});
+
+test('extends only the generic work relevance policy in v16 while preserving v15 input, schema, raw decisions and inspection', async () => {
+  const f = fixture('segment-recipients.v16');
+  const previous = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v15',
+  );
+  expect(f.request.systemPrompt).toBe(
+    previous.systemPrompt +
+      '\n' +
+      CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY,
+  );
+  expect(f.request.userPrompt).toBe(previous.userPrompt);
+  expect(f.request.workGroups).toEqual(previous.workGroups);
+  expect(
+    await Output.object({ schema: f.request.schema }).responseFormat,
+  ).toEqual(await Output.object({ schema: previous.schema }).responseFormat);
+  const before = JSON.stringify(f.audit);
+  const current = inspectContentAttachmentRecipients(
+    f.input,
+    f.segmentation,
+    f.audit,
+  );
+  expect(current.issues).toEqual([]);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, {
+      ...f.audit,
+      ...previous,
+    }),
+  ).toEqual(current);
+  expect(JSON.stringify(f.audit)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
 });
