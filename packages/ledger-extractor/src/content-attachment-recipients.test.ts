@@ -58,6 +58,9 @@ function fixture() {
         tableCellColumns: [],
         registrationDecisions: [],
       },
+      originTables: [
+        { ref: 'U1', contexts: ['C1'], caption: 'Inventory', headers: [] },
+      ],
       inventoryMembers: [['U1', ['R1', 'R2']]],
       originRows: [
         ['O1', 'U1', 1, []],
@@ -164,6 +167,22 @@ function fixture() {
     usage: {} as never,
     callAttempts: [],
   };
+  for (const segment of request.segmentSnapshot) {
+    audit.rawResponse.decisions[segment.ref] = structuredClone(
+      audit.rawResponse.decisions[segment.ref],
+    );
+    audit.rawResponse.decisions[segment.ref].inventoryReviews = {
+      U1: {
+        decision: 'rejected',
+        currentWordRanges: segment.evidence.map((e) => e.range),
+        contextWordRanges: [],
+        inventoryContextRefs: ['C1'],
+        candidateEvidenceRefs: [],
+        originRowRefs: [],
+        reason: 'Direct work or relationship, not an inventory collective.',
+      },
+    };
+  }
   return { input, segmentation, request, audit, support };
 }
 
@@ -461,6 +480,15 @@ function collectiveFixture() {
       },
     ] as ContentAttachmentCollectiveTrace['inventoryMembershipLinks'],
   };
+  trace.inventoryReviews = {
+    U1: {
+      ...f.audit.rawResponse.decisions['E2:S1'].inventoryReviews!.U1,
+      decision: 'accepted',
+      candidateEvidenceRefs: ['K1.1', 'K2.1'],
+      originRowRefs: ['O1', 'O2'],
+      reason: 'Original inventory connects this collective.',
+    },
+  };
   Object.assign(f.audit.rawResponse.decisions['E2:S1'], trace);
   return { ...f, trace };
 }
@@ -474,6 +502,7 @@ test('requires every intermediate field and every original member of the model-s
     'collectiveAssessment',
     'qualifierAssessment',
     'inventoryMembershipLinks',
+    'inventoryReviews',
   ]) {
     const raw = structuredClone(f.audit.rawResponse);
     delete (raw.decisions['E2:S1'] as unknown as Record<string, unknown>)[
@@ -504,6 +533,7 @@ test('replays original v1 responses exactly and rejects unsupported request vers
   );
   const raw = structuredClone(f.audit.rawResponse);
   for (const d of Object.values(raw.decisions)) {
+    delete d.inventoryReviews;
     delete d.collectiveAssessment;
     delete d.qualifierAssessment;
     delete d.inventoryMembershipLinks;
@@ -527,6 +557,8 @@ test('replays original v1 responses exactly and rejects unsupported request vers
 test('supports body-only collectives without inventing an inventory and rejects any table selection for an empty registry', async () => {
   const f = fixture();
   f.input.payload.inventoryMembers = [];
+  for (const d of Object.values(f.audit.rawResponse.decisions))
+    d.inventoryReviews = {};
   const req = createContentAttachmentRecipientRequest(f.input, f.segmentation);
   Object.assign(f.audit, req);
   const d = f.audit.rawResponse.decisions['E1:S1'];
@@ -575,6 +607,20 @@ test('checks intermediate dispositions independently and reconciles included, un
     inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
   ).toEqual([]);
   f.input.payload.inventoryMembers.push(['U2', ['R2']]);
+  f.input.payload.originTables.push({
+    ref: 'U2',
+    contexts: ['C1'],
+    caption: 'Other',
+    headers: [],
+  });
+  for (const decision of Object.values(f.audit.rawResponse.decisions)) {
+    decision.inventoryReviews!.U2 = {
+      ...decision.inventoryReviews!.U1,
+      decision: 'rejected',
+      candidateEvidenceRefs: [],
+      originRowRefs: [],
+    };
+  }
   f.input.payload.originRows.push(['O3', 'U2', 1, []]);
   f.input.payload.originAnchors.push(['R2', 'O3', 0]);
   Object.assign(
@@ -595,6 +641,7 @@ test('checks intermediate dispositions independently and reconciles included, un
     },
     reason: 'Overlapping inventory.',
   });
+  d.inventoryReviews!.U2.decision = 'accepted';
   d.attachments.push(f.support('R2', 'E2:W1-W3'));
   const before = JSON.stringify(f.audit);
   expect(
@@ -671,6 +718,153 @@ test('rejects forged intermediate source links, incomplete support and contradic
     },
     (f: F) => {
       member(f).disposition = 'excluded';
+    },
+  ]) {
+    const f = collectiveFixture();
+    mutate(f);
+    const before = JSON.stringify(f.audit);
+    expect(
+      inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit)
+        .issues,
+    ).toHaveLength(1);
+    expect(JSON.stringify(f.audit)).toBe(before);
+  }
+});
+
+test('requires all supplied inventory reviews even for non-collectives and preserves their rejected evidence', () => {
+  const f = fixture();
+  const d = f.audit.rawResponse.decisions['E1:S1'];
+  d.inventoryReviews!.U1.candidateEvidenceRefs = ['K1.1'];
+  d.inventoryReviews!.U1.originRowRefs = ['O2'];
+  const before = JSON.stringify(f.audit);
+  const inspected = inspectContentAttachmentRecipients(
+    f.input,
+    f.segmentation,
+    f.audit,
+  );
+  expect(inspected.issues).toEqual([]);
+  expect(inspected.findings[0].collectiveTrace!.inventoryReviews).toEqual(
+    d.inventoryReviews,
+  );
+  expect(JSON.stringify(f.audit)).toBe(before);
+  for (const change of [
+    (raw: typeof f.audit.rawResponse) => {
+      delete raw.decisions['E1:S1'].inventoryReviews!.U1;
+    },
+    (raw: typeof f.audit.rawResponse) => {
+      raw.decisions['E1:S1'].inventoryReviews!.invented =
+        d.inventoryReviews!.U1;
+    },
+    (raw: typeof f.audit.rawResponse) => {
+      raw.decisions['E1:S1'].inventoryReviews!.U1.currentWordRanges = [];
+    },
+  ]) {
+    const raw = structuredClone(f.audit.rawResponse);
+    change(raw);
+    expect(f.request.schema.safeParse(raw).success).toBe(false);
+  }
+});
+
+test('keeps original v2 request schemas and inspection independent of new inventory reviews', () => {
+  const f = collectiveFixture();
+  const old = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v2',
+  );
+  const raw = structuredClone(f.audit.rawResponse);
+  for (const d of Object.values(raw.decisions)) delete d.inventoryReviews;
+  const audit = { ...f.audit, ...old, rawResponse: raw };
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, audit).issues,
+  ).toEqual([]);
+  expect(f.request.userPrompt).toBe(old.userPrompt);
+  raw.decisions['E2:S1'].inventoryMembershipLinks!.push(
+    raw.decisions['E2:S1'].inventoryMembershipLinks![0],
+  );
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, audit).issues,
+  ).toHaveLength(1);
+  expect(old.systemPrompt).toContain('an empty inventoryMembershipLinks list');
+  expect(f.request.systemPrompt).toContain(
+    'inventoryReviews requires every supplied original inventory key',
+  );
+  expect(f.request.schema.safeParse(raw).success).toBe(false);
+});
+
+test('retains uncertain table connections and body-only collective conclusions without adopting memberships', () => {
+  const f = fixture(),
+    d = f.audit.rawResponse.decisions['E1:S1'];
+  d.inventoryReviews!.U1.decision = 'uncertain';
+  d.collectiveAssessment!.state = 'uncertain';
+  d.collectiveAssessment!.currentWordRanges = ['E1:W1-W2'];
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  d.collectiveAssessment!.state = 'collective';
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+  d.inventoryReviews!.U1.decision = 'rejected';
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toEqual([]);
+});
+
+test('reports foreign inventory-review evidence and review/conclusion/membership contradictions without repair', () => {
+  type F = ReturnType<typeof collectiveFixture>;
+  const review = (f: F) => f.trace.inventoryReviews!.U1;
+  for (const mutate of [
+    (f: F) => {
+      review(f).inventoryContextRefs = ['C1', 'C1'];
+    },
+    (f: F) => {
+      review(f).candidateEvidenceRefs = ['K1.1', 'K1.1'];
+    },
+    (f: F) => {
+      review(f).originRowRefs = ['O1', 'O1'];
+    },
+    (f: F) => {
+      review(f).inventoryContextRefs = ['foreign'];
+    },
+    (f: F) => {
+      review(f).candidateEvidenceRefs = ['foreign'];
+    },
+    (f: F) => {
+      review(f).originRowRefs = ['foreign'];
+    },
+    (f: F) => {
+      review(f).currentWordRanges = ['E2:W4-W5'];
+    },
+    (f: F) => {
+      review(f).contextWordRanges = ['E3:W99-W99'];
+    },
+    (f: F) => {
+      f.trace.collectiveAssessment.state = 'uncertain';
+    },
+    (f: F) => {
+      review(f).decision = 'rejected';
+    },
+    (f: F) => {
+      f.trace.inventoryMembershipLinks.length = 0;
+    },
+    (f: F) => {
+      f.trace.collectiveAssessment.state = 'not_collective';
+      f.trace.inventoryMembershipLinks.length = 0;
+    },
+    (f: F) => {
+      review(f).decision = 'uncertain';
+      f.trace.collectiveAssessment.state = 'not_collective';
+      f.trace.inventoryMembershipLinks.length = 0;
+    },
+    (f: F) => {
+      f.input.payload.inventoryMembers[0][1] = ['R1'];
+      review(f).candidateEvidenceRefs = ['K2.1'];
+      delete f.trace.inventoryMembershipLinks[0].members.R2;
+      Object.assign(
+        f.audit,
+        createContentAttachmentRecipientRequest(f.input, f.segmentation),
+      );
     },
   ]) {
     const f = collectiveFixture();

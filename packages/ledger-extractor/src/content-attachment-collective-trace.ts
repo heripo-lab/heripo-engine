@@ -1,4 +1,5 @@
 import type { createContentAttachmentGroundedInput } from './content-attachment-grounding';
+import type { ContentAttachmentInventoryReview } from './content-attachment-inventory-reviews';
 import type {
   ContentAttachmentIdentifiedSegment,
   ContentAttachmentSegmentationAudit,
@@ -6,6 +7,7 @@ import type {
 
 import { z } from 'zod';
 
+import { inspectContentAttachmentInventoryReviews } from './content-attachment-inventory-reviews';
 import {
   CONTENT_ATTACHMENT_WORD_RANGE_PATTERN,
   resolveContentAttachmentWordRange,
@@ -25,6 +27,7 @@ export interface ContentAttachmentCollectiveMember {
   reason: string;
 }
 export interface ContentAttachmentCollectiveTrace {
+  inventoryReviews?: Record<string, ContentAttachmentInventoryReview>;
   collectiveAssessment: {
     state: 'collective' | 'not_collective' | 'uncertain';
     currentWordRanges: string[];
@@ -166,6 +169,15 @@ export function inspectContentAttachmentCollectiveTrace(
     qualifiers.scopeWordRanges,
   ])
     resolve(ranges);
+  if (trace.inventoryReviews)
+    inspectContentAttachmentInventoryReviews(
+      input,
+      trace.inventoryReviews,
+      collective.state,
+      inventories.map((i) => i.inventoryRef),
+      grounds,
+      resolve,
+    );
   const seen = new Set<string>();
   const votes = new Map<string, string[]>();
   for (const selection of inventories) {

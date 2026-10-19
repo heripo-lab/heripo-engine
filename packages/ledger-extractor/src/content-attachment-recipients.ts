@@ -18,6 +18,10 @@ import {
   createContentAttachmentCollectiveTraceSchema,
   inspectContentAttachmentCollectiveTrace,
 } from './content-attachment-collective-trace';
+import {
+  CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY,
+  createContentAttachmentInventoryReviewsSchema,
+} from './content-attachment-inventory-reviews';
 import { inspectContentAttachmentSegmentation } from './content-attachment-segmentation';
 import {
   CONTENT_ATTACHMENT_WORD_RANGE_PATTERN,
@@ -35,9 +39,11 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v2' as const;
+  'segment-recipients.v3' as const;
 type RecipientVersion =
-  'segment-recipients.v1' | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
+  | 'segment-recipients.v1'
+  | 'segment-recipients.v2'
+  | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
   contextWordRanges: string[];
@@ -103,6 +109,7 @@ export function createContentAttachmentRecipientRequest(
 ) {
   if (
     version !== 'segment-recipients.v1' &&
+    version !== 'segment-recipients.v2' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -218,6 +225,12 @@ export function createContentAttachmentRecipientRequest(
       ...(version === 'segment-recipients.v1'
         ? {}
         : createContentAttachmentCollectiveTraceSchema(input)),
+      ...(version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+        ? {
+            inventoryReviews:
+              createContentAttachmentInventoryReviewsSchema(input),
+          }
+        : {}),
     })
     .meta({
       id: 'RecipientDecision',
@@ -234,7 +247,11 @@ export function createContentAttachmentRecipientRequest(
     systemPrompt:
       version === 'segment-recipients.v1'
         ? V1_SYSTEM_PROMPT
-        : V1_SYSTEM_PROMPT + '\n' + CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY,
+        : V1_SYSTEM_PROMPT +
+          '\n' +
+          (version === 'segment-recipients.v2'
+            ? CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY
+            : CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY),
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -251,7 +268,8 @@ export function inspectContentAttachmentRecipients(
     request = createContentAttachmentRecipientRequest(
       input,
       segmentation,
-      audit.version === 'segment-recipients.v1'
+      audit.version === 'segment-recipients.v1' ||
+        audit.version === 'segment-recipients.v2'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -361,7 +379,7 @@ export function inspectContentAttachmentRecipients(
           originRowRefs: support.originRowRefs,
         };
       };
-      if (audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION)
+      if (audit.version !== 'segment-recipients.v1')
         inspectContentAttachmentCollectiveTrace(
           input,
           segmentation,
@@ -372,9 +390,12 @@ export function inspectContentAttachmentRecipients(
         );
       findings.push({
         segmentRef: segment.ref,
-        ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+        ...(audit.version !== 'segment-recipients.v1'
           ? {
               collectiveTrace: {
+                ...(decision.inventoryReviews
+                  ? { inventoryReviews: decision.inventoryReviews }
+                  : {}),
                 collectiveAssessment: decision.collectiveAssessment!,
                 qualifierAssessment: decision.qualifierAssessment!,
                 inventoryMembershipLinks: decision.inventoryMembershipLinks!,

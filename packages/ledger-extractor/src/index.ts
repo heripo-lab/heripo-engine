@@ -176,3 +176,5 @@ export type {
   ContentAttachmentCollectiveMember,
   ContentAttachmentCollectiveTrace,
 } from './content-attachment-collective-trace';
+
+export type { ContentAttachmentInventoryReview } from './content-attachment-inventory-reviews';
