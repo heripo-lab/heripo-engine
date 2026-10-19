@@ -1024,3 +1024,26 @@ test('preserves v5 schemas and findings while adding only generic current-type b
   ).toHaveLength(1);
   expect(member.disposition).toBe('included');
 });
+
+test('replays v6 judgments unchanged with work-event coverage added only to the current prompt', async () => {
+  const f = collectiveFixture();
+  const old = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v6',
+  );
+  expect(f.request.userPrompt).toBe(old.userPrompt);
+  expect(f.request.systemPrompt.startsWith(old.systemPrompt)).toBe(true);
+  const currentFormat = await Output.object({ schema: f.request.schema })
+    .responseFormat;
+  const oldFormat = await Output.object({ schema: old.schema }).responseFormat;
+  expect(currentFormat).toEqual(oldFormat);
+  const audit = { ...f.audit, ...old };
+  const before = JSON.stringify(audit);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, audit),
+  ).toEqual(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit),
+  );
+  expect(JSON.stringify(audit)).toBe(before);
+});

@@ -24,6 +24,7 @@ import {
   CONTENT_ATTACHMENT_CURRENT_TYPE_BOUNDARY_POLICY,
   CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY,
   CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
+  CONTENT_ATTACHMENT_WORK_SCOPE_POLICY,
   createContentAttachmentInventoryReviewsSchema,
   resolveContentAttachmentInventoryContexts,
 } from './content-attachment-inventory-reviews';
@@ -44,13 +45,14 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v6' as const;
+  'segment-recipients.v7' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
   | 'segment-recipients.v3'
   | 'segment-recipients.v4'
   | 'segment-recipients.v5'
+  | 'segment-recipients.v6'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -122,6 +124,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v3' &&
     version !== 'segment-recipients.v4' &&
     version !== 'segment-recipients.v5' &&
+    version !== 'segment-recipients.v6' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -240,6 +243,7 @@ export function createContentAttachmentRecipientRequest(
       ...(version === 'segment-recipients.v3' ||
       version === 'segment-recipients.v4' ||
       version === 'segment-recipients.v5' ||
+      version === 'segment-recipients.v6' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -277,7 +281,11 @@ export function createContentAttachmentRecipientRequest(
                   CONTENT_ATTACHMENT_COLLECTIVE_SOURCE_SHARING_POLICY +
                   (version === 'segment-recipients.v5'
                     ? ''
-                    : '\n' + CONTENT_ATTACHMENT_CURRENT_TYPE_BOUNDARY_POLICY)),
+                    : '\n' +
+                      CONTENT_ATTACHMENT_CURRENT_TYPE_BOUNDARY_POLICY +
+                      (version === 'segment-recipients.v6'
+                        ? ''
+                        : '\n' + CONTENT_ATTACHMENT_WORK_SCOPE_POLICY))),
     userPrompt: JSON.stringify(payload),
     schema,
   };
@@ -298,7 +306,8 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v2' ||
         audit.version === 'segment-recipients.v3' ||
         audit.version === 'segment-recipients.v4' ||
-        audit.version === 'segment-recipients.v5'
+        audit.version === 'segment-recipients.v5' ||
+        audit.version === 'segment-recipients.v6'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -421,6 +430,7 @@ export function inspectContentAttachmentRecipients(
         segmentRef: segment.ref,
         ...(audit.version === 'segment-recipients.v4' ||
         audit.version === 'segment-recipients.v5' ||
+        audit.version === 'segment-recipients.v6' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:
