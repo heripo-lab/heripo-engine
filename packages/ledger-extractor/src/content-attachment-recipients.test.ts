@@ -2300,7 +2300,12 @@ test('inspects inline group membership, original evidence and coverage through t
   expect(LLMCaller.call).not.toHaveBeenCalled();
 });
 
-function singleAreaFixture(kinds = ['area', 'feature']) {
+function singleAreaFixture(
+  kinds = ['area', 'feature'],
+  version: Parameters<
+    typeof createContentAttachmentRecipientRequest
+  >[2] = 'segment-recipients.v18',
+) {
   const f = fixture('segment-recipients.v17');
   f.input.payload.candidates.forEach((row, i) => {
     row[1] = kinds[i];
@@ -2308,6 +2313,7 @@ function singleAreaFixture(kinds = ['area', 'feature']) {
   const request = createContentAttachmentRecipientRequest(
     f.input,
     f.segmentation,
+    version,
   );
   const areas = new Set(
     f.input.payload.candidates
@@ -2709,4 +2715,54 @@ test('does not pretend that deterministic area assembly corrects a semantically 
     ),
   ).toEqual(['R1']);
   expect(d.nonAreaAttachments).toEqual([]);
+});
+
+test('adds only the independent uncertainty wording in v19 while preserving v18 input, schema and derived judgments', async () => {
+  const previous = singleAreaFixture();
+  const current = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v19',
+  );
+  const policy =
+    'When the sole uncertainty is which candidate is the individual subject of a relationship, return only relationshipSubjectAlternatives; do not duplicate that uncertainty in recipientIdentityAlternatives.\n\nIf both uncertainty types are returned, ground each in a distinct unresolved source referent or independent predicate. Select its supporting evidence IDs in the existing fields and explain the distinction in the existing reason. Repeating the same uncertainty under another role does not establish a second uncertainty. Candidate overlap alone neither establishes nor invalidates two independent judgments.';
+  const defaultRequest = createContentAttachmentRecipientRequest(
+    current.input,
+    current.segmentation,
+  );
+  expect(defaultRequest.version).toBe('segment-recipients.v19');
+  expect(current.request.systemPrompt).toBe(
+    previous.request.systemPrompt.replace(
+      '\nFor every attachment or alternative,',
+      '\n' + policy + '\nFor every attachment or alternative,',
+    ),
+  );
+  expect(defaultRequest.systemPrompt).toBe(current.request.systemPrompt);
+  expect(current.request.userPrompt).toBe(previous.request.userPrompt);
+  expect(current.request.segmentSnapshot).toEqual(
+    previous.request.segmentSnapshot,
+  );
+  expect(current.request.candidateEvidence).toEqual(
+    previous.request.candidateEvidence,
+  );
+  const oldFormat = await Output.object({ schema: previous.request.schema })
+    .responseFormat;
+  const newFormat = await Output.object({ schema: current.request.schema })
+    .responseFormat;
+  expect(newFormat).toEqual(oldFormat);
+  const before = JSON.stringify(current.audit.rawResponse);
+  expect(
+    inspectContentAttachmentRecipients(
+      current.input,
+      current.segmentation,
+      current.audit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(
+      previous.input,
+      previous.segmentation,
+      previous.audit,
+    ),
+  );
+  expect(JSON.stringify(current.audit.rawResponse)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
 });

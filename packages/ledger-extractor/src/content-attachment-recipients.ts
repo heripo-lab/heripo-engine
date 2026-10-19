@@ -71,7 +71,7 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v18' as const;
+  'segment-recipients.v19' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
@@ -90,6 +90,7 @@ type RecipientVersion =
   | 'segment-recipients.v15'
   | 'segment-recipients.v16'
   | 'segment-recipients.v17'
+  | 'segment-recipients.v18'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -174,6 +175,9 @@ export interface ContentAttachmentRecipientFinding {
 const V1_SYSTEM_PROMPT =
   'Judge recipients for the supplied, already inspected original source segments. Do not segment again, rewrite source text or infer expected answers. Inspect each segment in its unchanged whole E, original body/table boundaries and neighboring source context. Return every required segment key, with attachments, recipientIdentityAlternatives and relationshipSubjectAlternatives independently. Empty lists are meaningful; do not force attachment. Use compact IDs only for evidence, never reproduce or normalize quotations. Give a concise reason for the segment disposition, including the source-based boundary of any relevant exclusion. Consider the entire supplied registry; unselected candidates are not confirmed recipients.\nAn attachment means this segment independently describes the candidate. Identify candidates from their own names, numbers, K grounds, original rows, chapter and investigation scope. Origin rows establish membership, not automatic propagation to containing trenches or areas. Preserve a source-established collective description on its identified members even without repeated numbers. Apply current period/type/scope qualifiers before broader antecedent membership. A tentative classification is not by itself evidence against membership or a relationship-subject alternative. Local row counts do not establish a global count or unique relation subject. Do not enlarge a collective to unrelated same-type candidates. General type summaries alone cannot identify individual artifacts.\nPreserve an identified investigation area own boundary, layout, recording and finding results when supported by its definition and original body continuity, separately from contained-unit work. Keep whole project areas distinct from partial survey areas. Same-cell or body-to-table continuation may supply a common action scope; local excavation/backfill does not automatically describe the area. Do not propagate the action object of a later local task backwards into preceding common work. Retain substantive object descriptions even when introduced by a meeting; meeting-only events, generic headers and pure table navigation need no recipients. Respect source-bound nonregistration decisions.\nKeep collective attachment independent of individual relationship-subject identity. A collective clause can have confirmed recipients while a separate relationship clause with an unidentified individual subject has NO confirmed attachment and only alternative subjects. Do not turn collective membership into confirmation of that individual relationship. Merely being a possible relationship subject does not justify a confirmed attachment for that relationship segment. Recipient-identity alternatives mean uncertainty about who receives this description, not uncertainty about which already identified collective member participates in an individual relationship. A road relation must not gain pit/area subject alternatives. Do not identify a relationship counterpart across investigation stages without original linking evidence. Use the original qualifiers and retain genuine uncertainty; never choose a candidate just because it is registered.\nFor every attachment or alternative, select nonempty currentWordRanges contained in that segment. Other current-E segments and E/X sources may supply contextWordRanges but cannot alone justify the current action. Supply each selected candidate own candidateEvidenceRefs; a group needs grounds for every member. originRowRefs may select supporting original O rows bound to the candidates; use an empty list if no such row is needed. Relation alternatives use role subject. Attachments and recipient-identity alternatives cannot assert both certainty and uncertainty for the same candidate in the same segment. Do not copy earlier answers or invent missing IDs. Code resolves provenance and separately previews whole-E preservation without changing your response or applying it to the ledger.';
 
+const V19_UNCERTAINTY_POLICY =
+  'When the sole uncertainty is which candidate is the individual subject of a relationship, return only relationshipSubjectAlternatives; do not duplicate that uncertainty in recipientIdentityAlternatives.\n\nIf both uncertainty types are returned, ground each in a distinct unresolved source referent or independent predicate. Select its supporting evidence IDs in the existing fields and explain the distinction in the existing reason. Repeating the same uncertainty under another role does not establish a second uncertainty. Candidate overlap alone neither establishes nor invalidates two independent judgments.';
+
 /** Compile all frozen candidate grounds and inspected segments without earlier recipient answers. */
 export function createContentAttachmentRecipientRequest(
   input: Input,
@@ -198,6 +202,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v15' &&
     version !== 'segment-recipients.v16' &&
     version !== 'segment-recipients.v17' &&
+    version !== 'segment-recipients.v18' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -260,6 +265,7 @@ export function createContentAttachmentRecipientRequest(
     version === 'segment-recipients.v15' ||
     version === 'segment-recipients.v16' ||
     version === 'segment-recipients.v17' ||
+    version === 'segment-recipients.v18' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? createContentAttachmentWorkGroups(input)
       : undefined;
@@ -317,7 +323,9 @@ export function createContentAttachmentRecipientRequest(
   const alternative = z
     .strictObject({ candidateRefs: z.array(ref).min(1), ...support })
     .meta({ id: 'RecipientIdentityAlternative' });
-  const singleAreaDecision = version === CONTENT_ATTACHMENT_RECIPIENT_VERSION;
+  const singleAreaDecision =
+    version === 'segment-recipients.v18' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION;
   const nonAreaRefs = candidateRefs.filter((id) => !areaRefs.includes(id));
   const nonAreaAttachment = z.array(
     z
@@ -364,6 +372,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v15' ||
       version === 'segment-recipients.v16' ||
       version === 'segment-recipients.v17' ||
+      version === 'segment-recipients.v18' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             workScopeAssessment: createContentAttachmentWorkScopeSchema(
@@ -371,6 +380,7 @@ export function createContentAttachmentRecipientRequest(
               workGroups?.map((g) => g.ref),
               version === 'segment-recipients.v14',
               version === 'segment-recipients.v17' ||
+                version === 'segment-recipients.v18' ||
                 version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
             ),
           }
@@ -384,6 +394,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v15' ||
       version === 'segment-recipients.v16' ||
       version === 'segment-recipients.v17' ||
+      version === 'segment-recipients.v18' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             areaAssessments: createContentAttachmentAreaAssessmentsSchema(
@@ -410,6 +421,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v15' ||
       version === 'segment-recipients.v16' ||
       version === 'segment-recipients.v17' ||
+      version === 'segment-recipients.v18' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -488,6 +500,8 @@ export function createContentAttachmentRecipientRequest(
                                                   version ===
                                                     'segment-recipients.v17' ||
                                                   version ===
+                                                    'segment-recipients.v18' ||
+                                                  version ===
                                                     CONTENT_ATTACHMENT_RECIPIENT_VERSION
                                                     ? '\n' +
                                                       CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY
@@ -495,21 +509,30 @@ export function createContentAttachmentRecipientRequest(
     userPrompt: JSON.stringify(payload),
     schema,
   };
+  const systemPrompt = singleAreaDecision
+    ? request.systemPrompt
+        .replace(
+          'with attachments, recipientIdentityAlternatives',
+          'with nonAreaAttachments, recipientIdentityAlternatives',
+        )
+        .replace(
+          'and never adds/removes recipients, repairs source or changes raw output.',
+          'and never revises recipient judgments, repairs source or changes raw output.',
+        ) +
+      '\n' +
+      CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY
+    : request.systemPrompt;
   return {
     ...request,
-    systemPrompt: singleAreaDecision
-      ? request.systemPrompt
-          .replace(
-            'with attachments, recipientIdentityAlternatives',
-            'with nonAreaAttachments, recipientIdentityAlternatives',
+    systemPrompt:
+      version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+        ? systemPrompt.replace(
+            '\nFor every attachment or alternative,',
+            '\n' +
+              V19_UNCERTAINTY_POLICY +
+              '\nFor every attachment or alternative,',
           )
-          .replace(
-            'and never adds/removes recipients, repairs source or changes raw output.',
-            'and never revises recipient judgments, repairs source or changes raw output.',
-          ) +
-        '\n' +
-        CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY
-      : request.systemPrompt,
+        : systemPrompt,
   };
 }
 
@@ -546,7 +569,8 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v14' ||
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
-        audit.version === 'segment-recipients.v17'
+        audit.version === 'segment-recipients.v17' ||
+        audit.version === 'segment-recipients.v18'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -560,6 +584,7 @@ export function inspectContentAttachmentRecipients(
       audit.version === 'segment-recipients.v15' ||
       audit.version === 'segment-recipients.v16' ||
       audit.version === 'segment-recipients.v17' ||
+      audit.version === 'segment-recipients.v18' ||
       audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION)
   )
     return {
@@ -596,6 +621,7 @@ export function inspectContentAttachmentRecipients(
     try {
       const rawDecision = parsed.data.decisions[segment.ref];
       const assembled =
+        audit.version === 'segment-recipients.v18' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? assembleContentAttachmentAreaRecipientDecision(
               kinds,
@@ -698,6 +724,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
         audit.version === 'segment-recipients.v17' ||
+        audit.version === 'segment-recipients.v18' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
@@ -724,6 +751,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
         audit.version === 'segment-recipients.v17' ||
+        audit.version === 'segment-recipients.v18' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
@@ -732,6 +760,7 @@ export function inspectContentAttachmentRecipients(
             audit.version === 'segment-recipients.v15' ||
             audit.version === 'segment-recipients.v16' ||
             audit.version === 'segment-recipients.v17' ||
+            audit.version === 'segment-recipients.v18' ||
             audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           )
             inspectContentAttachmentWorkGroupReviews(
@@ -739,6 +768,7 @@ export function inspectContentAttachmentRecipients(
               decision.workScopeAssessment!,
               attachmentRefs,
               audit.version === 'segment-recipients.v17' ||
+                audit.version === 'segment-recipients.v18' ||
                 audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
             );
           inspectContentAttachmentWorkScope(
@@ -746,6 +776,7 @@ export function inspectContentAttachmentRecipients(
             attachmentRefs,
             resolve,
             audit.version === 'segment-recipients.v17' ||
+              audit.version === 'segment-recipients.v18' ||
               audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
           );
         } catch (error) {
@@ -775,6 +806,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
         audit.version === 'segment-recipients.v17' ||
+        audit.version === 'segment-recipients.v18' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { areaAssessments: decision.areaAssessments }
           : {}),
@@ -788,6 +820,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
         audit.version === 'segment-recipients.v17' ||
+        audit.version === 'segment-recipients.v18' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { workScopeAssessment: decision.workScopeAssessment }
           : {}),
@@ -805,6 +838,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v15' ||
         audit.version === 'segment-recipients.v16' ||
         audit.version === 'segment-recipients.v17' ||
+        audit.version === 'segment-recipients.v18' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:
@@ -848,7 +882,8 @@ export function inspectContentAttachmentRecipients(
   return {
     issues,
     findings,
-    ...(audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+    ...(audit.version === 'segment-recipients.v18' ||
+    audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? { derivedResponse }
       : {}),
   };
