@@ -995,3 +995,32 @@ test('keeps established membership independent of unresolved individual dating a
     inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
   ).toHaveLength(1);
 });
+
+test('preserves v5 schemas and findings while adding only generic current-type boundaries', async () => {
+  const f = collectiveFixture();
+  const old = createContentAttachmentRecipientRequest(
+    f.input,
+    f.segmentation,
+    'segment-recipients.v5',
+  );
+  expect(f.request.userPrompt).toBe(old.userPrompt);
+  expect(f.request.systemPrompt.startsWith(old.systemPrompt)).toBe(true);
+  const currentFormat = await Output.object({ schema: f.request.schema })
+    .responseFormat;
+  const oldFormat = await Output.object({ schema: old.schema }).responseFormat;
+  expect(currentFormat).toEqual(oldFormat);
+  const audit = { ...f.audit, ...old };
+  const before = JSON.stringify(audit);
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, audit),
+  ).toEqual(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit),
+  );
+  expect(JSON.stringify(audit)).toBe(before);
+  const member = f.trace.inventoryMembershipLinks[0].members.R1;
+  member.typeStatus = 'incompatible';
+  expect(
+    inspectContentAttachmentRecipients(f.input, f.segmentation, f.audit).issues,
+  ).toHaveLength(1);
+  expect(member.disposition).toBe('included');
+});
