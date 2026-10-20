@@ -15,6 +15,10 @@ import { expect, test, vi } from 'vitest';
 
 import { CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY } from './content-attachment-area-assessments';
 import {
+  CONTENT_ATTACHMENT_INVENTORY_SUPPORT_POLICY,
+  CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
+} from './content-attachment-inventory-reviews';
+import {
   createContentAttachmentRecipientRequest,
   inspectContentAttachmentRecipients,
   judgeContentAttachmentRecipients,
@@ -2859,6 +2863,7 @@ test('adds only the approved v21 returned-work-object check while preserving v20
   const request = createContentAttachmentRecipientRequest(
     current.input,
     current.segmentation,
+    'segment-recipients.v21',
   );
   expect(request.version).toBe('segment-recipients.v21');
   expect(current.request.systemPrompt).toBe(
@@ -2875,6 +2880,55 @@ test('adds only the approved v21 returned-work-object check while preserving v20
   expect(current.request.workGroups).toEqual(previous.request.workGroups);
   expect(
     await Output.object({ schema: current.request.schema }).responseFormat,
+  ).toEqual(
+    await Output.object({ schema: previous.request.schema }).responseFormat,
+  );
+  const before = JSON.stringify(current.audit.rawResponse);
+  expect(
+    inspectContentAttachmentRecipients(
+      current.input,
+      current.segmentation,
+      current.audit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(
+      previous.input,
+      previous.segmentation,
+      previous.audit,
+    ),
+  );
+  expect(JSON.stringify(current.audit.rawResponse)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('clarifies optional inventory support in v22 while preserving the v21 input, provider schema and raw inspection', async () => {
+  const previous = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v21',
+  );
+  const current = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v22',
+  );
+  const request = createContentAttachmentRecipientRequest(
+    current.input,
+    current.segmentation,
+  );
+  expect(request.version).toBe('segment-recipients.v22');
+  expect(request.systemPrompt).toBe(
+    previous.request.systemPrompt.replace(
+      CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
+      CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY +
+        '\n\n' +
+        CONTENT_ATTACHMENT_INVENTORY_SUPPORT_POLICY,
+    ),
+  );
+  expect(request.userPrompt).toBe(previous.request.userPrompt);
+  expect(request.segmentSnapshot).toEqual(previous.request.segmentSnapshot);
+  expect(request.candidateEvidence).toEqual(previous.request.candidateEvidence);
+  expect(request.workGroups).toEqual(previous.request.workGroups);
+  expect(
+    await Output.object({ schema: request.schema }).responseFormat,
   ).toEqual(
     await Output.object({ schema: previous.request.schema }).responseFormat,
   );

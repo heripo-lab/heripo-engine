@@ -872,3 +872,9 @@ V20 reuses the registry's `RecipientCandidateRef` enum inside work targets and n
 ### Returned work-target cross-check (recipient v21)
 
 V21 appends only the approved generic return-time cross-check. For an operation, the model compares every non-area recipient and included area with the established work assessments it actually returns. A supported independent work target outside the reviewed inventory groups requires its own target group; a missing assessment must not be concealed by dropping the recipient or inventing evidence. Existing whole-group/subset judgments and uncertainty roles remain unchanged, and non-work segments do not acquire work objects. The entire compact input, shared provider schema, evidence inspection and deterministic assembly are unchanged from v20. V1–v20 retain their previous prompts and results; v20 retains its shared provider representation. Code does not repair raw responses or add another model stage.
+
+### Optional inventory-review support (recipient v22)
+
+V22 adds only the approved generic clarification to the inventory-review instructions. Every review and both evidence fields remain required, but unused K or row support arrays stay empty. Selected K grounds belong to candidates in the reviewed inventory, and selected original rows belong to that inventory. References occur once per array; K and row arrays are independent sets, so multiple candidates sharing a physical row cite it once. All other recipient, area, membership and work-evidence requirements remain unchanged.
+
+The complete v21 user input, shared provider schema, inspection and assembly are preserved. V1–v21 retain their original prompts and results. No source-specific rule, response deduplication, correction, additional model stage or automatic adoption is introduced; live output still requires provenance inspection and comparison with separately confirmed expectations.
