@@ -825,3 +825,51 @@ test('rejects a direct selection from a sibling segment of the same E', async ()
     request.segmentSnapshot[1].ref,
   ]);
 });
+
+test('replays v25 and inspects opt-in v26 with identical context and schema while rejecting mixed prompts', async () => {
+  const f = await fixture();
+  const oldAudit = JSON.stringify(f.audit);
+  const previous = await f.run();
+  const request = createContentAttachmentSourceContextRequest(
+    f.plan,
+    f.unit,
+    f.segmentation,
+    f.audit.contextOptions,
+    'segment-recipients.v26',
+  );
+  expect(request.userPrompt).toBe(f.audit.userPrompt);
+  expect(request.wordEvidence).toEqual(f.audit.wordEvidence);
+  expect(request.contextBindings).toEqual(f.audit.contextBindings);
+  const format = await Output.object({ schema: request.schema }).responseFormat;
+  expect(format?.type).toBe('json');
+  if (format?.type !== 'json') throw new Error('Expected object output');
+  expect(format.schema).toEqual(f.audit.providerOutputSchema);
+  const audit: Audit = {
+    ...f.audit,
+    version: 'segment-recipients.v26',
+    systemPrompt: request.systemPrompt,
+  };
+  expect(
+    await inspectContentAttachmentSourceContextRecipients(
+      f.document,
+      f.plan,
+      f.unit,
+      f.segmentation,
+      audit,
+    ),
+  ).toEqual(previous);
+  expect(
+    (
+      await inspectContentAttachmentSourceContextRecipients(
+        f.document,
+        f.plan,
+        f.unit,
+        f.segmentation,
+        { ...audit, systemPrompt: f.audit.systemPrompt },
+      )
+    ).issues,
+  ).toEqual([
+    'Invalid source-context audit: Source-context request snapshot differs',
+  ]);
+  expect(JSON.stringify(f.audit)).toBe(oldAudit);
+});

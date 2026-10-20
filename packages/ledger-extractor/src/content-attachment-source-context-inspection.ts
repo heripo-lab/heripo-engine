@@ -49,7 +49,7 @@ export function createContentAttachmentSourceContextReplaySnapshot(
 }
 
 export interface ContentAttachmentSourceContextRecipientAudit extends ContentAttachmentRecipientAudit<ContentAttachmentAreaRecipientResponse> {
-  version: 'segment-recipients.v25';
+  version: 'segment-recipients.v25' | 'segment-recipients.v26';
   contextVersion: typeof CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION;
   contextOptions: ContentAttachmentSourceContextOptions;
   replaySnapshot: ReturnType<
@@ -203,7 +203,8 @@ export async function inspectContentAttachmentSourceContextRecipients(
   let request: ContentAttachmentSourceContextRequest;
   try {
     requireMatch(
-      audit.version === 'segment-recipients.v25' &&
+      (audit.version === 'segment-recipients.v25' ||
+        audit.version === 'segment-recipients.v26') &&
         audit.contextVersion === CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION &&
         !!audit.contextOptions &&
         typeof audit.contextOptions === 'object',
@@ -226,6 +227,7 @@ export async function inspectContentAttachmentSourceContextRecipients(
       unit,
       segmentation,
       audit.contextOptions,
+      audit.version,
     );
     requireMatch(
       audit.systemPrompt === request.systemPrompt &&

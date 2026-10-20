@@ -855,9 +855,9 @@ V25는 현재 원문이 정의한 집합이 부분집합이나 작업 서술일 
 
 작업 적용은 대상 집합마다 독립적인 원문 근거로 판단한다. collective 판정만으로 작업 적용을 확립하거나 수신 대상을 추가하거나 미결을 해소하지 않는다. 기존 표 검토·한정 근거·독립 범위 판단은 유지한다. 입력·공유 제공자 스키마·검사·결정론적 조립은 그대로이며 v1~v24의 원래 프롬프트와 재현을 유지한다. 특정 사례 식별자·추가 필드·모델 단계·응답 보정은 추가하지 않는다.
 
-### 원문 구조를 보존하는 명시적 입력(context v1, recipient v25)
+### 원문 구조를 보존하는 명시적 입력(context v1, recipient v25/v26)
 
-`createContentAttachmentSourceContextRequest(plan, unit, segmentation, options)`는 선택적으로 사용하는 오프라인 문맥 컴파일러입니다. v25 시스템 프롬프트·제공자 출력 스키마·전체 후보군·현재 구간·기존 E/X/W 참조를 유지합니다. 기본 후보 판단 요청 생성기와 과거 버전은 변경하지 않습니다. 별도의 `contextVersion: 'content-source-context.v1'`은 입력 계약의 버전이며 추가 모델 단계가 아닙니다.
+`createContentAttachmentSourceContextRequest(plan, unit, segmentation, options, recipientVersion?)`는 선택적으로 사용하는 오프라인 문맥 컴파일러입니다. 기본값은 동결한 v25 시스템 프롬프트·제공자 출력 스키마·전체 후보군·현재 구간·기존 E/X/W 참조를 유지합니다. 다섯 번째 인수로 v26을 명시적으로 선택해도 입력과 스키마는 같으며 과거 요청도 유지합니다. 기본 후보 판단 호출이 이 문맥 입력을 자동 채택하지는 않습니다. 별도의 `contextVersion: 'content-source-context.v1'`은 입력 계약의 버전이며 추가 모델 단계가 아닙니다.
 
 각 원문에는 원래 자료 종류·장 문맥 참조·PDF 쪽·본문 블록 또는 표 셀 위치가 붙습니다. `bodySequences`는 같은 원래 textBlocks 배열에서 선택한 블록의 순서를 표시하고 `complete: false`로 생략을 드러냅니다. 자료 종류 사이의 PDF 읽기 순서나 조사 단계 태그를 추정하지 않습니다. 표 위치는 병합 구조를 포함한 전처리 grid 배열의 인덱스이며 확장된 논리 열 번호가 아닙니다. 긴 위치 정보는 `contextBindings`에 남습니다.
 
@@ -871,8 +871,14 @@ V25는 현재 원문이 정의한 집합이 부분집합이나 작업 서술일 
 
 `inspectContentAttachmentSourceContextRecipients(document, plan, unit, segmentation, audit)`는 I/O나 모델 호출 없이 새 문맥 계약을 비동기로 검사합니다. `createContentAttachmentSourceContextReplaySnapshot`은 원본 문서·plan·원래 구간 식별 감사의 정확한 JSON 해시와 문서/후보/등록부/작업 묶음 식별 정보를 구성합니다. 이는 재현 검사이며 실제 모델이 응답을 생성했다는 증명은 아닙니다.
 
-코드용 `ContentAttachmentSourceContextRecipientAudit`에는 `version: 'segment-recipients.v25'`, `contextVersion`, 명시적 `contextOptions`, `replaySnapshot`, 실제 `providerOutputSchema`, 프롬프트·후보/구간 스냅샷, 별도 `wordEvidence`/`contextBindings`, 원응답·사용량·호출 시도를 보존합니다. 동결 입력으로 요청을 재생성한 뒤 선택 결과를 검사합니다. 제공자 스키마 변환은 로컬 작업이며 기존 스키마를 바꾸거나 요청을 전송하지 않습니다. 원래 구간 식별 감사에 새 X를 덧붙이지 않습니다.
+코드용 `ContentAttachmentSourceContextRecipientAudit`에는 `version: 'segment-recipients.v25' | 'segment-recipients.v26'`, `contextVersion`, 명시적 `contextOptions`, `replaySnapshot`, 실제 `providerOutputSchema`, 프롬프트·후보/구간 스냅샷, 별도 `wordEvidence`/`contextBindings`, 원응답·사용량·호출 시도를 보존합니다. 동결 입력으로 요청을 재생성한 뒤 선택 결과를 검사합니다. 제공자 스키마 변환은 로컬 작업이며 기존 스키마를 바꾸거나 요청을 전송하지 않습니다. 원래 구간 식별 감사에 새 X를 덧붙이지 않습니다.
 
 검사기는 제공된 원본 문서에서 표·헤더·필드·전체 문자열·원래 메타데이터·UTF-16 위치·재생성한 W 경계를 독립적으로 대조합니다. 캡션은 셀의 `text`가 아니라 `fullText`로 해석합니다. 요청 또는 원문 스냅샷이 다르면 감사 전체를 거부합니다. 이후 배정·area·표/집합·한정·두 종류 미결·작업 검사는 같은 검증된 어절 스냅샷을 사용합니다. X 문맥을 현재 E의 직접 근거로 바꾸거나 같은 E의 다른 S 구간을 현재 근거로 선택할 수 없습니다. 잘못된 참조는 해당 구간을 실패시키며 다른 정상 구간은 유지하고 원응답을 보정하지 않습니다.
 
 별도의 `sourceRanges`에는 정상 구간에서 선택된 WordRanges의 각 참조, 응답 내 위치, 원문 필드, 원래 필드 기준 UTF-16 범위, 출처 참조와 페이지 메타데이터를 남깁니다. 기존 finding의 위치 표현은 유지합니다. 현재/문맥 구분과 선언된 작업 적용의 검사 기준은 동일합니다. 유효한 참조라는 사실만으로 배정·연속표·작업 연결의 의미가 옳다고 확정하지 않습니다. 기존 v25 응답은 원래 요청의 관측으로 보존하며, 합성 문맥 fixture를 새 모델 관측으로 등록하지 않습니다. 실제 호출이나 자동 원장 채택은 추가하지 않습니다.
+
+### 본문·표 연속성·작업 대상 연결 (후보 판단 v26)
+
+V26은 합의한 범용 영어 문안만 덧붙입니다. 본문→표 참조, 표 조각 사이 연속성, 현재 작업→후보 연결을 구분하고 필요한 연결마다 근거와 판단 결과를 기존 작업 적용 reason에 따로 설명합니다. 작업 대상 객체가 없으면 기존 area reason을 사용합니다. 구조 참조는 reason에, 실제 원문 어절과 후보 K는 기존 근거 필드에 남깁니다. 미판정 연속성은 기각이 아니며 표 연속성이나 후보 정의가 작업 적용을 대신하지 않습니다. 명시적 원문 경계·현재 작업 한정·독립적인 배정을 유지하고 동일성 미결을 자동으로 만들지 않습니다.
+
+기본 후보 판단 생성기는 v26을 선택합니다. 별도 문맥 컴파일러는 동결한 v25를 기본값으로 유지하며 다섯 번째 인수에 `segment-recipients.v26`을 지정하면 새 프롬프트를 명시적으로 선택합니다. 문맥 검사기는 감사에 기록된 v25/v26을 재현합니다. 입력·공유 제공자 스키마·근거 검사·조립은 유지하고 v1~v25의 요청과 응답도 재현합니다. 추가 모델 단계·원문/응답 보정·자동 채택은 없습니다. reason의 설명만으로 세 연결의 의미가 코드에서 강제 검증되는 것은 아닙니다.

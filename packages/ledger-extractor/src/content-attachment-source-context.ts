@@ -92,12 +92,15 @@ export function createContentAttachmentSourceContextRequest(
   unit: AttachmentUnit,
   segmentation: ContentAttachmentSegmentationAudit,
   options: ContentAttachmentSourceContextOptions = {},
+  recipientVersion:
+    | 'segment-recipients.v25'
+    | 'segment-recipients.v26' = 'segment-recipients.v25',
 ): ContentAttachmentSourceContextRequest {
   const input = createContentAttachmentGroundedInput(plan, unit);
   const legacy = createContentAttachmentRecipientRequest(
     input,
     segmentation,
-    'segment-recipients.v25',
+    recipientVersion,
   );
   const payload = JSON.parse(legacy.userPrompt);
   const resources = new Map(

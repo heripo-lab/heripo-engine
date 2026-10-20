@@ -3057,10 +3057,58 @@ test('adds only the approved v25 body subset collective definition while preserv
   const request = createContentAttachmentRecipientRequest(
     current.input,
     current.segmentation,
+    'segment-recipients.v25',
   );
   const policy =
     'Judge collectiveAssessment for the source-defined set described by the CURRENT segment, including a proper subset and a work account. When current words and source continuity establish that set and describe its members together, return collective; no whole-inventory result or accepted inventory is required. Rejected inventory adoption or unestablished larger-group coverage does not negate that body-defined collective.\n\nKeep workScopeAssessment independent: establish operation coverage only for source-supported targets, leaving unsupported larger-group coverage not_established. A collective verdict alone neither establishes coverage nor adds recipients or resolves uncertainty. Preserve existing inventory, qualifier and independent-area judgments.';
   expect(request.version).toBe('segment-recipients.v25');
+  expect(request.systemPrompt).toBe(
+    previous.request.systemPrompt + '\n\n' + policy,
+  );
+  expect(request.userPrompt).toBe(previous.request.userPrompt);
+  expect(request.segmentSnapshot).toEqual(previous.request.segmentSnapshot);
+  expect(request.candidateEvidence).toEqual(previous.request.candidateEvidence);
+  expect(request.workGroups).toEqual(previous.request.workGroups);
+  expect(
+    await Output.object({ schema: request.schema }).responseFormat,
+  ).toEqual(
+    await Output.object({ schema: previous.request.schema }).responseFormat,
+  );
+  const before = JSON.stringify(current.audit.rawResponse);
+  expect(
+    inspectContentAttachmentRecipients(
+      current.input,
+      current.segmentation,
+      current.audit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(
+      previous.input,
+      previous.segmentation,
+      previous.audit,
+    ),
+  );
+  expect(JSON.stringify(current.audit.rawResponse)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('adds only the approved v26 narrative/table/operation links while preserving v25 input, schema and raw inspection', async () => {
+  const previous = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v25',
+  );
+  const current = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v26',
+  );
+  const request = createContentAttachmentRecipientRequest(
+    current.input,
+    current.segmentation,
+    'segment-recipients.v26',
+  );
+  const policy =
+    'When a recipient decision relies on a narrative-to-table reference or continuation across table fragments, distinguish three links: (1) the narrative identifies the relevant table; (2) the fragments continue the same table; and (3) the current operation applies to the identified candidate.\n\nIn the existing operationCoverage.reason, or areaAssessments reason when no target group is returned, state the outcome and source-grounded basis for each necessary link separately. Explain an established, rejected, or unresolved link without substituting another link for it. Use original word ranges in the existing evidence fields and structural references in reason; never place structural references in word-range or candidate-evidence fields.\n\nAssess continuation from the combined original context, captions, headers, boundaries and sequence. An unjudged continuation is not a rejection. Table continuity alone does not establish an operation target, and candidate definition alone does not establish operation coverage. Respect explicit table boundaries and current investigation or task-scope restrictions. Preserve independently supported attachments; an unresolved link does not automatically create recipient-identity alternatives. Do not add fields or rewrite source text.';
+  expect(request.version).toBe('segment-recipients.v26');
   expect(request.systemPrompt).toBe(
     previous.request.systemPrompt + '\n\n' + policy,
   );
