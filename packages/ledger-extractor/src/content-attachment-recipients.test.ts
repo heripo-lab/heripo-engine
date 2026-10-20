@@ -2963,10 +2963,57 @@ test('adds only the approved v23 area operation link while preserving v22 input,
   const request = createContentAttachmentRecipientRequest(
     current.input,
     current.segmentation,
+    'segment-recipients.v23',
   );
   const policy =
     'Identify each area from its own K/context grounds, then separately determine whether the current operation applies to it. Read the whole segment with its original cell/body context.\n\nIn abbreviated or coordinated work entries, assess which named targets share the action; abbreviation alone does not make an area mention a heading. A linked table detailing other targets neither establishes nor cancels independently supported area work. Definition, containment and inventory membership alone do not establish operation coverage.\n\nUse the existing reason and evidence IDs to distinguish area identification from the operation link or source-based gap. Keep group coverage independent and preserve a separate established work object for an included independent area target.';
   expect(request.version).toBe('segment-recipients.v23');
+  expect(request.systemPrompt).toBe(
+    previous.request.systemPrompt + '\n\n' + policy,
+  );
+  expect(request.userPrompt).toBe(previous.request.userPrompt);
+  expect(request.segmentSnapshot).toEqual(previous.request.segmentSnapshot);
+  expect(request.candidateEvidence).toEqual(previous.request.candidateEvidence);
+  expect(request.workGroups).toEqual(previous.request.workGroups);
+  expect(
+    await Output.object({ schema: request.schema }).responseFormat,
+  ).toEqual(
+    await Output.object({ schema: previous.request.schema }).responseFormat,
+  );
+  const before = JSON.stringify(current.audit.rawResponse);
+  expect(
+    inspectContentAttachmentRecipients(
+      current.input,
+      current.segmentation,
+      current.audit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(
+      previous.input,
+      previous.segmentation,
+      previous.audit,
+    ),
+  );
+  expect(JSON.stringify(current.audit.rawResponse)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('adds only the approved v24 inventory source and qualifier roles while preserving v23 input, schema and raw inspection', async () => {
+  const previous = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v23',
+  );
+  const current = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v24',
+  );
+  const request = createContentAttachmentRecipientRequest(
+    current.input,
+    current.segmentation,
+  );
+  const policy =
+    'Separate target identification from the source link connecting an inventory to the set described by the CURRENT segment. Using a table only to identify already named targets does not establish that link. If no other source bridge is supported, reject the inventory connection while retaining valid identification grounds in the recipient and work-target fields. A bounded set established by body/context can remain collective with no accepted inventory and an empty inventoryMembershipLinks list. An explicitly supported inventory link remains admissible even when its descriptive predicate is stated in the body.\n\nSelect qualifier ranges by their semantic role. periodWordRanges records archaeological chronology of the described objects. Operational timing or target-selection conditions belong to scopeWordRanges when they constrain the current account; preserve the complete qualifying expression. Selection timing alone does not date either the objects or the operation. Keep type qualifiers in typeWordRanges and leave absent roles empty. These judgments do not replace independently supported recipient decisions or establish operation coverage by themselves.';
+  expect(request.version).toBe('segment-recipients.v24');
   expect(request.systemPrompt).toBe(
     previous.request.systemPrompt + '\n\n' + policy,
   );

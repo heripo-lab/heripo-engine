@@ -72,7 +72,7 @@ type CandidateRow = [
   Array<[string, string]>,
 ];
 export const CONTENT_ATTACHMENT_RECIPIENT_VERSION =
-  'segment-recipients.v23' as const;
+  'segment-recipients.v24' as const;
 type RecipientVersion =
   | 'segment-recipients.v1'
   | 'segment-recipients.v2'
@@ -96,6 +96,7 @@ type RecipientVersion =
   | 'segment-recipients.v20'
   | 'segment-recipients.v21'
   | 'segment-recipients.v22'
+  | 'segment-recipients.v23'
   | typeof CONTENT_ATTACHMENT_RECIPIENT_VERSION;
 export interface ContentAttachmentRecipientSupport {
   currentWordRanges: string[];
@@ -192,6 +193,9 @@ const V21_WORK_TARGET_CROSS_CHECK_POLICY =
 const V23_AREA_OPERATION_LINK_POLICY =
   'Identify each area from its own K/context grounds, then separately determine whether the current operation applies to it. Read the whole segment with its original cell/body context.\n\nIn abbreviated or coordinated work entries, assess which named targets share the action; abbreviation alone does not make an area mention a heading. A linked table detailing other targets neither establishes nor cancels independently supported area work. Definition, containment and inventory membership alone do not establish operation coverage.\n\nUse the existing reason and evidence IDs to distinguish area identification from the operation link or source-based gap. Keep group coverage independent and preserve a separate established work object for an included independent area target.';
 
+const V24_INVENTORY_SOURCE_QUALIFIER_POLICY =
+  'Separate target identification from the source link connecting an inventory to the set described by the CURRENT segment. Using a table only to identify already named targets does not establish that link. If no other source bridge is supported, reject the inventory connection while retaining valid identification grounds in the recipient and work-target fields. A bounded set established by body/context can remain collective with no accepted inventory and an empty inventoryMembershipLinks list. An explicitly supported inventory link remains admissible even when its descriptive predicate is stated in the body.\n\nSelect qualifier ranges by their semantic role. periodWordRanges records archaeological chronology of the described objects. Operational timing or target-selection conditions belong to scopeWordRanges when they constrain the current account; preserve the complete qualifying expression. Selection timing alone does not date either the objects or the operation. Keep type qualifiers in typeWordRanges and leave absent roles empty. These judgments do not replace independently supported recipient decisions or establish operation coverage by themselves.';
+
 /** Compile all frozen candidate grounds and inspected segments without earlier recipient answers. */
 export function createContentAttachmentRecipientRequest(
   input: Input,
@@ -221,6 +225,7 @@ export function createContentAttachmentRecipientRequest(
     version !== 'segment-recipients.v20' &&
     version !== 'segment-recipients.v21' &&
     version !== 'segment-recipients.v22' &&
+    version !== 'segment-recipients.v23' &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -288,6 +293,7 @@ export function createContentAttachmentRecipientRequest(
     version === 'segment-recipients.v20' ||
     version === 'segment-recipients.v21' ||
     version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? createContentAttachmentWorkGroups(input)
       : undefined;
@@ -351,6 +357,7 @@ export function createContentAttachmentRecipientRequest(
     version === 'segment-recipients.v20' ||
     version === 'segment-recipients.v21' ||
     version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION;
   const nonAreaRefs = candidateRefs.filter((id) => !areaRefs.includes(id));
   const nonAreaAttachment = z.array(
@@ -403,6 +410,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v20' ||
       version === 'segment-recipients.v21' ||
       version === 'segment-recipients.v22' ||
+      version === 'segment-recipients.v23' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             workScopeAssessment: createContentAttachmentWorkScopeSchema(
@@ -415,10 +423,12 @@ export function createContentAttachmentRecipientRequest(
                 version === 'segment-recipients.v20' ||
                 version === 'segment-recipients.v21' ||
                 version === 'segment-recipients.v22' ||
+                version === 'segment-recipients.v23' ||
                 version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
               version === 'segment-recipients.v20' ||
                 version === 'segment-recipients.v21' ||
                 version === 'segment-recipients.v22' ||
+                version === 'segment-recipients.v23' ||
                 version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
                 ? ref
                 : undefined,
@@ -439,6 +449,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v20' ||
       version === 'segment-recipients.v21' ||
       version === 'segment-recipients.v22' ||
+      version === 'segment-recipients.v23' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             areaAssessments: createContentAttachmentAreaAssessmentsSchema(
@@ -470,6 +481,7 @@ export function createContentAttachmentRecipientRequest(
       version === 'segment-recipients.v20' ||
       version === 'segment-recipients.v21' ||
       version === 'segment-recipients.v22' ||
+      version === 'segment-recipients.v23' ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(
@@ -558,6 +570,8 @@ export function createContentAttachmentRecipientRequest(
                                                   version ===
                                                     'segment-recipients.v22' ||
                                                   version ===
+                                                    'segment-recipients.v23' ||
+                                                  version ===
                                                     CONTENT_ATTACHMENT_RECIPIENT_VERSION
                                                     ? '\n' +
                                                       CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY
@@ -583,6 +597,7 @@ export function createContentAttachmentRecipientRequest(
     version === 'segment-recipients.v20' ||
     version === 'segment-recipients.v21' ||
     version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? systemPrompt.replace(
           '\nFor every attachment or alternative,',
@@ -595,6 +610,7 @@ export function createContentAttachmentRecipientRequest(
     version === 'segment-recipients.v20' ||
     version === 'segment-recipients.v21' ||
     version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? uncertaintyPrompt.replace(
           '\n\nThese work-assessment rules do not narrow source-established collective findings',
@@ -606,11 +622,13 @@ export function createContentAttachmentRecipientRequest(
   const crossCheckedPrompt =
     version === 'segment-recipients.v21' ||
     version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? operationTargetPrompt + '\n\n' + V21_WORK_TARGET_CROSS_CHECK_POLICY
       : operationTargetPrompt;
   const inventorySupportPrompt =
     version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? crossCheckedPrompt.replace(
           CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
@@ -619,12 +637,17 @@ export function createContentAttachmentRecipientRequest(
             CONTENT_ATTACHMENT_INVENTORY_SUPPORT_POLICY,
         )
       : crossCheckedPrompt;
+  const areaOperationPrompt =
+    version === 'segment-recipients.v23' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? inventorySupportPrompt + '\n\n' + V23_AREA_OPERATION_LINK_POLICY
+      : inventorySupportPrompt;
   return {
     ...request,
     systemPrompt:
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-        ? inventorySupportPrompt + '\n\n' + V23_AREA_OPERATION_LINK_POLICY
-        : inventorySupportPrompt,
+        ? areaOperationPrompt + '\n\n' + V24_INVENTORY_SOURCE_QUALIFIER_POLICY
+        : areaOperationPrompt,
   };
 }
 
@@ -666,7 +689,8 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v19' ||
         audit.version === 'segment-recipients.v20' ||
         audit.version === 'segment-recipients.v21' ||
-        audit.version === 'segment-recipients.v22'
+        audit.version === 'segment-recipients.v22' ||
+        audit.version === 'segment-recipients.v23'
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -685,6 +709,7 @@ export function inspectContentAttachmentRecipients(
       audit.version === 'segment-recipients.v20' ||
       audit.version === 'segment-recipients.v21' ||
       audit.version === 'segment-recipients.v22' ||
+      audit.version === 'segment-recipients.v23' ||
       audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION)
   )
     return {
@@ -726,6 +751,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v20' ||
         audit.version === 'segment-recipients.v21' ||
         audit.version === 'segment-recipients.v22' ||
+        audit.version === 'segment-recipients.v23' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? assembleContentAttachmentAreaRecipientDecision(
               kinds,
@@ -833,6 +859,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v20' ||
         audit.version === 'segment-recipients.v21' ||
         audit.version === 'segment-recipients.v22' ||
+        audit.version === 'segment-recipients.v23' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
@@ -864,6 +891,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v20' ||
         audit.version === 'segment-recipients.v21' ||
         audit.version === 'segment-recipients.v22' ||
+        audit.version === 'segment-recipients.v23' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ) {
         try {
@@ -877,6 +905,7 @@ export function inspectContentAttachmentRecipients(
             audit.version === 'segment-recipients.v20' ||
             audit.version === 'segment-recipients.v21' ||
             audit.version === 'segment-recipients.v22' ||
+            audit.version === 'segment-recipients.v23' ||
             audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           )
             inspectContentAttachmentWorkGroupReviews(
@@ -889,6 +918,7 @@ export function inspectContentAttachmentRecipients(
                 audit.version === 'segment-recipients.v20' ||
                 audit.version === 'segment-recipients.v21' ||
                 audit.version === 'segment-recipients.v22' ||
+                audit.version === 'segment-recipients.v23' ||
                 audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
             );
           inspectContentAttachmentWorkScope(
@@ -901,6 +931,7 @@ export function inspectContentAttachmentRecipients(
               audit.version === 'segment-recipients.v20' ||
               audit.version === 'segment-recipients.v21' ||
               audit.version === 'segment-recipients.v22' ||
+              audit.version === 'segment-recipients.v23' ||
               audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
           );
         } catch (error) {
@@ -935,6 +966,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v20' ||
         audit.version === 'segment-recipients.v21' ||
         audit.version === 'segment-recipients.v22' ||
+        audit.version === 'segment-recipients.v23' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { areaAssessments: decision.areaAssessments }
           : {}),
@@ -953,6 +985,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v20' ||
         audit.version === 'segment-recipients.v21' ||
         audit.version === 'segment-recipients.v22' ||
+        audit.version === 'segment-recipients.v23' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? { workScopeAssessment: decision.workScopeAssessment }
           : {}),
@@ -975,6 +1008,7 @@ export function inspectContentAttachmentRecipients(
         audit.version === 'segment-recipients.v20' ||
         audit.version === 'segment-recipients.v21' ||
         audit.version === 'segment-recipients.v22' ||
+        audit.version === 'segment-recipients.v23' ||
         audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
           ? {
               inventoryContexts:
@@ -1023,6 +1057,7 @@ export function inspectContentAttachmentRecipients(
     audit.version === 'segment-recipients.v20' ||
     audit.version === 'segment-recipients.v21' ||
     audit.version === 'segment-recipients.v22' ||
+    audit.version === 'segment-recipients.v23' ||
     audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? { derivedResponse }
       : {}),
