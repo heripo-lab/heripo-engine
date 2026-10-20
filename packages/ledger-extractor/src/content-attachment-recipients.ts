@@ -391,6 +391,9 @@ export function createContentAttachmentRecipientRequest(
                 version === 'segment-recipients.v18' ||
                 version === 'segment-recipients.v19' ||
                 version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+              version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+                ? ref
+                : undefined,
             ),
           }
         : {}),

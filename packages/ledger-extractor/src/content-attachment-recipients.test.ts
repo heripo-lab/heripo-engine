@@ -2768,7 +2768,28 @@ test('adds only the independent uncertainty wording in v19 while preserving v18 
   expect(LLMCaller.call).not.toHaveBeenCalled();
 });
 
-test('adds only the operation target coverage wording in v20 while preserving v19 input, schema and derived judgments', async () => {
+function expandProviderSchema(
+  value: unknown,
+  definitions?: Record<string, unknown>,
+): unknown {
+  if (Array.isArray(value))
+    return value.map((child) => expandProviderSchema(child, definitions));
+  if (!value || typeof value !== 'object') return value;
+  const node = value as Record<string, unknown>;
+  const defs = definitions ?? (node.definitions as Record<string, unknown>);
+  if (typeof node.$ref === 'string') {
+    const key = node.$ref.slice('#/definitions/'.length);
+    expect(defs).toHaveProperty(key);
+    return expandProviderSchema(defs[key], defs);
+  }
+  return Object.fromEntries(
+    Object.entries(node)
+      .filter(([key]) => key !== 'definitions')
+      .map(([key, child]) => [key, expandProviderSchema(child, defs)]),
+  );
+}
+
+test('preserves v20 wording, input and judgments while sharing equivalent provider definitions', async () => {
   const previous = singleAreaFixture(
     ['area', 'feature'],
     'segment-recipients.v19',
@@ -2797,11 +2818,14 @@ test('adds only the operation target coverage wording in v20 while preserving v1
   expect(current.request.candidateEvidence).toEqual(
     previous.request.candidateEvidence,
   );
-  expect(
-    await Output.object({ schema: current.request.schema }).responseFormat,
-  ).toEqual(
-    await Output.object({ schema: previous.request.schema }).responseFormat,
-  );
+  const shared = await Output.object({ schema: current.request.schema })
+    .responseFormat;
+  const original = await Output.object({ schema: previous.request.schema })
+    .responseFormat;
+  expect(expandProviderSchema(shared)).toEqual(expandProviderSchema(original));
+  expect(JSON.stringify(shared)).toContain('#/definitions/WorkTargetGroup');
+  expect(JSON.stringify(shared)).toContain('#/definitions/WorkGroupReview');
+  expect(JSON.stringify(original)).not.toContain('WorkGroupReview');
   const before = JSON.stringify(current.audit.rawResponse);
   expect(
     inspectContentAttachmentRecipients(

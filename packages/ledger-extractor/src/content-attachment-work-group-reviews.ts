@@ -58,6 +58,7 @@ export function createContentAttachmentWorkGroupReviewsSchema(
   refs: string[],
   legacyExclusive = false,
   fullGroupSchema?: z.ZodType<ContentAttachmentWorkTarget>,
+  shareDefinitions = false,
 ) {
   if (fullGroupSchema) {
     const review = z.union([
@@ -71,7 +72,12 @@ export function createContentAttachmentWorkGroupReviewsSchema(
         reason: z.string().min(1),
       }),
     ]);
-    return z.strictObject(Object.fromEntries(refs.map((ref) => [ref, review])));
+    const sharedReview = shareDefinitions
+      ? review.meta({ id: 'WorkGroupReview' })
+      : review;
+    return z.strictObject(
+      Object.fromEntries(refs.map((ref) => [ref, sharedReview])),
+    );
   }
   const options = [
     z.strictObject({

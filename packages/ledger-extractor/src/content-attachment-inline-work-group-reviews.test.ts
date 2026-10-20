@@ -4,6 +4,7 @@ import type {
 } from './content-attachment-work-scope';
 
 import { expect, test, vi } from 'vitest';
+import { z } from 'zod';
 
 import { inspectContentAttachmentWorkGroupReviews } from './content-attachment-work-group-reviews';
 import {
@@ -77,6 +78,42 @@ function inspect(a: ContentAttachmentWorkScopeAssessment, refs = ['R1']) {
   inspectContentAttachmentWorkGroupReviews(groups, a, refs, true);
   inspectContentAttachmentWorkScope(a, refs, vi.fn(), true);
 }
+
+test('shared work definitions preserve required reviews, candidate choices and coverage objects', () => {
+  const shared = createContentAttachmentWorkScopeSchema(
+    ['R1', 'R2', 'R3', 'R4'],
+    ['G1', 'G2'],
+    false,
+    true,
+    z.enum(['R1', 'R2', 'R3', 'R4']).meta({ id: 'RecipientCandidateRef' }),
+  );
+  const valid = assessment();
+  const before = JSON.stringify(valid);
+  for (const candidate of [schema(), shared]) {
+    expect(candidate.safeParse(valid).success).toBe(true);
+    const missing = structuredClone(valid);
+    delete missing.groupReviews!.G1;
+    const foreign = structuredClone(valid);
+    foreign.targetGroups[0].targetIdentification.candidateRefs = ['R999'];
+    const incomplete = structuredClone(valid);
+    delete incomplete.groupReviews!.G1.fullGroupAssessment;
+    const missingCoverage = structuredClone(valid);
+    delete (
+      missingCoverage.targetGroups[0] as Partial<ContentAttachmentWorkTarget>
+    ).operationCoverage;
+    const extra = structuredClone(valid);
+    extra.groupReviews!.G99 = extra.groupReviews!.G1;
+    for (const invalid of [
+      missing,
+      foreign,
+      incomplete,
+      missingCoverage,
+      extra,
+    ])
+      expect(candidate.safeParse(invalid).success).toBe(false);
+  }
+  expect(JSON.stringify(valid)).toBe(before);
+});
 
 test('keeps independent area and supported subset attachments while requiring an inline full group with unestablished coverage', () => {
   const a = assessment();

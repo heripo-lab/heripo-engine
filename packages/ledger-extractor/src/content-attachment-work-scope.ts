@@ -41,14 +41,17 @@ export function createContentAttachmentWorkScopeSchema(
   workGroupRefs?: string[],
   legacyExclusive = false,
   inlineFullGroups = false,
+  candidateRefSchema?: z.ZodType<string>,
 ) {
   const ranges = z
     .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
     .meta({ id: 'WorkScopeRanges' });
-  const target = z.strictObject({
+  const targetSchema = z.strictObject({
     targetIdentification: z.strictObject({
       candidateRefs: z
-        .array(z.enum(candidateRefs as [string, ...string[]]))
+        .array(
+          candidateRefSchema ?? z.enum(candidateRefs as [string, ...string[]]),
+        )
         .min(1),
       currentWordRanges: z
         .array(z.string().regex(CONTENT_ATTACHMENT_WORD_RANGE_PATTERN))
@@ -64,6 +67,9 @@ export function createContentAttachmentWorkScopeSchema(
       reason: z.string().min(1),
     }),
   });
+  const target = candidateRefSchema
+    ? targetSchema.meta({ id: 'WorkTargetGroup' })
+    : targetSchema;
   const schema = z
     .strictObject({
       state: z.enum(['operation', 'not_applicable']),
@@ -81,6 +87,7 @@ export function createContentAttachmentWorkScopeSchema(
         workGroupRefs,
         legacyExclusive,
         inlineFullGroups ? target : undefined,
+        candidateRefSchema !== undefined,
       ),
     }),
     z.strictObject({
