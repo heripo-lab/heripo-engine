@@ -892,3 +892,9 @@ V24 appends only the approved generic clarification separating candidate identif
 Qualifier IDs preserve their semantic roles: archaeological chronology in `periodWordRanges`, operational timing or target-selection restrictions in `scopeWordRanges`, and type qualifiers in `typeWordRanges`. Preserve the full qualifying expression; selection timing alone does not date objects or establish operation timing. Independent recipient decisions and operation coverage retain their own evidence requirements.
 
 The complete input, shared provider schema, evidence validation and deterministic assembly are unchanged. V1–v23 retain their original prompts and replay behavior. No sample-specific identifiers, new fields, model stages, response repair or automatic adoption are added. Confirmed semantic expectations remain a separate evaluation contract.
+
+### Body-defined subsets and collective work accounts (recipient v25)
+
+V25 appends only the approved generic definition of the current source-defined set, which may be a proper subset or a work account. When current words and source continuity establish that set and describe its members together, return collective without requiring a whole-inventory result or accepted inventory. Rejected inventory adoption and unsupported larger-group coverage do not negate that body-defined collective.
+
+Operation coverage remains independently source-grounded for each target group. A collective verdict alone does not establish coverage, add recipients or resolve uncertainty. Existing inventory, qualifier and independent-area judgments remain required. Inputs, shared provider schema, inspection and deterministic assembly are unchanged; v1–v24 retain their original prompts and replay behavior. No sample-specific identifiers, new fields, additional model stages or response repair are added.
