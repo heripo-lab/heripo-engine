@@ -209,3 +209,12 @@ export type {
   ContentAttachmentTableContextPair,
   ContentAttachmentSourceContextBinding,
 } from './content-attachment-source-context';
+
+export {
+  createContentAttachmentSourceContextReplaySnapshot,
+  inspectContentAttachmentSourceContextRecipients,
+} from './content-attachment-source-context-inspection';
+export type {
+  ContentAttachmentSourceContextRecipientAudit,
+  ContentAttachmentSourceContextRecipientInspection,
+} from './content-attachment-source-context-inspection';

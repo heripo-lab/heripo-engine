@@ -4,6 +4,7 @@ import type {
   ContentAttachmentIdentifiedSegment,
   ContentAttachmentSegmentationAudit,
 } from './content-attachment-segmentation';
+import type { ContentAttachmentWordEvidenceSnapshot } from './content-attachment-word-evidence';
 
 import { z } from 'zod';
 
@@ -130,6 +131,7 @@ export function inspectContentAttachmentCollectiveTrace(
     attachments: Array<{ candidateRef: string }>;
     recipientIdentityAlternatives: Array<{ candidateRefs: string[] }>;
   },
+  wordEvidence: ContentAttachmentWordEvidenceSnapshot = segmentation.wordEvidence,
 ) {
   const {
     collectiveAssessment: collective,
@@ -141,7 +143,7 @@ export function inspectContentAttachmentCollectiveTrace(
       throw new Error('Duplicate collective evidence');
     for (const range of ranges) {
       const evidence = resolveContentAttachmentWordRange(
-        segmentation.wordEvidence,
+        wordEvidence,
         range,
         segment.excerptRef,
       );

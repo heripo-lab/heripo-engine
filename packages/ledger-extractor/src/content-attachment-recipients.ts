@@ -13,7 +13,10 @@ import type {
   ContentAttachmentIdentifiedSegment,
   ContentAttachmentSegmentationAudit,
 } from './content-attachment-segmentation';
-import type { ContentAttachmentWordRangeEvidence } from './content-attachment-word-evidence';
+import type {
+  ContentAttachmentWordEvidenceSnapshot,
+  ContentAttachmentWordRangeEvidence,
+} from './content-attachment-word-evidence';
 import type { ContentAttachmentWorkScopeAssessment } from './content-attachment-work-scope';
 
 import { LLMCaller, createAuditedModel } from '@heripo/shared';
@@ -759,6 +762,27 @@ export function inspectContentAttachmentRecipients(
       issues: ['Invalid recipient response, request or source snapshot'],
       findings: [],
     };
+  return inspectContentAttachmentRecipientSelections(
+    input,
+    segmentation,
+    audit,
+    request,
+    parsed.data,
+  );
+}
+
+/** Apply unchanged selection checks only after the caller verifies its request and source snapshot. */
+export function inspectContentAttachmentRecipientSelections(
+  input: Input,
+  segmentation: ContentAttachmentSegmentationAudit,
+  audit: ContentAttachmentRecipientAudit<
+    ContentAttachmentRecipientResponse | ContentAttachmentAreaRecipientResponse
+  >,
+  request: ReturnType<typeof createContentAttachmentRecipientRequest>,
+  response:
+    ContentAttachmentRecipientResponse | ContentAttachmentAreaRecipientResponse,
+  wordEvidence: ContentAttachmentWordEvidenceSnapshot = segmentation.wordEvidence,
+): ReturnType<typeof inspectContentAttachmentRecipients> {
   const findings: ContentAttachmentRecipientFinding[] = [],
     issues: string[] = [];
   const derivedResponse: ContentAttachmentDerivedRecipientResponse = {
@@ -770,7 +794,7 @@ export function inspectContentAttachmentRecipients(
   );
   for (const segment of request.segmentSnapshot) {
     try {
-      const rawDecision = parsed.data.decisions[segment.ref];
+      const rawDecision = response.decisions[segment.ref];
       const assembled =
         audit.version === 'segment-recipients.v18' ||
         audit.version === 'segment-recipients.v19' ||
@@ -813,11 +837,11 @@ export function inspectContentAttachmentRecipients(
           throw new Error('Duplicate support');
         const currentEvidence = support.currentWordRanges.map((r) => {
           const evidence = resolveContentAttachmentWordRange(
-            segmentation.wordEvidence,
+            wordEvidence,
             r,
             segment.excerptRef,
           );
-          const source = segmentation.wordEvidence.sources.find(
+          const source = wordEvidence.sources.find(
             (s) => s.ref === segment.excerptRef,
           )!;
           if (
@@ -840,7 +864,7 @@ export function inspectContentAttachmentRecipients(
         });
         const contextEvidence = support.contextWordRanges.map((r) =>
           resolveContentAttachmentWordRange(
-            segmentation.wordEvidence,
+            wordEvidence,
             r,
             segment.excerptRef,
           ),
@@ -981,6 +1005,7 @@ export function inspectContentAttachmentRecipients(
           decision as ContentAttachmentCollectiveTrace,
           request.candidateEvidence,
           decision,
+          wordEvidence,
         );
       findings.push({
         segmentRef: segment.ref,
