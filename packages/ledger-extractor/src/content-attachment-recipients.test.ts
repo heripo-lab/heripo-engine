@@ -2913,6 +2913,7 @@ test('clarifies optional inventory support in v22 while preserving the v21 input
   const request = createContentAttachmentRecipientRequest(
     current.input,
     current.segmentation,
+    'segment-recipients.v22',
   );
   expect(request.version).toBe('segment-recipients.v22');
   expect(request.systemPrompt).toBe(
@@ -2922,6 +2923,52 @@ test('clarifies optional inventory support in v22 while preserving the v21 input
         '\n\n' +
         CONTENT_ATTACHMENT_INVENTORY_SUPPORT_POLICY,
     ),
+  );
+  expect(request.userPrompt).toBe(previous.request.userPrompt);
+  expect(request.segmentSnapshot).toEqual(previous.request.segmentSnapshot);
+  expect(request.candidateEvidence).toEqual(previous.request.candidateEvidence);
+  expect(request.workGroups).toEqual(previous.request.workGroups);
+  expect(
+    await Output.object({ schema: request.schema }).responseFormat,
+  ).toEqual(
+    await Output.object({ schema: previous.request.schema }).responseFormat,
+  );
+  const before = JSON.stringify(current.audit.rawResponse);
+  expect(
+    inspectContentAttachmentRecipients(
+      current.input,
+      current.segmentation,
+      current.audit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(
+      previous.input,
+      previous.segmentation,
+      previous.audit,
+    ),
+  );
+  expect(JSON.stringify(current.audit.rawResponse)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('adds only the approved v23 area operation link while preserving v22 input, schema and raw inspection', async () => {
+  const previous = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v22',
+  );
+  const current = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v23',
+  );
+  const request = createContentAttachmentRecipientRequest(
+    current.input,
+    current.segmentation,
+  );
+  const policy =
+    'Identify each area from its own K/context grounds, then separately determine whether the current operation applies to it. Read the whole segment with its original cell/body context.\n\nIn abbreviated or coordinated work entries, assess which named targets share the action; abbreviation alone does not make an area mention a heading. A linked table detailing other targets neither establishes nor cancels independently supported area work. Definition, containment and inventory membership alone do not establish operation coverage.\n\nUse the existing reason and evidence IDs to distinguish area identification from the operation link or source-based gap. Keep group coverage independent and preserve a separate established work object for an included independent area target.';
+  expect(request.version).toBe('segment-recipients.v23');
+  expect(request.systemPrompt).toBe(
+    previous.request.systemPrompt + '\n\n' + policy,
   );
   expect(request.userPrompt).toBe(previous.request.userPrompt);
   expect(request.segmentSnapshot).toEqual(previous.request.segmentSnapshot);
