@@ -197,3 +197,15 @@ export type {
 } from './content-attachment-area-assessments';
 
 export type { ContentAttachmentWorkGroupReview } from './content-attachment-work-group-reviews';
+
+export {
+  CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION,
+  createContentAttachmentSourceContextRequest,
+  resolveContentAttachmentSourceContextRange,
+} from './content-attachment-source-context';
+export type {
+  ContentAttachmentSourceContextOptions,
+  ContentAttachmentSourceContextRequest,
+  ContentAttachmentTableContextPair,
+  ContentAttachmentSourceContextBinding,
+} from './content-attachment-source-context';
