@@ -142,3 +142,79 @@ export type {
   ContentAttachmentSegmentDecision,
   ContentAttachmentSegmentFinding,
 } from './content-attachment-segment-review';
+
+export {
+  CONTENT_ATTACHMENT_SEGMENTATION_VERSION,
+  createContentAttachmentSegmentationRequest,
+  identifyContentAttachmentSegments,
+  inspectContentAttachmentSegmentation,
+} from './content-attachment-segmentation';
+export type {
+  ContentAttachmentSegmentationAudit,
+  ContentAttachmentSegmentationResponse,
+  ContentAttachmentIdentifiedSegment,
+} from './content-attachment-segmentation';
+
+export {
+  CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+  createContentAttachmentRecipientRequest,
+  inspectContentAttachmentRecipients,
+  judgeContentAttachmentRecipients,
+} from './content-attachment-recipients';
+export type {
+  ContentAttachmentRecipientSupport,
+  ContentAttachmentRecipientAttachment,
+  ContentAttachmentRecipientAlternative,
+  ContentAttachmentRecipientDecision,
+  ContentAttachmentRecipientResponse,
+  ContentAttachmentAreaRecipientDecision,
+  ContentAttachmentAreaRecipientResponse,
+  ContentAttachmentRecipientAttachmentOrigin,
+  ContentAttachmentDerivedRecipientResponse,
+  ContentAttachmentRecipientAudit,
+  ContentAttachmentResolvedRecipientSupport,
+  ContentAttachmentRecipientFinding,
+} from './content-attachment-recipients';
+
+export type {
+  ContentAttachmentCollectiveMember,
+  ContentAttachmentCollectiveTrace,
+} from './content-attachment-collective-trace';
+
+export type {
+  ContentAttachmentInventoryReview,
+  ContentAttachmentInventoryContext,
+} from './content-attachment-inventory-reviews';
+
+export type {
+  ContentAttachmentWorkScopeAssessment,
+  ContentAttachmentWorkTarget,
+} from './content-attachment-work-scope';
+
+export type {
+  ContentAttachmentAreaAssessment,
+  ContentAttachmentGroundedAreaAssessment,
+} from './content-attachment-area-assessments';
+
+export type { ContentAttachmentWorkGroupReview } from './content-attachment-work-group-reviews';
+
+export {
+  CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION,
+  createContentAttachmentSourceContextRequest,
+  resolveContentAttachmentSourceContextRange,
+} from './content-attachment-source-context';
+export type {
+  ContentAttachmentSourceContextOptions,
+  ContentAttachmentSourceContextRequest,
+  ContentAttachmentTableContextPair,
+  ContentAttachmentSourceContextBinding,
+} from './content-attachment-source-context';
+
+export {
+  createContentAttachmentSourceContextReplaySnapshot,
+  inspectContentAttachmentSourceContextRecipients,
+} from './content-attachment-source-context-inspection';
+export type {
+  ContentAttachmentSourceContextRecipientAudit,
+  ContentAttachmentSourceContextRecipientInspection,
+} from './content-attachment-source-context-inspection';
