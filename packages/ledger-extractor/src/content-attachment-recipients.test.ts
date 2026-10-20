@@ -2805,12 +2805,13 @@ test('preserves v20 wording, input and judgments while sharing equivalent provid
   expect(current.request.systemPrompt).toBe(
     previous.request.systemPrompt.replace(anchor, '\n\n' + policy + anchor),
   );
-  const defaultRequest = createContentAttachmentRecipientRequest(
+  const historicalRequest = createContentAttachmentRecipientRequest(
     current.input,
     current.segmentation,
+    'segment-recipients.v20',
   );
-  expect(defaultRequest.version).toBe('segment-recipients.v20');
-  expect(defaultRequest.systemPrompt).toBe(current.request.systemPrompt);
+  expect(historicalRequest.version).toBe('segment-recipients.v20');
+  expect(historicalRequest.systemPrompt).toBe(current.request.systemPrompt);
   expect(current.request.userPrompt).toBe(previous.request.userPrompt);
   expect(current.request.segmentSnapshot).toEqual(
     previous.request.segmentSnapshot,
@@ -2826,6 +2827,57 @@ test('preserves v20 wording, input and judgments while sharing equivalent provid
   expect(JSON.stringify(shared)).toContain('#/definitions/WorkTargetGroup');
   expect(JSON.stringify(shared)).toContain('#/definitions/WorkGroupReview');
   expect(JSON.stringify(original)).not.toContain('WorkGroupReview');
+  const before = JSON.stringify(current.audit.rawResponse);
+  expect(
+    inspectContentAttachmentRecipients(
+      current.input,
+      current.segmentation,
+      current.audit,
+    ),
+  ).toEqual(
+    inspectContentAttachmentRecipients(
+      previous.input,
+      previous.segmentation,
+      previous.audit,
+    ),
+  );
+  expect(JSON.stringify(current.audit.rawResponse)).toBe(before);
+  expect(LLMCaller.call).not.toHaveBeenCalled();
+});
+
+test('adds only the approved v21 returned-work-object check while preserving v20 input, schema and inspection', async () => {
+  const previous = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v20',
+  );
+  const current = singleAreaFixture(
+    ['area', 'feature'],
+    'segment-recipients.v21',
+  );
+  const policy =
+    'Before returning an operation segment, cross-check every recipient in nonAreaAttachments and every included areaAssessments entry against the work-scope objects actually returned. Each must appear in targetIdentification.candidateRefs of an assessment with operationCoverage.state = established, in workScopeAssessment.targetGroups or groupReviews.*.fullGroupAssessment.\n\nFor a source-supported independent work target outside the reviewed inventory groups, return its own targetGroups assessment with positive operation evidence in the existing fields. If that assessment is missing, include it; do not remove the supported recipient or invent support to satisfy this check.\n\nPreserve the existing full-group/subset judgments and uncertainty decisions. Identity or membership evidence alone does not establish operation coverage. This check does not require work objects for not_applicable segments.';
+  const request = createContentAttachmentRecipientRequest(
+    current.input,
+    current.segmentation,
+  );
+  expect(request.version).toBe('segment-recipients.v21');
+  expect(current.request.systemPrompt).toBe(
+    previous.request.systemPrompt + '\n\n' + policy,
+  );
+  expect(request.systemPrompt).toBe(current.request.systemPrompt);
+  expect(current.request.userPrompt).toBe(previous.request.userPrompt);
+  expect(current.request.segmentSnapshot).toEqual(
+    previous.request.segmentSnapshot,
+  );
+  expect(current.request.candidateEvidence).toEqual(
+    previous.request.candidateEvidence,
+  );
+  expect(current.request.workGroups).toEqual(previous.request.workGroups);
+  expect(
+    await Output.object({ schema: current.request.schema }).responseFormat,
+  ).toEqual(
+    await Output.object({ schema: previous.request.schema }).responseFormat,
+  );
   const before = JSON.stringify(current.audit.rawResponse);
   expect(
     inspectContentAttachmentRecipients(
