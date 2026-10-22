@@ -208,7 +208,8 @@ export function startContentAttachmentThin(
     else if (existsSync(u) && readdirSync(u).length)
       state.units[unit.unitId] = 'interrupted';
   }
-  persist();
+  // written directly so a stop request saved by the previous start is not carried over
+  write(stateFile, state);
 
   const model = createModel(run.settings.modelId);
   running.add(run.runId);
