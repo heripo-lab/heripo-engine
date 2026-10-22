@@ -165,7 +165,7 @@ function fixture() {
     pages: [],
     units: [unitA, unitB, unitC],
   };
-  return { plan, unitA, unitB };
+  return { plan, unitA };
 }
 
 const attach = (r: string[], e: string[], ia: string[][] = []) => ({
@@ -216,7 +216,7 @@ function routedResult(
 
 describe('assembleContentAttachmentThin', () => {
   test('attaches confirmed model targets and code-assigned cells by registry candidate', () => {
-    const { plan, unitA, unitB } = fixture();
+    const { plan, unitA } = fixture();
     const a = routedResult(plan, unitA, [
       {
         d: {
