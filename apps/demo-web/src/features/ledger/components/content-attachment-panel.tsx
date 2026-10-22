@@ -10,6 +10,7 @@ import {
 
 import { useCandidateDiscovery } from '../hooks/use-candidate-discovery';
 import { useContentAttachment } from '../hooks/use-content-attachment';
+import { ContentAttachmentThinSection } from './content-attachment-thin-section';
 
 const STATUS: Record<string, string> = {
   prepared: '순회 계획 준비 · 미실행',
@@ -68,6 +69,12 @@ export function ContentAttachmentPanel({ taskId }: { taskId: string }) {
             계획·입력·응답 JSON 다운로드
           </Button>
         </div>
+        <ContentAttachmentThinSection
+          taskId={taskId}
+          planReady={!!run && run.status !== 'running'}
+          planSnapshotId={run?.candidateSnapshotId ?? null}
+          latestSnapshotId={candidate?.runId ?? null}
+        />
         {(query.error || prepare.error || execute.error || audit.error) && (
           <p className="text-destructive text-sm">
             {

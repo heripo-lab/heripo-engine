@@ -65,10 +65,13 @@ function requireMatch(condition: boolean, message: string): asserts condition {
 }
 
 /** Check archived locators and complete W boundaries against the caller's frozen original document. */
-function verifyOriginalSources(
+export function verifyOriginalSources(
   document: ProcessedDocument,
   request: ContentAttachmentSourceContextRequest,
-  audit: ContentAttachmentSourceContextRecipientAudit,
+  audit: Pick<
+    ContentAttachmentSourceContextRecipientAudit,
+    'wordEvidence' | 'contextBindings'
+  >,
 ) {
   const resources = new Map(
     buildDocumentResourceIndex(document).resources.map((r) => [r.key, r]),

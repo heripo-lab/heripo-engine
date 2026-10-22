@@ -218,3 +218,85 @@ export type {
   ContentAttachmentSourceContextRecipientAudit,
   ContentAttachmentSourceContextRecipientInspection,
 } from './content-attachment-source-context-inspection';
+
+export {
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION,
+  createContentAttachmentEvidenceWindowRequest,
+  resolveContentAttachmentEvidenceWindowRange,
+  projectContentAttachmentEvidenceWindowChain,
+} from './content-attachment-evidence-windows';
+export type {
+  ContentAttachmentEvidenceWindow,
+  ContentAttachmentEvidenceWindowRequest,
+  ContentAttachmentEvidenceWindowVersion,
+} from './content-attachment-evidence-windows';
+export { inspectContentAttachmentEvidenceWindowRecipients } from './content-attachment-evidence-window-inspection';
+export type {
+  ContentAttachmentEvidenceWindowAudit,
+  ContentAttachmentEvidenceWindowInspection,
+} from './content-attachment-evidence-window-inspection';
+export {
+  CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT,
+  CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
+  createContentAttachmentThinInput,
+} from './content-attachment-thin-compile';
+export type {
+  ContentAttachmentThinCell,
+  ContentAttachmentThinCodeMap,
+  ContentAttachmentThinCompilation,
+  ContentAttachmentThinHandle,
+  ContentAttachmentThinInput,
+  ContentAttachmentThinSegmentSpan,
+  ContentAttachmentThinWindow,
+} from './content-attachment-thin-compile';
+export {
+  cellRegisteredCandidates,
+  createContentAttachmentThinRowOwners,
+} from './content-attachment-thin-row-owners';
+export type {
+  ContentAttachmentThinRowBinding,
+  ContentAttachmentThinRowOwners,
+} from './content-attachment-thin-row-owners';
+export {
+  CONTENT_ATTACHMENT_THIN_VERSION,
+  contentAttachmentThinRestoredRules,
+  contentAttachmentThinSystemPrompt,
+  createContentAttachmentThinRequest,
+  createContentAttachmentThinSchema,
+} from './content-attachment-thin-prompt';
+export type { ContentAttachmentThinRequest } from './content-attachment-thin-prompt';
+export { inspectContentAttachmentThinResponse } from './content-attachment-thin-inspection';
+export type {
+  ContentAttachmentThinAudit,
+  ContentAttachmentThinDecision,
+  ContentAttachmentThinEvidence,
+  ContentAttachmentThinInspection,
+} from './content-attachment-thin-inspection';
+export {
+  CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT,
+  CONTENT_ATTACHMENT_THIN_OUTLIER_RATE,
+  checkContentAttachmentThinOutliers,
+  routeContentAttachmentThinSegments,
+} from './content-attachment-thin-routing';
+export type {
+  ContentAttachmentThinLoneRate,
+  ContentAttachmentThinOutlierCheck,
+  ContentAttachmentThinRoutedSegment,
+  ContentAttachmentThinVote,
+} from './content-attachment-thin-routing';
+export { attachContentThinUnit } from './content-attachment-thin-run';
+export type {
+  ContentAttachmentThinCall,
+  ContentAttachmentThinRunName,
+  ContentAttachmentThinRunOptions,
+  ContentAttachmentThinUnitResult,
+} from './content-attachment-thin-run';
+export { assembleContentAttachmentThin } from './content-attachment-thin-assembly';
+export type {
+  ContentAttachmentThinBasis,
+  ContentAttachmentThinExcerpt,
+  ContentAttachmentThinResult,
+  ContentAttachmentThinReviewItem,
+} from './content-attachment-thin-assembly';

@@ -66,6 +66,186 @@ import {
 } from './content-attachment-work-scope';
 
 type Input = ReturnType<typeof createContentAttachmentGroundedInput>;
+
+function isSingleAreaRecipientVersion(version: RecipientVersion) {
+  return (
+    version === 'segment-recipients.v18' ||
+    version === 'segment-recipients.v19' ||
+    version === 'segment-recipients.v20' ||
+    version === 'segment-recipients.v21' ||
+    version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
+    version === 'segment-recipients.v24' ||
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+  );
+}
+
+/** The recipient system prompt for a supported version; it depends on the version only. */
+export function contentAttachmentRecipientSystemPrompt(
+  version: RecipientVersion,
+): string {
+  const singleAreaDecision = isSingleAreaRecipientVersion(version);
+  const basePrompt =
+    version === 'segment-recipients.v1'
+      ? V1_SYSTEM_PROMPT
+      : V1_SYSTEM_PROMPT +
+        '\n' +
+        (version === 'segment-recipients.v2'
+          ? CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY
+          : version === 'segment-recipients.v3'
+            ? CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY
+            : version === 'segment-recipients.v4'
+              ? CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY
+              : CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY +
+                '\n' +
+                CONTENT_ATTACHMENT_COLLECTIVE_SOURCE_SHARING_POLICY +
+                (version === 'segment-recipients.v5'
+                  ? ''
+                  : '\n' +
+                    CONTENT_ATTACHMENT_CURRENT_TYPE_BOUNDARY_POLICY +
+                    (version === 'segment-recipients.v6'
+                      ? ''
+                      : '\n' +
+                        CONTENT_ATTACHMENT_WORK_SCOPE_POLICY +
+                        (version === 'segment-recipients.v7'
+                          ? ''
+                          : '\n' +
+                            CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY +
+                            (version === 'segment-recipients.v8'
+                              ? ''
+                              : '\n' +
+                                CONTENT_ATTACHMENT_AREA_ASSESSMENT_POLICY +
+                                (version === 'segment-recipients.v9'
+                                  ? ''
+                                  : '\n' +
+                                    CONTENT_ATTACHMENT_AREA_FINDING_RESULTS_POLICY +
+                                    (version === 'segment-recipients.v10'
+                                      ? ''
+                                      : '\n' +
+                                        CONTENT_ATTACHMENT_INVENTORY_MEMBER_AREA_POLICY +
+                                        (version === 'segment-recipients.v11'
+                                          ? ''
+                                          : '\n' +
+                                            CONTENT_ATTACHMENT_WORK_SCOPE_EVIDENCE_BOUNDARY_POLICY +
+                                            (version ===
+                                            'segment-recipients.v12'
+                                              ? ''
+                                              : '\n' +
+                                                CONTENT_ATTACHMENT_CURRENT_PERIOD_MEMBER_POLICY +
+                                                (version ===
+                                                  'segment-recipients.v16' ||
+                                                version ===
+                                                  'segment-recipients.v17' ||
+                                                version ===
+                                                  'segment-recipients.v18' ||
+                                                version ===
+                                                  'segment-recipients.v19' ||
+                                                version ===
+                                                  'segment-recipients.v20' ||
+                                                version ===
+                                                  'segment-recipients.v21' ||
+                                                version ===
+                                                  'segment-recipients.v22' ||
+                                                version ===
+                                                  'segment-recipients.v23' ||
+                                                version ===
+                                                  'segment-recipients.v24' ||
+                                                version ===
+                                                  'segment-recipients.v25' ||
+                                                version ===
+                                                  CONTENT_ATTACHMENT_RECIPIENT_VERSION
+                                                  ? '\n' +
+                                                    CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY
+                                                  : ''))))))))));
+  const systemPrompt = singleAreaDecision
+    ? basePrompt
+        .replace(
+          'with attachments, recipientIdentityAlternatives',
+          'with nonAreaAttachments, recipientIdentityAlternatives',
+        )
+        .replace(
+          'and never adds/removes recipients, repairs source or changes raw output.',
+          'and never revises recipient judgments, repairs source or changes raw output.',
+        ) +
+      '\n' +
+      CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY
+    : basePrompt;
+  const uncertaintyPrompt =
+    version === 'segment-recipients.v19' ||
+    version === 'segment-recipients.v20' ||
+    version === 'segment-recipients.v21' ||
+    version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
+    version === 'segment-recipients.v24' ||
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? systemPrompt.replace(
+          '\nFor every attachment or alternative,',
+          '\n' +
+            V19_UNCERTAINTY_POLICY +
+            '\nFor every attachment or alternative,',
+        )
+      : systemPrompt;
+  const operationTargetPrompt =
+    version === 'segment-recipients.v20' ||
+    version === 'segment-recipients.v21' ||
+    version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
+    version === 'segment-recipients.v24' ||
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? uncertaintyPrompt.replace(
+          '\n\nThese work-assessment rules do not narrow source-established collective findings',
+          '\n\n' +
+            V20_OPERATION_TARGET_POLICY +
+            '\n\nThese work-assessment rules do not narrow source-established collective findings',
+        )
+      : uncertaintyPrompt;
+  const crossCheckedPrompt =
+    version === 'segment-recipients.v21' ||
+    version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
+    version === 'segment-recipients.v24' ||
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? operationTargetPrompt + '\n\n' + V21_WORK_TARGET_CROSS_CHECK_POLICY
+      : operationTargetPrompt;
+  const inventorySupportPrompt =
+    version === 'segment-recipients.v22' ||
+    version === 'segment-recipients.v23' ||
+    version === 'segment-recipients.v24' ||
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? crossCheckedPrompt.replace(
+          CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
+          CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY +
+            '\n\n' +
+            CONTENT_ATTACHMENT_INVENTORY_SUPPORT_POLICY,
+        )
+      : crossCheckedPrompt;
+  const areaOperationPrompt =
+    version === 'segment-recipients.v23' ||
+    version === 'segment-recipients.v24' ||
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? inventorySupportPrompt + '\n\n' + V23_AREA_OPERATION_LINK_POLICY
+      : inventorySupportPrompt;
+  const inventorySourcePrompt =
+    version === 'segment-recipients.v24' ||
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? areaOperationPrompt + '\n\n' + V24_INVENTORY_SOURCE_QUALIFIER_POLICY
+      : areaOperationPrompt;
+  const bodySubsetPrompt =
+    version === 'segment-recipients.v25' ||
+    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+      ? inventorySourcePrompt + '\n\n' + V25_BODY_SUBSET_COLLECTIVE_POLICY
+      : inventorySourcePrompt;
+  return version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
+    ? bodySubsetPrompt + '\n\n' + V26_NARRATIVE_TABLE_OPERATION_LINK_POLICY
+    : bodySubsetPrompt;
+}
 type CandidateRow = [
   string,
   string,
@@ -366,16 +546,7 @@ export function createContentAttachmentRecipientRequest(
   const alternative = z
     .strictObject({ candidateRefs: z.array(ref).min(1), ...support })
     .meta({ id: 'RecipientIdentityAlternative' });
-  const singleAreaDecision =
-    version === 'segment-recipients.v18' ||
-    version === 'segment-recipients.v19' ||
-    version === 'segment-recipients.v20' ||
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION;
+  const singleAreaDecision = isSingleAreaRecipientVersion(version);
   const nonAreaRefs = candidateRefs.filter((id) => !areaRefs.includes(id));
   const nonAreaAttachment = z.array(
     z
@@ -535,172 +706,11 @@ export function createContentAttachmentRecipientRequest(
     ...(workGroups ? { workGroups } : {}),
     segmentSnapshot: inspected.segments,
     candidateEvidence,
-    systemPrompt:
-      version === 'segment-recipients.v1'
-        ? V1_SYSTEM_PROMPT
-        : V1_SYSTEM_PROMPT +
-          '\n' +
-          (version === 'segment-recipients.v2'
-            ? CONTENT_ATTACHMENT_COLLECTIVE_TRACE_POLICY
-            : version === 'segment-recipients.v3'
-              ? CONTENT_ATTACHMENT_INVENTORY_REVIEW_POLICY
-              : version === 'segment-recipients.v4'
-                ? CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY
-                : CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY +
-                  '\n' +
-                  CONTENT_ATTACHMENT_COLLECTIVE_SOURCE_SHARING_POLICY +
-                  (version === 'segment-recipients.v5'
-                    ? ''
-                    : '\n' +
-                      CONTENT_ATTACHMENT_CURRENT_TYPE_BOUNDARY_POLICY +
-                      (version === 'segment-recipients.v6'
-                        ? ''
-                        : '\n' +
-                          CONTENT_ATTACHMENT_WORK_SCOPE_POLICY +
-                          (version === 'segment-recipients.v7'
-                            ? ''
-                            : '\n' +
-                              CONTENT_ATTACHMENT_WORK_SCOPE_ASSESSMENT_POLICY +
-                              (version === 'segment-recipients.v8'
-                                ? ''
-                                : '\n' +
-                                  CONTENT_ATTACHMENT_AREA_ASSESSMENT_POLICY +
-                                  (version === 'segment-recipients.v9'
-                                    ? ''
-                                    : '\n' +
-                                      CONTENT_ATTACHMENT_AREA_FINDING_RESULTS_POLICY +
-                                      (version === 'segment-recipients.v10'
-                                        ? ''
-                                        : '\n' +
-                                          CONTENT_ATTACHMENT_INVENTORY_MEMBER_AREA_POLICY +
-                                          (version === 'segment-recipients.v11'
-                                            ? ''
-                                            : '\n' +
-                                              CONTENT_ATTACHMENT_WORK_SCOPE_EVIDENCE_BOUNDARY_POLICY +
-                                              (version ===
-                                              'segment-recipients.v12'
-                                                ? ''
-                                                : '\n' +
-                                                  CONTENT_ATTACHMENT_CURRENT_PERIOD_MEMBER_POLICY +
-                                                  (version ===
-                                                    'segment-recipients.v16' ||
-                                                  version ===
-                                                    'segment-recipients.v17' ||
-                                                  version ===
-                                                    'segment-recipients.v18' ||
-                                                  version ===
-                                                    'segment-recipients.v19' ||
-                                                  version ===
-                                                    'segment-recipients.v20' ||
-                                                  version ===
-                                                    'segment-recipients.v21' ||
-                                                  version ===
-                                                    'segment-recipients.v22' ||
-                                                  version ===
-                                                    'segment-recipients.v23' ||
-                                                  version ===
-                                                    'segment-recipients.v24' ||
-                                                  version ===
-                                                    'segment-recipients.v25' ||
-                                                  version ===
-                                                    CONTENT_ATTACHMENT_RECIPIENT_VERSION
-                                                    ? '\n' +
-                                                      CONTENT_ATTACHMENT_WORK_GROUP_RELEVANCE_POLICY
-                                                    : '')))))))))),
+    systemPrompt: contentAttachmentRecipientSystemPrompt(version),
     userPrompt: JSON.stringify(payload),
     schema,
   };
-  const systemPrompt = singleAreaDecision
-    ? request.systemPrompt
-        .replace(
-          'with attachments, recipientIdentityAlternatives',
-          'with nonAreaAttachments, recipientIdentityAlternatives',
-        )
-        .replace(
-          'and never adds/removes recipients, repairs source or changes raw output.',
-          'and never revises recipient judgments, repairs source or changes raw output.',
-        ) +
-      '\n' +
-      CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY
-    : request.systemPrompt;
-  const uncertaintyPrompt =
-    version === 'segment-recipients.v19' ||
-    version === 'segment-recipients.v20' ||
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-      ? systemPrompt.replace(
-          '\nFor every attachment or alternative,',
-          '\n' +
-            V19_UNCERTAINTY_POLICY +
-            '\nFor every attachment or alternative,',
-        )
-      : systemPrompt;
-  const operationTargetPrompt =
-    version === 'segment-recipients.v20' ||
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-      ? uncertaintyPrompt.replace(
-          '\n\nThese work-assessment rules do not narrow source-established collective findings',
-          '\n\n' +
-            V20_OPERATION_TARGET_POLICY +
-            '\n\nThese work-assessment rules do not narrow source-established collective findings',
-        )
-      : uncertaintyPrompt;
-  const crossCheckedPrompt =
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-      ? operationTargetPrompt + '\n\n' + V21_WORK_TARGET_CROSS_CHECK_POLICY
-      : operationTargetPrompt;
-  const inventorySupportPrompt =
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-      ? crossCheckedPrompt.replace(
-          CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
-          CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY +
-            '\n\n' +
-            CONTENT_ATTACHMENT_INVENTORY_SUPPORT_POLICY,
-        )
-      : crossCheckedPrompt;
-  const areaOperationPrompt =
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-      ? inventorySupportPrompt + '\n\n' + V23_AREA_OPERATION_LINK_POLICY
-      : inventorySupportPrompt;
-  const inventorySourcePrompt =
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-      ? areaOperationPrompt + '\n\n' + V24_INVENTORY_SOURCE_QUALIFIER_POLICY
-      : areaOperationPrompt;
-  const bodySubsetPrompt =
-    version === 'segment-recipients.v25' ||
-    version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-      ? inventorySourcePrompt + '\n\n' + V25_BODY_SUBSET_COLLECTIVE_POLICY
-      : inventorySourcePrompt;
-  return {
-    ...request,
-    systemPrompt:
-      version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
-        ? bodySubsetPrompt + '\n\n' + V26_NARRATIVE_TABLE_OPERATION_LINK_POLICY
-        : bodySubsetPrompt,
-  };
+  return request;
 }
 
 /** Validate references and preview recipients while preserving the raw response and original E text. */
