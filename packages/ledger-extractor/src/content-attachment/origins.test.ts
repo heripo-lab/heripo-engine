@@ -14,7 +14,7 @@ import { createContentAttachmentBodyBlockInput } from './body-blocks';
 import { createContentAttachmentGroundedInput } from './grounding';
 import { createContentAttachmentOriginInput } from './origins';
 import { createContentAttachmentRequest } from './request';
-import { createContentAttachmentIndependentReviewRequest } from './review/independent-review';
+import { createContentAttachmentIndependentReviewRequest } from './review/independent-review-request';
 
 vi.mock('@heripo/shared', async (importOriginal) => ({
   ...(await importOriginal<typeof Shared>()),

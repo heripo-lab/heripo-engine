@@ -38,16 +38,14 @@ export type {
   ContentAttachmentInventoryReviewAudit,
   ContentAttachmentInventoryReviewResponse,
 } from './review/inventory-review';
-export {
-  createContentAttachmentIndependentReviewRequest,
-  inspectContentAttachmentIndependentReview,
-} from './review/independent-review';
+export { createContentAttachmentIndependentReviewRequest } from './review/independent-review-request';
+export { inspectContentAttachmentIndependentReview } from './review/independent-review-inspection';
 export type {
   ContentAttachmentIndependentMember,
   ContentAttachmentIndependentReviewAudit,
   ContentAttachmentIndependentReviewResponse,
   ContentAttachmentReviewFinding,
-} from './review/independent-review';
+} from './review/independent-review-types';
 export type {
   ContentAttachmentWordEvidenceSnapshot,
   ContentAttachmentWordRangeEvidence,

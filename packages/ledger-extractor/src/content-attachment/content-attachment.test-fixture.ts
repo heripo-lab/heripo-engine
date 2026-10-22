@@ -1,13 +1,13 @@
 import type { ProcessedDocument } from '@heripo/model';
 
 import type { CandidateDeduplicationResult } from '../candidates/candidate-deduplication';
-import type { CandidateDiscoveryResult } from '../candidates/candidate-discovery';
+import type { CandidateDiscoveryResult } from '../candidates/discovery-types';
 import type {
   ContentAttachmentAudit,
   ContentAttachmentResponse,
 } from './types';
 
-import { prepareCandidateDiscovery } from '../candidates/candidate-discovery';
+import { prepareCandidateDiscovery } from '../candidates/discovery-plan';
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
 import { prepareContentAttachment } from './prepare';
 import { createContentAttachmentRequest } from './request';

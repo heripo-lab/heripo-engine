@@ -10,7 +10,7 @@ import { createContentAttachmentBodyBlockInput } from './body-blocks';
 import { prepare, usage } from './content-attachment.test-fixture';
 import { createContentAttachmentGroundedInput } from './grounding';
 import { createContentAttachmentRequest } from './request';
-import { createContentAttachmentIndependentReviewRequest } from './review/independent-review';
+import { createContentAttachmentIndependentReviewRequest } from './review/independent-review-request';
 
 vi.mock('@heripo/shared', async (importOriginal) => ({
   ...(await importOriginal<typeof Shared>()),

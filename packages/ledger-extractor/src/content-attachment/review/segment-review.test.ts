@@ -1,5 +1,5 @@
 import type { ContentAttachmentWordEvidenceSnapshot } from '../recipients/word-evidence';
-import type { ContentAttachmentIndependentMember } from './independent-review';
+import type { ContentAttachmentIndependentMember } from './independent-review-types';
 import type { ContentAttachmentReviewSegment } from './segment-review';
 
 import { expect, test } from 'vitest';

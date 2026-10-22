@@ -1,7 +1,7 @@
 import type { LLMCallAttempt } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
-import type { ContentAttachmentIndependentReviewAudit } from './review/independent-review';
+import type { ContentAttachmentIndependentReviewAudit } from './review/independent-review-types';
 import type {
   AttachmentUnit,
   ContentAttachmentPlan,
@@ -21,7 +21,7 @@ import {
   createContentAttachmentResponseSchema,
   flattenContentAttachmentResponse,
 } from './response';
-import { createContentAttachmentIndependentReviewRequest } from './review/independent-review';
+import { createContentAttachmentIndependentReviewRequest } from './review/independent-review-request';
 
 export async function attachContentUnit(
   plan: ContentAttachmentPlan,

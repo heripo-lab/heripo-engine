@@ -4,7 +4,7 @@ import type { ContentRegistrationDecision } from './decisions';
 
 import { describe, expect, test, vi } from 'vitest';
 
-import { prepareCandidateDiscovery } from '../candidates/candidate-discovery';
+import { prepareCandidateDiscovery } from '../candidates/discovery-plan';
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
 import { fixture, prepare } from './content-attachment.test-fixture';
 import { createContentAttachmentInput } from './input';

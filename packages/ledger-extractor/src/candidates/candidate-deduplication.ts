@@ -5,7 +5,7 @@ import type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
   LedgerObjectCandidate,
-} from './candidate-discovery';
+} from './discovery-types';
 
 import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';

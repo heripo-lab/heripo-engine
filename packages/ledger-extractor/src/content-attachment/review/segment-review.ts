@@ -2,7 +2,7 @@ import type {
   ContentAttachmentWordEvidenceSnapshot,
   ContentAttachmentWordRangeEvidence,
 } from '../recipients/word-evidence';
-import type { ContentAttachmentIndependentMember } from './independent-review';
+import type { ContentAttachmentIndependentMember } from './independent-review-types';
 
 import { resolveContentAttachmentSegmentRanges } from '../recipients/segment-ranges';
 

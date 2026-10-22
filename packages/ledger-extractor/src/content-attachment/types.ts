@@ -5,7 +5,7 @@ import type {
   CandidateDiscoveryPlan,
   CandidateEvidence,
   LedgerObjectCandidate,
-} from '../candidates/candidate-discovery';
+} from '../candidates/discovery-types';
 import type { DocumentResource } from '../resources/document-resource-index';
 import type { createContentAttachmentBodyBlockInput } from './body-blocks';
 import type { createContentAttachmentContextInput } from './context';
@@ -22,7 +22,7 @@ import type { ContentAttachmentRequiredResponse } from './response';
 import type {
   ContentAttachmentIndependentReviewAudit,
   ContentAttachmentReviewFinding,
-} from './review/independent-review';
+} from './review/independent-review-types';
 import type { ContentAttachmentInventoryReviewAudit } from './review/inventory-review';
 import type { createContentAttachmentTableAnchorInput } from './tables/anchors';
 

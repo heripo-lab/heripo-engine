@@ -2,7 +2,7 @@ import type { ProcessedDocument } from '@heripo/model';
 import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
-import type { CandidateEvidence } from '../../candidates/candidate-discovery';
+import type { CandidateEvidence } from '../../candidates/discovery-types';
 import type { ContentAttachmentPlan } from '../types';
 
 import { LLMCaller } from '@heripo/shared';
@@ -14,7 +14,7 @@ import { attachContentUnit } from '../attach-unit';
 import { createContentAttachmentDecisionInput } from '../decisions';
 import { createContentAttachmentGroundedInput } from '../grounding';
 import { createContentAttachmentRequest } from '../request';
-import { createContentAttachmentIndependentReviewRequest } from '../review/independent-review';
+import { createContentAttachmentIndependentReviewRequest } from '../review/independent-review-request';
 import { createContentAttachmentTableAnchorInput } from './anchors';
 
 vi.mock('@heripo/shared', async (importOriginal) => ({

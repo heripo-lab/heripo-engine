@@ -1,10 +1,8 @@
-export {
-  prepareCandidateDiscovery,
-  prepareCandidateDiscoveryRetry,
-  discoverCandidateUnit,
-  assembleCandidateDiscovery,
-  CANDIDATE_DISCOVERY_PROMPT_VERSION,
-} from './candidate-discovery';
+export { prepareCandidateDiscovery } from './discovery-plan';
+export { prepareCandidateDiscoveryRetry } from './discovery-retry';
+export { discoverCandidateUnit } from './discovery-unit';
+export { assembleCandidateDiscovery } from './discovery-assembly';
+export { CANDIDATE_DISCOVERY_PROMPT_VERSION } from './discovery-request';
 export type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryUnit,
@@ -12,7 +10,7 @@ export type {
   CandidateDiscoveryResult,
   CandidateEvidence,
   LedgerObjectCandidate,
-} from './candidate-discovery';
+} from './discovery-types';
 export {
   createCandidateDeduplicationRequest,
   deduplicateCandidates,

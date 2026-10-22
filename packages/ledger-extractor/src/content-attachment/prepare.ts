@@ -2,7 +2,7 @@ import type { CandidateDeduplicationResult } from '../candidates/candidate-dedup
 import type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
-} from '../candidates/candidate-discovery';
+} from '../candidates/discovery-types';
 import type {
   DocumentResource,
   DocumentResourceIndex,

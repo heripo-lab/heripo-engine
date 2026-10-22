@@ -1,6 +1,6 @@
 import type { ExtendedTokenUsage, LLMCallAttempt } from '@heripo/shared';
 
-import type { CandidateEvidence } from '../../candidates/candidate-discovery';
+import type { CandidateEvidence } from '../../candidates/discovery-types';
 import type { createContentAttachmentGroundedInput } from '../grounding';
 import type {
   ContentAttachmentAreaAssessment,

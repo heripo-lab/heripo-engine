@@ -1,6 +1,6 @@
 import type { ProcessedDocument } from '@heripo/model';
 
-import type { CandidateEvidence } from '../candidates/candidate-discovery';
+import type { CandidateEvidence } from '../candidates/discovery-types';
 import type {
   ContentAttachmentPlan,
   ContentAttachmentSelectionAudit,

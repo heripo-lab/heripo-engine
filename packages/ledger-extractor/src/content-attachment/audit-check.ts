@@ -30,7 +30,7 @@ import {
   createContentAttachmentResponseSchema,
   flattenContentAttachmentResponse,
 } from './response';
-import { inspectContentAttachmentIndependentReview } from './review/independent-review';
+import { inspectContentAttachmentIndependentReview } from './review/independent-review-inspection';
 import { inspectContentAttachmentInventoryReview } from './review/inventory-review';
 import { createContentAttachmentTableAnchorInput } from './tables/anchors';
 import {
