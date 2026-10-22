@@ -286,3 +286,10 @@ export type {
   ContentAttachmentThinRoutedSegment,
   ContentAttachmentThinVote,
 } from './content-attachment-thin-routing';
+export { attachContentThinUnit } from './content-attachment-thin-run';
+export type {
+  ContentAttachmentThinCall,
+  ContentAttachmentThinRunName,
+  ContentAttachmentThinRunOptions,
+  ContentAttachmentThinUnitResult,
+} from './content-attachment-thin-run';
