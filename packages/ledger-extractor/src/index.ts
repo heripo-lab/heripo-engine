@@ -267,3 +267,10 @@ export {
   createContentAttachmentThinSchema,
 } from './content-attachment-thin-prompt';
 export type { ContentAttachmentThinRequest } from './content-attachment-thin-prompt';
+export { inspectContentAttachmentThinResponse } from './content-attachment-thin-inspection';
+export type {
+  ContentAttachmentThinAudit,
+  ContentAttachmentThinDecision,
+  ContentAttachmentThinEvidence,
+  ContentAttachmentThinInspection,
+} from './content-attachment-thin-inspection';
