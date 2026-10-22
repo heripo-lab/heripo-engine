@@ -251,3 +251,11 @@ export type {
   ContentAttachmentThinSegmentSpan,
   ContentAttachmentThinWindow,
 } from './content-attachment-thin-compile';
+export {
+  cellRegisteredCandidates,
+  createContentAttachmentThinRowOwners,
+} from './content-attachment-thin-row-owners';
+export type {
+  ContentAttachmentThinRowBinding,
+  ContentAttachmentThinRowOwners,
+} from './content-attachment-thin-row-owners';

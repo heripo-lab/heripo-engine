@@ -135,7 +135,14 @@ function fixture() {
       surveyPath,
       evidence('/tables/0/grid/1/0', '1'),
     ),
-    entry('R3', 'feature', '수혈', '3호', otherPath),
+    entry(
+      'R3',
+      'feature',
+      '수혈',
+      '3호',
+      otherPath,
+      evidence('/tables/0/grid/1/1', '수혈 3호'),
+    ),
     entry('R4', 'feature', '도로', null, otherPath),
     entry('R5', 'feature', '수', null, otherPath),
     entry('R6', 'feature', '구상유구', null, otherPath),
@@ -287,7 +294,7 @@ describe('createContentAttachmentThinInput', () => {
     ]);
   });
 
-  test('assigns registration row owners in code and keeps other cells as segments', () => {
+  test('assigns registration row owners and cell-registered candidates in code and keeps other cells as segments', () => {
     const { plan, unit } = fixture();
 
     const { input, codeMap } = createContentAttachmentThinInput(plan, unit);
@@ -324,10 +331,13 @@ describe('createContentAttachmentThinInput', () => {
         },
       ],
     });
+    expect(inventory.rows[1].cells[1].registeredInCell).toEqual(['R3']);
+    expect(inventory.rows[1].cells[0].registeredInCell).toBeUndefined();
     expect(codeMap.codeAssigned).toEqual([
       ['E7:S1', 'R2'],
-      ['E8:S1', 'R2'],
+      ['E8:S1', 'R2', 'R3'],
     ]);
+    expect(codeMap.rowBindings).toEqual([]);
     expect(codeMap.segments).toEqual([
       'E1:S1',
       'E1:S2',
@@ -345,8 +355,13 @@ describe('createContentAttachmentThinInput', () => {
       charEnd: 1,
       llm: false,
       owner: 'R2',
+      codeTargets: ['R2'],
     });
-    expect(codeMap.segSpans.find((s) => s.seg === 'E10:S1')?.owner).toBeNull();
+    expect(codeMap.segSpans.find((s) => s.seg === 'E10:S1')).toMatchObject({
+      llm: true,
+      owner: null,
+      codeTargets: [],
+    });
   });
 
   test('adds read-only context, captions and original reading order', () => {

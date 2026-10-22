@@ -3,9 +3,13 @@ import type {
   AttachmentUnit,
   ContentAttachmentPlan,
 } from './content-attachment';
+import type { ContentAttachmentThinRowBinding } from './content-attachment-thin-row-owners';
 
 import { createContentAttachmentGroundedInput } from './content-attachment-grounding';
-import { originalIdentifierCellOwners } from './content-attachment-table-owners';
+import {
+  cellRegisteredCandidates,
+  createContentAttachmentThinRowOwners,
+} from './content-attachment-thin-row-owners';
 
 export const CONTENT_ATTACHMENT_THIN_COMPILE_VERSION =
   'content-attachment-thin-compile.v1' as const;
@@ -40,6 +44,8 @@ export interface ContentAttachmentThinSegmentSpan {
   charEnd: number;
   llm: boolean;
   owner?: string | null;
+  /** Table cells only: the row owner followed by candidates registered from the cell. */
+  codeTargets?: string[];
 }
 export interface ContentAttachmentThinHandle {
   ref: string;
@@ -52,6 +58,7 @@ export interface ContentAttachmentThinCell {
   header: boolean;
   windows: WindowRow[];
   rowOwner?: string;
+  registeredInCell?: string[];
   segments?: Array<[string, string[]]>;
 }
 export interface ContentAttachmentThinInput {
@@ -87,8 +94,10 @@ export interface ContentAttachmentThinCodeMap {
   /** Candidate refs offered to the model after prefiltering. */
   candidateRefs: string[];
   windows: ContentAttachmentThinWindow[];
-  codeAssigned: Array<[string, string]>;
+  /** [segment, row owner, ...candidates registered from the cell] */
+  codeAssigned: Array<[string, ...string[]]>;
   segSpans: ContentAttachmentThinSegmentSpan[];
+  rowBindings: ContentAttachmentThinRowBinding[];
   handles: Array<{ ref: string; members: string[] }>;
 }
 export interface ContentAttachmentThinCompilation {
@@ -206,7 +215,7 @@ function collectiveHandles(
 /**
  * Compile one attachment unit into the thin per-unit model input and its code-only map.
  * Deterministic and offline: prefiltered candidates, collective handles, Q/L word windows,
- * sentence segments in Q/L, original reading order, captions and registration row owners.
+ * sentence segments in Q/L, original reading order, captions and code-assigned table rows.
  */
 export function createContentAttachmentThinInput(
   plan: ContentAttachmentPlan,
@@ -260,14 +269,13 @@ export function createContentAttachmentThinInput(
     return ranges;
   };
 
-  const owners = new Map<string, string | null>();
-  for (const t of unit.tables)
-    originalIdentifierCellOwners(plan, t).forEach((row, r) =>
-      row.forEach((owner, c) => owners.set(`${t.key}/grid/${r}/${c}`, owner)),
-    );
+  const { owners, rowBindings } = createContentAttachmentThinRowOwners(
+    plan,
+    unit,
+  );
 
   const segments: string[] = [];
-  const codeAssigned: Array<[string, string]> = [];
+  const codeAssigned: Array<[string, ...string[]]> = [];
   const segSpans: ContentAttachmentThinSegmentSpan[] = [];
   const bodyBlocks: ContentAttachmentThinInput['bodyBlocks'] = [];
   const tableRows = new Map<string, Map<number, ContentAttachmentThinCell[]>>();
@@ -299,6 +307,10 @@ export function createContentAttachmentThinInput(
     tableRows.set(tableRef, rows);
     const { rows: cellWindows } = toWindows(ref, text);
     const owner = owners.get(r.key) ?? null;
+    const registered = owner
+      ? cellRegisteredCandidates(plan, r.key, owner)
+      : [];
+    const codeTargets = owner ? [owner, ...registered] : [];
     const cell: ContentAttachmentThinCell = {
       ref,
       header: r.data.isHeader,
@@ -314,10 +326,12 @@ export function createContentAttachmentThinInput(
         charEnd: off.at(-1)![1],
         llm: !owner,
         owner,
+        codeTargets,
       });
       if (owner) {
         cell.rowOwner = owner;
-        codeAssigned.push([seg, owner]);
+        if (registered.length) cell.registeredInCell = registered;
+        codeAssigned.push([seg, ...codeTargets] as [string, ...string[]]);
       } else {
         segments.push(seg);
         cell.segments = [
@@ -408,6 +422,7 @@ export function createContentAttachmentThinInput(
       windows,
       codeAssigned,
       segSpans,
+      rowBindings,
       handles: handles.map((h) => ({ ref: h.ref, members: h.members })),
     },
   };
