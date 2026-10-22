@@ -236,3 +236,18 @@ export type {
   ContentAttachmentEvidenceWindowAudit,
   ContentAttachmentEvidenceWindowInspection,
 } from './content-attachment-evidence-window-inspection';
+export {
+  CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT,
+  CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
+  createContentAttachmentThinInput,
+} from './content-attachment-thin-compile';
+export type {
+  ContentAttachmentThinCell,
+  ContentAttachmentThinCodeMap,
+  ContentAttachmentThinCompilation,
+  ContentAttachmentThinHandle,
+  ContentAttachmentThinInput,
+  ContentAttachmentThinSegmentSpan,
+  ContentAttachmentThinWindow,
+} from './content-attachment-thin-compile';
