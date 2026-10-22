@@ -12,6 +12,8 @@ import type {
 export const CONTENT_ATTACHMENT_THIN_OUTLIER_RATE = 0.25;
 /** ...and on at least this many segments. */
 export const CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT = 3;
+/** Unanimous segments confirming more targets than this (collective statements) go to review. */
+export const CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT = 50;
 /** Layer names or numbers shorter than this are too generic to suggest. */
 const LAYER_KEY_MIN_LENGTH = 3;
 
@@ -39,6 +41,7 @@ export interface ContentAttachmentThinRoutedSegment {
     | 'uncertainty_differs'
     | 'area'
     | 'layer'
+    | 'large_collective'
   >;
   /** Non-area targets returned by every run. */
   confirmed: string[];
@@ -102,7 +105,8 @@ export function checkContentAttachmentThinOutliers(
 /**
  * Route each judged segment of a unit from its final runs. Targets returned by every run are confirmed,
  * others are contested with votes. A segment goes to review when targets are contested, uncertainty
- * groups differ, a run is invalid for it, an area is returned, or a literally named layer is not confirmed.
+ * groups differ, a run is invalid for it, an area is returned, a literally named layer is not confirmed, or
+ * more targets are confirmed than a collective statement may attach without review.
  */
 export function routeContentAttachmentThinSegments(
   plan: ContentAttachmentPlan,
@@ -166,6 +170,8 @@ export function routeContentAttachmentThinSegments(
     if (groupKeys.size > 1) reasons.push('uncertainty_differs');
     if (areaSuggestions.length) reasons.push('area');
     if (layerSuggestions.length) reasons.push('layer');
+    if (confirmed.length > CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT)
+      reasons.push('large_collective');
     const agreedGroups = groupKeys.size === 1 && valid.length === runs.length;
     return {
       segment,

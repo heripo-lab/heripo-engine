@@ -12,6 +12,7 @@ import type {
 import { describe, expect, test } from 'vitest';
 
 import {
+  CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT,
   checkContentAttachmentThinOutliers,
   routeContentAttachmentThinSegments,
 } from './content-attachment-thin-routing';
@@ -255,6 +256,34 @@ describe('routeContentAttachmentThinSegments', () => {
       reasons: ['invalid_run'],
       recipientIdentityAlternatives: [],
     });
+  });
+
+  test('reviews unanimous collective attachments above the target limit', () => {
+    const { plan, unit, compilation } = fixture();
+    const many = Array.from(
+      { length: CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT + 1 },
+      (_, i) => `R${100 + i}`,
+    );
+    plan.registry.push(...many.map((ref) => entry(ref, 'feature', '유구')));
+    const decisions = () => [
+      attach('E1:S1', many),
+      attach('E2:S1', many.slice(1), [], []),
+      none('E3:S1'),
+      none('E4:S1'),
+    ];
+
+    const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
+      run(...decisions()),
+      run(...decisions()),
+      run(...decisions()),
+    ]);
+
+    expect(routed[0]).toMatchObject({
+      status: 'review',
+      reasons: ['large_collective'],
+      confirmed: many,
+    });
+    expect(routed[1].reasons).not.toContain('large_collective');
   });
 
   test('sends every segment to review for a whole-unit review and requires a run', () => {
