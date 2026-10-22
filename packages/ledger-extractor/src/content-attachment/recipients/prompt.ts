@@ -78,14 +78,7 @@ export const V26_NARRATIVE_TABLE_OPERATION_LINK_POLICY =
 
 export function isSingleAreaRecipientVersion(version: RecipientVersion) {
   return (
-    version === 'segment-recipients.v18' ||
-    version === 'segment-recipients.v19' ||
-    version === 'segment-recipients.v20' ||
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 18, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
   );
 }
@@ -142,26 +135,11 @@ export function contentAttachmentRecipientSystemPrompt(
                                               ? ''
                                               : '\n' +
                                                 CONTENT_ATTACHMENT_CURRENT_PERIOD_MEMBER_POLICY +
-                                                (version ===
-                                                  'segment-recipients.v16' ||
-                                                version ===
-                                                  'segment-recipients.v17' ||
-                                                version ===
-                                                  'segment-recipients.v18' ||
-                                                version ===
-                                                  'segment-recipients.v19' ||
-                                                version ===
-                                                  'segment-recipients.v20' ||
-                                                version ===
-                                                  'segment-recipients.v21' ||
-                                                version ===
-                                                  'segment-recipients.v22' ||
-                                                version ===
-                                                  'segment-recipients.v23' ||
-                                                version ===
-                                                  'segment-recipients.v24' ||
-                                                version ===
-                                                  'segment-recipients.v25' ||
+                                                (isContentAttachmentRecipientVersionBetween(
+                                                  version,
+                                                  16,
+                                                  25,
+                                                ) ||
                                                 version ===
                                                   CONTENT_ATTACHMENT_RECIPIENT_VERSION
                                                   ? '\n' +
@@ -181,13 +159,7 @@ export function contentAttachmentRecipientSystemPrompt(
       CONTENT_ATTACHMENT_AREA_RECIPIENT_ASSEMBLY_POLICY
     : basePrompt;
   const uncertaintyPrompt =
-    version === 'segment-recipients.v19' ||
-    version === 'segment-recipients.v20' ||
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 19, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? systemPrompt.replace(
           '\nFor every attachment or alternative,',
@@ -197,12 +169,7 @@ export function contentAttachmentRecipientSystemPrompt(
         )
       : systemPrompt;
   const operationTargetPrompt =
-    version === 'segment-recipients.v20' ||
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 20, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? uncertaintyPrompt.replace(
           '\n\nThese work-assessment rules do not narrow source-established collective findings',
@@ -212,19 +179,12 @@ export function contentAttachmentRecipientSystemPrompt(
         )
       : uncertaintyPrompt;
   const crossCheckedPrompt =
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 21, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? operationTargetPrompt + '\n\n' + V21_WORK_TARGET_CROSS_CHECK_POLICY
       : operationTargetPrompt;
   const inventorySupportPrompt =
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 22, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? crossCheckedPrompt.replace(
           CONTENT_ATTACHMENT_MAPPED_INVENTORY_REVIEW_POLICY,
@@ -234,15 +194,12 @@ export function contentAttachmentRecipientSystemPrompt(
         )
       : crossCheckedPrompt;
   const areaOperationPrompt =
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 23, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? inventorySupportPrompt + '\n\n' + V23_AREA_OPERATION_LINK_POLICY
       : inventorySupportPrompt;
   const inventorySourcePrompt =
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 24, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? areaOperationPrompt + '\n\n' + V24_INVENTORY_SOURCE_QUALIFIER_POLICY
       : areaOperationPrompt;
@@ -254,4 +211,16 @@ export function contentAttachmentRecipientSystemPrompt(
   return version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
     ? bodySubsetPrompt + '\n\n' + V26_NARRATIVE_TABLE_OPERATION_LINK_POLICY
     : bodySubsetPrompt;
+}
+
+/** True when a value is segment-recipients.v{from} through v{to}; any other string is outside every range. */
+export function isContentAttachmentRecipientVersionBetween(
+  version: string,
+  from: number,
+  to: number,
+) {
+  const n = Number(
+    `#${version}`.replace(/^#segment-recipients\.v([1-9]\d*)$/, '$1'),
+  );
+  return n >= from && n <= to;
 }

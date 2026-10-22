@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { createContentAttachmentAreaAssessmentsSchema } from './area-assessments';
 import { createContentAttachmentCollectiveTraceSchema } from './collective-trace';
 import { createContentAttachmentInventoryReviewsSchema } from './inventory-reviews';
+import { isContentAttachmentRecipientVersionBetween } from './prompt';
 import {
   CONTENT_ATTACHMENT_RECIPIENT_VERSION,
   contentAttachmentRecipientSystemPrompt,
@@ -35,31 +36,7 @@ export function createContentAttachmentRecipientRequest(
   version: RecipientVersion = CONTENT_ATTACHMENT_RECIPIENT_VERSION,
 ) {
   if (
-    version !== 'segment-recipients.v1' &&
-    version !== 'segment-recipients.v2' &&
-    version !== 'segment-recipients.v3' &&
-    version !== 'segment-recipients.v4' &&
-    version !== 'segment-recipients.v5' &&
-    version !== 'segment-recipients.v6' &&
-    version !== 'segment-recipients.v7' &&
-    version !== 'segment-recipients.v8' &&
-    version !== 'segment-recipients.v9' &&
-    version !== 'segment-recipients.v10' &&
-    version !== 'segment-recipients.v11' &&
-    version !== 'segment-recipients.v12' &&
-    version !== 'segment-recipients.v13' &&
-    version !== 'segment-recipients.v14' &&
-    version !== 'segment-recipients.v15' &&
-    version !== 'segment-recipients.v16' &&
-    version !== 'segment-recipients.v17' &&
-    version !== 'segment-recipients.v18' &&
-    version !== 'segment-recipients.v19' &&
-    version !== 'segment-recipients.v20' &&
-    version !== 'segment-recipients.v21' &&
-    version !== 'segment-recipients.v22' &&
-    version !== 'segment-recipients.v23' &&
-    version !== 'segment-recipients.v24' &&
-    version !== 'segment-recipients.v25' &&
+    !isContentAttachmentRecipientVersionBetween(version, 1, 25) &&
     version !== CONTENT_ATTACHMENT_RECIPIENT_VERSION
   )
     throw new Error('Unsupported recipient version');
@@ -118,18 +95,7 @@ export function createContentAttachmentRecipientRequest(
   }
   const sourcePayload = JSON.parse(segmentation.userPrompt);
   const workGroups =
-    version === 'segment-recipients.v14' ||
-    version === 'segment-recipients.v15' ||
-    version === 'segment-recipients.v16' ||
-    version === 'segment-recipients.v17' ||
-    version === 'segment-recipients.v18' ||
-    version === 'segment-recipients.v19' ||
-    version === 'segment-recipients.v20' ||
-    version === 'segment-recipients.v21' ||
-    version === 'segment-recipients.v22' ||
-    version === 'segment-recipients.v23' ||
-    version === 'segment-recipients.v24' ||
-    version === 'segment-recipients.v25' ||
+    isContentAttachmentRecipientVersionBetween(version, 14, 25) ||
     version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
       ? createContentAttachmentWorkGroups(input)
       : undefined;
@@ -224,69 +190,23 @@ export function createContentAttachmentRecipientRequest(
           .meta({ id: 'RecipientSubjectAlternative' }),
       ),
       reason: z.string().min(1),
-      ...(version === 'segment-recipients.v8' ||
-      version === 'segment-recipients.v9' ||
-      version === 'segment-recipients.v10' ||
-      version === 'segment-recipients.v11' ||
-      version === 'segment-recipients.v12' ||
-      version === 'segment-recipients.v13' ||
-      version === 'segment-recipients.v14' ||
-      version === 'segment-recipients.v15' ||
-      version === 'segment-recipients.v16' ||
-      version === 'segment-recipients.v17' ||
-      version === 'segment-recipients.v18' ||
-      version === 'segment-recipients.v19' ||
-      version === 'segment-recipients.v20' ||
-      version === 'segment-recipients.v21' ||
-      version === 'segment-recipients.v22' ||
-      version === 'segment-recipients.v23' ||
-      version === 'segment-recipients.v24' ||
-      version === 'segment-recipients.v25' ||
+      ...(isContentAttachmentRecipientVersionBetween(version, 8, 25) ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             workScopeAssessment: createContentAttachmentWorkScopeSchema(
               candidateRefs,
               workGroups?.map((g) => g.ref),
               version === 'segment-recipients.v14',
-              version === 'segment-recipients.v17' ||
-                version === 'segment-recipients.v18' ||
-                version === 'segment-recipients.v19' ||
-                version === 'segment-recipients.v20' ||
-                version === 'segment-recipients.v21' ||
-                version === 'segment-recipients.v22' ||
-                version === 'segment-recipients.v23' ||
-                version === 'segment-recipients.v24' ||
-                version === 'segment-recipients.v25' ||
+              isContentAttachmentRecipientVersionBetween(version, 17, 25) ||
                 version === CONTENT_ATTACHMENT_RECIPIENT_VERSION,
-              version === 'segment-recipients.v20' ||
-                version === 'segment-recipients.v21' ||
-                version === 'segment-recipients.v22' ||
-                version === 'segment-recipients.v23' ||
-                version === 'segment-recipients.v24' ||
-                version === 'segment-recipients.v25' ||
+              isContentAttachmentRecipientVersionBetween(version, 20, 25) ||
                 version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
                 ? ref
                 : undefined,
             ),
           }
         : {}),
-      ...(version === 'segment-recipients.v9' ||
-      version === 'segment-recipients.v10' ||
-      version === 'segment-recipients.v11' ||
-      version === 'segment-recipients.v12' ||
-      version === 'segment-recipients.v13' ||
-      version === 'segment-recipients.v14' ||
-      version === 'segment-recipients.v15' ||
-      version === 'segment-recipients.v16' ||
-      version === 'segment-recipients.v17' ||
-      version === 'segment-recipients.v18' ||
-      version === 'segment-recipients.v19' ||
-      version === 'segment-recipients.v20' ||
-      version === 'segment-recipients.v21' ||
-      version === 'segment-recipients.v22' ||
-      version === 'segment-recipients.v23' ||
-      version === 'segment-recipients.v24' ||
-      version === 'segment-recipients.v25' ||
+      ...(isContentAttachmentRecipientVersionBetween(version, 9, 25) ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             areaAssessments: createContentAttachmentAreaAssessmentsSchema(
@@ -298,29 +218,7 @@ export function createContentAttachmentRecipientRequest(
       ...(version === 'segment-recipients.v1'
         ? {}
         : createContentAttachmentCollectiveTraceSchema(input)),
-      ...(version === 'segment-recipients.v3' ||
-      version === 'segment-recipients.v4' ||
-      version === 'segment-recipients.v5' ||
-      version === 'segment-recipients.v6' ||
-      version === 'segment-recipients.v7' ||
-      version === 'segment-recipients.v8' ||
-      version === 'segment-recipients.v9' ||
-      version === 'segment-recipients.v10' ||
-      version === 'segment-recipients.v11' ||
-      version === 'segment-recipients.v12' ||
-      version === 'segment-recipients.v13' ||
-      version === 'segment-recipients.v14' ||
-      version === 'segment-recipients.v15' ||
-      version === 'segment-recipients.v16' ||
-      version === 'segment-recipients.v17' ||
-      version === 'segment-recipients.v18' ||
-      version === 'segment-recipients.v19' ||
-      version === 'segment-recipients.v20' ||
-      version === 'segment-recipients.v21' ||
-      version === 'segment-recipients.v22' ||
-      version === 'segment-recipients.v23' ||
-      version === 'segment-recipients.v24' ||
-      version === 'segment-recipients.v25' ||
+      ...(isContentAttachmentRecipientVersionBetween(version, 3, 25) ||
       version === CONTENT_ATTACHMENT_RECIPIENT_VERSION
         ? {
             inventoryReviews: createContentAttachmentInventoryReviewsSchema(

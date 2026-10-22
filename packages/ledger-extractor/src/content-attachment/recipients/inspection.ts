@@ -8,6 +8,7 @@ import type {
   Input,
 } from './types';
 
+import { isContentAttachmentRecipientVersionBetween } from './prompt';
 import { CONTENT_ATTACHMENT_RECIPIENT_VERSION } from './prompt';
 import { createContentAttachmentRecipientRequest } from './request';
 import { inspectContentAttachmentRecipientSelections } from './selection-inspection';
@@ -29,31 +30,7 @@ export function inspectContentAttachmentRecipients(
     request = createContentAttachmentRecipientRequest(
       input,
       segmentation,
-      audit.version === 'segment-recipients.v1' ||
-        audit.version === 'segment-recipients.v2' ||
-        audit.version === 'segment-recipients.v3' ||
-        audit.version === 'segment-recipients.v4' ||
-        audit.version === 'segment-recipients.v5' ||
-        audit.version === 'segment-recipients.v6' ||
-        audit.version === 'segment-recipients.v7' ||
-        audit.version === 'segment-recipients.v8' ||
-        audit.version === 'segment-recipients.v9' ||
-        audit.version === 'segment-recipients.v10' ||
-        audit.version === 'segment-recipients.v11' ||
-        audit.version === 'segment-recipients.v12' ||
-        audit.version === 'segment-recipients.v13' ||
-        audit.version === 'segment-recipients.v14' ||
-        audit.version === 'segment-recipients.v15' ||
-        audit.version === 'segment-recipients.v16' ||
-        audit.version === 'segment-recipients.v17' ||
-        audit.version === 'segment-recipients.v18' ||
-        audit.version === 'segment-recipients.v19' ||
-        audit.version === 'segment-recipients.v20' ||
-        audit.version === 'segment-recipients.v21' ||
-        audit.version === 'segment-recipients.v22' ||
-        audit.version === 'segment-recipients.v23' ||
-        audit.version === 'segment-recipients.v24' ||
-        audit.version === 'segment-recipients.v25'
+      isContentAttachmentRecipientVersionBetween(audit.version, 1, 25)
         ? audit.version
         : CONTENT_ATTACHMENT_RECIPIENT_VERSION,
     );
@@ -63,18 +40,7 @@ export function inspectContentAttachmentRecipients(
   const parsed = request.schema.safeParse(audit.rawResponse);
   if (
     !parsed.success &&
-    (audit.version === 'segment-recipients.v14' ||
-      audit.version === 'segment-recipients.v15' ||
-      audit.version === 'segment-recipients.v16' ||
-      audit.version === 'segment-recipients.v17' ||
-      audit.version === 'segment-recipients.v18' ||
-      audit.version === 'segment-recipients.v19' ||
-      audit.version === 'segment-recipients.v20' ||
-      audit.version === 'segment-recipients.v21' ||
-      audit.version === 'segment-recipients.v22' ||
-      audit.version === 'segment-recipients.v23' ||
-      audit.version === 'segment-recipients.v24' ||
-      audit.version === 'segment-recipients.v25' ||
+    (isContentAttachmentRecipientVersionBetween(audit.version, 14, 25) ||
       audit.version === CONTENT_ATTACHMENT_RECIPIENT_VERSION)
   )
     return {
