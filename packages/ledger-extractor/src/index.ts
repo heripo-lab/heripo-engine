@@ -218,3 +218,19 @@ export type {
   ContentAttachmentSourceContextRecipientAudit,
   ContentAttachmentSourceContextRecipientInspection,
 } from './content-attachment-source-context-inspection';
+
+export {
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,
+  createContentAttachmentEvidenceWindowRequest,
+  resolveContentAttachmentEvidenceWindowRange,
+  projectContentAttachmentEvidenceWindowChain,
+} from './content-attachment-evidence-windows';
+export type {
+  ContentAttachmentEvidenceWindow,
+  ContentAttachmentEvidenceWindowRequest,
+} from './content-attachment-evidence-windows';
+export { inspectContentAttachmentEvidenceWindowRecipients } from './content-attachment-evidence-window-inspection';
+export type {
+  ContentAttachmentEvidenceWindowAudit,
+  ContentAttachmentEvidenceWindowInspection,
+} from './content-attachment-evidence-window-inspection';
