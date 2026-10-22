@@ -259,3 +259,11 @@ export type {
   ContentAttachmentThinRowBinding,
   ContentAttachmentThinRowOwners,
 } from './content-attachment-thin-row-owners';
+export {
+  CONTENT_ATTACHMENT_THIN_VERSION,
+  contentAttachmentThinRestoredRules,
+  contentAttachmentThinSystemPrompt,
+  createContentAttachmentThinRequest,
+  createContentAttachmentThinSchema,
+} from './content-attachment-thin-prompt';
+export type { ContentAttachmentThinRequest } from './content-attachment-thin-prompt';
