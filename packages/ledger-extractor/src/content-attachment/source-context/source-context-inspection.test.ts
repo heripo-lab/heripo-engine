@@ -4,10 +4,8 @@ import { Output } from 'ai';
 import { expect, test, vi } from 'vitest';
 
 import { createContentAttachmentGroundedInput } from '../grounding';
-import {
-  createContentAttachmentRecipientRequest,
-  inspectContentAttachmentRecipients,
-} from '../recipients/recipients';
+import { inspectContentAttachmentRecipients } from '../recipients/inspection';
+import { createContentAttachmentRecipientRequest } from '../recipients/request';
 import { createContentAttachmentSegmentationRequest } from '../recipients/segmentation';
 import { createContentAttachmentSourceContextRequest } from './source-context';
 import {

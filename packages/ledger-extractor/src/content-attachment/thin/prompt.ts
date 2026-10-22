@@ -1,6 +1,6 @@
 import type { ContentAttachmentThinCompilation } from './compile';
 
-import { contentAttachmentRecipientSystemPrompt } from '../recipients/recipients';
+import { contentAttachmentRecipientSystemPrompt } from '../recipients/prompt';
 
 export const CONTENT_ATTACHMENT_THIN_VERSION =
   'content-attachment-thin.v8' as const;

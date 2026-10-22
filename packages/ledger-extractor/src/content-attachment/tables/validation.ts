@@ -3,7 +3,7 @@ import type {
   AttachmentUnit,
   ContentAttachmentPlan,
   ContentAttachmentSelectionResponse,
-} from '../content-attachment';
+} from '../types';
 
 import { originalIdentifierCellOwners } from './owners';
 

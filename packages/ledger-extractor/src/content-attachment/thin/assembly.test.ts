@@ -5,7 +5,7 @@ import type {
   AttachmentRegistryEntry,
   AttachmentUnit,
   ContentAttachmentPlan,
-} from '../content-attachment';
+} from '../types';
 import type {
   ContentAttachmentThinCall,
   ContentAttachmentThinRunName,

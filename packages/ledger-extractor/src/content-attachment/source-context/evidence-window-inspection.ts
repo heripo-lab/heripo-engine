@@ -1,21 +1,18 @@
 import type { ProcessedDocument } from '@heripo/model';
 
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
+import type { ContentAttachmentSegmentationAudit } from '../recipients/segmentation';
 import type {
   ContentAttachmentAreaRecipientDecision,
   ContentAttachmentAreaRecipientResponse,
-} from '../recipients/recipients';
-import type { ContentAttachmentSegmentationAudit } from '../recipients/segmentation';
+} from '../recipients/types';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 import type { ContentAttachmentEvidenceWindowRequest } from './evidence-windows';
 
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import { createContentAttachmentGroundedInput } from '../grounding';
-import { inspectContentAttachmentRecipientSelections } from '../recipients/recipients';
+import { inspectContentAttachmentRecipientSelections } from '../recipients/selection-inspection';
 import {
   CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION,
   CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,

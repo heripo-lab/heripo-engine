@@ -2,7 +2,7 @@ import { Output } from 'ai';
 import { expect, test, vi } from 'vitest';
 
 import { createContentAttachmentGroundedInput } from '../grounding';
-import { createContentAttachmentRecipientRequest } from '../recipients/recipients';
+import { createContentAttachmentRecipientRequest } from '../recipients/request';
 import {
   createContentAttachmentSourceContextRequest,
   resolveContentAttachmentSourceContextRange,

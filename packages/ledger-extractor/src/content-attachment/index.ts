@@ -1,10 +1,8 @@
-export {
-  prepareContentAttachment,
-  createContentAttachmentRequest,
-  attachContentUnit,
-  assembleContentAttachment,
-  CONTENT_ATTACHMENT_PROMPT_VERSION,
-} from './content-attachment';
+export { prepareContentAttachment } from './prepare';
+export { createContentAttachmentRequest } from './request';
+export { attachContentUnit } from './attach-unit';
+export { assembleContentAttachment } from './assembly';
+export { CONTENT_ATTACHMENT_PROMPT_VERSION } from './prompts';
 export type {
   ContentAttachmentPlan,
   ContentAttachmentAudit,
@@ -13,7 +11,7 @@ export type {
   ContentAttachmentSelectionAudit,
   ContentAttachmentResult,
   AttachmentUnit,
-} from './content-attachment';
+} from './types';
 export { createContentAttachmentInput } from './input';
 export { createContentAttachmentSelectionInput } from './excerpts';
 export { createContentAttachmentDecisionInput } from './decisions';
@@ -70,12 +68,10 @@ export type {
   ContentAttachmentSegmentationResponse,
   ContentAttachmentIdentifiedSegment,
 } from './recipients/segmentation';
-export {
-  CONTENT_ATTACHMENT_RECIPIENT_VERSION,
-  createContentAttachmentRecipientRequest,
-  inspectContentAttachmentRecipients,
-  judgeContentAttachmentRecipients,
-} from './recipients/recipients';
+export { CONTENT_ATTACHMENT_RECIPIENT_VERSION } from './recipients/prompt';
+export { createContentAttachmentRecipientRequest } from './recipients/request';
+export { inspectContentAttachmentRecipients } from './recipients/inspection';
+export { judgeContentAttachmentRecipients } from './recipients/judge';
 export type {
   ContentAttachmentRecipientSupport,
   ContentAttachmentRecipientAttachment,
@@ -89,7 +85,7 @@ export type {
   ContentAttachmentRecipientAudit,
   ContentAttachmentResolvedRecipientSupport,
   ContentAttachmentRecipientFinding,
-} from './recipients/recipients';
+} from './recipients/types';
 export type {
   ContentAttachmentCollectiveMember,
   ContentAttachmentCollectiveTrace,

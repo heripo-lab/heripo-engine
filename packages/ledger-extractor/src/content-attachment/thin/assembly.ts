@@ -1,4 +1,4 @@
-import type { ContentAttachmentPlan } from '../content-attachment';
+import type { ContentAttachmentPlan } from '../types';
 import type { ContentAttachmentThinEvidence } from './inspection';
 import type { ContentAttachmentThinRoutedSegment } from './routing';
 import type {

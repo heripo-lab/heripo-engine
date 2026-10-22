@@ -4,20 +4,18 @@ import type { CandidateEvidence } from '../candidates/candidate-discovery';
 import type {
   ContentAttachmentPlan,
   ContentAttachmentSelectionAudit,
-} from './content-attachment';
+} from './types';
 
 import { describe, expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
+import { assembleContentAttachment } from './assembly';
 import { createContentAttachmentBodyBlockInput } from './body-blocks';
-import {
-  assembleContentAttachment,
-  createContentAttachmentRequest,
-} from './content-attachment';
 import {
   adjacentAttachmentBody,
   createContentAttachmentContextInput,
 } from './context';
+import { createContentAttachmentRequest } from './request';
 import { createContentAttachmentTableAnchorInput } from './tables/anchors';
 
 function fixture() {

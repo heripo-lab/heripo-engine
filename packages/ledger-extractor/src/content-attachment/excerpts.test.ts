@@ -4,19 +4,17 @@ import type {
   ContentAttachmentPlan,
   ContentAttachmentSelectionAudit,
   ContentAttachmentSelectionResponse,
-} from './content-attachment';
+} from './types';
 
 import { describe, expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
+import { assembleContentAttachment } from './assembly';
+import { attachContentUnit } from './attach-unit';
 import { createContentAttachmentBodyBlockInput } from './body-blocks';
-import {
-  assembleContentAttachment,
-  attachContentUnit,
-  createContentAttachmentRequest,
-} from './content-attachment';
 import { createContentAttachmentDecisionInput } from './decisions';
 import { createContentAttachmentSelectionInput } from './excerpts';
+import { createContentAttachmentRequest } from './request';
 import { createContentAttachmentTableAnchorInput } from './tables/anchors';
 
 const s6 = [

@@ -1,10 +1,7 @@
 import type { ProcessedDocument } from '@heripo/model';
 
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
 import type { ContentAttachmentSegmentationAudit } from '../recipients/segmentation';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 import type {
   ContentAttachmentSourceContextOptions,
   ContentAttachmentSourceContextRequest,

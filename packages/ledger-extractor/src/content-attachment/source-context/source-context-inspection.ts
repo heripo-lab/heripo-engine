@@ -1,14 +1,11 @@
 import type { ProcessedDocument } from '@heripo/model';
 
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
+import type { ContentAttachmentSegmentationAudit } from '../recipients/segmentation';
 import type {
   ContentAttachmentAreaRecipientResponse,
   ContentAttachmentRecipientAudit,
-} from '../recipients/recipients';
-import type { ContentAttachmentSegmentationAudit } from '../recipients/segmentation';
+} from '../recipients/types';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 import type {
   ContentAttachmentSourceContextBinding,
   ContentAttachmentSourceContextOptions,
@@ -21,7 +18,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
 import { createContentAttachmentGroundedInput } from '../grounding';
-import { inspectContentAttachmentRecipientSelections } from '../recipients/recipients';
+import { inspectContentAttachmentRecipientSelections } from '../recipients/selection-inspection';
 import {
   CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION,
   createContentAttachmentSourceContextRequest,

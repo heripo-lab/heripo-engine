@@ -1,4 +1,4 @@
-import type { ContentAttachmentRecipientSupport } from './recipients';
+import type { ContentAttachmentRecipientSupport } from './types';
 
 import { z } from 'zod';
 

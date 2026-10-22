@@ -3,16 +3,14 @@ import type { ProcessedDocument } from '@heripo/model';
 import type {
   ContentAttachmentPlan,
   ContentAttachmentSelectionAudit,
-} from '../content-attachment';
+} from '../types';
 
 import { expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
+import { assembleContentAttachment } from '../assembly';
 import { createContentAttachmentBodyBlockInput } from '../body-blocks';
-import {
-  assembleContentAttachment,
-  createContentAttachmentRequest,
-} from '../content-attachment';
+import { createContentAttachmentRequest } from '../request';
 import { originalIdentifierCellOwners } from './owners';
 import { validateContentAttachmentTables } from './validation';
 

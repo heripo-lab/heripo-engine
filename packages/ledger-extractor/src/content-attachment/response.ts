@@ -1,4 +1,4 @@
-import type { ContentAttachmentSelectionResponse } from './content-attachment';
+import type { ContentAttachmentSelectionResponse } from './types';
 
 import { z } from 'zod';
 

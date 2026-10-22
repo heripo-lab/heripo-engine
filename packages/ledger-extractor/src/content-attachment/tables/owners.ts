@@ -1,7 +1,4 @@
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 
 /** Bound each row segment by its original literal identifier-cell evidence. */
 export function originalIdentifierCellOwners(

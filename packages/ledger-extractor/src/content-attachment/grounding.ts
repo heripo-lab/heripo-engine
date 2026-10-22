@@ -1,9 +1,6 @@
 import type { CandidateEvidence } from '../candidates/candidate-discovery';
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from './content-attachment';
 import type { ContentAttachmentRequiredResponse } from './response';
+import type { AttachmentUnit, ContentAttachmentPlan } from './types';
 
 import { z } from 'zod';
 

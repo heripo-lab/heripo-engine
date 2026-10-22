@@ -1,4 +1,4 @@
-import type { ContentAttachmentAreaRecipientResponse } from '../recipients/recipients';
+import type { ContentAttachmentAreaRecipientResponse } from '../recipients/types';
 
 import { createContentAttachmentEvidenceWindowRequest } from './evidence-windows';
 import { sourceContextFixture } from './source-context.test-fixture';

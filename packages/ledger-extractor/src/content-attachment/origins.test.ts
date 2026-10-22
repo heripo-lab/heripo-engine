@@ -2,20 +2,18 @@ import type { ProcessedDocument } from '@heripo/model';
 import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
-import type { ContentAttachmentPlan } from './content-attachment';
+import type { ContentAttachmentPlan } from './types';
 
 import { LLMCaller } from '@heripo/shared';
 import { expect, test, vi } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
+import { assembleContentAttachment } from './assembly';
+import { attachContentUnit } from './attach-unit';
 import { createContentAttachmentBodyBlockInput } from './body-blocks';
-import {
-  assembleContentAttachment,
-  attachContentUnit,
-  createContentAttachmentRequest,
-} from './content-attachment';
 import { createContentAttachmentGroundedInput } from './grounding';
 import { createContentAttachmentOriginInput } from './origins';
+import { createContentAttachmentRequest } from './request';
 import { createContentAttachmentIndependentReviewRequest } from './review/independent-review';
 
 vi.mock('@heripo/shared', async (importOriginal) => ({

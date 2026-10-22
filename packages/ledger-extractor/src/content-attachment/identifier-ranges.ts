@@ -2,7 +2,7 @@ import type { CandidateEvidence } from '../candidates/candidate-discovery';
 import type {
   ContentAttachmentPlan,
   ContentAttachmentSelectionResponse,
-} from './content-attachment';
+} from './types';
 
 const trenchLabels = ['tr', 'trench', '트렌치'];
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

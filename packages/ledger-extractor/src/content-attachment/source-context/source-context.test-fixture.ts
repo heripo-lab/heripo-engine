@@ -1,7 +1,7 @@
 import type { ProcessedDocument } from '@heripo/model';
 
-import type { ContentAttachmentPlan } from '../content-attachment';
 import type { ContentAttachmentSegmentationAudit } from '../recipients/segmentation';
+import type { ContentAttachmentPlan } from '../types';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
 import { createContentAttachmentGroundedInput } from '../grounding';

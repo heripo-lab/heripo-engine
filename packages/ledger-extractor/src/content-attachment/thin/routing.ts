@@ -1,7 +1,4 @@
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 import type { ContentAttachmentThinCompilation } from './compile';
 import type {
   ContentAttachmentThinDecision,

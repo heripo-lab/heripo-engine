@@ -2,7 +2,7 @@ import type {
   AttachmentRegistryEntry,
   AttachmentUnit,
   ContentAttachmentPlan,
-} from '../content-attachment';
+} from '../types';
 import type { ContentAttachmentThinCompilation } from './compile';
 import type {
   ContentAttachmentThinDecision,

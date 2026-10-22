@@ -2,7 +2,7 @@ import type {
   ContentAttachmentAreaRecipientDecision,
   ContentAttachmentRecipientAttachmentOrigin,
   ContentAttachmentRecipientDecision,
-} from './recipients';
+} from './types';
 
 /** Project a schema-validated decision without changing judgments, evidence or uncertainty groups. */
 export function assembleContentAttachmentAreaRecipientDecision(

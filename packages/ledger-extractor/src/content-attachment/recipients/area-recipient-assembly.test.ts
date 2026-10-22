@@ -1,4 +1,4 @@
-import type { ContentAttachmentAreaRecipientDecision } from './recipients';
+import type { ContentAttachmentAreaRecipientDecision } from './types';
 
 import { expect, test } from 'vitest';
 

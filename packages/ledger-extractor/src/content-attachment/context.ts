@@ -3,7 +3,7 @@ import type {
   AttachmentSource,
   AttachmentUnit,
   ContentAttachmentPlan,
-} from './content-attachment';
+} from './types';
 
 import { createContentAttachmentTableAnchorInput } from './tables/anchors';
 

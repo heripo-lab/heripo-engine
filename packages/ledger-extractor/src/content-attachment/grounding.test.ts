@@ -1,28 +1,26 @@
 import type { ProcessedDocument } from '@heripo/model';
 import type * as Shared from '@heripo/shared';
 
+import type { ContentAttachmentGroundedResponse } from './grounding';
+import type { ContentAttachmentRequiredResponse } from './response';
 import type {
   ContentAttachmentPlan,
   ContentAttachmentSelectionAudit,
-} from './content-attachment';
-import type { ContentAttachmentGroundedResponse } from './grounding';
-import type { ContentAttachmentRequiredResponse } from './response';
+} from './types';
 
 import { LLMCaller, createAuditedModel } from '@heripo/shared';
 import { Output } from 'ai';
 import { expect, test, vi } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
-import {
-  assembleContentAttachment,
-  attachContentUnit,
-  createContentAttachmentRequest,
-} from './content-attachment';
+import { assembleContentAttachment } from './assembly';
+import { attachContentUnit } from './attach-unit';
 import {
   createContentAttachmentGroundedInput,
   createContentAttachmentGroundedSchema,
   inspectContentAttachmentGrounding,
 } from './grounding';
+import { createContentAttachmentRequest } from './request';
 import { flattenContentAttachmentResponse } from './response';
 import {
   createContentAttachmentIndependentReviewRequest,

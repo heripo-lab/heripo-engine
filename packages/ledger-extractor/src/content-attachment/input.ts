@@ -1,7 +1,4 @@
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from './content-attachment';
+import type { AttachmentUnit, ContentAttachmentPlan } from './types';
 
 /** Build a deterministic model view and a separate, lossless code-only locator map. */
 export function createContentAttachmentInput(

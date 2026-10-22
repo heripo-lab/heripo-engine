@@ -3,19 +3,17 @@ import type * as Shared from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
 import type { CandidateEvidence } from '../../candidates/candidate-discovery';
-import type { ContentAttachmentPlan } from '../content-attachment';
+import type { ContentAttachmentPlan } from '../types';
 
 import { LLMCaller } from '@heripo/shared';
 import { describe, expect, test, vi } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
-import {
-  assembleContentAttachment,
-  attachContentUnit,
-  createContentAttachmentRequest,
-} from '../content-attachment';
+import { assembleContentAttachment } from '../assembly';
+import { attachContentUnit } from '../attach-unit';
 import { createContentAttachmentDecisionInput } from '../decisions';
 import { createContentAttachmentGroundedInput } from '../grounding';
+import { createContentAttachmentRequest } from '../request';
 import { createContentAttachmentIndependentReviewRequest } from '../review/independent-review';
 import { createContentAttachmentTableAnchorInput } from './anchors';
 

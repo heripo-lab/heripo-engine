@@ -3,10 +3,7 @@ import type * as Shared from '@heripo/shared';
 import type * as Ai from 'ai';
 
 import type { DocumentResource } from '../../resources/document-resource-index';
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 
 import { createAuditedModel } from '@heripo/shared';
 import { generateText } from 'ai';

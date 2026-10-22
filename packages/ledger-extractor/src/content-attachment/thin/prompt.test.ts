@@ -1,9 +1,9 @@
-import type * as Recipients from '../recipients/recipients';
+import type * as Recipients from '../recipients/prompt';
 import type { ContentAttachmentThinCompilation } from './compile';
 
 import { describe, expect, test, vi } from 'vitest';
 
-import { contentAttachmentRecipientSystemPrompt } from '../recipients/recipients';
+import { contentAttachmentRecipientSystemPrompt } from '../recipients/prompt';
 import {
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
@@ -12,7 +12,7 @@ import {
   createContentAttachmentThinSchema,
 } from './prompt';
 
-vi.mock('../recipients/recipients', async (importOriginal) => {
+vi.mock('../recipients/prompt', async (importOriginal) => {
   const original = await importOriginal<typeof Recipients>();
   return {
     ...original,

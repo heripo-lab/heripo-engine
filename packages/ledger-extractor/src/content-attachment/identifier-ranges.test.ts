@@ -4,18 +4,16 @@ import type {
   ContentAttachmentPlan,
   ContentAttachmentSelectionAudit,
   ContentAttachmentSelectionResponse,
-} from './content-attachment';
+} from './types';
 
 import { expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
+import { assembleContentAttachment } from './assembly';
 import { createContentAttachmentBodyBlockInput } from './body-blocks';
-import {
-  assembleContentAttachment,
-  createContentAttachmentRequest,
-} from './content-attachment';
 import { validateContentAttachmentIdentifierRanges } from './identifier-ranges';
 import { createContentAttachmentOriginInput } from './origins';
+import { createContentAttachmentRequest } from './request';
 
 function fixture(text = 'TR6 ~ TR9, TR12 excavation') {
   const plan: ContentAttachmentPlan = {

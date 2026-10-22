@@ -1,10 +1,7 @@
 import type { LLMCallAttempt } from '@heripo/shared';
 import type { LanguageModel, LanguageModelUsage } from 'ai';
 
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 import type { ContentAttachmentThinInspection } from './inspection';
 import type { ContentAttachmentThinRequest } from './prompt';
 import type {

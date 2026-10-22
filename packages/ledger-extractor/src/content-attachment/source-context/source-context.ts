@@ -1,16 +1,13 @@
 import type { CandidateEvidence } from '../../candidates/candidate-discovery';
-import type {
-  AttachmentUnit,
-  ContentAttachmentPlan,
-} from '../content-attachment';
 import type { ContentAttachmentSegmentationAudit } from '../recipients/segmentation';
 import type {
   ContentAttachmentWordEvidenceSnapshot,
   ContentAttachmentWordSource,
 } from '../recipients/word-evidence';
+import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 
 import { createContentAttachmentGroundedInput } from '../grounding';
-import { createContentAttachmentRecipientRequest } from '../recipients/recipients';
+import { createContentAttachmentRecipientRequest } from '../recipients/request';
 import {
   contentAttachmentWordRows,
   resolveContentAttachmentWordRange,
