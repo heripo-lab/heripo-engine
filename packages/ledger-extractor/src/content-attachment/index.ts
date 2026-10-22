@@ -1,0 +1,209 @@
+export {
+  prepareContentAttachment,
+  createContentAttachmentRequest,
+  attachContentUnit,
+  assembleContentAttachment,
+  CONTENT_ATTACHMENT_PROMPT_VERSION,
+} from './content-attachment';
+export type {
+  ContentAttachmentPlan,
+  ContentAttachmentAudit,
+  ContentAttachmentResponse,
+  ContentAttachmentSelectionResponse,
+  ContentAttachmentSelectionAudit,
+  ContentAttachmentResult,
+  AttachmentUnit,
+} from './content-attachment';
+export { createContentAttachmentInput } from './input';
+export { createContentAttachmentSelectionInput } from './excerpts';
+export { createContentAttachmentDecisionInput } from './decisions';
+export type { ContentRegistrationDecision } from './decisions';
+export { createContentAttachmentTableAnchorInput } from './tables/anchors';
+export { createContentAttachmentContextInput } from './context';
+export { createContentAttachmentBodyBlockInput } from './body-blocks';
+export type { ContentAttachmentRequiredResponse } from './response';
+export { createContentAttachmentOriginInput } from './origins';
+export {
+  createContentAttachmentGroundedInput,
+  createContentAttachmentGroundedSchema,
+  inspectContentAttachmentGrounding,
+} from './grounding';
+export type {
+  ContentAttachmentGroundedResponse,
+  ContentAttachmentExclusion,
+} from './grounding';
+export {
+  createContentAttachmentInventoryReviewRequest,
+  inspectContentAttachmentInventoryReview,
+} from './review/inventory-review';
+export type {
+  ContentAttachmentInventoryReviewAudit,
+  ContentAttachmentInventoryReviewResponse,
+} from './review/inventory-review';
+export {
+  createContentAttachmentIndependentReviewRequest,
+  inspectContentAttachmentIndependentReview,
+} from './review/independent-review';
+export type {
+  ContentAttachmentIndependentMember,
+  ContentAttachmentIndependentReviewAudit,
+  ContentAttachmentIndependentReviewResponse,
+  ContentAttachmentReviewFinding,
+} from './review/independent-review';
+export type {
+  ContentAttachmentWordEvidenceSnapshot,
+  ContentAttachmentWordRangeEvidence,
+} from './recipients/word-evidence';
+export type {
+  ContentAttachmentReviewSegment,
+  ContentAttachmentSegmentDecision,
+  ContentAttachmentSegmentFinding,
+} from './review/segment-review';
+export {
+  CONTENT_ATTACHMENT_SEGMENTATION_VERSION,
+  createContentAttachmentSegmentationRequest,
+  identifyContentAttachmentSegments,
+  inspectContentAttachmentSegmentation,
+} from './recipients/segmentation';
+export type {
+  ContentAttachmentSegmentationAudit,
+  ContentAttachmentSegmentationResponse,
+  ContentAttachmentIdentifiedSegment,
+} from './recipients/segmentation';
+export {
+  CONTENT_ATTACHMENT_RECIPIENT_VERSION,
+  createContentAttachmentRecipientRequest,
+  inspectContentAttachmentRecipients,
+  judgeContentAttachmentRecipients,
+} from './recipients/recipients';
+export type {
+  ContentAttachmentRecipientSupport,
+  ContentAttachmentRecipientAttachment,
+  ContentAttachmentRecipientAlternative,
+  ContentAttachmentRecipientDecision,
+  ContentAttachmentRecipientResponse,
+  ContentAttachmentAreaRecipientDecision,
+  ContentAttachmentAreaRecipientResponse,
+  ContentAttachmentRecipientAttachmentOrigin,
+  ContentAttachmentDerivedRecipientResponse,
+  ContentAttachmentRecipientAudit,
+  ContentAttachmentResolvedRecipientSupport,
+  ContentAttachmentRecipientFinding,
+} from './recipients/recipients';
+export type {
+  ContentAttachmentCollectiveMember,
+  ContentAttachmentCollectiveTrace,
+} from './recipients/collective-trace';
+export type {
+  ContentAttachmentInventoryReview,
+  ContentAttachmentInventoryContext,
+} from './recipients/inventory-reviews';
+export type {
+  ContentAttachmentWorkScopeAssessment,
+  ContentAttachmentWorkTarget,
+} from './recipients/work-scope';
+export type {
+  ContentAttachmentAreaAssessment,
+  ContentAttachmentGroundedAreaAssessment,
+} from './recipients/area-assessments';
+export type { ContentAttachmentWorkGroupReview } from './recipients/work-group-reviews';
+export {
+  CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION,
+  createContentAttachmentSourceContextRequest,
+  resolveContentAttachmentSourceContextRange,
+} from './source-context/source-context';
+export type {
+  ContentAttachmentSourceContextOptions,
+  ContentAttachmentSourceContextRequest,
+  ContentAttachmentTableContextPair,
+  ContentAttachmentSourceContextBinding,
+} from './source-context/source-context';
+export {
+  createContentAttachmentSourceContextReplaySnapshot,
+  inspectContentAttachmentSourceContextRecipients,
+} from './source-context/source-context-inspection';
+export type {
+  ContentAttachmentSourceContextRecipientAudit,
+  ContentAttachmentSourceContextRecipientInspection,
+} from './source-context/source-context-inspection';
+export {
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION,
+  createContentAttachmentEvidenceWindowRequest,
+  resolveContentAttachmentEvidenceWindowRange,
+  projectContentAttachmentEvidenceWindowChain,
+} from './source-context/evidence-windows';
+export type {
+  ContentAttachmentEvidenceWindow,
+  ContentAttachmentEvidenceWindowRequest,
+  ContentAttachmentEvidenceWindowVersion,
+} from './source-context/evidence-windows';
+export { inspectContentAttachmentEvidenceWindowRecipients } from './source-context/evidence-window-inspection';
+export type {
+  ContentAttachmentEvidenceWindowAudit,
+  ContentAttachmentEvidenceWindowInspection,
+} from './source-context/evidence-window-inspection';
+export {
+  CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT,
+  CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
+  createContentAttachmentThinInput,
+} from './thin/compile';
+export type {
+  ContentAttachmentThinCell,
+  ContentAttachmentThinCodeMap,
+  ContentAttachmentThinCompilation,
+  ContentAttachmentThinHandle,
+  ContentAttachmentThinInput,
+  ContentAttachmentThinSegmentSpan,
+  ContentAttachmentThinWindow,
+} from './thin/compile';
+export {
+  cellRegisteredCandidates,
+  createContentAttachmentThinRowOwners,
+} from './thin/row-owners';
+export type {
+  ContentAttachmentThinRowBinding,
+  ContentAttachmentThinRowOwners,
+} from './thin/row-owners';
+export {
+  CONTENT_ATTACHMENT_THIN_VERSION,
+  contentAttachmentThinRestoredRules,
+  contentAttachmentThinSystemPrompt,
+  createContentAttachmentThinRequest,
+  createContentAttachmentThinSchema,
+} from './thin/prompt';
+export type { ContentAttachmentThinRequest } from './thin/prompt';
+export { inspectContentAttachmentThinResponse } from './thin/inspection';
+export type {
+  ContentAttachmentThinAudit,
+  ContentAttachmentThinDecision,
+  ContentAttachmentThinEvidence,
+  ContentAttachmentThinInspection,
+} from './thin/inspection';
+export {
+  CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT,
+  CONTENT_ATTACHMENT_THIN_OUTLIER_RATE,
+  checkContentAttachmentThinOutliers,
+  routeContentAttachmentThinSegments,
+} from './thin/routing';
+export type {
+  ContentAttachmentThinLoneRate,
+  ContentAttachmentThinOutlierCheck,
+  ContentAttachmentThinRoutedSegment,
+  ContentAttachmentThinVote,
+} from './thin/routing';
+export { attachContentThinUnit } from './thin/run';
+export type {
+  ContentAttachmentThinCall,
+  ContentAttachmentThinRunName,
+  ContentAttachmentThinRunOptions,
+  ContentAttachmentThinUnitResult,
+} from './thin/run';
+export { assembleContentAttachmentThin } from './thin/assembly';
+export type {
+  ContentAttachmentThinBasis,
+  ContentAttachmentThinExcerpt,
+  ContentAttachmentThinResult,
+  ContentAttachmentThinReviewItem,
+} from './thin/assembly';
