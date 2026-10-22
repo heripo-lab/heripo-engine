@@ -1,0 +1,96 @@
+import type { createContentAttachmentGroundedInput } from '../grounding';
+import type { AttachmentRegistryEntry } from '../types';
+import type { ContentAttachmentThinRowBinding } from './row-owners';
+
+export const CONTENT_ATTACHMENT_THIN_COMPILE_VERSION =
+  'content-attachment-thin-compile.v1' as const;
+
+/** Maximum original words addressed by one Q window. */
+export const CONTENT_ATTACHMENT_THIN_WINDOW_WORDS = 16;
+/** A chapter whose title core appears in the unit contributes all its candidates up to this size. */
+export const CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT = 30;
+
+/** Kinds that are document-wide referents and are always offered. */
+export const ALWAYS_OFFERED_KINDS = new Set<
+  AttachmentRegistryEntry['recordKind']
+>(['area', 'trench', 'layer']);
+
+export type Words = string[];
+export type WindowRow = [string, Words];
+export type CandidateRow = ReturnType<
+  typeof createContentAttachmentGroundedInput
+>['payload']['candidates'][number];
+
+export interface ContentAttachmentThinWindow {
+  ref: string;
+  sourceRef: string;
+  originalWords: string[];
+}
+export interface ContentAttachmentThinSegmentSpan {
+  seg: string;
+  key: string;
+  charStart: number;
+  charEnd: number;
+  llm: boolean;
+  owner?: string | null;
+  /** Table cells only: the row owner followed by candidates registered from the cell. */
+  codeTargets?: string[];
+}
+export interface ContentAttachmentThinHandle {
+  ref: string;
+  path: string[];
+  kind: AttachmentRegistryEntry['recordKind'];
+  members: string[];
+}
+export interface ContentAttachmentThinCell {
+  ref: string;
+  header: boolean;
+  windows: WindowRow[];
+  rowOwner?: string;
+  registeredInCell?: string[];
+  segments?: Array<[string, string[]]>;
+}
+export interface ContentAttachmentThinInput {
+  candidateColumns: string[];
+  contexts: Record<string, string[]>;
+  candidates: CandidateRow[];
+  uncertainties: Array<{ refs: string[]; reason: string }>;
+  handleColumns: ['ref', 'chapterPath', 'kind', 'memberCount'];
+  handles: Array<[string, string, string, number]>;
+  chapters: string[];
+  bodyBlocks: Array<{
+    ref: string;
+    windows: WindowRow[];
+    segments: Array<[string, string[]]>;
+  }>;
+  bodySequences: string[][];
+  tableLocations: Array<{
+    ref: string;
+    pdfPage: number;
+    rowCount: number;
+    captionRef: string | null;
+  }>;
+  tables: Array<{
+    ref: string;
+    rows: Array<{ index: number; cells: ContentAttachmentThinCell[] }>;
+  }>;
+  readOnlyContext: Array<{ ref: string; windows: WindowRow[] }>;
+}
+export interface ContentAttachmentThinCodeMap {
+  unitId: string;
+  /** Segments the model must judge, in input order. */
+  segments: string[];
+  /** Candidate refs offered to the model after prefiltering. */
+  candidateRefs: string[];
+  windows: ContentAttachmentThinWindow[];
+  /** [segment, row owner, ...candidates registered from the cell] */
+  codeAssigned: Array<[string, ...string[]]>;
+  segSpans: ContentAttachmentThinSegmentSpan[];
+  rowBindings: ContentAttachmentThinRowBinding[];
+  handles: Array<{ ref: string; members: string[] }>;
+}
+export interface ContentAttachmentThinCompilation {
+  version: typeof CONTENT_ATTACHMENT_THIN_COMPILE_VERSION;
+  input: ContentAttachmentThinInput;
+  codeMap: ContentAttachmentThinCodeMap;
+}

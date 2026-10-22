@@ -127,7 +127,20 @@ Apache-2.0 — [LICENSE](../../LICENSE) 참고.
 
 중복 통합 프롬프트 v3는 번호가 없는 층위도 전처리 입력의 전체 층위 정의·국지적 위치·지층 성격·층위 역할이 같은 대상을 가리키면 통합하도록 합니다. 판단 이유에 그 연결 근거를 명시하며, 일반적인 원지반·토질 명칭만 같은 경우나 별개 하위층은 구분합니다. PDF의 누락 문장을 복원하지 않고 전처리 입력만 사용하며, 원래 후보의 번호 유무와 발췌·출처는 그대로 보존합니다.
 
+## 묶음 단위 얇은 원문 배정
+
+얇은 경로는 고정된 후보 목록에 본문 문장과 표 항목을 배정하는 현재 방식입니다. 아래 `prepareContentAttachment` 계획을 그대로 쓰고, 구간마다 부르던 수신 대상 호출 대신 묶음마다 짧은 호출 하나를 세 번 반복합니다. 호출자의 모델을 부르는 `attachContentThinUnit`을 빼면 모두 결정론적이고 오프라인으로 동작합니다.
+
+- **컴파일** — `createContentAttachmentThinInput(plan, unit)`은 `{ version, input, codeMap }`(`content-attachment-thin-compile.v1`)을 돌려줍니다. 코드가 원문을 문장 구간으로 나누고, 모델은 최대 16단어짜리 Q 창(`CONTENT_ATTACHMENT_THIN_WINDOW_WORDS`)으로 원문 단어를 가리킵니다. 모델에 보일 후보도 코드가 먼저 거릅니다. 면적·트렌치·층위는 항상 넣고, 이름과 번호가 원문에 그대로 나오는 후보, 같은 장의 번호, 제목 핵심어가 묶음에 나오는 장의 후보(장 구성원 30개 이하, `CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT`)를 넣습니다. 장×유형 핸들(`H` 참조)은 그룹 전체를 가리킵니다. 원문 순서, 캡션, 표 위치를 유지합니다. 등록 행, 셀에서 등록된 후보, 유형명이 유일하게 맞는 표 행(`createContentAttachmentThinRowOwners`)은 코드가 배정하고 모델에 보내지 않습니다.
+- **요청** — `createContentAttachmentThinRequest(compilation)`은 `content-attachment-thin.v8` 지시문과, 모든 구간 키를 요구하는 공급자 스키마를 만듭니다. 각 판정은 `k: a|n`이며 대상, 핸들, 제외 참조, 대상 정체 대안, 관계 주체 대안, Q/L 근거를 담습니다. `contentAttachmentThinRestoredRules()`는 `segment-recipients.v26` 지시문에서 그대로 가져온 배정 규칙을 돌려줍니다.
+- **검사** — `inspectContentAttachmentThinResponse(plan, unit, { request, rawResponse })`는 요청을 다시 컴파일해 바뀐 요청을 거부하고, 구조를 검사한 뒤 핸들과 근거를 원문 단어와 UTF-16 위치로 풉니다. 원응답은 고치지 않고 `{ issues, findings, decisions }`를 돌려줍니다.
+- **분류** — `routeContentAttachmentThinSegments(plan, unit, compilation, runs, { wholeUnitReview })`는 모든 호출이 같이 고른 대상만 자동 확정합니다. 대상이 갈리거나, 불확실성 그룹이 다르거나, 무효인 호출이 있거나, 면적이 나오거나, 구간에 이름이 그대로 나온 층위가 확정되지 않았거나, 확정 대상이 50개를 넘으면(`CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT`, 사유 `large_collective`) 그 구간은 검수로 갑니다. `checkContentAttachmentThinOutliers(segments, runs)`는 혼자 다른 답을 낸 비율이 25%를 넘고 3구간 이상인 호출을 이상 호출로 표시합니다(`CONTENT_ATTACHMENT_THIN_OUTLIER_RATE`, `CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT`).
+- **실행** — `attachContentThinUnit(plan, unit, { model, maxRetries = 0, abortSignal, onAttempt, onCall })`은 r1을 보낸 뒤 r2와 r3을 함께 보냅니다. 이상 호출이 정확히 하나면 대체 호출(r4)을 한 번 보냅니다. 대체 호출도 이상 호출이거나 실패하면 묶음 전체가 검수로 갑니다. 각 호출은 요청, 원응답, 사용량, 검사 결과와 함께 `onCall`로 전달됩니다. 결과 상태는 `routed`, `failed`, `no_llm_segments` 중 하나입니다.
+- **조립** — `assembleContentAttachmentThin(plan, results)`은 `ledger-content-attachments.v2`를 돌려줍니다. 배정 내용은 원문 구간을 자원 키와 위치로 가리키며, 근거 종류는 `model_unanimous`, `code_row_owner`, `code_typed_row`, `code_cell_registration` 중 하나입니다. 검수 항목에는 최종 호출 각각의 판정이 남습니다. 결과는 `not_reviewed`로 시작합니다. 관계 상대(예: "3호 수혈에 의해 파괴"의 3호 수혈)는 이 단계에서 배정하지 않으며, `scope.relationCounterparts`는 `deferred_to_link_extraction`입니다.
+
 ## 본문·표 원문 배정 미리보기
+
+> 여기부터 끝까지는 얇은 경로와 같이 쓰는 계획 준비와, 이전의 묶음 단위·구간 단위 경로(`content-attachment.v74`까지의 지시문, `segment-recipients.v26`, 근거 창 계약)를 설명합니다. 저장된 감사 기록을 다시 재연할 수 있도록 이 API들은 계속 내보냅니다.
 
 `prepareContentAttachment(index, discoveryPlan, discovery, groups, { inputSha256, candidateSnapshotId, pdfPageNumbers, maxUnitChars })`는 검증된 후보 분할을 고정 등록부로 만들고 모델 호출 없이 PDF 페이지 순회 계획을 생성합니다. 본문·표가 없는 쪽도 포함하도록 전처리 문서의 전체 PDF 페이지를 전달합니다. 본문 블록과 원래 표의 한 행은 쪼개지 않으며 `maxUnitChars`는 원문 문자 수의 완화된 한도입니다. 전체 프롬프트나 토큰의 엄격한 제한이 아닙니다. 병합 셀 구조·논리 페이지·장 경로를 보존하고, 이름 필터 없이 전체 등록부와 기존 동일성 불확실성을 제공합니다.
 

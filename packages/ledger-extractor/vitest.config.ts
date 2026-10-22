@@ -13,6 +13,7 @@ export default defineConfig({
         ...(baseConfig.test?.coverage?.exclude || []),
         'src/types.ts', // Type definitions only
         'src/index.ts', // Re-exports only
+        'src/**/*.test-fixture.ts', // Shared test data and helpers
       ],
     },
   },

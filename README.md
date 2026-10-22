@@ -381,7 +381,7 @@ Current version: **v0.1.x** (Initial Release)
 
 ### v0.2.x - Immutable Ledger
 
-S0 source inspection and bounded investigation-object candidate proposals are available in `@heripo/ledger-extractor` and the demo. Inspect source-backed proposals before registering final ledger records.
+S0 source inspection and bounded investigation-object candidate proposals are available in `@heripo/ledger-extractor` and the demo. Inspect source-backed proposals before registering final ledger records. Thin per-unit content attachment attaches body sentences and table items to the fixed candidate registry; segments the repeated calls do not agree on, areas and large collective statements go to human review. Relation links, human review and validation on other reports are next.
 
 - Universal data model design covering global archaeology
 - Archaeological concept extraction (features, artifacts, strata, excavation units)
@@ -539,3 +539,5 @@ Content-attachment prompt v3 requests one body sentence per decision and shared 
 Content-attachment prompt v4 distinguishes source containers from sentence excerpts, keeping only a leading boundary fragment incomplete and separating the following sentences without changing source text or stored responses.
 
 Content-attachment prompt v5 preserves numbered/name headings of already registered objects as literal excerpts while excluding generic category titles; boundary sentence splitting and shared-context rules remain in effect.
+
+Thin per-unit content attachment (`content-attachment-thin.v8`) compiles each unit offline with prefiltered candidates, chapter handles and Q/L word windows, assigns table registration rows in code and calls the model three times per unit without retries. Only targets every run agrees on are confirmed; contested segments, areas, literally named layers and attachments to more than 50 targets go to review. The local demo can run every unit with call and token budgets and resumes without resending completed units.
