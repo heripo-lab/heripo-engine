@@ -11,6 +11,7 @@ import { createContentAttachmentOriginInput } from './origins';
 import {
   CONTENT_ATTACHMENT_PROMPT_VERSION,
   contentAttachmentSystemPrompt,
+  isContentAttachmentPromptBetween,
 } from './prompts';
 import { createContentAttachmentTableAnchorInput } from './tables/anchors';
 
@@ -26,60 +27,15 @@ export function createContentAttachmentRequest(
     promptVersion,
     systemPrompt: contentAttachmentSystemPrompt(promptVersion),
     userPrompt: JSON.stringify(
-      promptVersion === 'content-attachment.v59' ||
-        promptVersion === 'content-attachment.v60' ||
-        promptVersion === 'content-attachment.v61' ||
-        promptVersion === 'content-attachment.v62' ||
-        promptVersion === 'content-attachment.v63' ||
-        promptVersion === 'content-attachment.v64' ||
-        promptVersion === 'content-attachment.v65' ||
-        promptVersion === 'content-attachment.v66' ||
-        promptVersion === 'content-attachment.v67' ||
-        promptVersion === 'content-attachment.v68' ||
-        promptVersion === 'content-attachment.v69' ||
-        promptVersion === 'content-attachment.v70' ||
-        promptVersion === 'content-attachment.v71' ||
-        promptVersion === 'content-attachment.v72' ||
-        promptVersion === 'content-attachment.v73' ||
-        promptVersion === 'content-attachment.v74'
+      isContentAttachmentPromptBetween(promptVersion, 59, 74)
         ? createContentAttachmentGroundedInput(plan, unit).payload
-        : promptVersion === 'content-attachment.v55' ||
-            promptVersion === 'content-attachment.v56' ||
-            promptVersion === 'content-attachment.v57' ||
-            promptVersion === 'content-attachment.v58'
+        : isContentAttachmentPromptBetween(promptVersion, 55, 58)
           ? createContentAttachmentOriginInput(plan, unit).payload
-          : promptVersion === 'content-attachment.v33' ||
-              promptVersion === 'content-attachment.v34' ||
-              promptVersion === 'content-attachment.v35' ||
-              promptVersion === 'content-attachment.v36' ||
-              promptVersion === 'content-attachment.v37' ||
-              promptVersion === 'content-attachment.v38' ||
-              promptVersion === 'content-attachment.v39' ||
-              promptVersion === 'content-attachment.v40' ||
-              promptVersion === 'content-attachment.v41' ||
-              promptVersion === 'content-attachment.v42' ||
-              promptVersion === 'content-attachment.v43' ||
-              promptVersion === 'content-attachment.v44' ||
-              promptVersion === 'content-attachment.v45' ||
-              promptVersion === 'content-attachment.v46' ||
-              promptVersion === 'content-attachment.v47' ||
-              promptVersion === 'content-attachment.v48' ||
-              promptVersion === 'content-attachment.v49' ||
-              promptVersion === 'content-attachment.v50' ||
-              promptVersion === 'content-attachment.v51' ||
-              promptVersion === 'content-attachment.v52' ||
-              promptVersion === 'content-attachment.v53' ||
-              promptVersion === 'content-attachment.v54'
+          : isContentAttachmentPromptBetween(promptVersion, 33, 54)
             ? createContentAttachmentBodyBlockInput(plan, unit).payload
-            : promptVersion === 'content-attachment.v31' ||
-                promptVersion === 'content-attachment.v32'
+            : isContentAttachmentPromptBetween(promptVersion, 31, 32)
               ? createContentAttachmentContextInput(plan, unit).payload
-              : promptVersion === 'content-attachment.v25' ||
-                  promptVersion === 'content-attachment.v26' ||
-                  promptVersion === 'content-attachment.v27' ||
-                  promptVersion === 'content-attachment.v28' ||
-                  promptVersion === 'content-attachment.v29' ||
-                  promptVersion === 'content-attachment.v30'
+              : isContentAttachmentPromptBetween(promptVersion, 25, 30)
                 ? createContentAttachmentTableAnchorInput(plan, unit).payload
                 : legacy
                   ? {
@@ -90,23 +46,9 @@ export function createContentAttachmentRequest(
                       registryUncertainties: plan.registryUncertainties,
                       unit,
                     }
-                  : promptVersion === 'content-attachment.v13' ||
-                      promptVersion === 'content-attachment.v14' ||
-                      promptVersion === 'content-attachment.v15' ||
-                      promptVersion === 'content-attachment.v16' ||
-                      promptVersion === 'content-attachment.v17' ||
-                      promptVersion === 'content-attachment.v18' ||
-                      promptVersion === 'content-attachment.v19' ||
-                      promptVersion === 'content-attachment.v20' ||
-                      promptVersion === 'content-attachment.v21' ||
-                      promptVersion === 'content-attachment.v22' ||
-                      promptVersion === 'content-attachment.v23' ||
-                      promptVersion === 'content-attachment.v24'
+                  : isContentAttachmentPromptBetween(promptVersion, 13, 24)
                     ? createContentAttachmentDecisionInput(plan, unit).payload
-                    : promptVersion === 'content-attachment.v9' ||
-                        promptVersion === 'content-attachment.v10' ||
-                        promptVersion === 'content-attachment.v11' ||
-                        promptVersion === 'content-attachment.v12'
+                    : isContentAttachmentPromptBetween(promptVersion, 9, 12)
                       ? createContentAttachmentSelectionInput(plan, unit)
                           .payload
                       : createContentAttachmentInput(plan, unit).payload,

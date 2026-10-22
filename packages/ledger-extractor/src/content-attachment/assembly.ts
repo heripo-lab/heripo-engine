@@ -24,6 +24,10 @@ import { validateContentAttachmentIdentifierRanges } from './identifier-ranges';
 import { createContentAttachmentInput } from './input';
 import { createContentAttachmentOriginInput } from './origins';
 import { CONTENT_ATTACHMENT_PROMPT_VERSION } from './prompts';
+import {
+  isContentAttachmentPromptBetween,
+  isContentAttachmentPromptVersion,
+} from './prompts';
 import { createContentAttachmentRequest } from './request';
 import {
   createContentAttachmentResponseSchema,
@@ -63,225 +67,35 @@ export function assembleContentAttachment(
       issue('Unknown or repeated unit audit');
       continue;
     }
-    if (
-      audit.promptVersion !== 'content-attachment.v1' &&
-      audit.promptVersion !== 'content-attachment.v2' &&
-      audit.promptVersion !== 'content-attachment.v3' &&
-      audit.promptVersion !== 'content-attachment.v4' &&
-      audit.promptVersion !== 'content-attachment.v5' &&
-      audit.promptVersion !== 'content-attachment.v6' &&
-      audit.promptVersion !== 'content-attachment.v7' &&
-      audit.promptVersion !== 'content-attachment.v8' &&
-      audit.promptVersion !== 'content-attachment.v9' &&
-      audit.promptVersion !== 'content-attachment.v10' &&
-      audit.promptVersion !== 'content-attachment.v11' &&
-      audit.promptVersion !== 'content-attachment.v12' &&
-      audit.promptVersion !== 'content-attachment.v13' &&
-      audit.promptVersion !== 'content-attachment.v14' &&
-      audit.promptVersion !== 'content-attachment.v15' &&
-      audit.promptVersion !== 'content-attachment.v16' &&
-      audit.promptVersion !== 'content-attachment.v17' &&
-      audit.promptVersion !== 'content-attachment.v18' &&
-      audit.promptVersion !== 'content-attachment.v19' &&
-      audit.promptVersion !== 'content-attachment.v20' &&
-      audit.promptVersion !== 'content-attachment.v21' &&
-      audit.promptVersion !== 'content-attachment.v22' &&
-      audit.promptVersion !== 'content-attachment.v23' &&
-      audit.promptVersion !== 'content-attachment.v24' &&
-      audit.promptVersion !== 'content-attachment.v25' &&
-      audit.promptVersion !== 'content-attachment.v26' &&
-      audit.promptVersion !== 'content-attachment.v27' &&
-      audit.promptVersion !== 'content-attachment.v28' &&
-      audit.promptVersion !== 'content-attachment.v29' &&
-      audit.promptVersion !== 'content-attachment.v30' &&
-      audit.promptVersion !== 'content-attachment.v31' &&
-      audit.promptVersion !== 'content-attachment.v32' &&
-      audit.promptVersion !== 'content-attachment.v33' &&
-      audit.promptVersion !== 'content-attachment.v34' &&
-      audit.promptVersion !== 'content-attachment.v35' &&
-      audit.promptVersion !== 'content-attachment.v36' &&
-      audit.promptVersion !== 'content-attachment.v37' &&
-      audit.promptVersion !== 'content-attachment.v38' &&
-      audit.promptVersion !== 'content-attachment.v39' &&
-      audit.promptVersion !== 'content-attachment.v40' &&
-      audit.promptVersion !== 'content-attachment.v41' &&
-      audit.promptVersion !== 'content-attachment.v42' &&
-      audit.promptVersion !== 'content-attachment.v43' &&
-      audit.promptVersion !== 'content-attachment.v44' &&
-      audit.promptVersion !== 'content-attachment.v45' &&
-      audit.promptVersion !== 'content-attachment.v46' &&
-      audit.promptVersion !== 'content-attachment.v47' &&
-      audit.promptVersion !== 'content-attachment.v48' &&
-      audit.promptVersion !== 'content-attachment.v49' &&
-      audit.promptVersion !== 'content-attachment.v50' &&
-      audit.promptVersion !== 'content-attachment.v51' &&
-      audit.promptVersion !== 'content-attachment.v52' &&
-      audit.promptVersion !== 'content-attachment.v53' &&
-      audit.promptVersion !== 'content-attachment.v54' &&
-      audit.promptVersion !== 'content-attachment.v55' &&
-      audit.promptVersion !== 'content-attachment.v56' &&
-      audit.promptVersion !== 'content-attachment.v57' &&
-      audit.promptVersion !== 'content-attachment.v58' &&
-      audit.promptVersion !== 'content-attachment.v59' &&
-      audit.promptVersion !== 'content-attachment.v60' &&
-      audit.promptVersion !== 'content-attachment.v61' &&
-      audit.promptVersion !== 'content-attachment.v62' &&
-      audit.promptVersion !== 'content-attachment.v63' &&
-      audit.promptVersion !== 'content-attachment.v64' &&
-      audit.promptVersion !== 'content-attachment.v65' &&
-      audit.promptVersion !== 'content-attachment.v66' &&
-      audit.promptVersion !== 'content-attachment.v67' &&
-      audit.promptVersion !== 'content-attachment.v68' &&
-      audit.promptVersion !== 'content-attachment.v69' &&
-      audit.promptVersion !== 'content-attachment.v70' &&
-      audit.promptVersion !== 'content-attachment.v71' &&
-      audit.promptVersion !== 'content-attachment.v72' &&
-      audit.promptVersion !== 'content-attachment.v73' &&
-      audit.promptVersion !== CONTENT_ATTACHMENT_PROMPT_VERSION
-    ) {
+    if (!isContentAttachmentPromptVersion(audit.promptVersion)) {
       issue('Unsupported attachment prompt version');
       continue;
     }
     const legacy = audit.promptVersion === 'content-attachment.v1';
-    const selection =
-      audit.promptVersion === 'content-attachment.v9' ||
-      audit.promptVersion === 'content-attachment.v10' ||
-      audit.promptVersion === 'content-attachment.v11' ||
-      audit.promptVersion === 'content-attachment.v12' ||
-      audit.promptVersion === 'content-attachment.v13' ||
-      audit.promptVersion === 'content-attachment.v14' ||
-      audit.promptVersion === 'content-attachment.v15' ||
-      audit.promptVersion === 'content-attachment.v16' ||
-      audit.promptVersion === 'content-attachment.v17' ||
-      audit.promptVersion === 'content-attachment.v18' ||
-      audit.promptVersion === 'content-attachment.v19' ||
-      audit.promptVersion === 'content-attachment.v20' ||
-      audit.promptVersion === 'content-attachment.v21' ||
-      audit.promptVersion === 'content-attachment.v22' ||
-      audit.promptVersion === 'content-attachment.v23' ||
-      audit.promptVersion === 'content-attachment.v24' ||
-      audit.promptVersion === 'content-attachment.v25' ||
-      audit.promptVersion === 'content-attachment.v26' ||
-      audit.promptVersion === 'content-attachment.v27' ||
-      audit.promptVersion === 'content-attachment.v28' ||
-      audit.promptVersion === 'content-attachment.v29' ||
-      audit.promptVersion === 'content-attachment.v30' ||
-      audit.promptVersion === 'content-attachment.v31' ||
-      audit.promptVersion === 'content-attachment.v32' ||
-      audit.promptVersion === 'content-attachment.v33' ||
-      audit.promptVersion === 'content-attachment.v34' ||
-      audit.promptVersion === 'content-attachment.v35' ||
-      audit.promptVersion === 'content-attachment.v36' ||
-      audit.promptVersion === 'content-attachment.v37' ||
-      audit.promptVersion === 'content-attachment.v38' ||
-      audit.promptVersion === 'content-attachment.v39' ||
-      audit.promptVersion === 'content-attachment.v40' ||
-      audit.promptVersion === 'content-attachment.v41' ||
-      audit.promptVersion === 'content-attachment.v42' ||
-      audit.promptVersion === 'content-attachment.v43' ||
-      audit.promptVersion === 'content-attachment.v44' ||
-      audit.promptVersion === 'content-attachment.v45' ||
-      audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47' ||
-      audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49' ||
-      audit.promptVersion === 'content-attachment.v50' ||
-      audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52' ||
-      audit.promptVersion === 'content-attachment.v53' ||
-      audit.promptVersion === 'content-attachment.v54' ||
-      audit.promptVersion === 'content-attachment.v55' ||
-      audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58' ||
-      audit.promptVersion === 'content-attachment.v59' ||
-      audit.promptVersion === 'content-attachment.v60' ||
-      audit.promptVersion === 'content-attachment.v61' ||
-      audit.promptVersion === 'content-attachment.v62' ||
-      audit.promptVersion === 'content-attachment.v63' ||
-      audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65' ||
-      audit.promptVersion === 'content-attachment.v66' ||
-      audit.promptVersion === 'content-attachment.v67' ||
-      audit.promptVersion === 'content-attachment.v68' ||
-      audit.promptVersion === 'content-attachment.v69' ||
-      audit.promptVersion === 'content-attachment.v70' ||
-      audit.promptVersion === 'content-attachment.v71' ||
-      audit.promptVersion === 'content-attachment.v72' ||
-      audit.promptVersion === 'content-attachment.v73' ||
-      audit.promptVersion === 'content-attachment.v74';
-    const selectionInput =
-      audit.promptVersion === 'content-attachment.v59' ||
-      audit.promptVersion === 'content-attachment.v60' ||
-      audit.promptVersion === 'content-attachment.v61' ||
-      audit.promptVersion === 'content-attachment.v62' ||
-      audit.promptVersion === 'content-attachment.v63' ||
-      audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65' ||
-      audit.promptVersion === 'content-attachment.v66' ||
-      audit.promptVersion === 'content-attachment.v67' ||
-      audit.promptVersion === 'content-attachment.v68' ||
-      audit.promptVersion === 'content-attachment.v69' ||
-      audit.promptVersion === 'content-attachment.v70' ||
-      audit.promptVersion === 'content-attachment.v71' ||
-      audit.promptVersion === 'content-attachment.v72' ||
-      audit.promptVersion === 'content-attachment.v73' ||
-      audit.promptVersion === 'content-attachment.v74'
-        ? createContentAttachmentGroundedInput(plan, unit)
-        : audit.promptVersion === 'content-attachment.v55' ||
-            audit.promptVersion === 'content-attachment.v56' ||
-            audit.promptVersion === 'content-attachment.v57' ||
-            audit.promptVersion === 'content-attachment.v58'
-          ? createContentAttachmentOriginInput(plan, unit)
-          : audit.promptVersion === 'content-attachment.v33' ||
-              audit.promptVersion === 'content-attachment.v34' ||
-              audit.promptVersion === 'content-attachment.v35' ||
-              audit.promptVersion === 'content-attachment.v36' ||
-              audit.promptVersion === 'content-attachment.v37' ||
-              audit.promptVersion === 'content-attachment.v38' ||
-              audit.promptVersion === 'content-attachment.v39' ||
-              audit.promptVersion === 'content-attachment.v40' ||
-              audit.promptVersion === 'content-attachment.v41' ||
-              audit.promptVersion === 'content-attachment.v42' ||
-              audit.promptVersion === 'content-attachment.v43' ||
-              audit.promptVersion === 'content-attachment.v44' ||
-              audit.promptVersion === 'content-attachment.v45' ||
-              audit.promptVersion === 'content-attachment.v46' ||
-              audit.promptVersion === 'content-attachment.v47' ||
-              audit.promptVersion === 'content-attachment.v48' ||
-              audit.promptVersion === 'content-attachment.v49' ||
-              audit.promptVersion === 'content-attachment.v50' ||
-              audit.promptVersion === 'content-attachment.v51' ||
-              audit.promptVersion === 'content-attachment.v52' ||
-              audit.promptVersion === 'content-attachment.v53' ||
-              audit.promptVersion === 'content-attachment.v54'
-            ? createContentAttachmentBodyBlockInput(plan, unit)
-            : audit.promptVersion === 'content-attachment.v31' ||
-                audit.promptVersion === 'content-attachment.v32'
-              ? createContentAttachmentContextInput(plan, unit)
-              : audit.promptVersion === 'content-attachment.v25' ||
-                  audit.promptVersion === 'content-attachment.v26' ||
-                  audit.promptVersion === 'content-attachment.v27' ||
-                  audit.promptVersion === 'content-attachment.v28' ||
-                  audit.promptVersion === 'content-attachment.v29' ||
-                  audit.promptVersion === 'content-attachment.v30'
-                ? createContentAttachmentTableAnchorInput(plan, unit)
-                : selection
-                  ? audit.promptVersion === 'content-attachment.v13' ||
-                    audit.promptVersion === 'content-attachment.v14' ||
-                    audit.promptVersion === 'content-attachment.v15' ||
-                    audit.promptVersion === 'content-attachment.v16' ||
-                    audit.promptVersion === 'content-attachment.v17' ||
-                    audit.promptVersion === 'content-attachment.v18' ||
-                    audit.promptVersion === 'content-attachment.v19' ||
-                    audit.promptVersion === 'content-attachment.v20' ||
-                    audit.promptVersion === 'content-attachment.v21' ||
-                    audit.promptVersion === 'content-attachment.v22' ||
-                    audit.promptVersion === 'content-attachment.v23' ||
-                    audit.promptVersion === 'content-attachment.v24'
-                    ? createContentAttachmentDecisionInput(plan, unit)
-                    : createContentAttachmentSelectionInput(plan, unit)
-                  : null;
+    const selection = isContentAttachmentPromptBetween(
+      audit.promptVersion,
+      9,
+      74,
+    );
+    const selectionInput = isContentAttachmentPromptBetween(
+      audit.promptVersion,
+      59,
+      74,
+    )
+      ? createContentAttachmentGroundedInput(plan, unit)
+      : isContentAttachmentPromptBetween(audit.promptVersion, 55, 58)
+        ? createContentAttachmentOriginInput(plan, unit)
+        : isContentAttachmentPromptBetween(audit.promptVersion, 33, 54)
+          ? createContentAttachmentBodyBlockInput(plan, unit)
+          : isContentAttachmentPromptBetween(audit.promptVersion, 31, 32)
+            ? createContentAttachmentContextInput(plan, unit)
+            : isContentAttachmentPromptBetween(audit.promptVersion, 25, 30)
+              ? createContentAttachmentTableAnchorInput(plan, unit)
+              : selection
+                ? isContentAttachmentPromptBetween(audit.promptVersion, 13, 24)
+                  ? createContentAttachmentDecisionInput(plan, unit)
+                  : createContentAttachmentSelectionInput(plan, unit)
+                : null;
     if (
       !legacy &&
       JSON.stringify(audit.codeMap) !==
@@ -313,108 +127,10 @@ export function assembleContentAttachment(
       continue;
     }
     const fullCoverage =
-      audit.promptVersion === 'content-attachment.v6' ||
-      audit.promptVersion === 'content-attachment.v7' ||
-      audit.promptVersion === 'content-attachment.v8' ||
-      audit.promptVersion === 'content-attachment.v9' ||
-      audit.promptVersion === 'content-attachment.v10' ||
-      audit.promptVersion === 'content-attachment.v11' ||
-      audit.promptVersion === 'content-attachment.v12' ||
-      audit.promptVersion === 'content-attachment.v13' ||
-      audit.promptVersion === 'content-attachment.v14' ||
-      audit.promptVersion === 'content-attachment.v15' ||
-      audit.promptVersion === 'content-attachment.v16' ||
-      audit.promptVersion === 'content-attachment.v17' ||
-      audit.promptVersion === 'content-attachment.v18' ||
-      audit.promptVersion === 'content-attachment.v19' ||
-      audit.promptVersion === 'content-attachment.v20' ||
-      audit.promptVersion === 'content-attachment.v21' ||
-      audit.promptVersion === 'content-attachment.v22' ||
-      audit.promptVersion === 'content-attachment.v23' ||
-      audit.promptVersion === 'content-attachment.v24' ||
-      audit.promptVersion === 'content-attachment.v25' ||
-      audit.promptVersion === 'content-attachment.v26' ||
-      audit.promptVersion === 'content-attachment.v27' ||
-      audit.promptVersion === 'content-attachment.v28' ||
-      audit.promptVersion === 'content-attachment.v29' ||
-      audit.promptVersion === 'content-attachment.v30' ||
-      audit.promptVersion === 'content-attachment.v31' ||
-      audit.promptVersion === 'content-attachment.v32' ||
-      audit.promptVersion === 'content-attachment.v33' ||
-      audit.promptVersion === 'content-attachment.v34' ||
-      audit.promptVersion === 'content-attachment.v35' ||
-      audit.promptVersion === 'content-attachment.v36' ||
-      audit.promptVersion === 'content-attachment.v37' ||
-      audit.promptVersion === 'content-attachment.v38' ||
-      audit.promptVersion === 'content-attachment.v39' ||
-      audit.promptVersion === 'content-attachment.v40' ||
-      audit.promptVersion === 'content-attachment.v41' ||
-      audit.promptVersion === 'content-attachment.v42' ||
-      audit.promptVersion === 'content-attachment.v43' ||
-      audit.promptVersion === 'content-attachment.v44' ||
-      audit.promptVersion === 'content-attachment.v45' ||
-      audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47' ||
-      audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49' ||
-      audit.promptVersion === 'content-attachment.v50' ||
-      audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52' ||
-      audit.promptVersion === 'content-attachment.v53' ||
-      audit.promptVersion === 'content-attachment.v54' ||
-      audit.promptVersion === 'content-attachment.v55' ||
-      audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58' ||
-      audit.promptVersion === 'content-attachment.v59' ||
-      audit.promptVersion === 'content-attachment.v60' ||
-      audit.promptVersion === 'content-attachment.v61' ||
-      audit.promptVersion === 'content-attachment.v62' ||
-      audit.promptVersion === 'content-attachment.v63' ||
-      audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65' ||
-      audit.promptVersion === 'content-attachment.v66' ||
-      audit.promptVersion === 'content-attachment.v67' ||
-      audit.promptVersion === 'content-attachment.v68' ||
-      audit.promptVersion === 'content-attachment.v69' ||
-      audit.promptVersion === 'content-attachment.v70' ||
-      audit.promptVersion === 'content-attachment.v71' ||
-      audit.promptVersion === 'content-attachment.v72' ||
-      audit.promptVersion === 'content-attachment.v73' ||
+      isContentAttachmentPromptBetween(audit.promptVersion, 6, 73) ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION;
     if (
-      audit.promptVersion === 'content-attachment.v42' ||
-      audit.promptVersion === 'content-attachment.v43' ||
-      audit.promptVersion === 'content-attachment.v44' ||
-      audit.promptVersion === 'content-attachment.v45' ||
-      audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47' ||
-      audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49' ||
-      audit.promptVersion === 'content-attachment.v50' ||
-      audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52' ||
-      audit.promptVersion === 'content-attachment.v53' ||
-      audit.promptVersion === 'content-attachment.v54' ||
-      audit.promptVersion === 'content-attachment.v55' ||
-      audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58' ||
-      audit.promptVersion === 'content-attachment.v59' ||
-      audit.promptVersion === 'content-attachment.v60' ||
-      audit.promptVersion === 'content-attachment.v61' ||
-      audit.promptVersion === 'content-attachment.v62' ||
-      audit.promptVersion === 'content-attachment.v63' ||
-      audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65' ||
-      audit.promptVersion === 'content-attachment.v66' ||
-      audit.promptVersion === 'content-attachment.v67' ||
-      audit.promptVersion === 'content-attachment.v68' ||
-      audit.promptVersion === 'content-attachment.v69' ||
-      audit.promptVersion === 'content-attachment.v70' ||
-      audit.promptVersion === 'content-attachment.v71' ||
-      audit.promptVersion === 'content-attachment.v72' ||
-      audit.promptVersion === 'content-attachment.v73' ||
+      isContentAttachmentPromptBetween(audit.promptVersion, 42, 73) ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       const raw = (
@@ -461,22 +177,7 @@ export function assembleContentAttachment(
         );
       if (grounding.issues.length) continue;
     }
-    if (
-      audit.promptVersion === 'content-attachment.v61' ||
-      audit.promptVersion === 'content-attachment.v62' ||
-      audit.promptVersion === 'content-attachment.v63' ||
-      audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65' ||
-      audit.promptVersion === 'content-attachment.v66' ||
-      audit.promptVersion === 'content-attachment.v67' ||
-      audit.promptVersion === 'content-attachment.v68' ||
-      audit.promptVersion === 'content-attachment.v69' ||
-      audit.promptVersion === 'content-attachment.v70' ||
-      audit.promptVersion === 'content-attachment.v71' ||
-      audit.promptVersion === 'content-attachment.v72' ||
-      audit.promptVersion === 'content-attachment.v73' ||
-      audit.promptVersion === 'content-attachment.v74'
-    ) {
+    if (isContentAttachmentPromptBetween(audit.promptVersion, 61, 74)) {
       const reviewed = inspectContentAttachmentIndependentReview(
         createContentAttachmentGroundedInput(plan, unit),
         audit.rawResponse as ContentAttachmentRequiredResponse,
@@ -485,94 +186,61 @@ export function assembleContentAttachment(
           includeBodyContext: audit.promptVersion !== 'content-attachment.v61',
           preserveTentativeMembership:
             audit.promptVersion === 'content-attachment.v74',
-          gateQualifierStage:
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          checkClauseGrounds:
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          boundAreaRecording:
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          traceAreaRecording:
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          reviewTableWork:
-            audit.promptVersion === 'content-attachment.v69' ||
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          boundAreaResultRecipients:
-            audit.promptVersion === 'content-attachment.v68' ||
-            audit.promptVersion === 'content-attachment.v69' ||
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          qualifyBeforeIdentity:
-            audit.promptVersion === 'content-attachment.v63' ||
-            audit.promptVersion === 'content-attachment.v64' ||
-            audit.promptVersion === 'content-attachment.v65' ||
-            audit.promptVersion === 'content-attachment.v66' ||
-            audit.promptVersion === 'content-attachment.v67' ||
-            audit.promptVersion === 'content-attachment.v68' ||
-            audit.promptVersion === 'content-attachment.v69' ||
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          preserveAreaResults:
-            audit.promptVersion === 'content-attachment.v67' ||
-            audit.promptVersion === 'content-attachment.v68' ||
-            audit.promptVersion === 'content-attachment.v69' ||
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          preserveAreaWork:
-            audit.promptVersion === 'content-attachment.v66' ||
-            audit.promptVersion === 'content-attachment.v67' ||
-            audit.promptVersion === 'content-attachment.v68' ||
-            audit.promptVersion === 'content-attachment.v69' ||
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          crossChapterAreas:
-            audit.promptVersion === 'content-attachment.v65' ||
-            audit.promptVersion === 'content-attachment.v66' ||
-            audit.promptVersion === 'content-attachment.v67' ||
-            audit.promptVersion === 'content-attachment.v68' ||
-            audit.promptVersion === 'content-attachment.v69' ||
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
-          reconcileRecipientRefs:
-            audit.promptVersion === 'content-attachment.v64' ||
-            audit.promptVersion === 'content-attachment.v65' ||
-            audit.promptVersion === 'content-attachment.v66' ||
-            audit.promptVersion === 'content-attachment.v67' ||
-            audit.promptVersion === 'content-attachment.v68' ||
-            audit.promptVersion === 'content-attachment.v69' ||
-            audit.promptVersion === 'content-attachment.v70' ||
-            audit.promptVersion === 'content-attachment.v71' ||
-            audit.promptVersion === 'content-attachment.v72' ||
-            audit.promptVersion === 'content-attachment.v73' ||
-            audit.promptVersion === 'content-attachment.v74',
+          gateQualifierStage: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            73,
+            74,
+          ),
+          checkClauseGrounds: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            72,
+            74,
+          ),
+          boundAreaRecording: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            71,
+            74,
+          ),
+          traceAreaRecording: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            70,
+            74,
+          ),
+          reviewTableWork: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            69,
+            74,
+          ),
+          boundAreaResultRecipients: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            68,
+            74,
+          ),
+          qualifyBeforeIdentity: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            63,
+            74,
+          ),
+          preserveAreaResults: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            67,
+            74,
+          ),
+          preserveAreaWork: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            66,
+            74,
+          ),
+          crossChapterAreas: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            65,
+            74,
+          ),
+          reconcileRecipientRefs: isContentAttachmentPromptBetween(
+            audit.promptVersion,
+            64,
+            74,
+          ),
         },
       );
       for (const reason of reviewed.issues) issue(reason);
@@ -802,71 +470,7 @@ export function assembleContentAttachment(
           evidence,
           reason: ignored.reason,
         });
-        if (
-          audit.promptVersion === 'content-attachment.v12' ||
-          audit.promptVersion === 'content-attachment.v13' ||
-          audit.promptVersion === 'content-attachment.v14' ||
-          audit.promptVersion === 'content-attachment.v15' ||
-          audit.promptVersion === 'content-attachment.v16' ||
-          audit.promptVersion === 'content-attachment.v17' ||
-          audit.promptVersion === 'content-attachment.v18' ||
-          audit.promptVersion === 'content-attachment.v19' ||
-          audit.promptVersion === 'content-attachment.v20' ||
-          audit.promptVersion === 'content-attachment.v21' ||
-          audit.promptVersion === 'content-attachment.v22' ||
-          audit.promptVersion === 'content-attachment.v23' ||
-          audit.promptVersion === 'content-attachment.v24' ||
-          audit.promptVersion === 'content-attachment.v25' ||
-          audit.promptVersion === 'content-attachment.v26' ||
-          audit.promptVersion === 'content-attachment.v27' ||
-          audit.promptVersion === 'content-attachment.v28' ||
-          audit.promptVersion === 'content-attachment.v29' ||
-          audit.promptVersion === 'content-attachment.v30' ||
-          audit.promptVersion === 'content-attachment.v31' ||
-          audit.promptVersion === 'content-attachment.v32' ||
-          audit.promptVersion === 'content-attachment.v33' ||
-          audit.promptVersion === 'content-attachment.v34' ||
-          audit.promptVersion === 'content-attachment.v35' ||
-          audit.promptVersion === 'content-attachment.v36' ||
-          audit.promptVersion === 'content-attachment.v37' ||
-          audit.promptVersion === 'content-attachment.v38' ||
-          audit.promptVersion === 'content-attachment.v39' ||
-          audit.promptVersion === 'content-attachment.v40' ||
-          audit.promptVersion === 'content-attachment.v41' ||
-          audit.promptVersion === 'content-attachment.v42' ||
-          audit.promptVersion === 'content-attachment.v43' ||
-          audit.promptVersion === 'content-attachment.v44' ||
-          audit.promptVersion === 'content-attachment.v45' ||
-          audit.promptVersion === 'content-attachment.v46' ||
-          audit.promptVersion === 'content-attachment.v47' ||
-          audit.promptVersion === 'content-attachment.v48' ||
-          audit.promptVersion === 'content-attachment.v49' ||
-          audit.promptVersion === 'content-attachment.v50' ||
-          audit.promptVersion === 'content-attachment.v51' ||
-          audit.promptVersion === 'content-attachment.v52' ||
-          audit.promptVersion === 'content-attachment.v53' ||
-          audit.promptVersion === 'content-attachment.v54' ||
-          audit.promptVersion === 'content-attachment.v55' ||
-          audit.promptVersion === 'content-attachment.v56' ||
-          audit.promptVersion === 'content-attachment.v57' ||
-          audit.promptVersion === 'content-attachment.v58' ||
-          audit.promptVersion === 'content-attachment.v59' ||
-          audit.promptVersion === 'content-attachment.v60' ||
-          audit.promptVersion === 'content-attachment.v61' ||
-          audit.promptVersion === 'content-attachment.v62' ||
-          audit.promptVersion === 'content-attachment.v63' ||
-          audit.promptVersion === 'content-attachment.v64' ||
-          audit.promptVersion === 'content-attachment.v65' ||
-          audit.promptVersion === 'content-attachment.v66' ||
-          audit.promptVersion === 'content-attachment.v67' ||
-          audit.promptVersion === 'content-attachment.v68' ||
-          audit.promptVersion === 'content-attachment.v69' ||
-          audit.promptVersion === 'content-attachment.v70' ||
-          audit.promptVersion === 'content-attachment.v71' ||
-          audit.promptVersion === 'content-attachment.v72' ||
-          audit.promptVersion === 'content-attachment.v73' ||
-          audit.promptVersion === 'content-attachment.v74'
-        ) {
+        if (isContentAttachmentPromptBetween(audit.promptVersion, 12, 74)) {
           const source = unit.sources.find(
             (s) => s.sourceId === evidence[0].sourceId,
           )!.resource;
@@ -945,170 +549,25 @@ export function assembleContentAttachment(
         gap(text.length);
       }
     }
-    if (
-      audit.promptVersion === 'content-attachment.v18' ||
-      audit.promptVersion === 'content-attachment.v19' ||
-      audit.promptVersion === 'content-attachment.v20' ||
-      audit.promptVersion === 'content-attachment.v21' ||
-      audit.promptVersion === 'content-attachment.v22' ||
-      audit.promptVersion === 'content-attachment.v23' ||
-      audit.promptVersion === 'content-attachment.v24' ||
-      audit.promptVersion === 'content-attachment.v25' ||
-      audit.promptVersion === 'content-attachment.v26' ||
-      audit.promptVersion === 'content-attachment.v27' ||
-      audit.promptVersion === 'content-attachment.v28' ||
-      audit.promptVersion === 'content-attachment.v29' ||
-      audit.promptVersion === 'content-attachment.v30' ||
-      audit.promptVersion === 'content-attachment.v31' ||
-      audit.promptVersion === 'content-attachment.v32' ||
-      audit.promptVersion === 'content-attachment.v33' ||
-      audit.promptVersion === 'content-attachment.v34' ||
-      audit.promptVersion === 'content-attachment.v35' ||
-      audit.promptVersion === 'content-attachment.v36' ||
-      audit.promptVersion === 'content-attachment.v37' ||
-      audit.promptVersion === 'content-attachment.v38' ||
-      audit.promptVersion === 'content-attachment.v39' ||
-      audit.promptVersion === 'content-attachment.v40' ||
-      audit.promptVersion === 'content-attachment.v41' ||
-      audit.promptVersion === 'content-attachment.v42' ||
-      audit.promptVersion === 'content-attachment.v43' ||
-      audit.promptVersion === 'content-attachment.v44' ||
-      audit.promptVersion === 'content-attachment.v45' ||
-      audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47' ||
-      audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49' ||
-      audit.promptVersion === 'content-attachment.v50' ||
-      audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52' ||
-      audit.promptVersion === 'content-attachment.v53' ||
-      audit.promptVersion === 'content-attachment.v54' ||
-      audit.promptVersion === 'content-attachment.v55' ||
-      audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58' ||
-      audit.promptVersion === 'content-attachment.v59' ||
-      audit.promptVersion === 'content-attachment.v60' ||
-      audit.promptVersion === 'content-attachment.v61' ||
-      audit.promptVersion === 'content-attachment.v62' ||
-      audit.promptVersion === 'content-attachment.v63' ||
-      audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65' ||
-      audit.promptVersion === 'content-attachment.v66' ||
-      audit.promptVersion === 'content-attachment.v67' ||
-      audit.promptVersion === 'content-attachment.v68' ||
-      audit.promptVersion === 'content-attachment.v69' ||
-      audit.promptVersion === 'content-attachment.v70' ||
-      audit.promptVersion === 'content-attachment.v71' ||
-      audit.promptVersion === 'content-attachment.v72' ||
-      audit.promptVersion === 'content-attachment.v73' ||
-      audit.promptVersion === 'content-attachment.v74'
-    ) {
+    if (isContentAttachmentPromptBetween(audit.promptVersion, 18, 74)) {
       for (const reason of validateContentAttachmentTables(
         plan,
         unit,
         selectionInput!.codeMap.excerpts,
         newData!,
-        audit.promptVersion === 'content-attachment.v35' ||
-          audit.promptVersion === 'content-attachment.v36' ||
-          audit.promptVersion === 'content-attachment.v37' ||
-          audit.promptVersion === 'content-attachment.v38' ||
-          audit.promptVersion === 'content-attachment.v39' ||
-          audit.promptVersion === 'content-attachment.v40' ||
-          audit.promptVersion === 'content-attachment.v41' ||
-          audit.promptVersion === 'content-attachment.v42' ||
-          audit.promptVersion === 'content-attachment.v43' ||
-          audit.promptVersion === 'content-attachment.v44' ||
-          audit.promptVersion === 'content-attachment.v45' ||
-          audit.promptVersion === 'content-attachment.v46' ||
-          audit.promptVersion === 'content-attachment.v47' ||
-          audit.promptVersion === 'content-attachment.v48' ||
-          audit.promptVersion === 'content-attachment.v49' ||
-          audit.promptVersion === 'content-attachment.v50' ||
-          audit.promptVersion === 'content-attachment.v51' ||
-          audit.promptVersion === 'content-attachment.v52' ||
-          audit.promptVersion === 'content-attachment.v53' ||
-          audit.promptVersion === 'content-attachment.v54' ||
-          audit.promptVersion === 'content-attachment.v55' ||
-          audit.promptVersion === 'content-attachment.v56' ||
-          audit.promptVersion === 'content-attachment.v57' ||
-          audit.promptVersion === 'content-attachment.v58' ||
-          audit.promptVersion === 'content-attachment.v59' ||
-          audit.promptVersion === 'content-attachment.v60' ||
-          audit.promptVersion === 'content-attachment.v61' ||
-          audit.promptVersion === 'content-attachment.v62' ||
-          audit.promptVersion === 'content-attachment.v63' ||
-          audit.promptVersion === 'content-attachment.v64' ||
-          audit.promptVersion === 'content-attachment.v65' ||
-          audit.promptVersion === 'content-attachment.v66' ||
-          audit.promptVersion === 'content-attachment.v67' ||
-          audit.promptVersion === 'content-attachment.v68' ||
-          audit.promptVersion === 'content-attachment.v69' ||
-          audit.promptVersion === 'content-attachment.v70' ||
-          audit.promptVersion === 'content-attachment.v71' ||
-          audit.promptVersion === 'content-attachment.v72' ||
-          audit.promptVersion === 'content-attachment.v73' ||
-          audit.promptVersion === 'content-attachment.v74',
+        isContentAttachmentPromptBetween(audit.promptVersion, 35, 74),
       ))
         issue(reason);
     }
     if (
-      audit.promptVersion === 'content-attachment.v45' ||
-      audit.promptVersion === 'content-attachment.v46' ||
-      audit.promptVersion === 'content-attachment.v47' ||
-      audit.promptVersion === 'content-attachment.v48' ||
-      audit.promptVersion === 'content-attachment.v49' ||
-      audit.promptVersion === 'content-attachment.v50' ||
-      audit.promptVersion === 'content-attachment.v51' ||
-      audit.promptVersion === 'content-attachment.v52' ||
-      audit.promptVersion === 'content-attachment.v53' ||
-      audit.promptVersion === 'content-attachment.v54' ||
-      audit.promptVersion === 'content-attachment.v55' ||
-      audit.promptVersion === 'content-attachment.v56' ||
-      audit.promptVersion === 'content-attachment.v57' ||
-      audit.promptVersion === 'content-attachment.v58' ||
-      audit.promptVersion === 'content-attachment.v59' ||
-      audit.promptVersion === 'content-attachment.v60' ||
-      audit.promptVersion === 'content-attachment.v61' ||
-      audit.promptVersion === 'content-attachment.v62' ||
-      audit.promptVersion === 'content-attachment.v63' ||
-      audit.promptVersion === 'content-attachment.v64' ||
-      audit.promptVersion === 'content-attachment.v65' ||
-      audit.promptVersion === 'content-attachment.v66' ||
-      audit.promptVersion === 'content-attachment.v67' ||
-      audit.promptVersion === 'content-attachment.v68' ||
-      audit.promptVersion === 'content-attachment.v69' ||
-      audit.promptVersion === 'content-attachment.v70' ||
-      audit.promptVersion === 'content-attachment.v71' ||
-      audit.promptVersion === 'content-attachment.v72' ||
-      audit.promptVersion === 'content-attachment.v73' ||
+      isContentAttachmentPromptBetween(audit.promptVersion, 45, 73) ||
       audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION
     ) {
       for (const reason of validateContentAttachmentIdentifierRanges(
         plan,
         selectionInput!.codeMap.excerpts,
         newData!,
-        audit.promptVersion === 'content-attachment.v53' ||
-          audit.promptVersion === 'content-attachment.v54' ||
-          audit.promptVersion === 'content-attachment.v55' ||
-          audit.promptVersion === 'content-attachment.v56' ||
-          audit.promptVersion === 'content-attachment.v57' ||
-          audit.promptVersion === 'content-attachment.v58' ||
-          audit.promptVersion === 'content-attachment.v59' ||
-          audit.promptVersion === 'content-attachment.v60' ||
-          audit.promptVersion === 'content-attachment.v61' ||
-          audit.promptVersion === 'content-attachment.v62' ||
-          audit.promptVersion === 'content-attachment.v63' ||
-          audit.promptVersion === 'content-attachment.v64' ||
-          audit.promptVersion === 'content-attachment.v65' ||
-          audit.promptVersion === 'content-attachment.v66' ||
-          audit.promptVersion === 'content-attachment.v67' ||
-          audit.promptVersion === 'content-attachment.v68' ||
-          audit.promptVersion === 'content-attachment.v69' ||
-          audit.promptVersion === 'content-attachment.v70' ||
-          audit.promptVersion === 'content-attachment.v71' ||
-          audit.promptVersion === 'content-attachment.v72' ||
-          audit.promptVersion === 'content-attachment.v73' ||
+        isContentAttachmentPromptBetween(audit.promptVersion, 53, 73) ||
           audit.promptVersion === CONTENT_ATTACHMENT_PROMPT_VERSION,
       ))
         issue(reason);
