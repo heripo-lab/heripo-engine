@@ -101,17 +101,15 @@ export type {
   ContentAttachmentGroundedAreaAssessment,
 } from './recipients/area-assessments';
 export type { ContentAttachmentWorkGroupReview } from './recipients/work-group-reviews';
-export {
-  CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION,
-  createContentAttachmentSourceContextRequest,
-  resolveContentAttachmentSourceContextRange,
-} from './source-context/source-context';
+export { CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION } from './source-context/source-context-types';
+export { createContentAttachmentSourceContextRequest } from './source-context/source-context';
+export { resolveContentAttachmentSourceContextRange } from './source-context/source-context-range';
 export type {
   ContentAttachmentSourceContextOptions,
   ContentAttachmentSourceContextRequest,
   ContentAttachmentTableContextPair,
   ContentAttachmentSourceContextBinding,
-} from './source-context/source-context';
+} from './source-context/source-context-types';
 export {
   createContentAttachmentSourceContextReplaySnapshot,
   inspectContentAttachmentSourceContextRecipients,
@@ -141,8 +139,8 @@ export {
   CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT,
   CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
-  createContentAttachmentThinInput,
-} from './thin/compile';
+} from './thin/compile-types';
+export { createContentAttachmentThinInput } from './thin/compile';
 export type {
   ContentAttachmentThinCell,
   ContentAttachmentThinCodeMap,
@@ -151,7 +149,7 @@ export type {
   ContentAttachmentThinInput,
   ContentAttachmentThinSegmentSpan,
   ContentAttachmentThinWindow,
-} from './thin/compile';
+} from './thin/compile-types';
 export {
   cellRegisteredCandidates,
   createContentAttachmentThinRowOwners,

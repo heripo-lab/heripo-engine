@@ -1,5 +1,5 @@
 import type * as Recipients from '../recipients/prompt';
-import type { ContentAttachmentThinCompilation } from './compile';
+import type { ContentAttachmentThinCompilation } from './compile-types';
 
 import { describe, expect, test, vi } from 'vitest';
 

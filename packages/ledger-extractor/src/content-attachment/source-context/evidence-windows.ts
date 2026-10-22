@@ -5,21 +5,19 @@ import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 import type {
   ContentAttachmentSourceContextOptions,
   ContentAttachmentSourceContextRequest,
-} from './source-context';
+} from './source-context-types';
 
 import { Output } from 'ai';
 import { createHash } from 'node:crypto';
 
 import { CONTENT_ATTACHMENT_WORD_RANGE_PATTERN } from '../recipients/word-evidence';
 import { CONTENT_ATTACHMENT_EVIDENCE_WINDOW_POLICY } from './evidence-window-policy';
-import {
-  createContentAttachmentSourceContextRequest,
-  resolveContentAttachmentSourceContextRange,
-} from './source-context';
+import { createContentAttachmentSourceContextRequest } from './source-context';
 import {
   createContentAttachmentSourceContextReplaySnapshot,
   verifyOriginalSources,
 } from './source-context-inspection';
+import { resolveContentAttachmentSourceContextRange } from './source-context-range';
 
 export const CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION =
   'content-evidence-windows.v1' as const;

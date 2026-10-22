@@ -10,7 +10,7 @@ import type {
   ContentAttachmentSourceContextBinding,
   ContentAttachmentSourceContextOptions,
   ContentAttachmentSourceContextRequest,
-} from './source-context';
+} from './source-context-types';
 
 import { Output } from 'ai';
 import { createHash } from 'node:crypto';
@@ -19,11 +19,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
 import { createContentAttachmentGroundedInput } from '../grounding';
 import { inspectContentAttachmentRecipientSelections } from '../recipients/selection-inspection';
-import {
-  CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION,
-  createContentAttachmentSourceContextRequest,
-  resolveContentAttachmentSourceContextRange,
-} from './source-context';
+import { createContentAttachmentSourceContextRequest } from './source-context';
+import { resolveContentAttachmentSourceContextRange } from './source-context-range';
+import { CONTENT_ATTACHMENT_SOURCE_CONTEXT_VERSION } from './source-context-types';
 
 /** Pure snapshot digests bind replay inputs; they do not authenticate a model observation. */
 export function createContentAttachmentSourceContextReplaySnapshot(

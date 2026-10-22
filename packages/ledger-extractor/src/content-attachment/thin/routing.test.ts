@@ -3,7 +3,7 @@ import type {
   AttachmentUnit,
   ContentAttachmentPlan,
 } from '../types';
-import type { ContentAttachmentThinCompilation } from './compile';
+import type { ContentAttachmentThinCompilation } from './compile-types';
 import type {
   ContentAttachmentThinDecision,
   ContentAttachmentThinInspection,

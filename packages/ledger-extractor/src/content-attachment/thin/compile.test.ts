@@ -10,10 +10,8 @@ import type {
 import { describe, expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
-import {
-  CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
-  createContentAttachmentThinInput,
-} from './compile';
+import { createContentAttachmentThinInput } from './compile';
+import { CONTENT_ATTACHMENT_THIN_COMPILE_VERSION } from './compile-types';
 
 const cell = (text: string, isHeader = false) => ({
   text,

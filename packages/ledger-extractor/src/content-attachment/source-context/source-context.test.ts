@@ -3,10 +3,8 @@ import { expect, test, vi } from 'vitest';
 
 import { createContentAttachmentGroundedInput } from '../grounding';
 import { createContentAttachmentRecipientRequest } from '../recipients/request';
-import {
-  createContentAttachmentSourceContextRequest,
-  resolveContentAttachmentSourceContextRange,
-} from './source-context';
+import { createContentAttachmentSourceContextRequest } from './source-context';
+import { resolveContentAttachmentSourceContextRange } from './source-context-range';
 import { sourceContextFixture as fixture } from './source-context.test-fixture';
 
 const payload = (
