@@ -22,10 +22,15 @@ const STATUS: Record<ContentAttachmentThinState['status'], string> = {
 export function ContentAttachmentThinSection({
   taskId,
   planReady,
+  planSnapshotId,
+  latestSnapshotId,
 }: {
   taskId: string;
   planReady: boolean;
+  planSnapshotId: string | null;
+  latestSnapshotId: string | null;
 }) {
+  const stale = !!planSnapshotId && planSnapshotId !== latestSnapshotId;
   const { query, runThin, stopThin, thinResult } = useContentAttachment(taskId);
   const thin = query.data?.thin ?? null;
   const [maxCalls, setMaxCalls] = useState(400);
@@ -53,6 +58,19 @@ export function ContentAttachmentThinSection({
         않습니다. 면적·층위와 결과가 갈린 구간은 검수 항목으로 남습니다. 호출
         비용이 발생합니다.
       </p>
+      {planSnapshotId && (
+        <p className="font-mono text-xs">
+          계획 후보 스냅샷 {planSnapshotId} · 최신 후보 스냅샷{' '}
+          {latestSnapshotId ?? '없음'}
+        </p>
+      )}
+      {stale && (
+        <p className="text-destructive text-sm" role="alert">
+          순회 계획이 이전 후보 스냅샷으로 만들어졌습니다. 최신 후보가 반영되지
+          않으므로 &lsquo;순회 계획 만들기&rsquo;로 계획을 다시 준비한 뒤
+          실행하세요.
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <label className="space-y-1">
           <span>최대 호출 수</span>
@@ -76,7 +94,7 @@ export function ContentAttachmentThinSection({
           />
         </label>
         <Button
-          disabled={!planReady || isRunning || runThin.isPending}
+          disabled={!planReady || stale || isRunning || runThin.isPending}
           onClick={() => runThin.mutate({ maxCalls, maxTotalTokens })}
         >
           {thin ? '얇은 배정 이어서 실행' : '얇은 배정 실행'}

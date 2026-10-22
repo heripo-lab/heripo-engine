@@ -21,6 +21,7 @@ import { join } from 'path';
 
 import { paths } from '../paths';
 import { createModel } from '../processing/model-factory';
+import { getCandidateDiscoveryRun } from './candidate-discovery-run';
 import { getContentAttachmentRun } from './content-attachment-run';
 
 /** Units processed at the same time; each unit already sends r2 and r3 together. */
@@ -138,7 +139,8 @@ export function stopContentAttachmentThin(taskId: string) {
 /**
  * Attach every unit of the prepared plan with the thin method, in the background. Each call is saved as it
  * finishes; completed units are skipped when started again, and a unit with saved calls but no result is
- * left as interrupted for a manual decision rather than re-sent. New units stop on request, on HTTP 429,
+ * left as interrupted for a manual decision rather than re-sent. A plan whose candidate snapshot is no longer
+ * the latest candidate discovery run is refused. New units stop on request, on HTTP 429,
  * on repeated failures or when the call or token budget would be exceeded.
  */
 export function startContentAttachmentThin(
@@ -150,6 +152,9 @@ export function startContentAttachmentThin(
     throw new Error('Prepare a content attachment plan first');
   if (running.has(run.runId))
     throw new Error('Thin attachment already running');
+  // a plan prepared before a newer candidate discovery run would attach to an outdated registry
+  if (getCandidateDiscoveryRun(taskId)?.runId !== run.candidateSnapshotId)
+    throw new Error('Candidate snapshot changed; prepare a new plan');
   const dir = join(
     paths.task(taskId).outputRoot,
     'content-attachment',
