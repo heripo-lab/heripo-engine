@@ -293,3 +293,10 @@ export type {
   ContentAttachmentThinRunOptions,
   ContentAttachmentThinUnitResult,
 } from './content-attachment-thin-run';
+export { assembleContentAttachmentThin } from './content-attachment-thin-assembly';
+export type {
+  ContentAttachmentThinBasis,
+  ContentAttachmentThinExcerpt,
+  ContentAttachmentThinResult,
+  ContentAttachmentThinReviewItem,
+} from './content-attachment-thin-assembly';
