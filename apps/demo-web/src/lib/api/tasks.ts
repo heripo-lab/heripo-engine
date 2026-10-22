@@ -16,6 +16,7 @@ import type {
   CandidateDiscoveryRunSettings,
 } from '~/lib/ledger/candidate-discovery-run';
 import type { ContentAttachmentRun } from '~/lib/ledger/content-attachment-run';
+import type { ContentAttachmentThinState } from '~/lib/ledger/content-attachment-thin-run';
 
 import type { ProcessingOptions } from '~/features/upload';
 
@@ -293,6 +294,7 @@ export async function downloadTaskZip(taskId: string): Promise<Blob> {
 
 export async function fetchContentAttachment(taskId: string): Promise<{
   run: ContentAttachmentRun | null;
+  thin?: ContentAttachmentThinState | null;
 }> {
   return handleResponse(await fetch(`/api/tasks/${taskId}/content-attachment`));
 }
@@ -326,5 +328,39 @@ export async function fetchContentAttachmentAudit(
 ): Promise<unknown> {
   return handleResponse(
     await fetch(`/api/tasks/${taskId}/content-attachment?audit=true`),
+  );
+}
+export async function runThinContentAttachment(
+  taskId: string,
+  budget: { maxCalls: number; maxTotalTokens: number },
+): Promise<{
+  run: ContentAttachmentRun | null;
+  thin: ContentAttachmentThinState;
+}> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'run-thin', ...budget }),
+    }),
+  );
+}
+export async function stopThinContentAttachment(taskId: string): Promise<{
+  run: ContentAttachmentRun | null;
+  thin: ContentAttachmentThinState;
+}> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'stop-thin' }),
+    }),
+  );
+}
+export async function fetchThinContentAttachmentResult(
+  taskId: string,
+): Promise<unknown> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/content-attachment?thin=result`),
   );
 }
