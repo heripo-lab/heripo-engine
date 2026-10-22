@@ -13,6 +13,7 @@ import type {
 import { Output } from 'ai';
 import { createHash } from 'node:crypto';
 
+import { CONTENT_ATTACHMENT_EVIDENCE_WINDOW_POLICY } from './content-attachment-evidence-window-policy';
 import {
   createContentAttachmentSourceContextRequest,
   resolveContentAttachmentSourceContextRange,
@@ -25,13 +26,18 @@ import { CONTENT_ATTACHMENT_WORD_RANGE_PATTERN } from './content-attachment-word
 
 export const CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION =
   'content-evidence-windows.v1' as const;
+export const CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION =
+  'content-evidence-windows.v2' as const;
+export type ContentAttachmentEvidenceWindowVersion =
+  | typeof CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION
+  | typeof CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION;
 export interface ContentAttachmentEvidenceWindow {
   ref: string;
   sourceRef: string;
   originalWords: string[];
 }
 export interface ContentAttachmentEvidenceWindowRequest {
-  version: typeof CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION;
+  version: ContentAttachmentEvidenceWindowVersion;
   executionMode: 'offline-only';
   baseVersion: 'segment-recipients.v25' | 'segment-recipients.v26';
   maxWindowWords: 16;
@@ -127,7 +133,7 @@ function windowSchema(
   return result;
 }
 
-/** Compile only an offline address contract; no provider invocation or prompt migration occurs. */
+/** Compile an opt-in offline address contract, preserving the exact historical v1 default. */
 export async function createContentAttachmentEvidenceWindowRequest(
   document: ProcessedDocument,
   plan: ContentAttachmentPlan,
@@ -137,7 +143,13 @@ export async function createContentAttachmentEvidenceWindowRequest(
   baseVersion:
     | 'segment-recipients.v25'
     | 'segment-recipients.v26' = 'segment-recipients.v26',
+  windowVersion: ContentAttachmentEvidenceWindowVersion = CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,
 ): Promise<ContentAttachmentEvidenceWindowRequest> {
+  if (
+    windowVersion !== CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION &&
+    windowVersion !== CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION
+  )
+    throw new Error('Invalid evidence-window version');
   if (
     baseVersion !== 'segment-recipients.v25' &&
     baseVersion !== 'segment-recipients.v26'
@@ -182,7 +194,7 @@ export async function createContentAttachmentEvidenceWindowRequest(
   const format = await Output.object({ schema: source.schema }).responseFormat;
   if (format?.type !== 'json') throw new Error('Expected object output');
   const data = {
-    version: CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,
+    version: windowVersion,
     executionMode: 'offline-only' as const,
     baseVersion,
     maxWindowWords: 16 as const,
@@ -193,7 +205,12 @@ export async function createContentAttachmentEvidenceWindowRequest(
       unit,
       segmentation,
     ),
-    systemPrompt: source.systemPrompt,
+    systemPrompt:
+      windowVersion === CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION
+        ? source.systemPrompt +
+          '\n\n' +
+          CONTENT_ATTACHMENT_EVIDENCE_WINDOW_POLICY
+        : source.systemPrompt,
     userPrompt: JSON.stringify(payload),
     providerOutputSchema: windowSchema(format.schema, windows),
     windows,

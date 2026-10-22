@@ -15,6 +15,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import {
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION,
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,
   createContentAttachmentEvidenceWindowRequest,
   resolveContentAttachmentEvidenceWindowRange,
 } from './content-attachment-evidence-windows';
@@ -44,6 +46,12 @@ export async function inspectContentAttachmentEvidenceWindowRecipients(
   let request: ContentAttachmentEvidenceWindowRequest;
   let decisions: Record<string, unknown>;
   try {
+    if (
+      audit.request.version !== CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION &&
+      audit.request.version !==
+        CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION
+    )
+      throw new Error('REQUEST_SNAPSHOT_MISMATCH');
     request = await createContentAttachmentEvidenceWindowRequest(
       document,
       plan,
@@ -51,6 +59,7 @@ export async function inspectContentAttachmentEvidenceWindowRecipients(
       segmentation,
       audit.request.contextOptions,
       audit.request.baseVersion,
+      audit.request.version,
     );
     if (!isDeepStrictEqual(request, audit.request))
       throw new Error('REQUEST_SNAPSHOT_MISMATCH');

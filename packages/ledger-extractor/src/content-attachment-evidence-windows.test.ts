@@ -3,6 +3,7 @@ import type * as Ai from 'ai';
 import { Output } from 'ai';
 import { expect, test, vi } from 'vitest';
 
+import { CONTENT_ATTACHMENT_EVIDENCE_WINDOW_POLICY } from './content-attachment-evidence-window-policy';
 import {
   createContentAttachmentEvidenceWindowRequest,
   projectContentAttachmentEvidenceWindowChain as project,
@@ -265,3 +266,81 @@ test('rejects a changed provider schema contract or non-object output without a 
   ).rejects.toThrow('Window schema contract differs');
   expect(spy).toHaveBeenCalled();
 });
+
+test.each(['segment-recipients.v25', 'segment-recipients.v26'] as const)(
+  'adds only opt-in Q/L instructions while preserving the %s base request and schema',
+  async (baseVersion) => {
+    const f = await evidenceWindowFixture(true, true);
+    const before = JSON.stringify({
+      document: f.document,
+      plan: f.plan,
+      segmentation: f.segmentation,
+    });
+    const old = await createContentAttachmentEvidenceWindowRequest(
+      f.document,
+      f.plan,
+      f.unit,
+      f.segmentation,
+      f.options,
+      baseVersion,
+    );
+    const explicitOld = await createContentAttachmentEvidenceWindowRequest(
+      f.document,
+      f.plan,
+      f.unit,
+      f.segmentation,
+      f.options,
+      baseVersion,
+      'content-evidence-windows.v1',
+    );
+    expect(explicitOld).toEqual(old);
+    const current = await createContentAttachmentEvidenceWindowRequest(
+      f.document,
+      f.plan,
+      f.unit,
+      f.segmentation,
+      f.options,
+      baseVersion,
+      'content-evidence-windows.v2',
+    );
+    expect(current.version).toBe('content-evidence-windows.v2');
+    expect(current.executionMode).toBe('offline-only');
+    expect(current.systemPrompt).toBe(
+      old.systemPrompt + '\n\n' + CONTENT_ATTACHMENT_EVIDENCE_WINDOW_POLICY,
+    );
+    expect(current.userPrompt).toBe(old.userPrompt);
+    expect(current.providerOutputSchema).toEqual(old.providerOutputSchema);
+    const {
+      version: _oldVersion,
+      systemPrompt: _oldPrompt,
+      snapshotSha256: oldHash,
+      ...oldOther
+    } = old;
+    const {
+      version: _version,
+      systemPrompt: _prompt,
+      snapshotSha256: hash,
+      ...other
+    } = current;
+    expect(other).toEqual(oldOther);
+    expect(hash).not.toBe(oldHash);
+    expect(
+      JSON.stringify({
+        document: f.document,
+        plan: f.plan,
+        segmentation: f.segmentation,
+      }),
+    ).toBe(before);
+    await expect(
+      createContentAttachmentEvidenceWindowRequest(
+        f.document,
+        f.plan,
+        f.unit,
+        f.segmentation,
+        f.options,
+        baseVersion,
+        'foreign' as never,
+      ),
+    ).rejects.toThrow('Invalid evidence-window version');
+  },
+);

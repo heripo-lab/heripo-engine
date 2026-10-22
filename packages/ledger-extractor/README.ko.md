@@ -896,3 +896,11 @@ V26은 합의한 범용 영어 문안만 덧붙입니다. 본문→표 참조, �
 검사기는 명시적인 파생 W 범위 해석을 기존 판단 검사에 전달하며 Q/L 원응답을 수정하지 않습니다. 정상 finding의 `windowSelections`에는 원래 선택·응답 내 위치·구간·원래 범위·필드·UTF-16 위치·출처를 남깁니다. 원문과 기존 관측을 수정하지 않습니다. 스키마·출처의 유효성이 의미적 충분성을 증명하거나 수신 대상을 자동 채택하지는 않습니다.
 
 `resolveContentAttachmentEvidenceWindowRange`는 새로 컴파일한 신뢰 요청에서만 사용합니다. `projectContentAttachmentEvidenceWindowChain`은 같은 원문의 비어 있지 않은 정순·연속 어절 연결만 허용하며, 원래 필드에서 사이 공백까지 읽습니다. 비연속 조각·역순 목록·다른 본문/셀/캡션은 별도 근거로 유효할 수 있지만 한 연속 구절로 조회하지 않습니다. 원응답 목록을 정렬·중복 제거·보정하지 않습니다. 기존 v25/v26 요청·검사는 원래 API로 계속 재현합니다.
+
+### 선택적으로 적용하는 Q/L 주소 지침(window contract v2)
+
+`createContentAttachmentEvidenceWindowRequest`의 일곱 번째 인수에 `'content-evidence-windows.v2'`를 지정하면 선택한 v25/v26 기본 프롬프트 뒤에 Q/L 근거 주소 지침만 덧붙입니다. 여섯 번째 인수는 기존처럼 기본 후보 판단 버전을 선택합니다. `CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION`은 v2를 가리키며 `CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION`과 기본값은 v1을 유지합니다. `ContentAttachmentEvidenceWindowVersion`은 두 버전을 표현합니다.
+
+추가 지침은 입력의 원래 E/X/W 위치와 응답의 Q/L 선택을 구별하고, 주소 단위와 의미 구간을 분리하며 현재 E:S 범위·원문 역할을 유지하고 지역 L 끝점과 구조 참조 L을 구별합니다. 기존 수신 대상·미결·목록·조사범위·작업 적용 규칙은 그대로 상속합니다. 사용자 입력·전체 후보·Q 매핑·원래 출처·제공자 출력 스키마는 v1과 같습니다. 버전·시스템 프롬프트·스냅샷 해시만 달라집니다.
+
+검사기는 감사에 기록된 버전을 명시적으로 재컴파일하며 v1/v2 감사 표지만 서로 바꾼 경우 거부합니다. 기존 v1 요청도 정확히 재현합니다. 두 버전 모두 `executionMode: 'offline-only'`를 유지하며 이번 프롬프트 버전 추가로 제공자 호출·기본 파이프라인 채택·응답 보정을 추가하지 않습니다.

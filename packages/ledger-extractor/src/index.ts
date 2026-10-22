@@ -221,6 +221,7 @@ export type {
 
 export {
   CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION,
+  CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION,
   createContentAttachmentEvidenceWindowRequest,
   resolveContentAttachmentEvidenceWindowRange,
   projectContentAttachmentEvidenceWindowChain,
@@ -228,6 +229,7 @@ export {
 export type {
   ContentAttachmentEvidenceWindow,
   ContentAttachmentEvidenceWindowRequest,
+  ContentAttachmentEvidenceWindowVersion,
 } from './content-attachment-evidence-windows';
 export { inspectContentAttachmentEvidenceWindowRecipients } from './content-attachment-evidence-window-inspection';
 export type {

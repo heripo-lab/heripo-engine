@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { expect, test, vi } from 'vitest';
 
 import { inspectContentAttachmentEvidenceWindowRecipients as inspect } from './content-attachment-evidence-window-inspection';
+import { createContentAttachmentEvidenceWindowRequest } from './content-attachment-evidence-windows';
 import { evidenceWindowFixture } from './content-attachment-evidence-windows.test-fixture';
 
 const run = (
@@ -254,3 +255,42 @@ test('retains broader but structurally valid evidence without claiming it proves
   expect(result.issues).toEqual([]);
   expect(result.findings).toHaveLength(1);
 });
+
+test.each(['segment-recipients.v25', 'segment-recipients.v26'] as const)(
+  'replays both window versions for %s without adopting a different prompt or changing raw decisions',
+  async (baseVersion) => {
+    const f = await evidenceWindowFixture(true, true);
+    const results = [];
+    const before = JSON.stringify(f.response);
+    for (const version of [
+      'content-evidence-windows.v1',
+      'content-evidence-windows.v2',
+    ] as const) {
+      const request = await createContentAttachmentEvidenceWindowRequest(
+        f.document,
+        f.plan,
+        f.unit,
+        f.segmentation,
+        f.options,
+        baseVersion,
+        version,
+      );
+      const audit = JSON.parse(
+        JSON.stringify({ request, rawResponse: f.response }),
+      );
+      const result = await run(f, audit);
+      expect(result.issues).toEqual([]);
+      expect(result.findings).toHaveLength(2);
+      results.push(result);
+      audit.request.version =
+        version === 'content-evidence-windows.v1'
+          ? 'content-evidence-windows.v2'
+          : 'content-evidence-windows.v1';
+      const mixed = await run(f, audit);
+      expect(mixed.issues.join(' ')).toContain('REQUEST_SNAPSHOT_MISMATCH');
+      expect(mixed.findings).toEqual([]);
+    }
+    expect(results[0]).toEqual(results[1]);
+    expect(JSON.stringify(f.response)).toBe(before);
+  },
+);
