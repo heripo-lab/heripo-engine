@@ -274,3 +274,15 @@ export type {
   ContentAttachmentThinEvidence,
   ContentAttachmentThinInspection,
 } from './content-attachment-thin-inspection';
+export {
+  CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT,
+  CONTENT_ATTACHMENT_THIN_OUTLIER_RATE,
+  checkContentAttachmentThinOutliers,
+  routeContentAttachmentThinSegments,
+} from './content-attachment-thin-routing';
+export type {
+  ContentAttachmentThinLoneRate,
+  ContentAttachmentThinOutlierCheck,
+  ContentAttachmentThinRoutedSegment,
+  ContentAttachmentThinVote,
+} from './content-attachment-thin-routing';
