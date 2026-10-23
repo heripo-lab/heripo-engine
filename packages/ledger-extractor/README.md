@@ -173,6 +173,12 @@ Discovery v6 preserves merged header cells (`text`, `rowSpan`, `colSpan`, `isHea
 
 `prepareCandidateDiscoveryRetry(plan, audits, { unitIds, updatedPlan })` also accepts explicitly reviewed units (including semantic exclusions) and updated bounded inputs for those units. It returns the replacement `plan`; unselected units and audits remain unchanged. Historical v4/v5 prompts remain replayable without applying v6 validation retroactively.
 
+## Report profile
+
+Reports differ (land excavations, trench-only surveys, underwater catalogues), so later steps read a person-confirmed `ReportProfile` (`report-profile.v1`) instead of one rule set for every report. A profile records the original input hash, trait judgments (`yes`, `no` or `unclear`) for `REPORT_TRAIT_IDS`, the distinct, non-nested chapters that hold this investigation's objects, its source (`router` or `manual`) and the confirmation time. The trait list stays open: a characteristic of a new kind of report is recorded as an `x-` prefixed trait until a branch uses it.
+
+`validateReportProfile(index, inputSha256, profile)` returns every problem it finds (wrong input, unknown traits or values, missing, repeated or nested scope chapters, unknown source, invalid time) without changing the profile; an empty list means the profile can be used. Its `scopeChapterIds` can be passed directly to `prepareCandidateDiscovery`. `contentAttachmentThinPolicyFromProfile(profile)` maps traits to thin attachment rules: `layers: 'local'` unless stratigraphy is confirmed not local (`local_stratigraphy: 'no'`) or there is no profile, which keeps `layers: 'all'`. Applying the policy to plans and routing is follow-up work.
+
 ## Thin per-unit content attachment
 
 The thin path is the current way to attach body sentences and table items to a frozen registry. It reuses the `prepareContentAttachment` plan below and replaces the per-segment recipient calls with one compact call per unit, repeated three times. All functions are deterministic and offline except `attachContentThinUnit`, which calls the caller's model.

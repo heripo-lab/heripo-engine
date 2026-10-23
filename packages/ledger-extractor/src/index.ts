@@ -30,3 +30,4 @@ export * from './candidates';
 export * from './resources';
 export * from './validators';
 export * from './content-attachment';
+export * from './profile';
