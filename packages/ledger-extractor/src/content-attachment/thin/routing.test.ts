@@ -341,6 +341,7 @@ describe('routeContentAttachmentThinSegments', () => {
       runs(),
     );
     plan.thinPolicy = { layers: 'local' };
+    compilation.codeMap.candidateRefs = ['R4', 'R10', 'R11', 'R12', 'R13'];
     const local = routeContentAttachmentThinSegments(
       plan,
       unit,
@@ -353,5 +354,10 @@ describe('routeContentAttachmentThinSegments', () => {
     expect(local[0].layerSuggestions).toEqual(['R10']);
     expect(local[3].layerSuggestions).toEqual(['R11']);
     expect(local[1].layerSuggestions).toEqual(['R4']);
+    compilation.codeMap.candidateRefs = ['R10', 'R11', 'R12', 'R13'];
+    expect(
+      routeContentAttachmentThinSegments(plan, unit, compilation, runs())[1]
+        .layerSuggestions,
+    ).toEqual([]);
   });
 });

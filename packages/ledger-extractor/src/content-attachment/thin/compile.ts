@@ -17,6 +17,7 @@ import {
 } from './compile-candidates';
 import {
   CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
 } from './compile-types';
 import {
@@ -192,7 +193,10 @@ export function createContentAttachmentThinInput(
   }
 
   return {
-    version: CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+    version:
+      plan.thinPolicy?.layers === 'local'
+        ? CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION
+        : CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
     input: {
       candidateColumns: grounded.columns,
       contexts,

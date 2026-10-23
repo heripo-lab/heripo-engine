@@ -144,12 +144,16 @@ export function routeContentAttachmentThinSegments(
         ),
       ]),
   );
+  // under the local policy only layers offered to the model for this unit can be suggested
+  const local = plan.thinPolicy?.layers === 'local';
+  const offered = new Set(compilation.codeMap.candidateRefs);
   const nameUse = new Map<string, number>();
   for (const l of layerKeys)
     for (const k of new Set(l.keys)) nameUse.set(k, (nameUse.get(k) ?? 0) + 1);
   /**
    * Local rule for a name several layers share: keep the layers with evidence in this unit, then only the
-   * one whose evidence is nearest at or before the segment. Names used by one layer are unaffected.
+   * one whose evidence is nearest at or before the segment. Names used by one layer are unaffected, but
+   * only layers offered to the model for this unit can be suggested.
    */
   const narrowLocal = (named: typeof layerKeys, text: string, at: number) => {
     const shared = [...nameUse].flatMap(([k, n]) =>
@@ -157,11 +161,12 @@ export function routeContentAttachmentThinSegments(
     );
     const before = (ref: string) =>
       Math.max(-1, ...evidenceOrder.get(ref)!.filter((i) => i <= at));
-    return named.filter((l) => {
+    const pool = named.filter((l) => offered.has(l.ref));
+    return pool.filter((l) => {
       const key = shared.find((k) => l.keys.includes(k));
       if (!key) return true;
       if (!evidenceOrder.get(l.ref)!.length) return false;
-      const rivals = named.filter(
+      const rivals = pool.filter(
         (o) => o.keys.includes(key) && evidenceOrder.get(o.ref)!.length,
       );
       const best = Math.max(...rivals.map((o) => before(o.ref)));
@@ -187,9 +192,7 @@ export function routeContentAttachmentThinSegments(
     const areaSuggestions = returned.filter(isArea).map(vote);
     const named = layerKeys.filter((l) => l.keys.some((k) => text.includes(k)));
     const layerSuggestions = (
-      plan.thinPolicy?.layers === 'local'
-        ? narrowLocal(named, text, sourceOrder.get(span.key)!)
-        : named
+      local ? narrowLocal(named, text, sourceOrder.get(span.key)!) : named
     )
       .filter((l) => !(votes.has(l.ref) && unanimous(l.ref)))
       .map((l) => l.ref);

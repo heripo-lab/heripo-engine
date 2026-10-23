@@ -11,7 +11,10 @@ import { describe, expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
 import { createContentAttachmentThinInput } from './compile';
-import { CONTENT_ATTACHMENT_THIN_COMPILE_VERSION } from './compile-types';
+import {
+  CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
+} from './compile-types';
 
 const cell = (text: string, isHeader = false) => ({
   text,
@@ -214,6 +217,54 @@ describe('createContentAttachmentThinInput', () => {
       { refs: ['R3', 'R9'], reason: 'offered' },
     ]);
     expect(input.chapters).toEqual(['1. 시굴조사']);
+  });
+
+  test('offers a single-unit layer only in its unit and next to it under the local layer policy', () => {
+    const { plan, unit } = fixture();
+    const others = ['far', 'next-but-one', 'next'].map(
+      (unitId, i) =>
+        ({
+          ...unit,
+          unitId,
+          sources: [{ ...unit.sources[0], resource: { key: `/other/${i}` } }],
+        }) as unknown as AttachmentUnit,
+    );
+    plan.units = [...others, unit];
+    const layer = (ref: string, keys: string[]) => {
+      const e = structuredClone(plan.registry[0]);
+      e.ref = ref;
+      e.groupId = `g-${ref}`;
+      e.recordKind = 'layer';
+      e.mentions[0].evidence = keys.map(
+        (resourceKey) =>
+          ({ resourceKey }) as (typeof e.mentions)[0]['evidence'][0],
+      );
+      return e;
+    };
+    plan.registry.push(
+      layer('L1', [unit.sources[0].resource.key]),
+      layer('L2', ['/other/0']),
+      layer('L3', ['/other/2']),
+      layer('L4', ['/other/0', '/other/1']),
+      layer('L5', []),
+      layer('L6', ['/elsewhere']),
+    );
+
+    const all = createContentAttachmentThinInput(plan, unit);
+    plan.thinPolicy = { layers: 'local' };
+    const local = createContentAttachmentThinInput(plan, unit);
+
+    expect(all.version).toBe(CONTENT_ATTACHMENT_THIN_COMPILE_VERSION);
+    expect(all.codeMap.candidateRefs).toEqual(
+      expect.arrayContaining(['L1', 'L2', 'L3', 'L4', 'L5', 'L6']),
+    );
+    expect(local.version).toBe(CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION);
+    expect(
+      local.codeMap.candidateRefs.filter((r) => r.startsWith('L')),
+    ).toEqual(['L1', 'L3', 'L4', 'L5', 'L6']);
+    expect(local.input.candidates.map((row) => row[0])).toEqual(
+      local.codeMap.candidateRefs,
+    );
   });
 
   test('builds one handle per chapter node and record kind', () => {

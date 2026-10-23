@@ -4,13 +4,16 @@ import type { ContentAttachmentThinRowBinding } from './row-owners';
 
 export const CONTENT_ATTACHMENT_THIN_COMPILE_VERSION =
   'content-attachment-thin-compile.v1' as const;
+/** Compilation under the plan's `local` layer policy, where single-unit layers are offered only nearby. */
+export const CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION =
+  'content-attachment-thin-compile.v2' as const;
 
 /** Maximum original words addressed by one Q window. */
 export const CONTENT_ATTACHMENT_THIN_WINDOW_WORDS = 16;
 /** A chapter whose title core appears in the unit contributes all its candidates up to this size. */
 export const CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT = 30;
 
-/** Kinds that are document-wide referents and are always offered. */
+/** Kinds that are document-wide referents and are always offered (layers: see the plan's layer policy). */
 export const ALWAYS_OFFERED_KINDS = new Set<
   AttachmentRegistryEntry['recordKind']
 >(['area', 'trench', 'layer']);
@@ -90,7 +93,9 @@ export interface ContentAttachmentThinCodeMap {
   handles: Array<{ ref: string; members: string[] }>;
 }
 export interface ContentAttachmentThinCompilation {
-  version: typeof CONTENT_ATTACHMENT_THIN_COMPILE_VERSION;
+  version:
+    | typeof CONTENT_ATTACHMENT_THIN_COMPILE_VERSION
+    | typeof CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION;
   input: ContentAttachmentThinInput;
   codeMap: ContentAttachmentThinCodeMap;
 }
