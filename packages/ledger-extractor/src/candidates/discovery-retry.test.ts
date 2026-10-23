@@ -114,6 +114,10 @@ describe('original table identifiers and chapter continuations', () => {
       },
       {
         unitIds: [plan.units[0].unitId],
+        updatedPlan: { ...updated, scopeChapterIds: ['root', 'other'] },
+      },
+      {
+        unitIds: [plan.units[0].unitId],
         updatedPlan: { ...updated, units: [] },
       },
     ])

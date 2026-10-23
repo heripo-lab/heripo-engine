@@ -206,6 +206,7 @@ export async function assembleCandidateDiscovery(
     version: 'ledger-object-candidates.v1',
     inputSha256: plan.inputSha256,
     scopeChapterId: plan.scopeChapterId,
+    ...(plan.scopeChapterIds ? { scopeChapterIds: plan.scopeChapterIds } : {}),
     scopeTitle: plan.scopeTitle,
     candidates: [...candidates.values()],
     issues,

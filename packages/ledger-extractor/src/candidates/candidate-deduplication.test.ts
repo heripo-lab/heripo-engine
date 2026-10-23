@@ -166,9 +166,20 @@ describe('whole-pool candidate deduplication', () => {
       ['/t', '/cell'],
     );
     expect(request.units[0].chapterPath).toEqual(plan.units[0].chapterPath);
+    expect(request).not.toHaveProperty('scopeChapterIds');
+    const scopes = ['ch', 'ch2'];
+    expect(
+      JSON.parse(
+        createCandidateDeduplicationRequest(
+          { ...plan, scopeChapterIds: scopes },
+          { ...d, scopeChapterIds: scopes },
+        ).userPrompt,
+      ).scopeChapterIds,
+    ).toEqual(scopes);
     for (const change of [
       { inputSha256: 'other' },
       { scopeChapterId: 'other' },
+      { scopeChapterIds: ['ch', 'other'] },
       { completedUnitIds: [] },
       { completedUnitIds: ['wrong'] },
     ])

@@ -7,11 +7,14 @@ import type {
   CandidateDiscoveryUnit,
 } from './discovery-types';
 
-/** Code chooses scope, chunk sizes and context; the model cannot schedule more work. */
+/**
+ * Code chooses scope, chunk sizes and context; the model cannot schedule more work.
+ * The scope is one chapter subtree or several distinct, non-nested subtrees planned in document order.
+ */
 export function prepareCandidateDiscovery(
   index: DocumentResourceIndex,
   options: {
-    scopeChapterId: string;
+    scopeChapterId: string | string[];
     inputSha256: string;
     maxTextChars: number;
     tableRowsPerUnit: number;
@@ -24,18 +27,25 @@ export function prepareCandidateDiscovery(
     options.tableRowsPerUnit < 1
   )
     throw new Error('Discovery chunk limits must be positive integers');
-  const root = index.resources.find(
-    (r) => r.kind === 'chapter' && r.resourceId === options.scopeChapterId,
-  );
-  if (!root || root.kind !== 'chapter')
-    throw new Error('Scope chapter not found');
   const chapters = index.resources.filter(
     (r): r is Extract<DocumentResource, { kind: 'chapter' }> =>
       r.kind === 'chapter',
   );
-  const scoped = chapters.filter(
-    (r) => r.key === root.key || r.key.startsWith(`${root.key}/children/`),
+  const ids = [options.scopeChapterId].flat();
+  const roots = chapters.filter((r) => ids.includes(r.resourceId!));
+  if (!ids.length || roots.length !== new Set(ids).size)
+    throw new Error('Scope chapter not found');
+  if (
+    roots.length !== ids.length ||
+    roots.some((a) => roots.some((b) => b.key.startsWith(`${a.key}/children/`)))
+  )
+    throw new Error('Scope chapters must be distinct and not nested');
+  const subtrees = roots.map((root) =>
+    chapters.filter(
+      (r) => r.key === root.key || r.key.startsWith(`${root.key}/children/`),
+    ),
   );
+  const scoped = subtrees.flat();
   const units: CandidateDiscoveryUnit[] = [];
   const textByChapter = new Map(
     scoped.map((chapter) => [
@@ -46,10 +56,12 @@ export function prepareCandidateDiscovery(
       ),
     ]),
   );
-  // Preserve original resources while assigning leading continuation blocks to the preceding sibling.
-  for (let i = 1; i < scoped.length; i++) {
-    const previous = scoped[i - 1];
-    const current = scoped[i];
+  // Preserve original resources while assigning leading continuation blocks to the preceding sibling
+  // of the same scope subtree; separate scopes are not adjacent in the document.
+  for (const pair of subtrees.flatMap((tree) =>
+    tree.slice(1).map((current, i) => [tree[i], current] as const),
+  )) {
+    const [previous, current] = pair;
     if (
       previous.key.slice(0, previous.key.lastIndexOf('/')) !==
       current.key.slice(0, current.key.lastIndexOf('/'))
@@ -143,9 +155,24 @@ export function prepareCandidateDiscovery(
     }
   }
   return {
-    scopeChapterId: options.scopeChapterId,
-    scopeTitle: root.data.originTitle,
+    scopeChapterId: roots[0].resourceId!,
+    ...(roots.length > 1
+      ? { scopeChapterIds: roots.map((r) => r.resourceId!) }
+      : {}),
+    scopeTitle: roots.map((r) => r.data.originTitle).join(' · '),
     inputSha256: options.inputSha256,
     units,
   };
+}
+
+/** Whether two discovery plans or results cover the same scope chapters. */
+export function isSameCandidateDiscoveryScope(
+  a: Pick<CandidateDiscoveryPlan, 'scopeChapterId' | 'scopeChapterIds'>,
+  b: Pick<CandidateDiscoveryPlan, 'scopeChapterId' | 'scopeChapterIds'>,
+) {
+  return (
+    a.scopeChapterId === b.scopeChapterId &&
+    JSON.stringify(a.scopeChapterIds ?? []) ===
+      JSON.stringify(b.scopeChapterIds ?? [])
+  );
 }

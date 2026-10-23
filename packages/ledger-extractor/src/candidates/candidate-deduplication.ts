@@ -10,6 +10,8 @@ import type {
 import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';
 
+import { isSameCandidateDiscoveryScope } from './discovery-plan';
+
 export const CANDIDATE_DEDUPLICATION_PROMPT_VERSION =
   'candidate-deduplication.v5';
 const SYSTEM_PROMPT_V3 = `Review the ENTIRE supplied archaeological object candidate pool AFTER discovery has finished. Group occurrences that refer to the SAME archaeological object. Do not perform a new extraction or exclude candidates.
@@ -85,7 +87,7 @@ export function createCandidateDeduplicationRequest(
 ) {
   if (
     plan.inputSha256 !== discovery.inputSha256 ||
-    plan.scopeChapterId !== discovery.scopeChapterId ||
+    !isSameCandidateDiscoveryScope(plan, discovery) ||
     discovery.completedUnitIds.length !== plan.units.length ||
     plan.units.some((u) => !discovery.completedUnitIds.includes(u.unitId))
   ) {
@@ -134,6 +136,9 @@ export function createCandidateDeduplicationRequest(
     userPrompt: JSON.stringify({
       inputSha256: discovery.inputSha256,
       scopeChapterId: discovery.scopeChapterId,
+      ...(discovery.scopeChapterIds
+        ? { scopeChapterIds: discovery.scopeChapterIds }
+        : {}),
       candidates,
       units,
     }),

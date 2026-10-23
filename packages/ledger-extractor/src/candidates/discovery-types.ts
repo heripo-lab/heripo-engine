@@ -83,6 +83,8 @@ export interface CandidateDiscoveryUnit {
 }
 export interface CandidateDiscoveryPlan {
   scopeChapterId: string;
+  /** Every scope chapter in document order, present only when the scope has more than one chapter. */
+  scopeChapterIds?: string[];
   scopeTitle: string;
   inputSha256: string;
   units: CandidateDiscoveryUnit[];
@@ -127,6 +129,8 @@ export interface CandidateDiscoveryResult {
   version: 'ledger-object-candidates.v1';
   inputSha256: string;
   scopeChapterId: string;
+  /** Every scope chapter in document order, present only when the scope has more than one chapter. */
+  scopeChapterIds?: string[];
   scopeTitle: string;
   candidates: LedgerObjectCandidate[];
   issues: CandidateDiscoveryIssue[];
