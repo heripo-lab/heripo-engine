@@ -77,6 +77,11 @@ export const LLM_MODELS: LLMModel[] = [
     provider: 'Anthropic',
   },
   {
+    id: 'anthropic/claude-haiku-5-5',
+    label: 'Claude Haiku 5.5',
+    provider: 'Anthropic',
+  },
+  {
     id: 'anthropic/claude-haiku-4-5',
     label: 'Claude Haiku 4.5',
     provider: 'Anthropic',

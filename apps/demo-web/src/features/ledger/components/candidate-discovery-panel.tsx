@@ -42,7 +42,7 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   const { data: indexData } = useDocumentResourceIndex(taskId);
   const { query, start, cancel, audit } = useCandidateDiscovery(taskId);
   const [scope, setScope] = useState<string[]>([]);
-  const [modelId, setModelId] = useState('openai/gpt-6-luna');
+  const [modelId, setModelId] = useState('anthropic/claude-haiku-5-5');
   const [maxTextChars, setMaxTextChars] = useState(8000);
   const [tableRowsPerUnit, setTableRowsPerUnit] = useState(12);
   const [maxRetries, setMaxRetries] = useState(0);
