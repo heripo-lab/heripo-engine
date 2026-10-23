@@ -162,14 +162,20 @@ export type {
   ContentAttachmentThinRowOwners,
 } from './thin/row-owners';
 export {
+  CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
   CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
   contentAttachmentThinSystemPrompt,
   createContentAttachmentThinRequest,
+  createContentAttachmentThinArraySchema,
   createContentAttachmentThinSchema,
 } from './thin/prompt';
-export type { ContentAttachmentThinRequest } from './thin/prompt';
+export type {
+  ContentAttachmentThinRequest,
+  ContentAttachmentThinRequestVersion,
+  ContentAttachmentThinResponseFormat,
+} from './thin/prompt';
 export { inspectContentAttachmentThinResponse } from './thin/inspection';
 export type {
   ContentAttachmentThinAudit,

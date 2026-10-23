@@ -1,5 +1,6 @@
 import type { ContentAttachmentPlan } from '../types';
 import type { ContentAttachmentThinEvidence } from './inspection';
+import type { ContentAttachmentThinRequestVersion } from './prompt';
 import type { ContentAttachmentThinRoutedSegment } from './routing';
 import type {
   ContentAttachmentThinRunName,
@@ -45,9 +46,8 @@ export interface ContentAttachmentThinReviewItem extends Omit<
 }
 export interface ContentAttachmentThinResult {
   version: 'ledger-content-attachments.v2';
-  method:
-    | typeof CONTENT_ATTACHMENT_THIN_VERSION
-    | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION;
+  /** Prompt version of the saved calls (the first one found); without calls, the version the plan implied. */
+  method: ContentAttachmentThinRequestVersion;
   reviewStatus: 'not_reviewed';
   totalUnits: number;
   units: Array<{
@@ -106,9 +106,10 @@ export function assembleContentAttachmentThin(
   const output: ContentAttachmentThinResult = {
     version: 'ledger-content-attachments.v2',
     method:
-      plan.thinPolicy?.continuity === 'linked'
+      results.flatMap((r) => r.calls)[0]?.request.version ??
+      (plan.thinPolicy?.continuity === 'linked'
         ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
-        : CONTENT_ATTACHMENT_THIN_VERSION,
+        : CONTENT_ATTACHMENT_THIN_VERSION),
     reviewStatus: 'not_reviewed',
     totalUnits: plan.units.length,
     units: [],

@@ -11,6 +11,19 @@ export const CONTENT_ATTACHMENT_THIN_VERSION =
 /** The v8 prompt plus the rule for linked page-boundary context (`continuity: 'linked'`). */
 export const CONTENT_ATTACHMENT_THIN_LINKED_VERSION =
   'content-attachment-thin.v9' as const;
+/**
+ * Decisions returned as an array with one item per segment, and a schema that checks reference formats only;
+ * membership of segments, candidates, handles and ranges is checked by code. Linked compilations add the
+ * page-boundary rule as in v9. The default for new requests.
+ */
+export const CONTENT_ATTACHMENT_THIN_ARRAY_VERSION =
+  'content-attachment-thin.v10' as const;
+export type ContentAttachmentThinRequestVersion =
+  | typeof CONTENT_ATTACHMENT_THIN_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_ARRAY_VERSION;
+/** `object`: v8/v9 decisions keyed by segment; `array`: v10 decision items. */
+export type ContentAttachmentThinResponseFormat = 'object' | 'array';
 
 /** The recipient prompt version whose rules are restored verbatim. */
 const RESTORED_RULES_SOURCE_VERSION = 'segment-recipients.v26' as const;
@@ -73,14 +86,33 @@ export function contentAttachmentThinRestoredRules(): string {
 
 const THIN_LINKED_RULE = `PAGE BOUNDARY: Read-only blocks before the first body block may list evidenceOf: R refs whose registration evidence is that block. When the first body block continues such a block (same sentence or same description), its target is that block's subject; otherwise ignore evidenceOf.`;
 
+/** v10 sentences that describe the decision array instead of segment keys of d. */
+const ARRAY_FORMAT: Array<[string, string]> = [
+  [
+    'Return one decision for every segment key in d (k = a or n):',
+    'Return d as an array with exactly one item per listed segment, in any order; s is the segment ref and k = a or n:',
+  ],
+  ['and are not keys in d.', 'and are not items of d.'],
+];
+
 /**
  * Thin system prompt: base instructions, the format bridge and the restored rules, plus the page-boundary rule
- * for linked compilations.
+ * for linked compilations. The array format describes decision items instead of segment keys.
  */
 export function contentAttachmentThinSystemPrompt(
-  options: { linked?: boolean } = {},
+  options: {
+    linked?: boolean;
+    format?: ContentAttachmentThinResponseFormat;
+  } = {},
 ): string {
-  const base = `${THIN_BASE_PROMPT}\n\n${THIN_FORMAT_BRIDGE}\n\n${contentAttachmentThinRestoredRules()}`;
+  const head =
+    options.format === 'array'
+      ? ARRAY_FORMAT.reduce(
+          (prompt, [from, to]) => prompt.replace(from, to),
+          THIN_BASE_PROMPT,
+        )
+      : THIN_BASE_PROMPT;
+  const base = `${head}\n\n${THIN_FORMAT_BRIDGE}\n\n${contentAttachmentThinRestoredRules()}`;
   return options.linked ? `${base}\n\n${THIN_LINKED_RULE}` : base;
 }
 
@@ -93,8 +125,40 @@ const obj = (props: Record<string, unknown>) => ({
 });
 const arr = (items: unknown) => ({ type: 'array', items });
 
+const pattern = (p: string) => ({ type: 'string', pattern: p });
 /**
- * Output schema: every judged segment is a required key of d; a decision is either an attachment (k = a)
+ * v10 output schema, the same for every unit: d is an array of decision items whose segment, candidate, handle
+ * and range references are checked by format only.
+ */
+export function createContentAttachmentThinArraySchema() {
+  const ref = pattern('^R[0-9]+$');
+  const segment = pattern('^[ET][0-9]+:S[0-9]+$');
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['d'],
+    properties: {
+      d: arr({
+        anyOf: [
+          obj({
+            s: segment,
+            k: { type: 'string', enum: ['a'] },
+            r: arr(ref),
+            h: arr(pattern('^H[0-9]+$')),
+            x: arr(ref),
+            ia: arr(arr(ref)),
+            sa: arr(arr(ref)),
+            e: arr(pattern('^Q[0-9]+:L[0-9]+-L[0-9]+$')),
+          }),
+          obj({ s: segment, k: { type: 'string', enum: ['n'] } }),
+        ],
+      }),
+    },
+  };
+}
+
+/**
+ * v8/v9 output schema: every judged segment is a required key of d; a decision is either an attachment (k = a)
  * or none (k = n). Evidence ranges admit only existing Q windows and L numbers within each window.
  */
 export function createContentAttachmentThinSchema(
@@ -144,28 +208,39 @@ export function createContentAttachmentThinSchema(
 }
 
 export interface ContentAttachmentThinRequest {
-  version:
-    | typeof CONTENT_ATTACHMENT_THIN_VERSION
-    | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION;
+  version: ContentAttachmentThinRequestVersion;
   systemPrompt: string;
   userPrompt: string;
-  providerOutputSchema: ReturnType<typeof createContentAttachmentThinSchema>;
+  providerOutputSchema:
+    | ReturnType<typeof createContentAttachmentThinSchema>
+    | ReturnType<typeof createContentAttachmentThinArraySchema>;
 }
 
-/** Model request for one compiled unit; the user prompt is the compact input JSON. */
+/**
+ * Model request for one compiled unit; the user prompt is the compact input JSON. New requests use the array
+ * format (v10); the object format reproduces v8/v9 requests, v9 for linked compilations.
+ */
 export function createContentAttachmentThinRequest(
   compilation: ContentAttachmentThinCompilation,
+  options: { format?: ContentAttachmentThinResponseFormat } = {},
 ): ContentAttachmentThinRequest {
+  const format = options.format ?? 'array';
   const linked =
     compilation.version === CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION ||
     compilation.version ===
       CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION;
   return {
-    version: linked
-      ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
-      : CONTENT_ATTACHMENT_THIN_VERSION,
-    systemPrompt: contentAttachmentThinSystemPrompt({ linked }),
+    version:
+      format === 'array'
+        ? CONTENT_ATTACHMENT_THIN_ARRAY_VERSION
+        : linked
+          ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
+          : CONTENT_ATTACHMENT_THIN_VERSION,
+    systemPrompt: contentAttachmentThinSystemPrompt({ linked, format }),
     userPrompt: JSON.stringify(compilation.input),
-    providerOutputSchema: createContentAttachmentThinSchema(compilation),
+    providerOutputSchema:
+      format === 'array'
+        ? createContentAttachmentThinArraySchema()
+        : createContentAttachmentThinSchema(compilation),
   };
 }

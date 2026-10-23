@@ -183,7 +183,9 @@ function routedResult(
   outputs: unknown[],
 ): ContentAttachmentThinUnitResult {
   const compilation = createContentAttachmentThinInput(plan, unit);
-  const request = createContentAttachmentThinRequest(compilation);
+  const request = createContentAttachmentThinRequest(compilation, {
+    format: 'object',
+  });
   const calls: ContentAttachmentThinCall[] = outputs.map((rawResponse, i) => ({
     run: `r${i + 1}` as ContentAttachmentThinRunName,
     status: 'completed',
@@ -388,6 +390,9 @@ describe('assembleContentAttachmentThin', () => {
     ]);
 
     expect(view.method).toBe('content-attachment-thin.v8');
+    expect(assembleContentAttachmentThin(plan, []).method).toBe(
+      'content-attachment-thin.v8',
+    );
     plan.thinPolicy = { layers: 'all', continuity: 'linked' };
     expect(assembleContentAttachmentThin(plan, []).method).toBe(
       'content-attachment-thin.v9',

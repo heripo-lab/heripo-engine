@@ -105,12 +105,13 @@ const attachR1 = {
   sa: [],
   e: ['Q1:L1-L2'],
 };
-const agreed = () => ({
-  d: { 'E1:S1': attachR1, 'E2:S1': none, 'E3:S1': none, 'E4:S1': none },
+const items = (d: Record<string, object>) => ({
+  d: Object.entries(d).map(([s, decision]) => ({ s, ...decision })),
 });
-const outlier = () => ({
-  d: { 'E1:S1': none, 'E2:S1': attachR1, 'E3:S1': attachR1, 'E4:S1': none },
-});
+const agreed = () =>
+  items({ 'E1:S1': attachR1, 'E2:S1': none, 'E3:S1': none, 'E4:S1': none });
+const outlier = () =>
+  items({ 'E1:S1': none, 'E2:S1': attachR1, 'E3:S1': attachR1, 'E4:S1': none });
 const reply = (output: unknown) => ({
   output,
   usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },

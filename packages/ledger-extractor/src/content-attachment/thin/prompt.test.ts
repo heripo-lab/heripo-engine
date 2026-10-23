@@ -5,10 +5,12 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { contentAttachmentRecipientSystemPrompt } from '../recipients/prompt';
 import {
+  CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
   CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
   contentAttachmentThinSystemPrompt,
+  createContentAttachmentThinArraySchema,
   createContentAttachmentThinRequest,
   createContentAttachmentThinSchema,
 } from './prompt';
@@ -133,10 +135,10 @@ describe('createContentAttachmentThinSchema', () => {
 });
 
 describe('createContentAttachmentThinRequest', () => {
-  test('sends the compact input as the user prompt', () => {
+  test('sends the compact input as the user prompt in the object format', () => {
     const c = compilation();
 
-    const request = createContentAttachmentThinRequest(c);
+    const request = createContentAttachmentThinRequest(c, { format: 'object' });
 
     expect(request.version).toBe(CONTENT_ATTACHMENT_THIN_VERSION);
     expect(request.systemPrompt).toBe(contentAttachmentThinSystemPrompt());
@@ -151,7 +153,11 @@ describe('createContentAttachmentThinRequest', () => {
       'content-attachment-thin-compile.v4',
       'content-attachment-thin-compile.v5',
     ] as const) {
-      const request = createContentAttachmentThinRequest({
+      const request = createContentAttachmentThinRequest(
+        { ...compilation(), version },
+        { format: 'object' },
+      );
+      const array = createContentAttachmentThinRequest({
         ...compilation(),
         version,
       });
@@ -160,6 +166,36 @@ describe('createContentAttachmentThinRequest', () => {
       expect(request.systemPrompt).toBe(
         contentAttachmentThinSystemPrompt({ linked: true }),
       );
+      expect(array.version).toBe(CONTENT_ATTACHMENT_THIN_ARRAY_VERSION);
+      expect(array.systemPrompt).toBe(
+        contentAttachmentThinSystemPrompt({ linked: true, format: 'array' }),
+      );
+      expect(array.systemPrompt).toContain('PAGE BOUNDARY:');
     }
+  });
+
+  test('defaults to the array format with one schema for every unit', () => {
+    const c = compilation();
+
+    const request = createContentAttachmentThinRequest(c);
+    const schema = createContentAttachmentThinArraySchema();
+    const items = (
+      schema.properties.d.items as { anyOf: Array<{ required: string[] }> }
+    ).anyOf;
+
+    expect(request.version).toBe(CONTENT_ATTACHMENT_THIN_ARRAY_VERSION);
+    expect(request.providerOutputSchema).toEqual(schema);
+    expect(request.userPrompt).toBe(JSON.stringify(c.input));
+    expect(request.systemPrompt).toContain(
+      'Return d as an array with exactly one item per listed segment',
+    );
+    expect(request.systemPrompt).toContain('and are not items of d.');
+    expect(request.systemPrompt).not.toContain('segment key in d');
+    expect(request.systemPrompt).not.toContain('PAGE BOUNDARY:');
+    expect(items.map((o) => o.required)).toEqual([
+      ['s', 'k', 'r', 'h', 'x', 'ia', 'sa', 'e'],
+      ['s', 'k'],
+    ]);
+    expect(JSON.stringify(schema)).not.toContain('enum":["R');
   });
 });

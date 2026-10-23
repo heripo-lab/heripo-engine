@@ -134,8 +134,10 @@ function fixture() {
     pages: [{ pdfPageNo: 1, unitIds: ['page-1'], status: 'planned' }],
     units: [unit],
   };
+  // object-format (v8) request; the array format (v10) has its own tests below
   const request = createContentAttachmentThinRequest(
     createContentAttachmentThinInput(plan, unit),
+    { format: 'object' },
   );
   return { plan, unit, request };
 }
@@ -162,10 +164,13 @@ describe('inspectContentAttachmentThinResponse', () => {
   test('compiles the expected segments, windows and handles for the fixture', () => {
     const { request } = fixture();
 
-    expect(request.providerOutputSchema.properties.d.required).toEqual([
-      'E1:S1',
-      'E2:S1',
-    ]);
+    expect(
+      (
+        request.providerOutputSchema as {
+          properties: { d: { required: string[] } };
+        }
+      ).properties.d.required,
+    ).toEqual(['E1:S1', 'E2:S1']);
     expect(JSON.parse(request.userPrompt).readOnlyContext).toEqual([
       { ref: 'X1', windows: [['Q3', ['앞선', '문단']]] },
       { ref: 'X2', windows: [['Q4', ['표', '1', '일지']]] },
@@ -379,5 +384,66 @@ describe('inspectContentAttachmentThinResponse', () => {
     expect(result.decisions[1].relationshipSubjectAlternatives).toEqual([
       ['R2', 'R3'],
     ]);
+  });
+});
+
+describe('inspectContentAttachmentThinResponse with the v10 array format', () => {
+  const arrayAudit = (rawResponse: unknown) => {
+    const { plan, unit } = fixture();
+    const request = createContentAttachmentThinRequest(
+      createContentAttachmentThinInput(plan, unit),
+    );
+    return {
+      inspection: inspectContentAttachmentThinResponse(plan, unit, {
+        request,
+        rawResponse,
+      }),
+      request,
+    };
+  };
+
+  test('reads one item per segment like the object format and replays the saved request version', () => {
+    const decisions = { 'E1:S1': attach({ r: ['R3'] }), 'E2:S1': { k: 'n' } };
+    const object = inspect({ d: decisions });
+
+    const { inspection, request } = arrayAudit({
+      d: [
+        { s: 'E2:S1', k: 'n' },
+        { s: 'E1:S1', ...attach({ r: ['R3'] }) },
+      ],
+    });
+
+    expect(request.version).toBe('content-attachment-thin.v10');
+    expect(inspection.issues).toEqual([]);
+    expect(
+      [...inspection.decisions].sort((a, b) =>
+        a.segment.localeCompare(b.segment),
+      ),
+    ).toEqual(object.decisions);
+  });
+
+  test('reports a missing array, items without a segment, repeated and unknown segments', () => {
+    expect(arrayAudit({ d: {} }).inspection.issues).toEqual([
+      'response has no decision array d',
+    ]);
+
+    const { inspection } = arrayAudit({
+      d: [
+        { k: 'n' },
+        'E1:S1',
+        { s: 'E1:S1', k: 'n' },
+        { s: 'E1:S1', ...attach({ r: ['R3'] }) },
+        { s: 'E9:S1', k: 'n' },
+      ],
+    });
+
+    expect(inspection.issues).toEqual([
+      'malformed decision item',
+      'malformed decision item',
+      'E1:S1: repeated segment',
+      'E9:S1: unexpected segment',
+      'E2:S1: missing decision',
+    ]);
+    expect(inspection.decisions).toEqual([]);
   });
 });

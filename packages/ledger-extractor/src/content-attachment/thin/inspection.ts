@@ -3,7 +3,10 @@ import type { ContentAttachmentThinCompilation } from './compile-types';
 import type { ContentAttachmentThinRequest } from './prompt';
 
 import { createContentAttachmentThinInput } from './compile';
-import { createContentAttachmentThinRequest } from './prompt';
+import {
+  CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
+  createContentAttachmentThinRequest,
+} from './prompt';
 
 export interface ContentAttachmentThinAudit {
   request: ContentAttachmentThinRequest;
@@ -90,9 +93,11 @@ function sameRequest(
 }
 
 /**
- * Inspect one raw thin response against its recompiled request. The raw response is never changed.
- * A request that differs from the recompiled one invalidates the whole audit; a structurally invalid
- * segment is reported and left out, while the other segments are interpreted independently.
+ * Inspect one raw thin response against its request, recompiled in the saved request's format (array for v10,
+ * object for v8/v9). The raw response is never changed. A request that differs from the recompiled one
+ * invalidates the whole audit; a structurally invalid segment is reported and left out, while the other
+ * segments are interpreted independently. In the array format an item without a segment ref is reported, and
+ * a segment returned twice is reported and left out.
  */
 export function inspectContentAttachmentThinResponse(
   plan: ContentAttachmentPlan,
@@ -101,8 +106,14 @@ export function inspectContentAttachmentThinResponse(
 ): ContentAttachmentThinInspection {
   const compilation: ContentAttachmentThinCompilation =
     createContentAttachmentThinInput(plan, unit);
+  const array = audit.request.version === CONTENT_ATTACHMENT_THIN_ARRAY_VERSION;
   if (
-    !sameRequest(audit.request, createContentAttachmentThinRequest(compilation))
+    !sameRequest(
+      audit.request,
+      createContentAttachmentThinRequest(compilation, {
+        format: array ? 'array' : 'object',
+      }),
+    )
   )
     return {
       issues: ['request differs from the recompiled request'],
@@ -110,15 +121,38 @@ export function inspectContentAttachmentThinResponse(
       decisions: [],
     };
   const { codeMap } = compilation;
-  const d = isObject(audit.rawResponse) ? audit.rawResponse.d : undefined;
-  if (!isObject(d))
-    return {
-      issues: ['response has no decision object d'],
-      findings: [],
-      decisions: [],
-    };
-
+  const raw = isObject(audit.rawResponse) ? audit.rawResponse.d : undefined;
   const issues: string[] = [];
+  const repeated = new Set<string>();
+  let d: Record<string, unknown>;
+  if (array) {
+    if (!Array.isArray(raw))
+      return {
+        issues: ['response has no decision array d'],
+        findings: [],
+        decisions: [],
+      };
+    d = Object.create(null) as Record<string, unknown>;
+    for (const item of raw) {
+      if (!isObject(item) || typeof item.s !== 'string') {
+        issues.push('malformed decision item');
+        continue;
+      }
+      const { s: segment, ...decision } = item;
+      if (segment in d) repeated.add(segment);
+      d[segment] = decision;
+    }
+    for (const segment of repeated) issues.push(`${segment}: repeated segment`);
+  } else {
+    if (!isObject(raw))
+      return {
+        issues: ['response has no decision object d'],
+        findings: [],
+        decisions: [],
+      };
+    d = raw;
+  }
+
   const findings: string[] = [];
   const decisions: ContentAttachmentThinDecision[] = [];
   for (const key of Object.keys(d))
@@ -131,6 +165,7 @@ export function inspectContentAttachmentThinResponse(
   const registryOrder = plan.registry.map((r) => r.ref);
 
   for (const segment of codeMap.segments) {
+    if (repeated.has(segment)) continue;
     const value = d[segment];
     const problems: string[] = [];
     if (!isObject(value)) {
