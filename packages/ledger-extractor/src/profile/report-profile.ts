@@ -42,6 +42,11 @@ export interface ReportProfile {
 export interface ContentAttachmentThinPolicy {
   /** `all`: every layer is offered everywhere; `local`: single-unit layers are offered only near their evidence. */
   layers: 'all' | 'local';
+  /**
+   * `linked`: the read-only blocks before a unit's first body block stay in its reading order across chapters
+   * and list the offered candidates whose evidence they are. Absent: compilation is unchanged.
+   */
+  continuity?: 'linked';
 }
 
 const TRAIT_VALUES = new Set<string>(['yes', 'no', 'unclear']);
@@ -92,13 +97,15 @@ export function validateReportProfile(
 /**
  * Map profile traits to thin attachment rules. Report-wide layers stay offered everywhere under `local`,
  * so an unclear stratigraphy judgment also uses `local`; only a confirmed `no`, or no profile, keeps `all`.
+ * A confirmed profile also links page-boundary context; without a profile the rules stay as before.
  */
 export function contentAttachmentThinPolicyFromProfile(
   profile?: ReportProfile,
 ): ContentAttachmentThinPolicy {
+  if (!profile) return { layers: 'all' };
   return {
-    layers:
-      !profile || profile.traits.local_stratigraphy === 'no' ? 'all' : 'local',
+    layers: profile.traits.local_stratigraphy === 'no' ? 'all' : 'local',
+    continuity: 'linked',
   };
 }
 

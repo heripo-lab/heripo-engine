@@ -1,9 +1,16 @@
 import type { ContentAttachmentThinCompilation } from './compile-types';
 
 import { contentAttachmentRecipientSystemPrompt } from '../recipients/prompt';
+import {
+  CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
+} from './compile-types';
 
 export const CONTENT_ATTACHMENT_THIN_VERSION =
   'content-attachment-thin.v8' as const;
+/** The v8 prompt plus the rule for linked page-boundary context (`continuity: 'linked'`). */
+export const CONTENT_ATTACHMENT_THIN_LINKED_VERSION =
+  'content-attachment-thin.v9' as const;
 
 /** The recipient prompt version whose rules are restored verbatim. */
 const RESTORED_RULES_SOURCE_VERSION = 'segment-recipients.v26' as const;
@@ -64,9 +71,17 @@ export function contentAttachmentThinRestoredRules(): string {
     .join('\n\n');
 }
 
-/** Thin system prompt: base instructions, the format bridge and the restored rules. */
-export function contentAttachmentThinSystemPrompt(): string {
-  return `${THIN_BASE_PROMPT}\n\n${THIN_FORMAT_BRIDGE}\n\n${contentAttachmentThinRestoredRules()}`;
+const THIN_LINKED_RULE = `PAGE BOUNDARY: Read-only blocks before the first body block may list evidenceOf: R refs whose registration evidence is that block. When the first body block continues such a block (same sentence or same description), its target is that block's subject; otherwise ignore evidenceOf.`;
+
+/**
+ * Thin system prompt: base instructions, the format bridge and the restored rules, plus the page-boundary rule
+ * for linked compilations.
+ */
+export function contentAttachmentThinSystemPrompt(
+  options: { linked?: boolean } = {},
+): string {
+  const base = `${THIN_BASE_PROMPT}\n\n${THIN_FORMAT_BRIDGE}\n\n${contentAttachmentThinRestoredRules()}`;
+  return options.linked ? `${base}\n\n${THIN_LINKED_RULE}` : base;
 }
 
 const upTo = (n: number) => (n <= 9 ? `[1-${n}]` : `[1-9]|1[0-${n - 10}]`);
@@ -129,7 +144,9 @@ export function createContentAttachmentThinSchema(
 }
 
 export interface ContentAttachmentThinRequest {
-  version: typeof CONTENT_ATTACHMENT_THIN_VERSION;
+  version:
+    | typeof CONTENT_ATTACHMENT_THIN_VERSION
+    | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION;
   systemPrompt: string;
   userPrompt: string;
   providerOutputSchema: ReturnType<typeof createContentAttachmentThinSchema>;
@@ -139,9 +156,15 @@ export interface ContentAttachmentThinRequest {
 export function createContentAttachmentThinRequest(
   compilation: ContentAttachmentThinCompilation,
 ): ContentAttachmentThinRequest {
+  const linked =
+    compilation.version === CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION ||
+    compilation.version ===
+      CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION;
   return {
-    version: CONTENT_ATTACHMENT_THIN_VERSION,
-    systemPrompt: contentAttachmentThinSystemPrompt(),
+    version: linked
+      ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
+      : CONTENT_ATTACHMENT_THIN_VERSION,
+    systemPrompt: contentAttachmentThinSystemPrompt({ linked }),
     userPrompt: JSON.stringify(compilation.input),
     providerOutputSchema: createContentAttachmentThinSchema(compilation),
   };

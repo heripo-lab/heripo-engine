@@ -138,7 +138,9 @@ export type {
 export {
   CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT,
   CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
 } from './thin/compile-types';
 export { createContentAttachmentThinInput } from './thin/compile';
@@ -160,6 +162,7 @@ export type {
   ContentAttachmentThinRowOwners,
 } from './thin/row-owners';
 export {
+  CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
   contentAttachmentThinSystemPrompt,

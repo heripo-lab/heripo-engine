@@ -10,6 +10,15 @@ export const CONTENT_ATTACHMENT_THIN_COMPILE_VERSION =
  */
 export const CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION =
   'content-attachment-thin-compile.v3' as const;
+/**
+ * Compilation under the plan's `linked` continuity policy: the read-only blocks before a unit's first body
+ * block join its reading order and list the offered candidates whose evidence they are. v4 with `all` layers.
+ */
+export const CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION =
+  'content-attachment-thin-compile.v4' as const;
+/** `linked` continuity together with the `local` layer policy. */
+export const CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION =
+  'content-attachment-thin-compile.v5' as const;
 
 /** Maximum original words addressed by one Q window. */
 export const CONTENT_ATTACHMENT_THIN_WINDOW_WORDS = 16;
@@ -80,7 +89,12 @@ export interface ContentAttachmentThinInput {
     ref: string;
     rows: Array<{ index: number; cells: ContentAttachmentThinCell[] }>;
   }>;
-  readOnlyContext: Array<{ ref: string; windows: WindowRow[] }>;
+  readOnlyContext: Array<{
+    ref: string;
+    windows: WindowRow[];
+    /** Linked continuity only: offered candidates whose evidence this preceding block is. */
+    evidenceOf?: string[];
+  }>;
 }
 export interface ContentAttachmentThinCodeMap {
   unitId: string;
@@ -98,7 +112,9 @@ export interface ContentAttachmentThinCodeMap {
 export interface ContentAttachmentThinCompilation {
   version:
     | typeof CONTENT_ATTACHMENT_THIN_COMPILE_VERSION
-    | typeof CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION;
+    | typeof CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION
+    | typeof CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION
+    | typeof CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION;
   input: ContentAttachmentThinInput;
   codeMap: ContentAttachmentThinCodeMap;
 }

@@ -7,7 +7,10 @@ import type {
 } from './run';
 
 import { createContentAttachmentThinInput } from './compile';
-import { CONTENT_ATTACHMENT_THIN_VERSION } from './prompt';
+import {
+  CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
+  CONTENT_ATTACHMENT_THIN_VERSION,
+} from './prompt';
 
 export type ContentAttachmentThinBasis =
   | 'model_unanimous'
@@ -42,7 +45,9 @@ export interface ContentAttachmentThinReviewItem extends Omit<
 }
 export interface ContentAttachmentThinResult {
   version: 'ledger-content-attachments.v2';
-  method: typeof CONTENT_ATTACHMENT_THIN_VERSION;
+  method:
+    | typeof CONTENT_ATTACHMENT_THIN_VERSION
+    | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION;
   reviewStatus: 'not_reviewed';
   totalUnits: number;
   units: Array<{
@@ -100,7 +105,10 @@ export function assembleContentAttachmentThin(
 ): ContentAttachmentThinResult {
   const output: ContentAttachmentThinResult = {
     version: 'ledger-content-attachments.v2',
-    method: CONTENT_ATTACHMENT_THIN_VERSION,
+    method:
+      plan.thinPolicy?.continuity === 'linked'
+        ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
+        : CONTENT_ATTACHMENT_THIN_VERSION,
     reviewStatus: 'not_reviewed',
     totalUnits: plan.units.length,
     units: [],

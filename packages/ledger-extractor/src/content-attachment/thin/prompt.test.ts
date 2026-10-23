@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { contentAttachmentRecipientSystemPrompt } from '../recipients/prompt';
 import {
+  CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
   contentAttachmentThinSystemPrompt,
@@ -98,6 +99,14 @@ describe('contentAttachmentThinSystemPrompt', () => {
     expect(prompt).toContain('\n\nMAPPING TO THIS OUTPUT:');
     expect(prompt).toContain('\n\nRELATION COUNTERPARTS:');
     expect(prompt.endsWith(contentAttachmentThinRestoredRules())).toBe(true);
+    expect(prompt).not.toContain('PAGE BOUNDARY:');
+  });
+
+  test('appends the page-boundary rule only for linked compilations', () => {
+    const linked = contentAttachmentThinSystemPrompt({ linked: true });
+
+    expect(linked.startsWith(contentAttachmentThinSystemPrompt())).toBe(true);
+    expect(linked).toContain('\n\nPAGE BOUNDARY: Read-only blocks');
   });
 });
 
@@ -135,5 +144,22 @@ describe('createContentAttachmentThinRequest', () => {
     expect(request.providerOutputSchema).toEqual(
       createContentAttachmentThinSchema(c),
     );
+  });
+
+  test('uses the linked prompt version and rule for linked compilations', () => {
+    for (const version of [
+      'content-attachment-thin-compile.v4',
+      'content-attachment-thin-compile.v5',
+    ] as const) {
+      const request = createContentAttachmentThinRequest({
+        ...compilation(),
+        version,
+      });
+
+      expect(request.version).toBe(CONTENT_ATTACHMENT_THIN_LINKED_VERSION);
+      expect(request.systemPrompt).toBe(
+        contentAttachmentThinSystemPrompt({ linked: true }),
+      );
+    }
   });
 });

@@ -92,13 +92,13 @@ describe('report profile', () => {
     ]);
   });
 
-  test('keeps every layer offered only when stratigraphy is confirmed not local or there is no profile', () => {
+  test('keeps every layer offered only when stratigraphy is confirmed not local or there is no profile, and links context with a profile', () => {
     expect(contentAttachmentThinPolicyFromProfile()).toEqual({ layers: 'all' });
     expect(
       contentAttachmentThinPolicyFromProfile(
         profile({ traits: { local_stratigraphy: 'no' } }),
       ),
-    ).toEqual({ layers: 'all' });
+    ).toEqual({ layers: 'all', continuity: 'linked' });
     const localTraits: Array<ReportProfile['traits']> = [
       { local_stratigraphy: 'yes' },
       { local_stratigraphy: 'unclear' },
@@ -107,7 +107,7 @@ describe('report profile', () => {
     for (const traits of localTraits)
       expect(
         contentAttachmentThinPolicyFromProfile(profile({ traits })),
-      ).toEqual({ layers: 'local' });
+      ).toEqual({ layers: 'local', continuity: 'linked' });
   });
 
   test('hashes the same judgments the same regardless of key order', async () => {

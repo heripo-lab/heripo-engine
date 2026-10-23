@@ -387,6 +387,11 @@ describe('assembleContentAttachmentThin', () => {
       routedResult(plan, unitA, [{ d: {} }]),
     ]);
 
+    expect(view.method).toBe('content-attachment-thin.v8');
+    plan.thinPolicy = { layers: 'all', continuity: 'linked' };
+    expect(assembleContentAttachmentThin(plan, []).method).toBe(
+      'content-attachment-thin.v9',
+    );
     expect(view.issues).toEqual([
       { unitId: 'page-1', reason: 'a required call failed' },
       { unitId: 'page-9', reason: 'unknown unit' },
