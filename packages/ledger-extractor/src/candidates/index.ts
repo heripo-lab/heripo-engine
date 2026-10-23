@@ -21,6 +21,7 @@ export {
   getCandidateGroupMembers,
   groupCandidateUncertainties,
   CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
+  CANDIDATE_DEDUPLICATION_UNMERGED_REASON,
 } from './candidate-deduplication';
 export type {
   CandidateDeduplicationAudit,
