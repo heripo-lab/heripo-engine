@@ -74,6 +74,8 @@ export function ContentAttachmentPanel({ taskId }: { taskId: string }) {
           planReady={!!run && run.status !== 'running'}
           planSnapshotId={run?.candidateSnapshotId ?? null}
           latestSnapshotId={candidate?.runId ?? null}
+          thinPolicy={run?.thinPolicy}
+          profile={run?.profile}
         />
         {(query.error || prepare.error || execute.error || audit.error) && (
           <p className="text-destructive text-sm">

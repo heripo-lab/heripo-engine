@@ -1,4 +1,10 @@
 'use client';
+import type { ContentAttachmentPlan } from '@heripo/ledger-extractor';
+
+import {
+  CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
+} from '@heripo/ledger-extractor';
 import { useState } from 'react';
 
 import type { ContentAttachmentThinState } from '~/lib/ledger/content-attachment-thin-run';
@@ -7,6 +13,7 @@ import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 
 import { useContentAttachment } from '../hooks/use-content-attachment';
+import { useReportProfile } from '../hooks/use-report-profile';
 
 const STATUS: Record<ContentAttachmentThinState['status'], string> = {
   running: '얇은 묶음 배정 실행 중',
@@ -24,13 +31,23 @@ export function ContentAttachmentThinSection({
   planReady,
   planSnapshotId,
   latestSnapshotId,
+  thinPolicy,
+  profile,
 }: {
   taskId: string;
   planReady: boolean;
   planSnapshotId: string | null;
   latestSnapshotId: string | null;
+  thinPolicy?: ContentAttachmentPlan['thinPolicy'];
+  profile?: ContentAttachmentPlan['profile'];
 }) {
   const stale = !!planSnapshotId && planSnapshotId !== latestSnapshotId;
+  const currentProfile = useReportProfile(taskId).query.data?.stored ?? null;
+  const profileChanged =
+    !!planSnapshotId &&
+    (currentProfile?.profileSha256 ?? null) !==
+      (profile?.profileSha256 ?? null);
+  const local = thinPolicy?.layers === 'local';
   const { query, runThin, stopThin, thinResult } = useContentAttachment(taskId);
   const thin = query.data?.thin ?? null;
   const [maxCalls, setMaxCalls] = useState(400);
@@ -62,6 +79,34 @@ export function ContentAttachmentThinSection({
         <p className="font-mono text-xs">
           계획 후보 스냅샷 {planSnapshotId} · 최신 후보 스냅샷{' '}
           {latestSnapshotId ?? '없음'}
+        </p>
+      )}
+      {planSnapshotId && (
+        <div className="bg-muted/30 space-y-1 rounded p-2 text-sm">
+          <p>
+            적용 정책 · 층위 후보{' '}
+            {local
+              ? '근처 묶음만 제공(local): 한 묶음에서만 근거가 나온 층위는 앞뒤 1묶음까지만, 같은 이름 층위는 가까운 근거로 좁힘'
+              : '모두 제공(all)'}
+          </p>
+          <p className="font-mono text-xs break-all">
+            컴파일{' '}
+            {local
+              ? CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION
+              : CONTENT_ATTACHMENT_THIN_COMPILE_VERSION}{' '}
+            ·{' '}
+            {profile
+              ? `프로필 출처 ${profile.source === 'router' ? '라우터 판정 후 사람 확인' : '사람 직접 작성'} · 해시 ${profile.profileSha256}`
+              : '확인된 프로필 없이 준비된 계획(기존 규칙)'}
+          </p>
+        </div>
+      )}
+      {profileChanged && (
+        <p className="text-sm text-amber-700" role="status">
+          계획 준비 이후 확인된 프로필이{' '}
+          {currentProfile ? '바뀌었습니다' : '없어졌습니다'}. 계획에 고정된
+          정책으로 실행되며, 현재 프로필을 반영하려면 &lsquo;순회 계획
+          만들기&rsquo;로 다시 준비하세요.
         </p>
       )}
       {stale && (

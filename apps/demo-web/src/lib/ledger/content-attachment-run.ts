@@ -12,6 +12,7 @@ import {
   assembleContentAttachment,
   attachContentUnit,
   buildDocumentResourceIndex,
+  contentAttachmentThinPolicyFromProfile,
   createContentAttachmentRequest,
   createContentAttachmentTableAnchorInput,
   prepareContentAttachment,
@@ -33,6 +34,7 @@ import {
   getCandidateDiscoveryRun,
 } from './candidate-discovery-run';
 import { parseLedgerInputText } from './ledger-input';
+import { getReportProfile } from './report-profile';
 
 export interface ContentAttachmentRun {
   runId: string;
@@ -55,6 +57,9 @@ export interface ContentAttachmentRun {
   firstUnit: ContentAttachmentPlan['units'][number] | null;
   firstRequest: ReturnType<typeof createContentAttachmentRequest> | null;
   settings: { modelId: string; maxRetries: number; maxUnitChars: number };
+  /** Thin rules fixed into the plan from the confirmed profile; absent on plans prepared without one. */
+  thinPolicy?: ContentAttachmentPlan['thinPolicy'];
+  profile?: ContentAttachmentPlan['profile'];
   result: ContentAttachmentResult;
   modelResponse?:
     | ContentAttachmentAudit['response']
@@ -150,6 +155,7 @@ export async function prepareContentAttachmentRun(
     ) !== JSON.stringify(source.deduplication)
   )
     throw new Error('Candidate snapshot audit does not replay');
+  const stored = await getReportProfile(taskId);
   const plan = await prepareContentAttachment(
     buildDocumentResourceIndex(document),
     snapshot.plan,
@@ -161,6 +167,15 @@ export async function prepareContentAttachmentRun(
       pdfPageNumbers: Object.keys(document.pageRangeMap).map(Number),
       maxUnitChars: options.maxUnitChars,
       registrationDecisions: options.registrationDecisions,
+      ...(stored
+        ? {
+            thinPolicy: contentAttachmentThinPolicyFromProfile(stored.profile),
+            profile: {
+              profileSha256: stored.profileSha256,
+              source: stored.profile.source,
+            },
+          }
+        : {}),
     },
   );
   const runId = randomUUID();
@@ -208,6 +223,8 @@ export async function prepareContentAttachmentRun(
       maxRetries: 0,
       maxUnitChars: options.maxUnitChars,
     },
+    ...(plan.thinPolicy ? { thinPolicy: plan.thinPolicy } : {}),
+    ...(plan.profile ? { profile: plan.profile } : {}),
     result: assembleContentAttachment(plan, []),
     error: null,
     fullSweepExecuted: false,
