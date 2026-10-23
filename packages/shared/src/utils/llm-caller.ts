@@ -145,6 +145,8 @@ export interface ExtendedTokenUsage {
   cachedInputTokens?: number | null;
   cacheWriteTokens?: number | null;
   cacheWrite1hTokens?: number | null;
+  /** Output tokens the provider reports as reasoning (thinking), when it reports them. */
+  reasoningTokens?: number;
   metadata?: TokenUsageMetadata;
 }
 
@@ -155,6 +157,13 @@ export interface LLMCallResult<T> {
   output: T;
   usage: ExtendedTokenUsage;
   usedFallback: boolean;
+  /** Finish reason of the call that produced the output, when the SDK reports it. */
+  finishReason?: string;
+  /**
+   * Structured-output attempts made on the model that produced the output, including schema-mismatch
+   * retries. Only the producing attempt's tokens are in usage.
+   */
+  structuredAttempts?: number;
 }
 
 /**
@@ -172,6 +181,8 @@ interface ExecutionConfig {
 interface GeneratedUsage {
   usage?: LanguageModelUsage;
   steps?: readonly { usage: LanguageModelUsage }[];
+  finishReason?: string;
+  structuredAttempts?: number;
 }
 
 function cacheWrite1hTokens(
@@ -259,7 +270,22 @@ export class LLMCaller {
         cacheWriteTokens: allWrites - (write1h ?? 0),
       }),
       ...(write1h !== undefined && { cacheWrite1hTokens: write1h }),
+      ...(usage?.outputTokenDetails?.reasoningTokens != null && {
+        reasoningTokens: usage.outputTokenDetails.reasoningTokens,
+      }),
       metadata: config.metadata,
+    };
+  }
+
+  /** Finish reason and structured-output attempts, when known. */
+  private static callDetails(response: GeneratedUsage) {
+    return {
+      ...(response.finishReason !== undefined && {
+        finishReason: response.finishReason,
+      }),
+      ...(response.structuredAttempts !== undefined && {
+        structuredAttempts: response.structuredAttempts,
+      }),
     };
   }
 
@@ -289,11 +315,7 @@ export class LLMCaller {
     model: LanguageModel,
     schema: z.ZodType<TOutput>,
     promptParams: Record<string, unknown>,
-  ): Promise<{
-    output: TOutput;
-    usage?: LanguageModelUsage;
-    steps?: GeneratedUsage['steps'];
-  }> {
+  ): Promise<GeneratedUsage & { output: TOutput }> {
     const submitTool = tool({
       description: 'Submit the structured result',
       inputSchema: schema,
@@ -321,6 +343,8 @@ export class LLMCaller {
           output: toolCall.input as TOutput,
           usage: lastResult.usage,
           steps: lastResult.steps,
+          finishReason: lastResult.finishReason,
+          structuredAttempts: attempt + 1,
         };
       }
     }
@@ -352,11 +376,7 @@ export class LLMCaller {
     model: LanguageModel,
     schema: z.ZodType<TOutput>,
     promptParams: Record<string, unknown>,
-  ): Promise<{
-    output: TOutput;
-    usage?: LanguageModelUsage;
-    steps?: GeneratedUsage['steps'];
-  }> {
+  ): Promise<GeneratedUsage & { output: TOutput }> {
     const providerType = detectProvider(model);
 
     if (
@@ -375,11 +395,19 @@ export class LLMCaller {
       attempt++
     ) {
       try {
-        return await (generateText as any)({
+        const result = await (generateText as any)({
           model,
           output: Output.object({ schema }),
           ...promptParams,
         });
+        // the SDK result exposes output through getters, so fields are read explicitly
+        return {
+          output: result.output,
+          usage: result.usage,
+          steps: result.steps,
+          finishReason: result.finishReason,
+          structuredAttempts: attempt + 1,
+        };
       } catch (error) {
         if (NoObjectGeneratedError.isInstance(error)) {
           lastError = error;
@@ -400,11 +428,9 @@ export class LLMCaller {
    */
   private static async executeWithFallback<TOutput>(
     config: ExecutionConfig,
-    generateFn: (model: LanguageModel) => Promise<{
-      output: TOutput;
-      usage?: LanguageModelUsage;
-      steps?: GeneratedUsage['steps'];
-    }>,
+    generateFn: (
+      model: LanguageModel,
+    ) => Promise<GeneratedUsage & { output: TOutput }>,
   ): Promise<LLMCallResult<TOutput>> {
     const primaryModelName = this.extractModelName(config.primaryModel);
 
@@ -416,6 +442,7 @@ export class LLMCaller {
         output: response.output,
         usage: this.buildUsage(config, primaryModelName, response, false),
         usedFallback: false,
+        ...this.callDetails(response),
       };
     } catch (primaryError) {
       // If aborted, don't try fallback - re-throw immediately
@@ -436,6 +463,7 @@ export class LLMCaller {
         output: response.output,
         usage: this.buildUsage(config, fallbackModelName, response, true),
         usedFallback: true,
+        ...this.callDetails(response),
       };
     }
   }

@@ -37,7 +37,7 @@ console.log(batches, results);
 
 OpenAI, Google, Anthropic, Together AI, Ollama, LM Studio를 구분합니다. Together AI/Ollama는 tool-call 방식, 나머지는 구조화된 출력 경로를 사용합니다. 응답 스키마는 Zod로 검증합니다. 설정에는 모델, 스키마, 프롬프트(또는 vision 메시지), `maxRetries`, `component`, `phase`가 필요하며 `fallbackModel`, `abortSignal`, `temperature`, `metadata`는 선택 사항입니다.
 
-반환값은 `{ output, usage, usedFallback }`입니다. `usage`를 aggregator의 `track()`에 전달하세요. `getReport()`는 컴포넌트·단계·모델별 사용량과 메타데이터를 반환합니다. 동일 단계에 여러 모델이 있으면 모델별로 구분된 phase 행을 만들므로 phase 이름의 유일성을 가정하지 마세요. 사용량은 추적된 호출 기준이며 provider 청구서와 같다는 보장은 없습니다.
+반환값은 `{ output, usage, usedFallback }`이며, 알 수 있으면 `finishReason`과 `structuredAttempts`도 포함합니다. 구조화 출력은 `maxRetries`와 별개로 스키마 불일치 시 최대 10회 더 시도합니다. `structuredAttempts`는 그 시도 수를 세며, `usage`에는 출력을 만든 마지막 시도만 들어갑니다. provider가 사고 토큰을 보고하면 `usage.reasoningTokens`가 채워집니다. `usage`를 aggregator의 `track()`에 전달하세요. `getReport()`는 컴포넌트·단계·모델별 사용량과 메타데이터를 반환합니다. 동일 단계에 여러 모델이 있으면 모델별로 구분된 phase 행을 만들므로 phase 이름의 유일성을 가정하지 마세요. 사용량은 추적된 호출 기준이며 provider 청구서와 같다는 보장은 없습니다.
 
 `spawnAsync`의 stdout/stderr 수집은 기본 활성화되며 옵션으로 끌 수 있습니다. 비정상 종료 코드는 반환값에서 확인하고, 프로세스 시작 오류는 예외로 처리하세요.
 
