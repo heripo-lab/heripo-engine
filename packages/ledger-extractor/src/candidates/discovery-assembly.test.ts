@@ -482,3 +482,82 @@ test('keeps distinct explicit investigation areas eligible in a stratigraphy uni
   );
   expect({ plan, oldAudit, currentAudit }).toEqual(before);
 });
+
+test('reports item-table rows that are neither proposed nor excluded, for the current prompt version only', async () => {
+  const cell = (text: string, isHeader = false) => ({
+    text,
+    colSpan: 1,
+    rowSpan: 1,
+    isHeader,
+  });
+  const doc = input();
+  doc.chapters = [chapter({ tableIds: ['registry'] })];
+  doc.tables = [
+    {
+      id: 'registry',
+      pdfPageNo: 1,
+      numRows: 6,
+      numCols: 2,
+      grid: [
+        [cell('번호', true), cell('유물명', true)],
+        [cell('1'), cell('기대')],
+        [cell('2'), cell('뚜껑')],
+        [cell('3'), cell('삼족기')],
+        [cell(''), cell('')],
+        [cell('4'), cell('소계', true)],
+      ],
+    },
+  ];
+  const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+    scopeChapterId: 'root',
+    inputSha256: 'hash',
+    maxTextChars: 8000,
+    tableRowsPerUnit: 12,
+  });
+  const unit = plan.units[0];
+  const id = (text: string) =>
+    getCandidateSources(unit).find((s) => s.resource.data.text === text)!
+      .sourceId;
+  const item: CandidateDiscoveryResponse['candidates'][number] = {
+    recordKind: 'artifact',
+    sourceName: '기대',
+    sourceIdentifier: '1',
+    identifierSourceId: id('1'),
+    eligibilityBasis: 'table_item',
+    reason: '등록표 행',
+    evidence: [
+      { sourceId: id('1'), quote: '1' },
+      { sourceId: id('기대'), quote: '기대' },
+    ],
+  };
+  const response: CandidateDiscoveryResponse = {
+    candidates: [item],
+    exclusions: [{ sourceId: id('뚜껑'), reason: '중복 행' }],
+  };
+  const v6 = {
+    unitId: unit.unitId,
+    ...createCandidateDiscoveryRequest(unit, 'candidate-discovery.v6'),
+    response,
+    usage,
+  };
+
+  const current = await assembleCandidateDiscovery(plan, [
+    audit(unit, response),
+  ]);
+  const old = await assembleCandidateDiscovery(plan, [v6]);
+  const noItems = await assembleCandidateDiscovery(plan, [
+    audit(unit, { candidates: [], exclusions: [] }),
+  ]);
+
+  expect(current.candidates).toHaveLength(1);
+  expect(current.issues).toEqual([
+    {
+      unitId: unit.unitId,
+      candidateIndex: null,
+      reason: 'Table rows neither proposed nor excluded: 3',
+    },
+  ]);
+  expect(old.issues).toEqual([]);
+  expect(old.candidates).toEqual(current.candidates);
+  expect(noItems.issues).toEqual([]);
+});
