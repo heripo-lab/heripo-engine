@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { isSameCandidateDiscoveryScope } from './discovery-plan';
 
 export const CANDIDATE_DEDUPLICATION_PROMPT_VERSION =
-  'candidate-deduplication.v5';
+  'candidate-deduplication.v6';
 const SYSTEM_PROMPT_V3 = `Review the ENTIRE supplied archaeological object candidate pool AFTER discovery has finished. Group occurrences that refer to the SAME archaeological object. Do not perform a new extraction or exclude candidates.
 Return a complete partition: every candidate ref must occur in exactly one group, including singleton groups. The first member is only the display representative; all original candidates, source wording and evidence are retained unchanged by code. Give concise Korean reasons.
 Use chapter paths, original body context, table headers/rows, identifiers, findspots and periods together. Repeated numbers or similar names alone are NOT identity evidence. Never merge distinct periods, areas, features, layers or objects merely sharing a number. A layer and its containing feature are different objects. A parent and child are different objects. Do not merge a collective artifact description into an individual object merely because it may contain it; identity must be established. Do not invent entities, names, identifiers, source text or relationships.
@@ -32,13 +32,19 @@ RELATIONS ARE NOT IDENTITY UNCERTAINTY: Keep separately identified objects with 
 FINAL CONFLICT AND COVERAGE AUDIT: Review the complete layer definition/occurrence inventory, including pairs you keep separate. Check repeated identifiers and definition-linked occurrences for incompatible period, natural-versus-anthropogenic genesis, material or stratigraphic-role descriptions. If the full source does not resolve a plausible identity conflict, preserve separate groups AND return that pair in uncertainMatches with both original descriptions in the reason. Do not silently drop the conflict merely because the records remain separate or the prompt also discusses relation exclusions. Do not repair apparent source numbering, replace original forms or infer a resolution from a preferred definition. Conversely, remove relation-only pseudo-uncertainties from your proposed output before returning. Keep all candidates exactly once in the partition, preserve distinct whole/subarea extents, and retain all original text and evidence without new extraction, deletion, attributes, parents or relationships. Code validates provenance and partition structure; it never fills a missing semantic merge or uncertainty judgment.
 `;
 
-const SYSTEM_PROMPT =
+const SYSTEM_PROMPT_V5 =
   SYSTEM_PROMPT_V4 +
   `
 LAYER-GROUP MEMBERSHIP VERSUS OBJECT IDENTITY: Resolve the scope of each mention before applying the earlier local-occurrence rules. A layer group can contain or classify several distinct deposits; sharing that classification, period, distribution or formation process does not make those deposits the SAME object as one another or as the broader group. Alternative material descriptions joined by "or" may describe different construction substrates. Neither that conjunction, a shared broad definition, nor the absence of a separate subdivision number is positive identity evidence. Require the complete source to establish that the mentions denote the same report-defined referent at the same scope, rather than merely compatible membership. Do not merge transitively through a shared layer-group candidate when the local deposits are distinct members. If a local phrase actually denotes another occurrence of the same defined group, a source-supported definition/location/material/role chain may still establish identity without repeating its code. Explain that distinction, rather than forcing every local mention apart or merging every compatible member.
 Preserving different original strings and evidence is provenance retention, not separate object identity: a single groups entry asserts SAME-object identity for every member. Do not justify merging different physical deposits merely by promising to retain their separate wording. Keep source-supported broader groups and distinct member layers separate; clear classification/containment alone is not uncertain identity. If a plausible same-referent link really remains unresolved, keep separate groups and describe the actual scope/identity gap in uncertainMatches. Do not add membership relations, change the schema, invent finer units, delete candidates or repair sources.
 QUALIFIED DISTRIBUTION IS NONEXCLUSIVE: Read qualifiers such as "mainly", "predominantly", "generally", "centered on", "주로", and equivalent expressions literally. A definition concentrated in one location does not exclude other locations unless the source explicitly limits its extent or provides another concrete incompatibility. Do not turn a central tendency into an exclusive geographic boundary or cite an outside occurrence alone as a contradiction. Compare the full definition's distribution, material, stratigraphic role and local context before deciding. Nonexclusive compatibility alone also does not prove identity. If the link remains unresolved, name the actual missing identity evidence or source-supported distinction; do not replace it with an invented exclusive restriction. Preserve original qualifications and avoid inferring continuity, soil equivalence or boundaries that the source does not supply.
 Apply this scope and qualifier review to the full pool while retaining genuine unresolved repeated-identifier, period/genesis or stratigraphic-role conflicts in separate groups AND uncertainMatches. These refinements do not resolve such contradictions by choosing a preferred wording, and relation-only pairs still do not belong in identity uncertainty. Keep the complete partition, distinct whole/subarea extents, original evidence and all prior non-repair constraints.
+`;
+
+const SYSTEM_PROMPT =
+  SYSTEM_PROMPT_V5 +
+  `
+GROUPS STAY WITHIN ONE RECORD KIND: Every candidate has a fixed recordKind (site, area, trench, layer, feature, artifact, shipwreck or unknown) chosen at discovery. A group asserts that its members are the SAME record, so all members of a group share one recordKind. A site and an area with the same or nested name, a trench and the area it lies in, a feature and its fill layer, or an artifact and its findspot are different records even when one name contains the other; keep them in separate groups and do not move a candidate to another kind. Return groups under groupsByKind, one list per recordKind present in the pool; each list may contain only refs of that kind, and every ref still appears exactly once across all lists. Relations or containment between kinds are not identity and are not uncertainMatches.
 `;
 
 function responseSchema(ref: z.ZodType<string>) {
@@ -52,11 +58,50 @@ function responseSchema(ref: z.ZodType<string>) {
   });
 }
 const savedResponseSchema = responseSchema(z.string());
+const groupSchema = (ref: z.ZodType<string>) =>
+  z.array(
+    z.object({ members: z.array(ref).min(1), reason: z.string().min(1) }),
+  );
+/** v6: groups are listed per record kind, and each kind's members are limited to that kind's refs. */
+function responseSchemaByKind(
+  kinds: Array<[string, [string, ...string[]]]>,
+  refs: [string, ...string[]],
+) {
+  return z.object({
+    groupsByKind: z.object(
+      Object.fromEntries(
+        kinds.map(([kind, kindRefs]) => [kind, groupSchema(z.enum(kindRefs))]),
+      ),
+    ),
+    uncertainMatches: z.array(
+      z.object({
+        left: z.enum(refs),
+        right: z.enum(refs),
+        reason: z.string().min(1),
+      }),
+    ),
+  });
+}
+const savedResponseByKindSchema = z.object({
+  groupsByKind: z.record(z.string(), groupSchema(z.string())),
+  uncertainMatches: savedResponseSchema.shape.uncertainMatches,
+});
+/** Refs of each record kind in the pool, kinds in order of first appearance. */
+function refsByKind(discovery: CandidateDiscoveryResult) {
+  const kinds = new Map<string, string[]>();
+  discovery.candidates.forEach((c, i) =>
+    kinds.set(c.recordKind, [...(kinds.get(c.recordKind) ?? []), `C${i + 1}`]),
+  );
+  return [...kinds] as Array<[string, [string, ...string[]]]>;
+}
 export interface CandidateDeduplicationAudit {
   promptVersion: string;
   systemPrompt: string;
   userPrompt: string;
-  response: z.infer<typeof savedResponseSchema>;
+  /** Flat groups up to v5; groups per record kind from v6. */
+  response:
+    | z.infer<typeof savedResponseSchema>
+    | z.infer<typeof savedResponseByKindSchema>;
   usage: ExtendedTokenUsage;
 }
 export interface CandidateGroup {
@@ -83,6 +128,7 @@ export function createCandidateDeduplicationRequest(
   promptVersion:
     | 'candidate-deduplication.v3'
     | 'candidate-deduplication.v4'
+    | 'candidate-deduplication.v5'
     | typeof CANDIDATE_DEDUPLICATION_PROMPT_VERSION = CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
 ) {
   if (
@@ -132,7 +178,9 @@ export function createCandidateDeduplicationRequest(
         ? SYSTEM_PROMPT_V3
         : promptVersion === 'candidate-deduplication.v4'
           ? SYSTEM_PROMPT_V4
-          : SYSTEM_PROMPT,
+          : promptVersion === 'candidate-deduplication.v5'
+            ? SYSTEM_PROMPT_V5
+            : SYSTEM_PROMPT,
     userPrompt: JSON.stringify({
       inputSha256: discovery.inputSha256,
       scopeChapterId: discovery.scopeChapterId,
@@ -159,7 +207,10 @@ export async function deduplicateCandidates(
     throw new Error('No candidates to deduplicate');
   const refs = discovery.candidates.map((_, i) => `C${i + 1}`);
   const { output, usage } = await LLMCaller.call({
-    schema: responseSchema(z.enum(refs as [string, ...string[]])),
+    schema: responseSchemaByKind(
+      refsByKind(discovery),
+      refs as [string, ...string[]],
+    ),
     systemPrompt: request.systemPrompt,
     userPrompt: request.userPrompt,
     primaryModel: options.model,
@@ -175,6 +226,43 @@ export async function deduplicateCandidates(
   return { ...request, response: output, usage };
 }
 
+/**
+ * Parse a saved response into flat groups. From v6 groups are listed per record kind: they are read in the
+ * pool's kind order, and a list under a kind absent from the pool is an issue.
+ */
+function parseSavedResponse(
+  audit: CandidateDeduplicationAudit,
+  discovery: CandidateDiscoveryResult,
+):
+  | { success: false }
+  | {
+      success: true;
+      data: z.infer<typeof savedResponseSchema>;
+      issues: string[];
+    } {
+  if (audit.promptVersion !== CANDIDATE_DEDUPLICATION_PROMPT_VERSION) {
+    const flat = savedResponseSchema.safeParse(audit.response);
+    return flat.success
+      ? { success: true, data: flat.data, issues: [] }
+      : { success: false };
+  }
+  const byKind = savedResponseByKindSchema.safeParse(audit.response);
+  if (!byKind.success) return { success: false };
+  const kinds = refsByKind(discovery).map(([kind]) => kind);
+  return {
+    success: true,
+    data: {
+      groups: kinds.flatMap((kind) => byKind.data.groupsByKind[kind] ?? []),
+      uncertainMatches: byKind.data.uncertainMatches,
+    },
+    issues: Object.keys(byKind.data.groupsByKind)
+      .filter((kind) => !kinds.includes(kind))
+      .map(
+        (kind) => `Groups listed under a kind absent from the pool: ${kind}`,
+      ),
+  };
+}
+
 /** Reject invalid partitions atomically; never infer, repair or discard model assignments. */
 export function assembleCandidateDeduplication(
   plan: CandidateDiscoveryPlan,
@@ -185,7 +273,8 @@ export function assembleCandidateDeduplication(
     plan,
     discovery,
     audit.promptVersion === 'candidate-deduplication.v3' ||
-      audit.promptVersion === 'candidate-deduplication.v4'
+      audit.promptVersion === 'candidate-deduplication.v4' ||
+      audit.promptVersion === 'candidate-deduplication.v5'
       ? audit.promptVersion
       : CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
   );
@@ -205,11 +294,12 @@ export function assembleCandidateDeduplication(
     );
     return result;
   }
-  const parsed = savedResponseSchema.safeParse(audit.response);
+  const parsed = parseSavedResponse(audit, discovery);
   if (!parsed.success) {
     result.issues.push('Invalid deduplication response schema');
     return result;
   }
+  result.issues.push(...parsed.issues);
   const byRef = new Map(discovery.candidates.map((c, i) => [`C${i + 1}`, c]));
   const assigned = new Map<string, number>();
   for (const [i, group] of parsed.data.groups.entries()) {

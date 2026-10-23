@@ -131,10 +131,23 @@ const response = () => ({
   ],
   uncertainMatches: [{ left: 'C2', right: 'C3', reason: '번호만 같음' }],
 });
-const audit = (d = discovery()): CandidateDeduplicationAudit => ({
-  ...createCandidateDeduplicationRequest(plan, d),
+type FlatAudit = Omit<CandidateDeduplicationAudit, 'response'> & {
+  response: ReturnType<typeof response>;
+};
+/** A saved v5 audit: flat groups, replayed with its own prompt. */
+const audit = (d = discovery()): FlatAudit => ({
+  ...createCandidateDeduplicationRequest(plan, d, 'candidate-deduplication.v5'),
   response: response(),
   usage,
+});
+const byKind = () => ({
+  groupsByKind: {
+    feature: [
+      { members: ['C1', 'C2'], reason: '본문과 표의 같은 우물' },
+      { members: ['C3'], reason: '별개 대상' },
+    ],
+  },
+  uncertainMatches: [{ left: 'C2', right: 'C3', reason: '번호만 같음' }],
 });
 
 describe('whole-pool candidate deduplication', () => {
@@ -233,24 +246,36 @@ describe('whole-pool candidate deduplication', () => {
   });
   test('makes one structured call for the entire pool and exposes exact prompts and response', async () => {
     vi.mocked(LLMCaller.call).mockResolvedValue({
-      output: response(),
+      output: byKind(),
       usage,
       usedFallback: false,
     });
     const d = discovery();
+    d.candidates[2].recordKind = 'layer';
     const result = await deduplicateCandidates(plan, d, {
       model: {} as LanguageModel,
       maxRetries: 0,
     });
     const call = vi.mocked(LLMCaller.call).mock.calls[0][0];
-    expect(call.schema.safeParse(response()).success).toBe(true);
-    expect(
-      call.schema.safeParse({
-        groups: [{ members: ['C9'], reason: 'wrong' }],
-        uncertainMatches: [],
-      }).success,
-    ).toBe(false);
-    expect(result.response).toEqual(response());
+    const valid = {
+      groupsByKind: {
+        feature: [{ members: ['C1', 'C2'], reason: '같은 우물' }],
+        layer: [{ members: ['C3'], reason: '층' }],
+      },
+      uncertainMatches: [{ left: 'C2', right: 'C3', reason: '확인 필요' }],
+    };
+    expect(call.schema.safeParse(valid).success).toBe(true);
+    for (const groupsByKind of [
+      { feature: [{ members: ['C1', 'C3'], reason: 'cross kind' }], layer: [] },
+      { feature: [{ members: ['C9'], reason: 'unknown' }], layer: [] },
+      { feature: [] },
+    ])
+      expect(
+        call.schema.safeParse({ groupsByKind, uncertainMatches: [] }).success,
+      ).toBe(false);
+    expect(result.response).toEqual(byKind());
+    expect(result.promptVersion).toBe('candidate-deduplication.v6');
+    expect(result.systemPrompt).toContain('GROUPS STAY WITHIN ONE RECORD KIND');
     expect(JSON.parse(result.userPrompt).candidates).toHaveLength(3);
     await expect(
       deduplicateCandidates(
@@ -276,7 +301,11 @@ test('adds full-source layer and identity-conflict review while replaying immuta
       d,
       'candidate-deduplication.v3',
     ),
-    current = createCandidateDeduplicationRequest(fullPlan, d),
+    current = createCandidateDeduplicationRequest(
+      fullPlan,
+      d,
+      'candidate-deduplication.v5',
+    ),
     oldAudit = { ...oldRequest, response: response(), usage },
     newAudit = { ...current, response: response(), usage },
     before = structuredClone({ d, fullPlan, oldAudit, newAudit });
@@ -317,7 +346,11 @@ test('replays archived v4 judgments without applying the new scope or distributi
       d,
       'candidate-deduplication.v4',
     ),
-    current = createCandidateDeduplicationRequest(plan, d),
+    current = createCandidateDeduplicationRequest(
+      plan,
+      d,
+      'candidate-deduplication.v5',
+    ),
     priorAudit = { ...prior, response: response(), usage },
     before = structuredClone({ d, priorAudit });
   expect(current.promptVersion).toBe('candidate-deduplication.v5');
@@ -404,4 +437,71 @@ test('rejects missing provenance and intra-group doubts instead of silently drop
   expect(() => groupCandidateUncertainties(invalid, d.candidates)).toThrow(
     'Identity uncertainty must link distinct groups',
   );
+});
+
+test('reads v6 groups per record kind in pool order and keeps saved v5 partitions replayable', () => {
+  const d = discovery();
+  d.candidates[0].recordKind = 'layer';
+  d.candidates[1].recordKind = 'layer';
+  const current = createCandidateDeduplicationRequest(plan, d);
+  const v5 = createCandidateDeduplicationRequest(
+    plan,
+    d,
+    'candidate-deduplication.v5',
+  );
+  const v6 = (response: unknown): CandidateDeduplicationAudit =>
+    ({ ...current, response, usage }) as CandidateDeduplicationAudit;
+  const groups = {
+    feature: [{ members: ['C3'], reason: '별개 대상' }],
+    layer: [{ members: ['C1', 'C2'], reason: '같은 층' }],
+  };
+
+  const result = assembleCandidateDeduplication(
+    plan,
+    d,
+    v6({ groupsByKind: groups, uncertainMatches: [] }),
+  );
+  const unknownKind = assembleCandidateDeduplication(
+    plan,
+    d,
+    v6({
+      groupsByKind: { ...groups, site: [{ members: ['C3'], reason: 'x' }] },
+      uncertainMatches: [],
+    }),
+  );
+  const mixed = assembleCandidateDeduplication(
+    plan,
+    d,
+    v6({
+      groupsByKind: {
+        layer: [{ members: ['C1', 'C2', 'C3'], reason: '섞임' }],
+      },
+      uncertainMatches: [],
+    }),
+  );
+
+  expect(current.promptVersion).toBe('candidate-deduplication.v6');
+  expect(current.userPrompt).toBe(v5.userPrompt);
+  expect(current.systemPrompt.startsWith(v5.systemPrompt)).toBe(true);
+  expect(v5.systemPrompt).not.toContain('GROUPS STAY WITHIN ONE RECORD KIND');
+  expect(result.issues).toEqual([]);
+  expect(result.groups.map((g) => g.memberCandidateIds)).toEqual([
+    ['a', 'b'],
+    ['c'],
+  ]);
+  expect(unknownKind.issues).toEqual([
+    'Groups listed under a kind absent from the pool: site',
+  ]);
+  expect(unknownKind.groups).toEqual([]);
+  expect(mixed.issues).toEqual(['Group 1 mixes record kinds']);
+  expect(
+    assembleCandidateDeduplication(plan, d, v6(response())).issues,
+  ).toEqual(['Invalid deduplication response schema']);
+  expect(
+    assembleCandidateDeduplication(plan, d, {
+      ...v5,
+      response: byKind(),
+      usage,
+    }).issues,
+  ).toEqual(['Invalid deduplication response schema']);
 });
