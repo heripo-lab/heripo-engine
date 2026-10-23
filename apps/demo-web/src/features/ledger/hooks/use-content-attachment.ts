@@ -36,8 +36,11 @@ export function useContentAttachment(taskId: string) {
     mutationFn: () => fetchContentAttachmentAudit(taskId),
   });
   const runThin = useMutation({
-    mutationFn: (budget: { maxCalls: number; maxTotalTokens: number }) =>
-      runThinContentAttachment(taskId, budget),
+    mutationFn: (budget: {
+      maxCalls: number;
+      maxTotalTokens: number;
+      modelId: string;
+    }) => runThinContentAttachment(taskId, budget),
     onSuccess: (data) => client.setQueryData(queryKey, data),
   });
   const stopThin = useMutation({

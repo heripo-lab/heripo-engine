@@ -333,7 +333,7 @@ export async function fetchContentAttachmentAudit(
 }
 export async function runThinContentAttachment(
   taskId: string,
-  budget: { maxCalls: number; maxTotalTokens: number },
+  budget: { maxCalls: number; maxTotalTokens: number; modelId: string },
 ): Promise<{
   run: ContentAttachmentRun | null;
   thin: ContentAttachmentThinState;

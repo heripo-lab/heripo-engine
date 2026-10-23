@@ -67,6 +67,9 @@ const schema = z.discriminatedUnion('action', [
       action: z.literal('run-thin'),
       maxCalls: z.number().int().min(1).max(5000),
       maxTotalTokens: z.number().int().min(1000).max(100_000_000),
+      modelId: z
+        .string()
+        .regex(/^(openai|anthropic|google|together|ollama|lmstudio)\/.+/),
     })
     .strict(),
   z.object({ action: z.literal('stop-thin') }).strict(),
@@ -93,10 +96,14 @@ export async function POST(request: NextRequest, context: Context) {
           run: getContentAttachmentRun(task.taskId!),
           thin:
             action === 'run-thin'
-              ? startContentAttachmentThin(task.taskId!, {
-                  maxCalls: parsed.data.maxCalls,
-                  maxTotalTokens: parsed.data.maxTotalTokens,
-                })
+              ? startContentAttachmentThin(
+                  task.taskId!,
+                  {
+                    maxCalls: parsed.data.maxCalls,
+                    maxTotalTokens: parsed.data.maxTotalTokens,
+                  },
+                  parsed.data.modelId,
+                )
               : stopContentAttachmentThin(task.taskId!),
         },
         { status: 202 },

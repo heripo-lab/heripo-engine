@@ -52,6 +52,12 @@ export function ContentAttachmentThinSection({
   const thin = query.data?.thin ?? null;
   const [maxCalls, setMaxCalls] = useState(400);
   const [maxTotalTokens, setMaxTotalTokens] = useState(9_000_000);
+  const [modelInput, setModelInput] = useState<string | null>(null);
+  // a run that already has calls keeps its model; otherwise default to Claude Haiku 5.5
+  const modelId =
+    modelInput ??
+    (thin?.usage.calls ? thin.modelId : 'anthropic/claude-haiku-5-5');
+  const modelLocked = !!thin?.usage.calls;
   const isRunning = thin?.status === 'running';
   const units = Object.values(thin?.units ?? {});
   const count = (s: string) => units.filter((u) => u === s).length;
@@ -118,6 +124,16 @@ export function ContentAttachmentThinSection({
       )}
       <div className="flex flex-wrap items-end gap-2 text-sm">
         <label className="space-y-1">
+          <span>배정 모델</span>
+          <Input
+            aria-label="배정 모델"
+            className="w-64 font-mono"
+            value={modelId}
+            disabled={isRunning || modelLocked}
+            onChange={(e) => setModelInput(e.target.value)}
+          />
+        </label>
+        <label className="space-y-1">
           <span>최대 호출 수</span>
           <Input
             type="number"
@@ -139,8 +155,10 @@ export function ContentAttachmentThinSection({
           />
         </label>
         <Button
-          disabled={!planReady || stale || isRunning || runThin.isPending}
-          onClick={() => runThin.mutate({ maxCalls, maxTotalTokens })}
+          disabled={
+            !planReady || stale || !modelId || isRunning || runThin.isPending
+          }
+          onClick={() => runThin.mutate({ maxCalls, maxTotalTokens, modelId })}
         >
           {thin ? '얇은 배정 이어서 실행' : '얇은 배정 실행'}
         </Button>
@@ -159,6 +177,12 @@ export function ContentAttachmentThinSection({
           v2 결과 JSON 다운로드
         </Button>
       </div>
+      {modelLocked && (
+        <p className="text-muted-foreground text-xs">
+          이미 호출이 저장된 실행은 같은 모델로만 이어서 실행합니다. 모델을
+          바꾸려면 순회 계획을 다시 준비하세요.
+        </p>
+      )}
       {(runThin.error || stopThin.error || thinResult.error) && (
         <p className="text-destructive text-sm">
           {(runThin.error || stopThin.error || thinResult.error)?.message}
@@ -190,7 +214,7 @@ export function ContentAttachmentThinSection({
               묶음 전체 검수 {thin.summary.wholeUnitReviewUnits}
             </p>
           )}
-          <p className="font-mono text-xs">모델 {thin.modelId}</p>
+          <p className="font-mono text-xs">사용 모델 {thin.modelId}</p>
         </div>
       )}
     </section>
