@@ -4,9 +4,12 @@ import type { ContentAttachmentThinRowBinding } from './row-owners';
 
 export const CONTENT_ATTACHMENT_THIN_COMPILE_VERSION =
   'content-attachment-thin-compile.v1' as const;
-/** Compilation under the plan's `local` layer policy, where single-unit layers are offered only nearby. */
+/**
+ * Compilation under the plan's `local` layer policy, where a single-unit layer is offered only in its unit and
+ * in the units next to it that share its evidence chapter.
+ */
 export const CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION =
-  'content-attachment-thin-compile.v2' as const;
+  'content-attachment-thin-compile.v3' as const;
 
 /** Maximum original words addressed by one Q window. */
 export const CONTENT_ATTACHMENT_THIN_WINDOW_WORDS = 16;

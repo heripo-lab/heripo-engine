@@ -219,7 +219,7 @@ describe('createContentAttachmentThinInput', () => {
     expect(input.chapters).toEqual(['1. 시굴조사']);
   });
 
-  test('offers a single-unit layer only in its unit and next to it under the local layer policy', () => {
+  test('offers a single-unit layer only in its unit and next to it in its chapter under the local layer policy', () => {
     const { plan, unit } = fixture();
     const others = ['far', 'next-but-one', 'next'].map(
       (unitId, i) =>
@@ -230,11 +230,16 @@ describe('createContentAttachmentThinInput', () => {
         }) as unknown as AttachmentUnit,
     );
     plan.units = [...others, unit];
-    const layer = (ref: string, keys: string[]) => {
+    const layer = (
+      ref: string,
+      keys: string[],
+      chapterPath = unit.chapters[0].path,
+    ) => {
       const e = structuredClone(plan.registry[0]);
       e.ref = ref;
       e.groupId = `g-${ref}`;
       e.recordKind = 'layer';
+      e.mentions[0].chapterPath = chapterPath;
       e.mentions[0].evidence = keys.map(
         (resourceKey) =>
           ({ resourceKey }) as (typeof e.mentions)[0]['evidence'][0],
@@ -248,6 +253,13 @@ describe('createContentAttachmentThinInput', () => {
       layer('L4', ['/other/0', '/other/1']),
       layer('L5', []),
       layer('L6', ['/elsewhere']),
+      layer('L7', ['/other/2'], [{ id: 'other', originTitle: '2. 발굴조사' }]),
+      layer('L8', ['/other/2'], []),
+      layer(
+        'L9',
+        [unit.sources[0].resource.key],
+        [{ id: 'other', originTitle: '2. 발굴조사' }],
+      ),
     );
 
     const all = createContentAttachmentThinInput(plan, unit);
@@ -256,12 +268,22 @@ describe('createContentAttachmentThinInput', () => {
 
     expect(all.version).toBe(CONTENT_ATTACHMENT_THIN_COMPILE_VERSION);
     expect(all.codeMap.candidateRefs).toEqual(
-      expect.arrayContaining(['L1', 'L2', 'L3', 'L4', 'L5', 'L6']),
+      expect.arrayContaining([
+        'L1',
+        'L2',
+        'L3',
+        'L4',
+        'L5',
+        'L6',
+        'L7',
+        'L8',
+        'L9',
+      ]),
     );
     expect(local.version).toBe(CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION);
     expect(
       local.codeMap.candidateRefs.filter((r) => r.startsWith('L')),
-    ).toEqual(['L1', 'L3', 'L4', 'L5', 'L6']);
+    ).toEqual(['L1', 'L3', 'L4', 'L5', 'L6', 'L8', 'L9']);
     expect(local.input.candidates.map((row) => row[0])).toEqual(
       local.codeMap.candidateRefs,
     );

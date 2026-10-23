@@ -91,6 +91,7 @@ function fixture() {
     readOnlyContext: [],
   } as unknown as AttachmentUnit;
   const plan = {
+    units: [unit],
     registry: [
       entry('R1', 'area', '사업범위'),
       entry('R2', 'feature', '수혈', '1호'),
@@ -359,5 +360,66 @@ describe('routeContentAttachmentThinSegments', () => {
       routeContentAttachmentThinSegments(plan, unit, compilation, runs())[1]
         .layerSuggestions,
     ).toEqual([]);
+  });
+
+  test("suggests a neighbouring unit's layer only to a segment in its chapter under the local policy", () => {
+    const { plan, unit, compilation } = fixture();
+    unit.chapters = [
+      {
+        chapterId: 'trial',
+        path: [
+          { id: 'survey', originTitle: 'IV. 조사내용' },
+          { id: 'trial', originTitle: '2. 시굴조사' },
+        ],
+      },
+    ];
+    plan.units = [
+      {
+        ...unit,
+        unitId: 'page-0',
+        sources: [{ resource: { key: '/next/0' } }],
+      },
+      unit,
+    ] as unknown as AttachmentUnit[];
+    unit.sources[0].resource.data.text =
+      '교란층과 역석층, 아스콘층 복토층 패각층';
+    unit.sources[0].resource.chapterIds = ['trial'];
+    unit.sources[2].resource.data.text = '역석층';
+    unit.sources[3].resource.data.text = '역석층';
+    unit.sources[3].resource.chapterIds = ['unlisted'];
+    compilation.codeMap.segSpans[0].charEnd = 22;
+    compilation.codeMap.segSpans[2].charEnd = 3;
+    compilation.codeMap.segSpans[3].charEnd = 3;
+    const layer = (
+      ref: string,
+      name: string,
+      chapterId: string,
+      key: string | null = '/next/0',
+    ) => {
+      const e = entry(ref, 'layer', name);
+      e.mentions[0].chapterPath = [{ id: chapterId, originTitle: chapterId }];
+      if (key)
+        e.mentions[0].evidence = [
+          { resourceKey: key } as (typeof e.mentions)[0]['evidence'][0],
+        ];
+      return e;
+    };
+    plan.registry.push(
+      layer('R20', '교란층', 'trial'),
+      layer('R21', '역석층', 'excavation'),
+      layer('R22', '아스콘층', 'survey'),
+      layer('R23', '복토층', 'excavation', null),
+      layer('R24', '패각층', 'excavation', '/chapters/0/textBlocks/0'),
+    );
+    plan.thinPolicy = { layers: 'local' };
+    compilation.codeMap.candidateRefs = ['R20', 'R21', 'R22', 'R23', 'R24'];
+
+    const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
+      run(none('E1:S1'), none('E2:S1'), none('E3:S1'), none('E4:S1')),
+    ]);
+
+    expect(routed[0].layerSuggestions).toEqual(['R20', 'R22', 'R23', 'R24']);
+    expect(routed[2].layerSuggestions).toEqual(['R21']);
+    expect(routed[3].layerSuggestions).toEqual([]);
   });
 });

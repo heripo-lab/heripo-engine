@@ -5,6 +5,8 @@ import type {
   ContentAttachmentThinInspection,
 } from './inspection';
 
+import { layerInChapters, localLayerHomes } from './compile-candidates';
+
 /** A run is an outlier when it alone differs on more than this share of segments... */
 export const CONTENT_ATTACHMENT_THIN_OUTLIER_RATE = 0.25;
 /** ...and on at least this many segments. */
@@ -104,7 +106,8 @@ export function checkContentAttachmentThinOutliers(
  * others are contested with votes. A segment goes to review when targets are contested, uncertainty
  * groups differ, a run is invalid for it, an area is returned, a literally named layer is not confirmed, or
  * more targets are confirmed than a collective statement may attach without review. Under the plan's
- * `local` layer policy a layer name shared by several layers suggests only the nearest local one.
+ * `local` layer policy a layer name shared by several layers suggests only the nearest local one, and a
+ * single-unit layer from a neighbouring unit is suggested only to a segment in its chapter.
  */
 export function routeContentAttachmentThinSegments(
   plan: ContentAttachmentPlan,
@@ -147,21 +150,45 @@ export function routeContentAttachmentThinSegments(
   // under the local policy only layers offered to the model for this unit can be suggested
   const local = plan.thinPolicy?.layers === 'local';
   const offered = new Set(compilation.codeMap.candidateRefs);
+  const entries = new Map(plan.registry.map((r) => [r.ref, r]));
+  const homes = local ? localLayerHomes(plan) : new Map<string, number>();
+  const unitAt = plan.units.findIndex((u) => u.unitId === unit.unitId);
+  const chapterPaths = new Map(
+    unit.chapters.map((c) => [c.chapterId, c.path.map((x) => x.id)]),
+  );
+  const segmentPaths = new Map(
+    unit.sources.map((s) => [
+      s.resource.key,
+      s.resource.chapterIds.map((id) => chapterPaths.get(id) ?? [id]),
+    ]),
+  );
   const nameUse = new Map<string, number>();
   for (const l of layerKeys)
     for (const k of new Set(l.keys)) nameUse.set(k, (nameUse.get(k) ?? 0) + 1);
   /**
    * Local rule for a name several layers share: keep the layers with evidence in this unit, then only the
    * one whose evidence is nearest at or before the segment. Names used by one layer are unaffected, but
-   * only layers offered to the model for this unit can be suggested.
+   * only layers offered to the model for this unit can be suggested, and a single-unit layer from a
+   * neighbouring unit only to a segment in its chapter.
    */
-  const narrowLocal = (named: typeof layerKeys, text: string, at: number) => {
+  const narrowLocal = (
+    named: typeof layerKeys,
+    text: string,
+    at: number,
+    paths: string[][],
+  ) => {
     const shared = [...nameUse].flatMap(([k, n]) =>
       n > 1 && text.includes(k) ? [k] : [],
     );
     const before = (ref: string) =>
       Math.max(-1, ...evidenceOrder.get(ref)!.filter((i) => i <= at));
-    const pool = named.filter((l) => offered.has(l.ref));
+    const pool = named.filter(
+      (l) =>
+        offered.has(l.ref) &&
+        (!homes.has(l.ref) ||
+          homes.get(l.ref) === unitAt ||
+          layerInChapters(entries.get(l.ref)!, paths)),
+    );
     return pool.filter((l) => {
       const key = shared.find((k) => l.keys.includes(k));
       if (!key) return true;
@@ -192,7 +219,14 @@ export function routeContentAttachmentThinSegments(
     const areaSuggestions = returned.filter(isArea).map(vote);
     const named = layerKeys.filter((l) => l.keys.some((k) => text.includes(k)));
     const layerSuggestions = (
-      local ? narrowLocal(named, text, sourceOrder.get(span.key)!) : named
+      local
+        ? narrowLocal(
+            named,
+            text,
+            sourceOrder.get(span.key)!,
+            segmentPaths.get(span.key)!,
+          )
+        : named
     )
       .filter((l) => !(votes.has(l.ref) && unanimous(l.ref)))
       .map((l) => l.ref);
