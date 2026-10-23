@@ -14,14 +14,18 @@ export const CONTENT_ATTACHMENT_THIN_LINKED_VERSION =
 /**
  * Decisions returned as an array with one item per segment, and a schema that checks reference formats only;
  * membership of segments, candidates, handles and ranges is checked by code. Linked compilations add the
- * page-boundary rule as in v9. The default for new requests.
+ * page-boundary rule as in v9.
  */
 export const CONTENT_ATTACHMENT_THIN_ARRAY_VERSION =
   'content-attachment-thin.v10' as const;
+/** v10 plus the rule that headings and discussion statements naming candidates describe them. The default. */
+export const CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION =
+  'content-attachment-thin.v11' as const;
 export type ContentAttachmentThinRequestVersion =
   | typeof CONTENT_ATTACHMENT_THIN_VERSION
   | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION
-  | typeof CONTENT_ATTACHMENT_THIN_ARRAY_VERSION;
+  | typeof CONTENT_ATTACHMENT_THIN_ARRAY_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION;
 /** `object`: v8/v9 decisions keyed by segment; `array`: v10 decision items. */
 export type ContentAttachmentThinResponseFormat = 'object' | 'array';
 
@@ -99,10 +103,14 @@ const ARRAY_FORMAT: Array<[string, string]> = [
  * Thin system prompt: base instructions, the format bridge and the restored rules, plus the page-boundary rule
  * for linked compilations. The array format describes decision items instead of segment keys.
  */
+const THIN_HEADINGS_RULE = `HEADINGS AND DISCUSSION STATEMENTS: A heading that names a registered current candidate (a feature, artifact, area, trench or layer, with or without its number) describes that candidate: decide a with it as the recipient, even when figure, plate or photo references follow the name; those references do not make the heading a caption. A topic heading that names no specific candidate, such as a heading for the site's stratigraphy or the survey method, stays n. A sentence stating that the report discusses or examines named current candidates also describes those candidates.`;
+
 export function contentAttachmentThinSystemPrompt(
   options: {
     linked?: boolean;
     format?: ContentAttachmentThinResponseFormat;
+    /** v11: add the heading and discussion-statement rule. */
+    headings?: boolean;
   } = {},
 ): string {
   const head =
@@ -113,7 +121,12 @@ export function contentAttachmentThinSystemPrompt(
         )
       : THIN_BASE_PROMPT;
   const base = `${head}\n\n${THIN_FORMAT_BRIDGE}\n\n${contentAttachmentThinRestoredRules()}`;
-  return options.linked ? `${base}\n\n${THIN_LINKED_RULE}` : base;
+  const withHeadings = options.headings
+    ? `${base}\n\n${THIN_HEADINGS_RULE}`
+    : base;
+  return options.linked
+    ? `${withHeadings}\n\n${THIN_LINKED_RULE}`
+    : withHeadings;
 }
 
 const upTo = (n: number) => (n <= 9 ? `[1-${n}]` : `[1-9]|1[0-${n - 10}]`);
@@ -217,14 +230,28 @@ export interface ContentAttachmentThinRequest {
 }
 
 /**
- * Model request for one compiled unit; the user prompt is the compact input JSON. New requests use the array
- * format (v10); the object format reproduces v8/v9 requests, v9 for linked compilations.
+ * Model request for one compiled unit; the user prompt is the compact input JSON. New requests use v11 (array
+ * format with the heading rule). `version` rebuilds a saved request's version; `format: 'object'` builds the
+ * v8/v9 request, v9 for linked compilations.
  */
 export function createContentAttachmentThinRequest(
   compilation: ContentAttachmentThinCompilation,
-  options: { format?: ContentAttachmentThinResponseFormat } = {},
+  options: {
+    format?: ContentAttachmentThinResponseFormat;
+    version?: ContentAttachmentThinRequestVersion;
+  } = {},
 ): ContentAttachmentThinRequest {
-  const format = options.format ?? 'array';
+  const version =
+    options.version ??
+    (options.format === 'object'
+      ? CONTENT_ATTACHMENT_THIN_VERSION
+      : CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION);
+  const format: ContentAttachmentThinResponseFormat =
+    version === CONTENT_ATTACHMENT_THIN_ARRAY_VERSION ||
+    version === CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION
+      ? 'array'
+      : 'object';
+  const headings = version === CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION;
   const linked =
     compilation.version === CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION ||
     compilation.version ===
@@ -232,11 +259,15 @@ export function createContentAttachmentThinRequest(
   return {
     version:
       format === 'array'
-        ? CONTENT_ATTACHMENT_THIN_ARRAY_VERSION
+        ? version
         : linked
           ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
           : CONTENT_ATTACHMENT_THIN_VERSION,
-    systemPrompt: contentAttachmentThinSystemPrompt({ linked, format }),
+    systemPrompt: contentAttachmentThinSystemPrompt({
+      linked,
+      format,
+      headings,
+    }),
     userPrompt: JSON.stringify(compilation.input),
     providerOutputSchema:
       format === 'array'

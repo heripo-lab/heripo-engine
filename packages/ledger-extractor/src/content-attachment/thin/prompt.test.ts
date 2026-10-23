@@ -6,6 +6,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { contentAttachmentRecipientSystemPrompt } from '../recipients/prompt';
 import {
   CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
+  CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION,
   CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
@@ -166,24 +167,44 @@ describe('createContentAttachmentThinRequest', () => {
       expect(request.systemPrompt).toBe(
         contentAttachmentThinSystemPrompt({ linked: true }),
       );
-      expect(array.version).toBe(CONTENT_ATTACHMENT_THIN_ARRAY_VERSION);
+      expect(array.version).toBe(CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION);
       expect(array.systemPrompt).toBe(
-        contentAttachmentThinSystemPrompt({ linked: true, format: 'array' }),
+        contentAttachmentThinSystemPrompt({
+          linked: true,
+          format: 'array',
+          headings: true,
+        }),
       );
       expect(array.systemPrompt).toContain('PAGE BOUNDARY:');
     }
   });
 
-  test('defaults to the array format with one schema for every unit', () => {
+  test('defaults to v11: the array format with one schema for every unit and the heading rule', () => {
     const c = compilation();
 
     const request = createContentAttachmentThinRequest(c);
+    const v10 = createContentAttachmentThinRequest(c, {
+      version: CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
+    });
+    const v8 = createContentAttachmentThinRequest(c, {
+      version: CONTENT_ATTACHMENT_THIN_VERSION,
+    });
     const schema = createContentAttachmentThinArraySchema();
     const items = (
       schema.properties.d.items as { anyOf: Array<{ required: string[] }> }
     ).anyOf;
 
-    expect(request.version).toBe(CONTENT_ATTACHMENT_THIN_ARRAY_VERSION);
+    expect(request.version).toBe(CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION);
+    expect(request.systemPrompt).toContain(
+      'HEADINGS AND DISCUSSION STATEMENTS',
+    );
+    expect(v10.version).toBe(CONTENT_ATTACHMENT_THIN_ARRAY_VERSION);
+    expect(v10.systemPrompt).not.toContain('HEADINGS AND DISCUSSION');
+    expect(request.systemPrompt.startsWith(v10.systemPrompt)).toBe(true);
+    expect(v10.providerOutputSchema).toEqual(schema);
+    expect(v8).toEqual(
+      createContentAttachmentThinRequest(c, { format: 'object' }),
+    );
     expect(request.providerOutputSchema).toEqual(schema);
     expect(request.userPrompt).toBe(JSON.stringify(c.input));
     expect(request.systemPrompt).toContain(

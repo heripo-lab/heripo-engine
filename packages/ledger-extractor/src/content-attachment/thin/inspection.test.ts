@@ -387,11 +387,15 @@ describe('inspectContentAttachmentThinResponse', () => {
   });
 });
 
-describe('inspectContentAttachmentThinResponse with the v10 array format', () => {
-  const arrayAudit = (rawResponse: unknown) => {
+describe('inspectContentAttachmentThinResponse with the array format', () => {
+  const arrayAudit = (
+    rawResponse: unknown,
+    version?: 'content-attachment-thin.v10',
+  ) => {
     const { plan, unit } = fixture();
     const request = createContentAttachmentThinRequest(
       createContentAttachmentThinInput(plan, unit),
+      version ? { version } : {},
     );
     return {
       inspection: inspectContentAttachmentThinResponse(plan, unit, {
@@ -413,7 +417,19 @@ describe('inspectContentAttachmentThinResponse with the v10 array format', () =>
       ],
     });
 
-    expect(request.version).toBe('content-attachment-thin.v10');
+    const v10 = arrayAudit(
+      {
+        d: [
+          { s: 'E1:S1', ...attach({ r: ['R3'] }) },
+          { s: 'E2:S1', k: 'n' },
+        ],
+      },
+      'content-attachment-thin.v10',
+    );
+
+    expect(request.version).toBe('content-attachment-thin.v11');
+    expect(v10.request.version).toBe('content-attachment-thin.v10');
+    expect(v10.inspection.issues).toEqual([]);
     expect(inspection.issues).toEqual([]);
     expect(
       [...inspection.decisions].sort((a, b) =>

@@ -5,6 +5,7 @@ import type { ContentAttachmentThinRequest } from './prompt';
 import { createContentAttachmentThinInput } from './compile';
 import {
   CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
+  CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION,
   createContentAttachmentThinRequest,
 } from './prompt';
 
@@ -93,8 +94,8 @@ function sameRequest(
 }
 
 /**
- * Inspect one raw thin response against its request, recompiled in the saved request's format (array for v10,
- * object for v8/v9). The raw response is never changed. A request that differs from the recompiled one
+ * Inspect one raw thin response against its request, recompiled in the saved request's version (array for
+ * v10/v11, object for v8/v9). The raw response is never changed. A request that differs from the recompiled one
  * invalidates the whole audit; a structurally invalid segment is reported and left out, while the other
  * segments are interpreted independently. In the array format an item without a segment ref is reported, and
  * a segment returned twice is reported and left out.
@@ -106,12 +107,14 @@ export function inspectContentAttachmentThinResponse(
 ): ContentAttachmentThinInspection {
   const compilation: ContentAttachmentThinCompilation =
     createContentAttachmentThinInput(plan, unit);
-  const array = audit.request.version === CONTENT_ATTACHMENT_THIN_ARRAY_VERSION;
+  const array =
+    audit.request.version === CONTENT_ATTACHMENT_THIN_ARRAY_VERSION ||
+    audit.request.version === CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION;
   if (
     !sameRequest(
       audit.request,
       createContentAttachmentThinRequest(compilation, {
-        format: array ? 'array' : 'object',
+        version: audit.request.version,
       }),
     )
   )
