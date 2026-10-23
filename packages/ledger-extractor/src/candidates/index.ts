@@ -1,4 +1,7 @@
-export { prepareCandidateDiscovery } from './discovery-plan';
+export {
+  isSameCandidateDiscoveryScope,
+  prepareCandidateDiscovery,
+} from './discovery-plan';
 export { prepareCandidateDiscoveryRetry } from './discovery-retry';
 export { discoverCandidateUnit } from './discovery-unit';
 export { assembleCandidateDiscovery } from './discovery-assembly';

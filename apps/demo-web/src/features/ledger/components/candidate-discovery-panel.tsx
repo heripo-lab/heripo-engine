@@ -41,7 +41,7 @@ const STATUS_LABELS: Record<string, string> = {
 export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   const { data: indexData } = useDocumentResourceIndex(taskId);
   const { query, start, cancel, audit } = useCandidateDiscovery(taskId);
-  const [scope, setScope] = useState('');
+  const [scope, setScope] = useState<string[]>([]);
   const [modelId, setModelId] = useState('openai/gpt-6-luna');
   const [maxTextChars, setMaxTextChars] = useState(8000);
   const [tableRowsPerUnit, setTableRowsPerUnit] = useState(12);
@@ -51,12 +51,25 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   const [selectedId, setSelectedId] = useState('');
   const chapters =
     indexData?.index.resources.filter((r) => r.kind === 'chapter') ?? [];
-  const scopeChapterId =
-    scope ||
-    chapters.find(
-      (c) => c.kind === 'chapter' && /조사\s*내용/.test(c.data.title),
-    )?.resourceId ||
-    '';
+  const defaultScope = chapters.find(
+    (c) => c.kind === 'chapter' && /조사\s*내용/.test(c.data.title),
+  )?.resourceId;
+  const scopeIds = scope.length ? scope : defaultScope ? [defaultScope] : [];
+  // one chapter keeps the original single-scope settings; several are planned in document order
+  const scopeChapterId = scopeIds.length === 1 ? scopeIds[0] : scopeIds;
+  const selectedKeys = chapters
+    .filter((c) => scopeIds.includes(c.resourceId!))
+    .map((c) => c.key);
+  const insideSelected = (key: string) =>
+    selectedKeys.some((k) => key.startsWith(`${k}/children/`));
+  const toggleScope = (id: string) =>
+    setScope(
+      scopeIds.includes(id)
+        ? scopeIds.filter((s) => s !== id)
+        : chapters
+            .map((c) => c.resourceId!)
+            .filter((s) => s === id || scopeIds.includes(s)),
+    );
   const run = query.data?.run;
   const running = run?.status === 'running';
   const candidates =
@@ -96,24 +109,41 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm">
-            후보 탐색 범위 (하위 장 포함)
-            <select
+          <fieldset className="text-sm">
+            <legend>후보 탐색 범위 (하위 장 포함, 여러 장 선택 가능)</legend>
+            <div
               aria-label="후보 탐색 범위"
-              className="bg-background mt-1 w-full rounded border p-2"
-              value={scopeChapterId}
-              disabled={running}
-              onChange={(e) => setScope(e.target.value)}
+              className="bg-background mt-1 max-h-48 space-y-1 overflow-y-auto rounded border p-2"
             >
-              <option value="">장 선택</option>
-              {chapters.map((c) => (
-                <option key={c.key} value={c.resourceId!}>
-                  {c.resourceId} ·{' '}
-                  {c.kind === 'chapter' ? c.data.originTitle : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+              {chapters.map((c) => {
+                const nested = insideSelected(c.key);
+                return (
+                  <label
+                    key={c.key}
+                    className="flex items-center gap-2"
+                    style={{
+                      paddingLeft: `${(c.key.split('/children/').length - 1) * 12}px`,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={scopeIds.includes(c.resourceId!) || nested}
+                      disabled={running || nested}
+                      onChange={() => toggleScope(c.resourceId!)}
+                    />
+                    <span className={nested ? 'text-muted-foreground' : ''}>
+                      {c.resourceId} ·{' '}
+                      {c.kind === 'chapter' ? c.data.originTitle : ''}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-muted-foreground mt-1 text-xs">
+              선택한 장의 하위 장은 자동으로 포함됩니다. 여러 장의 후보는 중복
+              검토 한 번으로 함께 묶습니다.
+            </p>
+          </fieldset>
           <label className="text-sm">
             후보 판단 모델
             <input
@@ -175,7 +205,9 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
         </details>
         <div className="flex flex-wrap gap-2">
           <Button
-            disabled={!scopeChapterId || !modelId || running || start.isPending}
+            disabled={
+              !scopeIds.length || !modelId || running || start.isPending
+            }
             onClick={() =>
               start.mutate({
                 scopeChapterId,
@@ -265,8 +297,11 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 {run.result.issues.length}개
               </p>
               <p>
-                {run.result.scopeTitle} ({run.result.scopeChapterId}) · 모델{' '}
-                {run.settings.modelId}
+                {run.result.scopeTitle} (
+                {(
+                  run.result.scopeChapterIds ?? [run.result.scopeChapterId]
+                ).join(', ')}
+                ) · 모델 {run.settings.modelId}
               </p>
               <p className="font-mono text-xs break-all">
                 실행 {run.runId} · 입력 {run.result.inputSha256}

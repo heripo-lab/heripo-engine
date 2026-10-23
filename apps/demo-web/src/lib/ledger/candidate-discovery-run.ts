@@ -11,6 +11,7 @@ import {
   createCandidateDeduplicationRequest,
   deduplicateCandidates,
   discoverCandidateUnit,
+  isSameCandidateDiscoveryScope,
   prepareCandidateDiscovery,
   prepareCandidateDiscoveryRetry,
 } from '@heripo/ledger-extractor';
@@ -23,7 +24,8 @@ import { createModel } from '../processing/model-factory';
 import { parseLedgerInputText } from './ledger-input';
 
 export interface CandidateDiscoveryRunSettings {
-  scopeChapterId: string;
+  /** One chapter subtree, or several distinct, non-nested chapter subtrees. */
+  scopeChapterId: string | string[];
   modelId: string;
   maxTextChars: number;
   tableRowsPerUnit: number;
@@ -128,7 +130,7 @@ export async function startCandidateDiscovery(
     (!existing ||
       existing.completedUnits !== existing.totalUnits ||
       existing.result.inputSha256 !== freshPlan.inputSha256 ||
-      existing.result.scopeChapterId !== settings.scopeChapterId)
+      !isSameCandidateDiscoveryScope(existing.result, freshPlan))
   ) {
     throw new Error(
       'A complete discovery snapshot for the same input and scope is required',
