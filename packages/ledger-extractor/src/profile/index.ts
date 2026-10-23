@@ -2,6 +2,7 @@ export {
   REPORT_PROFILE_VERSION,
   REPORT_TRAIT_IDS,
   contentAttachmentThinPolicyFromProfile,
+  reportProfileSha256,
   validateReportProfile,
 } from './report-profile';
 export type {

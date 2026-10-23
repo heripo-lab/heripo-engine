@@ -133,7 +133,7 @@ Apache-2.0 — [LICENSE](../../LICENSE) 참고.
 
 보고서마다 성격이 다르므로(육상 발굴, 트렌치 위주 시굴, 수중 도록형 등), 이후 단계는 모든 보고서에 같은 규칙을 쓰지 않고 사람이 확인한 `ReportProfile`(`report-profile.v1`)을 읽습니다. 프로필에는 원본 입력 해시, `REPORT_TRAIT_IDS` 특성별 판정(`yes`·`no`·`unclear`), 이번 조사 객체가 있는 장 목록(서로 겹치거나 포함하지 않음), 출처(`router`·`manual`), 확인 시각을 담습니다. 특성 목록은 열려 있어서, 새로운 유형의 보고서에서 나온 특성은 분기에 쓰이기 전까지 `x-` 접두 특성으로 기록합니다.
 
-`validateReportProfile(index, inputSha256, profile)`은 프로필을 고치지 않고 찾은 문제를 모두 돌려줍니다(다른 입력, 모르는 특성·값, 없거나 반복되거나 겹치는 범위 장, 모르는 출처, 잘못된 시각). 빈 목록이면 쓸 수 있는 프로필입니다. `scopeChapterIds`는 그대로 `prepareCandidateDiscovery`에 넘길 수 있습니다. `contentAttachmentThinPolicyFromProfile(profile)`은 특성을 얇은 배정 규칙으로 바꿉니다. 층서가 국지적이지 않다고 확인된 경우(`local_stratigraphy: 'no'`)와 프로필이 없는 경우만 `layers: 'all'`이고, 나머지는 `layers: 'local'`입니다. 이 정책을 계획과 분류에 적용하는 일은 다음 단계입니다.
+`validateReportProfile(index, inputSha256, profile)`은 프로필을 고치지 않고 찾은 문제를 모두 돌려줍니다(다른 입력, 모르는 특성·값, 없거나 반복되거나 겹치는 범위 장, 모르는 출처, 잘못된 시각). 빈 목록이면 쓸 수 있는 프로필입니다. `scopeChapterIds`는 그대로 `prepareCandidateDiscovery`에 넘길 수 있으며, `scopeSource: { kind: 'profile', profileSha256 }`도 함께 넘기면 범위가 그 프로필에서 왔다는 사실이 계획에 남습니다. `reportProfileSha256(profile)`은 키를 정렬해 해시하므로 같은 판정이면 같은 해시가 나옵니다. `contentAttachmentThinPolicyFromProfile(profile)`은 특성을 얇은 배정 규칙으로 바꿉니다. 층서가 국지적이지 않다고 확인된 경우(`local_stratigraphy: 'no'`)와 프로필이 없는 경우만 `layers: 'all'`이고, 나머지는 `layers: 'local'`입니다. 이 정책을 계획과 분류에 적용하는 일은 다음 단계입니다.
 
 ## 묶음 단위 얇은 원문 배정
 

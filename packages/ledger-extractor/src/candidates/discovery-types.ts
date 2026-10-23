@@ -88,6 +88,8 @@ export interface CandidateDiscoveryPlan {
   scopeTitle: string;
   inputSha256: string;
   units: CandidateDiscoveryUnit[];
+  /** Where the scope came from; present only when a confirmed report profile supplied it. */
+  scopeSource?: { kind: 'profile'; profileSha256: string };
 }
 export interface CandidateEvidence {
   sourceId: string;

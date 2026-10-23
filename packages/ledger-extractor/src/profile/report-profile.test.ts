@@ -9,6 +9,7 @@ import {
   REPORT_PROFILE_VERSION,
   REPORT_TRAIT_IDS,
   contentAttachmentThinPolicyFromProfile,
+  reportProfileSha256,
   validateReportProfile,
 } from './report-profile';
 
@@ -107,5 +108,25 @@ describe('report profile', () => {
       expect(
         contentAttachmentThinPolicyFromProfile(profile({ traits })),
       ).toEqual({ layers: 'local' });
+  });
+
+  test('hashes the same judgments the same regardless of key order', async () => {
+    const input = profile({ notes: '' });
+    const reordered = Object.fromEntries(
+      Object.entries(input).reverse(),
+    ) as ReportProfile;
+    reordered.traits = Object.fromEntries(
+      Object.entries(input.traits).reverse(),
+    );
+
+    const hash = await reportProfileSha256(input);
+
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(await reportProfileSha256(reordered)).toBe(hash);
+    expect(
+      await reportProfileSha256(
+        profile({ notes: '', scopeChapterIds: ['results', 'methods'] }),
+      ),
+    ).not.toBe(hash);
   });
 });

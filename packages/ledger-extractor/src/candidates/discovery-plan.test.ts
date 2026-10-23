@@ -224,6 +224,14 @@ describe('multi-chapter discovery scope', () => {
     ).toEqual(plan);
     const single = prepareCandidateDiscovery(index, options(['range']));
     expect(single).not.toHaveProperty('scopeChapterIds');
+    expect(single).not.toHaveProperty('scopeSource');
+    const scopeSource = { kind: 'profile' as const, profileSha256: 'abc' };
+    const fromProfile = prepareCandidateDiscovery(index, {
+      ...options(['range', 'trench']),
+      scopeSource,
+    });
+    expect(fromProfile).toEqual({ ...plan, scopeSource });
+    expect(fromProfile.scopeSource).not.toBe(scopeSource);
     expect(single).toEqual(prepareCandidateDiscovery(index, options('range')));
     const result = await assembleCandidateDiscovery(plan, []);
     expect(result.scopeChapterIds).toEqual(['range', 'trench']);

@@ -101,3 +101,27 @@ export function contentAttachmentThinPolicyFromProfile(
       !profile || profile.traits.local_stratigraphy === 'no' ? 'all' : 'local',
   };
 }
+
+const canonical = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((k) => [k, canonical((value as Record<string, unknown>)[k])]),
+        )
+      : value;
+
+/** SHA-256 of a profile with sorted keys, so the same judgments hash the same regardless of key order. */
+export async function reportProfileSha256(
+  profile: ReportProfile,
+): Promise<string> {
+  const hash = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(canonical(profile))),
+  );
+  return Array.from(new Uint8Array(hash), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
+}

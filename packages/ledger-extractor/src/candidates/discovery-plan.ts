@@ -18,6 +18,7 @@ export function prepareCandidateDiscovery(
     inputSha256: string;
     maxTextChars: number;
     tableRowsPerUnit: number;
+    scopeSource?: CandidateDiscoveryPlan['scopeSource'];
   },
 ): CandidateDiscoveryPlan {
   if (
@@ -162,6 +163,7 @@ export function prepareCandidateDiscovery(
     scopeTitle: roots.map((r) => r.data.originTitle).join(' · '),
     inputSha256: options.inputSha256,
     units,
+    ...(options.scopeSource ? { scopeSource: { ...options.scopeSource } } : {}),
   };
 }
 
