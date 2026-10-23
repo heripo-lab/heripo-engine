@@ -120,7 +120,12 @@ export interface CandidateDiscoveryAudit {
   systemPrompt: string;
   userPrompt: string;
   response: CandidateDiscoveryResponse;
+  /** Includes reasoningTokens when the provider reports thinking tokens. */
   usage: ExtendedTokenUsage;
+  /** How the producing call ended, when the SDK reports it (absent in older audits). */
+  finishReason?: string;
+  /** Structured-output attempts including schema-mismatch retries; usage counts only the last one. */
+  structuredAttempts?: number;
 }
 export interface CandidateDiscoveryIssue {
   unitId: string;

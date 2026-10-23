@@ -44,7 +44,9 @@ export async function assembleCandidateDiscovery(
           ? 'candidate-discovery.v5'
           : audit.promptVersion === 'candidate-discovery.v6'
             ? 'candidate-discovery.v6'
-            : CANDIDATE_DISCOVERY_PROMPT_VERSION,
+            : audit.promptVersion === 'candidate-discovery.v7'
+              ? 'candidate-discovery.v7'
+              : CANDIDATE_DISCOVERY_PROMPT_VERSION,
     );
     if (
       audit.promptVersion !== expected.promptVersion ||
@@ -123,6 +125,7 @@ export async function assembleCandidateDiscovery(
       )?.resource;
       const strictTableIdentifier =
         (audit.promptVersion === 'candidate-discovery.v6' ||
+          audit.promptVersion === 'candidate-discovery.v7' ||
           audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION) &&
         unit.table !== null &&
         proposal.eligibilityBasis === 'table_item';
@@ -202,7 +205,10 @@ export async function assembleCandidateDiscovery(
         evidence,
       });
     }
-    if (audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION) {
+    if (
+      audit.promptVersion === 'candidate-discovery.v7' ||
+      audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION
+    ) {
       const missing = unhandledTableRows(sources, parsed.data);
       if (missing.length)
         issues.push({

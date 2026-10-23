@@ -483,7 +483,7 @@ test('keeps distinct explicit investigation areas eligible in a stratigraphy uni
   expect({ plan, oldAudit, currentAudit }).toEqual(before);
 });
 
-test('reports item-table rows that are neither proposed nor excluded, for the current prompt version only', async () => {
+test('reports item-table rows that are neither proposed nor excluded, from prompt v7 on', async () => {
   const cell = (text: string, isHeader = false) => ({
     text,
     colSpan: 1,
@@ -545,6 +545,12 @@ test('reports item-table rows that are neither proposed nor excluded, for the cu
     audit(unit, response),
   ]);
   const old = await assembleCandidateDiscovery(plan, [v6]);
+  const v7 = await assembleCandidateDiscovery(plan, [
+    {
+      ...v6,
+      ...createCandidateDiscoveryRequest(unit, 'candidate-discovery.v7'),
+    },
+  ]);
   const noItems = await assembleCandidateDiscovery(plan, [
     audit(unit, { candidates: [], exclusions: [] }),
   ]);
@@ -557,6 +563,7 @@ test('reports item-table rows that are neither proposed nor excluded, for the cu
       reason: 'Table rows neither proposed nor excluded: 3',
     },
   ]);
+  expect(v7.issues).toEqual(current.issues);
   expect(old.issues).toEqual([]);
   expect(old.candidates).toEqual(current.candidates);
   expect(noItems.issues).toEqual([]);

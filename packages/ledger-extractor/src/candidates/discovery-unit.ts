@@ -24,20 +24,21 @@ export async function discoverCandidateUnit(
   },
 ): Promise<CandidateDiscoveryAudit> {
   const { userPrompt } = createCandidateDiscoveryRequest(unit);
-  const { output, usage } = await LLMCaller.call({
-    schema: createCandidateDiscoverySchema(unit),
-    systemPrompt: SYSTEM_PROMPT,
-    userPrompt,
-    primaryModel: options.model,
-    maxRetries: options.maxRetries,
-    abortSignal: options.abortSignal,
-    component: 'LedgerCandidateDiscovery',
-    phase: 'candidate-discovery',
-    metadata: {
-      unitId: unit.unitId,
-      promptVersion: CANDIDATE_DISCOVERY_PROMPT_VERSION,
-    },
-  });
+  const { output, usage, finishReason, structuredAttempts } =
+    await LLMCaller.call({
+      schema: createCandidateDiscoverySchema(unit),
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt,
+      primaryModel: options.model,
+      maxRetries: options.maxRetries,
+      abortSignal: options.abortSignal,
+      component: 'LedgerCandidateDiscovery',
+      phase: 'candidate-discovery',
+      metadata: {
+        unitId: unit.unitId,
+        promptVersion: CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      },
+    });
   return {
     unitId: unit.unitId,
     promptVersion: CANDIDATE_DISCOVERY_PROMPT_VERSION,
@@ -45,5 +46,7 @@ export async function discoverCandidateUnit(
     userPrompt,
     response: output,
     usage,
+    ...(finishReason !== undefined && { finishReason }),
+    ...(structuredAttempts !== undefined && { structuredAttempts }),
   };
 }
