@@ -32,6 +32,7 @@ const settingsSchema = z.object({
   deduplicationOnly: z.boolean().optional(),
   retryFailedUnits: z.boolean().optional(),
   retryUnitIds: z.array(z.string().min(1)).max(100).optional(),
+  useProfileScope: z.boolean().optional(),
 });
 type Context = { params: Promise<{ taskId: string }> };
 

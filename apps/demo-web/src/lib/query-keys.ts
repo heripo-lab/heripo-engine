@@ -3,6 +3,8 @@ export const taskKeys = {
     ['tasks', 'detail', taskId, 'content-attachment'] as const,
   candidates: (taskId: string) =>
     ['tasks', 'detail', taskId, 'candidates'] as const,
+  reportProfile: (taskId: string) =>
+    ['tasks', 'detail', taskId, 'report-profile'] as const,
   all: ['tasks'] as const,
   lists: () => [...taskKeys.all, 'list'] as const,
   list: (filters: { limit?: number; offset?: number; status?: string }) =>

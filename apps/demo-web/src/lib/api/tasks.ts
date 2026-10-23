@@ -17,6 +17,7 @@ import type {
 } from '~/lib/ledger/candidate-discovery-run';
 import type { ContentAttachmentRun } from '~/lib/ledger/content-attachment-run';
 import type { ContentAttachmentThinState } from '~/lib/ledger/content-attachment-thin-run';
+import type { StoredReportProfile } from '~/lib/ledger/report-profile';
 
 import type { ProcessingOptions } from '~/features/upload';
 
@@ -363,4 +364,28 @@ export async function fetchThinContentAttachmentResult(
   return handleResponse(
     await fetch(`/api/tasks/${taskId}/content-attachment?thin=result`),
   );
+}
+
+export async function fetchReportProfile(
+  taskId: string,
+): Promise<{ stored: StoredReportProfile | null }> {
+  return handleResponse(await fetch(`/api/tasks/${taskId}/report-profile`));
+}
+
+/** Save a confirmed profile; validation problems from the server are listed in the error message. */
+export async function saveReportProfileRequest(
+  taskId: string,
+  profile: unknown,
+): Promise<{ stored: StoredReportProfile }> {
+  const response = await fetch(`/api/tasks/${taskId}/report-profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+  const body = await response.json();
+  if (!response.ok)
+    throw new Error(
+      [body.error ?? 'Request failed', ...(body.issues ?? [])].join(': '),
+    );
+  return body;
 }
