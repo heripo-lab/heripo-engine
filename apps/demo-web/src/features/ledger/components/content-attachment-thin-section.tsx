@@ -3,7 +3,9 @@ import type { ContentAttachmentPlan } from '@heripo/ledger-extractor';
 
 import {
   CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
 } from '@heripo/ledger-extractor';
 import { useState } from 'react';
 
@@ -48,6 +50,14 @@ export function ContentAttachmentThinSection({
     (currentProfile?.profileSha256 ?? null) !==
       (profile?.profileSha256 ?? null);
   const local = thinPolicy?.layers === 'local';
+  const linked = thinPolicy?.continuity === 'linked';
+  const compileVersion = linked
+    ? local
+      ? CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION
+      : CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION
+    : local
+      ? CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION
+      : CONTENT_ATTACHMENT_THIN_COMPILE_VERSION;
   const { query, runThin, stopThin, thinResult } = useContentAttachment(taskId);
   const thin = query.data?.thin ?? null;
   const [maxCalls, setMaxCalls] = useState(400);
@@ -92,15 +102,17 @@ export function ContentAttachmentThinSection({
           <p>
             적용 정책 · 층위 후보{' '}
             {local
-              ? '근처 묶음만 제공(local): 한 묶음에서만 근거가 나온 층위는 앞뒤 1묶음까지만, 같은 이름 층위는 가까운 근거로 좁힘'
+              ? '근처 묶음만 제공(local): 한 묶음에서만 근거가 나온 층위는 자기 묶음과 같은 장의 앞뒤 1묶음까지만, 같은 이름 층위는 가까운 근거로 좁힘'
               : '모두 제공(all)'}
           </p>
+          <p>
+            쪽 경계 맥락{' '}
+            {linked
+              ? '연결(linked): 앞 쪽 블록을 첫 블록과 같은 읽기 순서로 잇고, 후보의 근거 블록이면 표시'
+              : '기존 방식'}
+          </p>
           <p className="font-mono text-xs break-all">
-            컴파일{' '}
-            {local
-              ? CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION
-              : CONTENT_ATTACHMENT_THIN_COMPILE_VERSION}{' '}
-            ·{' '}
+            컴파일 {compileVersion} ·{' '}
             {profile
               ? `프로필 출처 ${profile.source === 'router' ? '라우터 판정 후 사람 확인' : '사람 직접 작성'} · 해시 ${profile.profileSha256}`
               : '확인된 프로필 없이 준비된 계획(기존 규칙)'}
