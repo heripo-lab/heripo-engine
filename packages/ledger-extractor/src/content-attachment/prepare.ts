@@ -38,6 +38,8 @@ export async function prepareContentAttachment(
     pdfPageNumbers: number[];
     maxUnitChars: number;
     registrationDecisions?: ContentRegistrationDecision[];
+    thinPolicy?: ContentAttachmentPlan['thinPolicy'];
+    profile?: ContentAttachmentPlan['profile'];
   },
 ): Promise<ContentAttachmentPlan> {
   createCandidateDeduplicationRequest(discoveryPlan, discovery);
@@ -222,5 +224,7 @@ export async function prepareContentAttachment(
       : {}),
     pages,
     units,
+    ...(options.thinPolicy ? { thinPolicy: { ...options.thinPolicy } } : {}),
+    ...(options.profile ? { profile: { ...options.profile } } : {}),
   };
 }

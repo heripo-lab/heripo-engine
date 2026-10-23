@@ -6,6 +6,10 @@ import type {
   CandidateEvidence,
   LedgerObjectCandidate,
 } from '../candidates/discovery-types';
+import type {
+  ContentAttachmentThinPolicy,
+  ReportProfile,
+} from '../profile/report-profile';
 import type { DocumentResource } from '../resources/document-resource-index';
 import type { createContentAttachmentBodyBlockInput } from './body-blocks';
 import type { createContentAttachmentContextInput } from './context';
@@ -77,6 +81,10 @@ export interface ContentAttachmentPlan {
     status: 'planned' | 'no_body_or_table_text';
   }>;
   units: AttachmentUnit[];
+  /** Thin attachment rules from a confirmed report profile; without it every rule stays as before. */
+  thinPolicy?: ContentAttachmentThinPolicy;
+  /** The confirmed profile the rules came from: its hash and source only; the profile file is kept apart. */
+  profile?: { profileSha256: string; source: ReportProfile['source'] };
 }
 function responseSchema(
   source: z.ZodType<string>,

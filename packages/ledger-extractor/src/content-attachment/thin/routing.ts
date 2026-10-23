@@ -103,7 +103,8 @@ export function checkContentAttachmentThinOutliers(
  * Route each judged segment of a unit from its final runs. Targets returned by every run are confirmed,
  * others are contested with votes. A segment goes to review when targets are contested, uncertainty
  * groups differ, a run is invalid for it, an area is returned, a literally named layer is not confirmed, or
- * more targets are confirmed than a collective statement may attach without review.
+ * more targets are confirmed than a collective statement may attach without review. Under the plan's
+ * `local` layer policy a layer name shared by several layers suggests only the nearest local one.
  */
 export function routeContentAttachmentThinSegments(
   plan: ContentAttachmentPlan,
@@ -128,6 +129,45 @@ export function routeContentAttachmentThinSegments(
     unit.sources.map((s) => [s.resource.key, s.resource.data.text]),
   );
   const indexes = byIndex(runs);
+  const sourceOrder = new Map(unit.sources.map((s, i) => [s.resource.key, i]));
+  const evidenceOrder = new Map(
+    plan.registry
+      .filter((r) => r.recordKind === 'layer')
+      .map((r) => [
+        r.ref,
+        r.mentions.flatMap((m) =>
+          m.evidence.flatMap((e) =>
+            sourceOrder.has(e.resourceKey)
+              ? [sourceOrder.get(e.resourceKey)!]
+              : [],
+          ),
+        ),
+      ]),
+  );
+  const nameUse = new Map<string, number>();
+  for (const l of layerKeys)
+    for (const k of new Set(l.keys)) nameUse.set(k, (nameUse.get(k) ?? 0) + 1);
+  /**
+   * Local rule for a name several layers share: keep the layers with evidence in this unit, then only the
+   * one whose evidence is nearest at or before the segment. Names used by one layer are unaffected.
+   */
+  const narrowLocal = (named: typeof layerKeys, text: string, at: number) => {
+    const shared = [...nameUse].flatMap(([k, n]) =>
+      n > 1 && text.includes(k) ? [k] : [],
+    );
+    const before = (ref: string) =>
+      Math.max(-1, ...evidenceOrder.get(ref)!.filter((i) => i <= at));
+    return named.filter((l) => {
+      const key = shared.find((k) => l.keys.includes(k));
+      if (!key) return true;
+      if (!evidenceOrder.get(l.ref)!.length) return false;
+      const rivals = named.filter(
+        (o) => o.keys.includes(key) && evidenceOrder.get(o.ref)!.length,
+      );
+      const best = Math.max(...rivals.map((o) => before(o.ref)));
+      return best >= 0 ? before(l.ref) === best : rivals[0] === l;
+    });
+  };
 
   return compilation.codeMap.segments.map((segment) => {
     const span = compilation.codeMap.segSpans.find((s) => s.seg === segment)!;
@@ -145,12 +185,13 @@ export function routeContentAttachmentThinSegments(
     const confirmed = returned.filter((r) => unanimous(r) && !isArea(r));
     const contested = returned.filter((r) => !unanimous(r) && !isArea(r));
     const areaSuggestions = returned.filter(isArea).map(vote);
-    const layerSuggestions = layerKeys
-      .filter(
-        (l) =>
-          l.keys.some((k) => text.includes(k)) &&
-          !(votes.has(l.ref) && unanimous(l.ref)),
-      )
+    const named = layerKeys.filter((l) => l.keys.some((k) => text.includes(k)));
+    const layerSuggestions = (
+      plan.thinPolicy?.layers === 'local'
+        ? narrowLocal(named, text, sourceOrder.get(span.key)!)
+        : named
+    )
+      .filter((l) => !(votes.has(l.ref) && unanimous(l.ref)))
       .map((l) => l.ref);
     const groupKeys = new Set(
       valid.map((d) =>

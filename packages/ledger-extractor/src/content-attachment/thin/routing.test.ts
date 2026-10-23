@@ -307,4 +307,51 @@ describe('routeContentAttachmentThinSegments', () => {
       routeContentAttachmentThinSegments(plan, unit, compilation, []),
     ).toThrow('Expected at least one run');
   });
+
+  test('narrows a shared layer name to the nearest local layer only under the local policy', () => {
+    const { plan, unit, compilation } = fixture();
+    const setText = (i: number, text: string) => {
+      unit.sources[i].resource.data.text = text;
+      compilation.codeMap.segSpans[i].charEnd = text.length;
+    };
+    setText(0, '교란층 위 수혈 1호');
+    setText(3, '교란층 아래 표토');
+    const layer = (ref: string, key: string | null) => {
+      const e = entry(ref, 'layer', '교란층');
+      if (key)
+        e.mentions[0].evidence = [
+          { resourceKey: key } as (typeof e.mentions)[0]['evidence'][0],
+        ];
+      return e;
+    };
+    plan.registry.push(
+      layer('R10', '/chapters/0/textBlocks/1'),
+      layer('R11', '/chapters/0/textBlocks/2'),
+      layer('R12', '/chapters/9/textBlocks/0'),
+      layer('R13', null),
+    );
+    const runs = () => [
+      run(none('E1:S1'), none('E2:S1'), none('E3:S1'), none('E4:S1')),
+    ];
+
+    const all = routeContentAttachmentThinSegments(
+      plan,
+      unit,
+      compilation,
+      runs(),
+    );
+    plan.thinPolicy = { layers: 'local' };
+    const local = routeContentAttachmentThinSegments(
+      plan,
+      unit,
+      compilation,
+      runs(),
+    );
+
+    expect(all[0].layerSuggestions).toEqual(['R10', 'R11', 'R12', 'R13']);
+    expect(all[3].layerSuggestions).toEqual(['R10', 'R11', 'R12', 'R13']);
+    expect(local[0].layerSuggestions).toEqual(['R10']);
+    expect(local[3].layerSuggestions).toEqual(['R11']);
+    expect(local[1].layerSuggestions).toEqual(['R4']);
+  });
 });
