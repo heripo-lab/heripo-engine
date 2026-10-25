@@ -17,6 +17,9 @@ import {
 } from './compile-candidates';
 import {
   CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
 } from './compile-types';
 import {
@@ -156,11 +159,30 @@ export function createContentAttachmentThinInput(
     rows.set(r.rowIndex, cells);
   });
 
-  const readOnly = unit.readOnlyContext.map((c, i) => ({
+  const readOnly: Array<{
+    ref: string;
+    key: string;
+    windows: WindowRow[];
+    evidenceOf?: string[];
+  }> = unit.readOnlyContext.map((c, i) => ({
     ref: `X${i + 1}`,
     key: c.resourceKey,
     windows: toWindows(`X${i + 1}`, c.text).rows,
   }));
+  const linked = plan.thinPolicy?.continuity === 'linked';
+  const preceding = linked ? precedingContext(plan, unit, readOnly) : [];
+  for (const block of preceding) {
+    const refs = plan.registry
+      .filter(
+        (r) =>
+          offered.has(r.ref) &&
+          r.mentions.some((m) =>
+            m.evidence.some((e) => e.resourceKey === block.key),
+          ),
+      )
+      .map((r) => r.ref);
+    if (refs.length) block.evidenceOf = refs;
+  }
   const captionRefs = new Map<string, string>();
   for (const t of unit.tables) {
     const caption = t.data.caption?.fullText;
@@ -191,8 +213,34 @@ export function createContentAttachmentThinInput(
     sequences.set(match[1], items);
   }
 
+  let bodySequences = [...sequences.values()].map((items) =>
+    items.sort((a, b) => a.index - b.index).map((x) => x.ref),
+  );
+  const sequenceOf = (key: string) => key.replace(/\/textBlocks\/\d+$/, '');
+  // a page break can fall where the source document starts a new chapter: keep reading order across it
+  if (
+    preceding.length &&
+    sequenceOf(preceding.at(-1)!.key) !==
+      sequenceOf(unit.sources[0].resource.key)
+  ) {
+    const moved = new Set(preceding.map((b) => b.ref));
+    bodySequences = bodySequences
+      .map((refs) => refs.filter((ref) => !moved.has(ref)))
+      .filter((refs) => refs.length)
+      .map((refs) =>
+        refs.includes('E1') ? [...preceding.map((b) => b.ref), ...refs] : refs,
+      );
+  }
+  const local = plan.thinPolicy?.layers === 'local';
+
   return {
-    version: CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+    version: linked
+      ? local
+        ? CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION
+        : CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION
+      : local
+        ? CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION
+        : CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
     input: {
       candidateColumns: grounded.columns,
       contexts,
@@ -209,9 +257,7 @@ export function createContentAttachmentThinInput(
         c.path.map((p) => p.originTitle).join(' > '),
       ),
       bodyBlocks,
-      bodySequences: [...sequences.values()].map((items) =>
-        items.sort((a, b) => a.index - b.index).map((x) => x.ref),
-      ),
+      bodySequences,
       tableLocations: unit.tables.map((t, i) => ({
         ref: `T${i + 1}`,
         pdfPage: t.data.pdfPageNo,
@@ -222,9 +268,10 @@ export function createContentAttachmentThinInput(
         ref,
         rows: [...rows].map(([index, cells]) => ({ index, cells })),
       })),
-      readOnlyContext: readOnly.map(({ ref, windows: w }) => ({
+      readOnlyContext: readOnly.map(({ ref, windows: w, evidenceOf }) => ({
         ref,
         windows: w,
+        ...(evidenceOf ? { evidenceOf } : {}),
       })),
     },
     codeMap: {
@@ -238,4 +285,30 @@ export function createContentAttachmentThinInput(
       handles: handles.map((h) => ({ ref: h.ref, members: h.members })),
     },
   };
+}
+
+/**
+ * Read-only blocks that directly precede the unit's first body block in document order: the last text sources
+ * of earlier units, as far back as the context runs without a gap. Empty when the unit does not start with a
+ * text block or its immediate predecessor is not in the context.
+ */
+function precedingContext<T extends { key: string }>(
+  plan: ContentAttachmentPlan,
+  unit: AttachmentUnit,
+  readOnly: T[],
+): T[] {
+  if (unit.sources[0]?.resource.kind !== 'text') return [];
+  const at = plan.units.findIndex((u) => u.unitId === unit.unitId);
+  const earlier = plan.units
+    .slice(0, at)
+    .flatMap((u) =>
+      u.sources.flatMap((s) =>
+        s.resource.kind === 'text' ? [s.resource.key] : [],
+      ),
+    );
+  const byKey = new Map(readOnly.map((b) => [b.key, b]));
+  const run: T[] = [];
+  for (let i = earlier.length - 1; i >= 0 && byKey.has(earlier[i]); i--)
+    run.unshift(byKey.get(earlier[i])!);
+  return run;
 }

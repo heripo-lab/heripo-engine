@@ -140,6 +140,33 @@ describe('LLMCaller', () => {
     });
   });
 
+  test('reports the finish reason, reasoning tokens and structured-output attempts', async () => {
+    vi.mocked(generateText).mockResolvedValueOnce({
+      output: { value: 'ok' },
+      finishReason: 'stop',
+      usage: {
+        inputTokens: 100,
+        outputTokens: 40,
+        totalTokens: 140,
+        outputTokenDetails: { textTokens: 10, reasoningTokens: 30 },
+      },
+    } as any);
+
+    const result = await LLMCaller.call({
+      schema: mockSchema,
+      systemPrompt: 'system',
+      userPrompt: 'user',
+      primaryModel: mockPrimaryModel,
+      maxRetries: 0,
+      component: 'Test',
+      phase: 'details',
+    });
+
+    expect(result.finishReason).toBe('stop');
+    expect(result.structuredAttempts).toBe(1);
+    expect(result.usage.reasoningTokens).toBe(30);
+  });
+
   test('keeps default cache writes when steps have no one-hour cache data', async () => {
     vi.mocked(generateText).mockResolvedValueOnce({
       output: { value: 'ok' },
@@ -1036,6 +1063,7 @@ describe('LLMCaller', () => {
 
       expect(result.output).toEqual({ result: 'recovered' });
       expect(generateText).toHaveBeenCalledTimes(3);
+      expect(result.structuredAttempts).toBe(3);
     });
 
     test('should use empty string when result.text is undefined in tool call error', async () => {

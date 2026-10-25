@@ -14,7 +14,10 @@ import { Output, generateText, jsonSchema } from 'ai';
 
 import { createContentAttachmentThinInput } from './compile';
 import { inspectContentAttachmentThinResponse } from './inspection';
-import { createContentAttachmentThinRequest } from './prompt';
+import {
+  CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION,
+  createContentAttachmentThinRequest,
+} from './prompt';
 import {
   checkContentAttachmentThinOutliers,
   routeContentAttachmentThinSegments,
@@ -60,8 +63,9 @@ export interface ContentAttachmentThinRunOptions {
 
 /**
  * Attach one unit with the thin method: r1, then r2 and r3 together so they can reuse the provider's
- * prompt cache, then at most one replacement r4 for a single outlier. Calls are never retried beyond
- * maxRetries and a failed call is never re-sent. Persistence, budgets and stopping stay with the caller.
+ * prompt cache, then at most one replacement r4 for a single outlier. When r4 is again an outlier, the runs
+ * hold two readings and segments are routed with all four runs; a failed r4 sends the unit to review. Calls
+ * are never retried beyond maxRetries and a failed call is never re-sent. Persistence, budgets and stopping stay with the caller.
  */
 export async function attachContentThinUnit(
   plan: ContentAttachmentPlan,
@@ -69,7 +73,12 @@ export async function attachContentThinUnit(
   options: ContentAttachmentThinRunOptions,
 ): Promise<ContentAttachmentThinUnitResult> {
   const compilation = createContentAttachmentThinInput(plan, unit);
-  const request = createContentAttachmentThinRequest(compilation);
+  const request = createContentAttachmentThinRequest(
+    compilation,
+    plan.thinPolicy?.catalog === 'fields'
+      ? { version: CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION }
+      : {},
+  );
   const base = {
     unitId: unit.unitId,
     codeAssigned: compilation.codeMap.codeAssigned,
@@ -147,12 +156,13 @@ export async function attachContentThinUnit(
   if (firstCheck.flagged.length === 1) {
     const r4 = await call('r4');
     if (r4.status === 'completed') {
-      finalCalls = [...first.filter((_, i) => i !== firstCheck.flagged[0]), r4];
+      const kept = [...first.filter((_, i) => i !== firstCheck.flagged[0]), r4];
       replacement = checkContentAttachmentThinOutliers(
         segments,
-        finalCalls.map((c) => c.inspection!),
+        kept.map((c) => c.inspection!),
       );
-      wholeUnitReview = replacement.flagged.includes(2);
+      // an outlying replacement means two readings; all four runs must then agree on each segment
+      finalCalls = replacement.flagged.includes(2) ? [...first, r4] : kept;
     } else wholeUnitReview = true;
   }
   return {

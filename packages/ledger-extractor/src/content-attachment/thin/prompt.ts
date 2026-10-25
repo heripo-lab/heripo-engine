@@ -1,9 +1,52 @@
 import type { ContentAttachmentThinCompilation } from './compile-types';
 
 import { contentAttachmentRecipientSystemPrompt } from '../recipients/prompt';
+import {
+  CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
+} from './compile-types';
 
 export const CONTENT_ATTACHMENT_THIN_VERSION =
   'content-attachment-thin.v8' as const;
+/** The v8 prompt plus the rule for linked page-boundary context (`continuity: 'linked'`). */
+export const CONTENT_ATTACHMENT_THIN_LINKED_VERSION =
+  'content-attachment-thin.v9' as const;
+/**
+ * Decisions returned as an array with one item per segment, and a schema that checks reference formats only;
+ * membership of segments, candidates, handles and ranges is checked by code. Linked compilations add the
+ * page-boundary rule as in v9.
+ */
+export const CONTENT_ATTACHMENT_THIN_ARRAY_VERSION =
+  'content-attachment-thin.v10' as const;
+/** v10 plus the rule that headings and discussion statements naming candidates describe them. */
+export const CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION =
+  'content-attachment-thin.v11' as const;
+/** v11 plus the rule that every line of a catalog entry describes its object (`catalog: 'fields'`). */
+export const CONTENT_ATTACHMENT_THIN_CATALOG_VERSION =
+  'content-attachment-thin.v12' as const;
+/** v11 plus the rule for counts and collective summaries. The default. */
+export const CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION =
+  'content-attachment-thin.v13' as const;
+/** v12 plus the rule for counts and collective summaries (`catalog: 'fields'`). */
+export const CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION =
+  'content-attachment-thin.v14' as const;
+export type ContentAttachmentThinRequestVersion =
+  | typeof CONTENT_ATTACHMENT_THIN_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_ARRAY_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_CATALOG_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION;
+/** `object`: v8/v9 decisions keyed by segment; `array`: v10 decision items. */
+export type ContentAttachmentThinResponseFormat = 'object' | 'array';
+
+/** Whether a request version returns the v10 decision array. */
+export const isContentAttachmentThinArrayVersion = (
+  version: ContentAttachmentThinRequestVersion,
+) =>
+  version !== CONTENT_ATTACHMENT_THIN_VERSION &&
+  version !== CONTENT_ATTACHMENT_THIN_LINKED_VERSION;
 
 /** The recipient prompt version whose rules are restored verbatim. */
 const RESTORED_RULES_SOURCE_VERSION = 'segment-recipients.v26' as const;
@@ -64,9 +107,56 @@ export function contentAttachmentThinRestoredRules(): string {
     .join('\n\n');
 }
 
-/** Thin system prompt: base instructions, the format bridge and the restored rules. */
-export function contentAttachmentThinSystemPrompt(): string {
-  return `${THIN_BASE_PROMPT}\n\n${THIN_FORMAT_BRIDGE}\n\n${contentAttachmentThinRestoredRules()}`;
+const THIN_LINKED_RULE = `PAGE BOUNDARY: Read-only blocks before the first body block may list evidenceOf: R refs whose registration evidence is that block. When the first body block continues such a block (same sentence or same description), its target is that block's subject; otherwise ignore evidenceOf.`;
+
+/** v10 sentences that describe the decision array instead of segment keys of d. */
+const ARRAY_FORMAT: Array<[string, string]> = [
+  [
+    'Return one decision for every segment key in d (k = a or n):',
+    'Return d as an array with exactly one item per listed segment, in any order; s is the segment ref and k = a or n:',
+  ],
+  ['and are not keys in d.', 'and are not items of d.'],
+];
+
+/**
+ * Thin system prompt: base instructions, the format bridge and the restored rules, plus the page-boundary rule
+ * for linked compilations. The array format describes decision items instead of segment keys.
+ */
+const THIN_HEADINGS_RULE = `HEADINGS AND DISCUSSION STATEMENTS: A heading that names a registered current candidate (a feature, artifact, area, trench or layer, with or without its number) describes that candidate: decide a with it as the recipient, even when figure, plate or photo references follow the name; those references do not make the heading a caption. A topic heading that names no specific candidate, such as a heading for the site's stratigraphy or the survey method, stays n. A sentence stating that the report discusses or examines named current candidates also describes those candidates.`;
+
+const THIN_CATALOG_RULE = `CATALOG ENTRIES: In a catalog that describes registered objects one entry at a time, an entry starts with a line giving one object's catalog or registration numbers and continues with short field lines, such as its name, a translated or foreign-language name, its findspot and find date, and its measurements, followed by its description. Every line of the entry, field lines included, describes that entry's object: decide a with it as the recipient even when the line is only numbers, a name, a list of values or a labeled field, and does not repeat the object's name or number. The entry ends where the next entry's number line begins. Other candidates named in a field line, such as a findspot area, follow the other rules.`;
+
+const THIN_AGGREGATE_RULE = `COUNTS AND COLLECTIVE SUMMARIES: A sentence that describes or counts a collective the report defines for the current investigation, such as the features or finds under a chapter or heading or an enumerated set like "수혈 204기", describes every registered member of that collective, including qualified follow-ups about most or some of its members; use a handle only when it covers exactly that collective. A count of one class within it, such as one material, describes every registered member of that class. A sentence about one type within a collective, such as one ware, form or period, describes only the registered members of that type: list them in r and do not use the collective's handle; decide n when the type cannot be told from the candidates' names. When a stated count clearly exceeds the registered members because it includes finds the report does not register individually, such as discarded, buried or unpublished items, the sentence describes no candidate: decide n.`;
+
+export function contentAttachmentThinSystemPrompt(
+  options: {
+    linked?: boolean;
+    format?: ContentAttachmentThinResponseFormat;
+    /** v11: add the heading and discussion-statement rule. */
+    headings?: boolean;
+    /** v12: add the catalog-entry rule. */
+    catalog?: boolean;
+    /** v13/v14: add the counts and collective summaries rule. */
+    aggregate?: boolean;
+  } = {},
+): string {
+  const head =
+    options.format === 'array'
+      ? ARRAY_FORMAT.reduce(
+          (prompt, [from, to]) => prompt.replace(from, to),
+          THIN_BASE_PROMPT,
+        )
+      : THIN_BASE_PROMPT;
+  const base = `${head}\n\n${THIN_FORMAT_BRIDGE}\n\n${contentAttachmentThinRestoredRules()}`;
+  const withHeadings = [
+    base,
+    ...(options.headings ? [THIN_HEADINGS_RULE] : []),
+    ...(options.catalog ? [THIN_CATALOG_RULE] : []),
+    ...(options.aggregate ? [THIN_AGGREGATE_RULE] : []),
+  ].join('\n\n');
+  return options.linked
+    ? `${withHeadings}\n\n${THIN_LINKED_RULE}`
+    : withHeadings;
 }
 
 const upTo = (n: number) => (n <= 9 ? `[1-${n}]` : `[1-9]|1[0-${n - 10}]`);
@@ -78,8 +168,40 @@ const obj = (props: Record<string, unknown>) => ({
 });
 const arr = (items: unknown) => ({ type: 'array', items });
 
+const pattern = (p: string) => ({ type: 'string', pattern: p });
 /**
- * Output schema: every judged segment is a required key of d; a decision is either an attachment (k = a)
+ * v10 output schema, the same for every unit: d is an array of decision items whose segment, candidate, handle
+ * and range references are checked by format only.
+ */
+export function createContentAttachmentThinArraySchema() {
+  const ref = pattern('^R[0-9]+$');
+  const segment = pattern('^[ET][0-9]+:S[0-9]+$');
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['d'],
+    properties: {
+      d: arr({
+        anyOf: [
+          obj({
+            s: segment,
+            k: { type: 'string', enum: ['a'] },
+            r: arr(ref),
+            h: arr(pattern('^H[0-9]+$')),
+            x: arr(ref),
+            ia: arr(arr(ref)),
+            sa: arr(arr(ref)),
+            e: arr(pattern('^Q[0-9]+:L[0-9]+-L[0-9]+$')),
+          }),
+          obj({ s: segment, k: { type: 'string', enum: ['n'] } }),
+        ],
+      }),
+    },
+  };
+}
+
+/**
+ * v8/v9 output schema: every judged segment is a required key of d; a decision is either an attachment (k = a)
  * or none (k = n). Evidence ranges admit only existing Q windows and L numbers within each window.
  */
 export function createContentAttachmentThinSchema(
@@ -129,20 +251,64 @@ export function createContentAttachmentThinSchema(
 }
 
 export interface ContentAttachmentThinRequest {
-  version: typeof CONTENT_ATTACHMENT_THIN_VERSION;
+  version: ContentAttachmentThinRequestVersion;
   systemPrompt: string;
   userPrompt: string;
-  providerOutputSchema: ReturnType<typeof createContentAttachmentThinSchema>;
+  providerOutputSchema:
+    | ReturnType<typeof createContentAttachmentThinSchema>
+    | ReturnType<typeof createContentAttachmentThinArraySchema>;
 }
 
-/** Model request for one compiled unit; the user prompt is the compact input JSON. */
+/**
+ * Model request for one compiled unit; the user prompt is the compact input JSON. New requests use v13 (array
+ * format with the heading and collective-summary rules), or v14 with the catalog-entry rule when the caller
+ * passes that version. `version` rebuilds a saved request's version; `format: 'object'` builds the v8/v9
+ * request, v9 for linked compilations.
+ */
 export function createContentAttachmentThinRequest(
   compilation: ContentAttachmentThinCompilation,
+  options: {
+    format?: ContentAttachmentThinResponseFormat;
+    version?: ContentAttachmentThinRequestVersion;
+  } = {},
 ): ContentAttachmentThinRequest {
+  const version =
+    options.version ??
+    (options.format === 'object'
+      ? CONTENT_ATTACHMENT_THIN_VERSION
+      : CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION);
+  const format: ContentAttachmentThinResponseFormat =
+    isContentAttachmentThinArrayVersion(version) ? 'array' : 'object';
+  const catalog =
+    version === CONTENT_ATTACHMENT_THIN_CATALOG_VERSION ||
+    version === CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION;
+  const aggregate =
+    version === CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION ||
+    version === CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION;
+  const headings =
+    format === 'array' && version !== CONTENT_ATTACHMENT_THIN_ARRAY_VERSION;
+  const linked =
+    compilation.version === CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION ||
+    compilation.version ===
+      CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION;
   return {
-    version: CONTENT_ATTACHMENT_THIN_VERSION,
-    systemPrompt: contentAttachmentThinSystemPrompt(),
+    version:
+      format === 'array'
+        ? version
+        : linked
+          ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
+          : CONTENT_ATTACHMENT_THIN_VERSION,
+    systemPrompt: contentAttachmentThinSystemPrompt({
+      linked,
+      format,
+      headings,
+      catalog,
+      aggregate,
+    }),
     userPrompt: JSON.stringify(compilation.input),
-    providerOutputSchema: createContentAttachmentThinSchema(compilation),
+    providerOutputSchema:
+      format === 'array'
+        ? createContentAttachmentThinArraySchema()
+        : createContentAttachmentThinSchema(compilation),
   };
 }

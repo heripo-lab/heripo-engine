@@ -105,12 +105,13 @@ const attachR1 = {
   sa: [],
   e: ['Q1:L1-L2'],
 };
-const agreed = () => ({
-  d: { 'E1:S1': attachR1, 'E2:S1': none, 'E3:S1': none, 'E4:S1': none },
+const items = (d: Record<string, object>) => ({
+  d: Object.entries(d).map(([s, decision]) => ({ s, ...decision })),
 });
-const outlier = () => ({
-  d: { 'E1:S1': none, 'E2:S1': attachR1, 'E3:S1': attachR1, 'E4:S1': none },
-});
+const agreed = () =>
+  items({ 'E1:S1': attachR1, 'E2:S1': none, 'E3:S1': none, 'E4:S1': none });
+const outlier = () =>
+  items({ 'E1:S1': none, 'E2:S1': attachR1, 'E3:S1': attachR1, 'E4:S1': none });
 const reply = (output: unknown) => ({
   output,
   usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
@@ -226,17 +227,22 @@ describe('attachContentThinUnit', () => {
     expect(result.segments.every((s) => s.status === 'auto')).toBe(true);
   });
 
-  test('sends the unit to review when the replacement is again an outlier or fails', async () => {
+  test('routes with all four runs when the replacement is again an outlier, and reviews the unit when it fails', async () => {
     const { plan, unit } = fixture();
     respond(agreed(), outlier(), agreed(), outlier());
 
     const again = await attachContentThinUnit(plan, unit, { model });
 
-    expect(again.outliers?.wholeUnitReview).toBe(true);
-    expect(again.outliers?.finalRuns).toEqual(['r1', 'r3', 'r4']);
-    expect(again.segments.every((s) => s.reasons.includes('whole_unit'))).toBe(
-      true,
-    );
+    expect(again.outliers?.wholeUnitReview).toBe(false);
+    expect(again.outliers?.replacement?.flagged).toEqual([2]);
+    expect(again.outliers?.finalRuns).toEqual(['r1', 'r2', 'r3', 'r4']);
+    expect(again.segments.map((s) => [s.status, s.reasons])).toEqual([
+      ['review', ['contested_targets']],
+      ['review', ['contested_targets']],
+      ['review', ['contested_targets']],
+      ['auto', []],
+    ]);
+    expect(again.segments[0].contested).toEqual([{ ref: 'R1', votes: 2 }]);
 
     respond(agreed(), outlier(), agreed(), new Error('rate limited'));
     const failedReplacement = await attachContentThinUnit(plan, unit, {
@@ -253,6 +259,18 @@ describe('attachContentThinUnit', () => {
       wholeUnitReview: true,
     });
     expect(failedReplacement.outliers?.replacement).toBeUndefined();
+  });
+
+  test('sends the v14 catalog request when the plan policy asks for catalog fields', async () => {
+    const { plan, unit } = fixture();
+    plan.thinPolicy = { layers: 'all', catalog: 'fields' };
+    respond(agreed(), agreed(), agreed());
+
+    const result = await attachContentThinUnit(plan, unit, { model });
+
+    expect(result.calls[0].request.version).toBe('content-attachment-thin.v14');
+    expect(result.calls[0].request.systemPrompt).toContain('CATALOG ENTRIES:');
+    expect(result.status).toBe('routed');
   });
 
   test('stops without retrying when r1 or a parallel call fails', async () => {

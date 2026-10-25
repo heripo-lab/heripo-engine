@@ -75,6 +75,9 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> =
     'anthropic/claude-opus-4-8': { input: 5, output: 25 },
     'anthropic/claude-sonnet-5': { input: 3, output: 15 },
     'anthropic/claude-sonnet-4-6': { input: 3, output: 15 },
+    // Haiku 5.5 charges 0.5 / 2.5 for prompts over 100K tokens; usage here is summed per model,
+    // so the cost uses the rate for prompts of 100K tokens or fewer.
+    'anthropic/claude-haiku-5-5': { input: 0.1, output: 0.5 },
     'anthropic/claude-haiku-4-5': { input: 1, output: 5 },
     // VLM strategy models (provider-prefixed keys from TokenUsageReport)
     'openai/gpt-6-astra': { input: 10, output: 50 },

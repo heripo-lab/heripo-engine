@@ -138,6 +138,9 @@ export type {
 export {
   CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT,
   CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
 } from './thin/compile-types';
 export { createContentAttachmentThinInput } from './thin/compile';
@@ -159,13 +162,24 @@ export type {
   ContentAttachmentThinRowOwners,
 } from './thin/row-owners';
 export {
+  CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
+  CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION,
+  CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION,
+  CONTENT_ATTACHMENT_THIN_CATALOG_VERSION,
+  CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION,
+  CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
   contentAttachmentThinSystemPrompt,
   createContentAttachmentThinRequest,
+  createContentAttachmentThinArraySchema,
   createContentAttachmentThinSchema,
 } from './thin/prompt';
-export type { ContentAttachmentThinRequest } from './thin/prompt';
+export type {
+  ContentAttachmentThinRequest,
+  ContentAttachmentThinRequestVersion,
+  ContentAttachmentThinResponseFormat,
+} from './thin/prompt';
 export { inspectContentAttachmentThinResponse } from './thin/inspection';
 export type {
   ContentAttachmentThinAudit,
@@ -175,6 +189,7 @@ export type {
 } from './thin/inspection';
 export {
   CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT,
+  CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT,
   CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT,
   CONTENT_ATTACHMENT_THIN_OUTLIER_RATE,
   checkContentAttachmentThinOutliers,
@@ -193,7 +208,10 @@ export type {
   ContentAttachmentThinRunOptions,
   ContentAttachmentThinUnitResult,
 } from './thin/run';
-export { assembleContentAttachmentThin } from './thin/assembly';
+export {
+  assembleContentAttachmentThin,
+  CONTENT_ATTACHMENT_THIN_COLLECTIVE_REVIEW_MIN_MEMBERS,
+} from './thin/assembly';
 export type {
   ContentAttachmentThinBasis,
   ContentAttachmentThinExcerpt,

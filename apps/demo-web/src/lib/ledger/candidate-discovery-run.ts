@@ -11,6 +11,7 @@ import {
   createCandidateDeduplicationRequest,
   deduplicateCandidates,
   discoverCandidateUnit,
+  isSameCandidateDiscoveryScope,
   prepareCandidateDiscovery,
   prepareCandidateDiscoveryRetry,
 } from '@heripo/ledger-extractor';
@@ -21,9 +22,11 @@ import { join } from 'path';
 import { paths } from '../paths';
 import { createModel } from '../processing/model-factory';
 import { parseLedgerInputText } from './ledger-input';
+import { getReportProfile } from './report-profile';
 
 export interface CandidateDiscoveryRunSettings {
-  scopeChapterId: string;
+  /** One chapter subtree, or several distinct, non-nested chapter subtrees. */
+  scopeChapterId: string | string[];
   modelId: string;
   maxTextChars: number;
   tableRowsPerUnit: number;
@@ -31,6 +34,8 @@ export interface CandidateDiscoveryRunSettings {
   deduplicationOnly?: boolean;
   retryFailedUnits?: boolean;
   retryUnitIds?: string[];
+  /** Use the scope of the task's confirmed report profile and record its hash in the plan. */
+  useProfileScope?: boolean;
 }
 export interface CandidateDiscoveryRun {
   runId: string;
@@ -106,10 +111,19 @@ export function cancelCandidateDiscovery(taskId: string): void {
 /** Local single-process runner; each completed call is checkpointed before applying it. */
 export async function startCandidateDiscovery(
   taskId: string,
-  settings: CandidateDiscoveryRunSettings,
+  requested: CandidateDiscoveryRunSettings,
 ): Promise<CandidateDiscoveryRun> {
   const existing = getCandidateDiscoveryRun(taskId);
   if (existing?.status === 'running') return existing;
+  const stored = requested.useProfileScope
+    ? await getReportProfile(taskId)
+    : null;
+  if (requested.useProfileScope && !stored)
+    throw new Error('A valid confirmed report profile is required');
+  // the profile scope replaces any chapters sent with the request
+  const settings: CandidateDiscoveryRunSettings = stored
+    ? { ...requested, scopeChapterId: stored.profile.scopeChapterIds }
+    : requested;
   const raw = readFileSync(paths.task(taskId).inputJson);
   const index = buildDocumentResourceIndex(
     parseLedgerInputText(raw.toString('utf8')),
@@ -117,6 +131,14 @@ export async function startCandidateDiscovery(
   const freshPlan = prepareCandidateDiscovery(index, {
     ...settings,
     inputSha256: createHash('sha256').update(raw).digest('hex'),
+    ...(stored
+      ? {
+          scopeSource: {
+            kind: 'profile' as const,
+            profileSha256: stored.profileSha256,
+          },
+        }
+      : {}),
   });
   if (settings.deduplicationOnly && settings.retryFailedUnits) {
     throw new Error('Choose either duplicate review or failed-unit retry');
@@ -128,7 +150,7 @@ export async function startCandidateDiscovery(
     (!existing ||
       existing.completedUnits !== existing.totalUnits ||
       existing.result.inputSha256 !== freshPlan.inputSha256 ||
-      existing.result.scopeChapterId !== settings.scopeChapterId)
+      !isSameCandidateDiscoveryScope(existing.result, freshPlan))
   ) {
     throw new Error(
       'A complete discovery snapshot for the same input and scope is required',

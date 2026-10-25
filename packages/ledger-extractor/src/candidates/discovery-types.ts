@@ -83,9 +83,13 @@ export interface CandidateDiscoveryUnit {
 }
 export interface CandidateDiscoveryPlan {
   scopeChapterId: string;
+  /** Every scope chapter in document order, present only when the scope has more than one chapter. */
+  scopeChapterIds?: string[];
   scopeTitle: string;
   inputSha256: string;
   units: CandidateDiscoveryUnit[];
+  /** Where the scope came from; present only when a confirmed report profile supplied it. */
+  scopeSource?: { kind: 'profile'; profileSha256: string };
 }
 export interface CandidateEvidence {
   sourceId: string;
@@ -116,7 +120,12 @@ export interface CandidateDiscoveryAudit {
   systemPrompt: string;
   userPrompt: string;
   response: CandidateDiscoveryResponse;
+  /** Includes reasoningTokens when the provider reports thinking tokens. */
   usage: ExtendedTokenUsage;
+  /** How the producing call ended, when the SDK reports it (absent in older audits). */
+  finishReason?: string;
+  /** Structured-output attempts including schema-mismatch retries; usage counts only the last one. */
+  structuredAttempts?: number;
 }
 export interface CandidateDiscoveryIssue {
   unitId: string;
@@ -127,6 +136,8 @@ export interface CandidateDiscoveryResult {
   version: 'ledger-object-candidates.v1';
   inputSha256: string;
   scopeChapterId: string;
+  /** Every scope chapter in document order, present only when the scope has more than one chapter. */
+  scopeChapterIds?: string[];
   scopeTitle: string;
   candidates: LedgerObjectCandidate[];
   issues: CandidateDiscoveryIssue[];

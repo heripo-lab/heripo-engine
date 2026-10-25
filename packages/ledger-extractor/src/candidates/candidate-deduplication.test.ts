@@ -11,6 +11,7 @@ import { LLMCaller } from '@heripo/shared';
 import { describe, expect, test, vi } from 'vitest';
 
 import {
+  CANDIDATE_DEDUPLICATION_UNMERGED_REASON,
   assembleCandidateDeduplication,
   createCandidateDeduplicationRequest,
   deduplicateCandidates,
@@ -131,10 +132,29 @@ const response = () => ({
   ],
   uncertainMatches: [{ left: 'C2', right: 'C3', reason: '번호만 같음' }],
 });
-const audit = (d = discovery()): CandidateDeduplicationAudit => ({
-  ...createCandidateDeduplicationRequest(plan, d),
+type FlatAudit = Omit<CandidateDeduplicationAudit, 'response'> & {
+  response: ReturnType<typeof response>;
+};
+/** A saved v5 audit: flat groups, replayed with its own prompt. */
+const audit = (d = discovery()): FlatAudit => ({
+  ...createCandidateDeduplicationRequest(plan, d, 'candidate-deduplication.v5'),
   response: response(),
   usage,
+});
+const byKind = () => ({
+  groupsByKind: {
+    feature: [
+      { members: ['C1', 'C2'], reason: '본문과 표의 같은 우물' },
+      { members: ['C3'], reason: '별개 대상' },
+    ],
+  },
+  uncertainMatches: [{ left: 'C2', right: 'C3', reason: '번호만 같음' }],
+});
+const merges = () => ({
+  mergesByKind: {
+    feature: [{ members: ['C1', 'C2'], reason: '본문과 표의 같은 우물' }],
+  },
+  uncertainMatches: [{ left: 'C2', right: 'C3', reason: '번호만 같음' }],
 });
 
 describe('whole-pool candidate deduplication', () => {
@@ -166,9 +186,20 @@ describe('whole-pool candidate deduplication', () => {
       ['/t', '/cell'],
     );
     expect(request.units[0].chapterPath).toEqual(plan.units[0].chapterPath);
+    expect(request).not.toHaveProperty('scopeChapterIds');
+    const scopes = ['ch', 'ch2'];
+    expect(
+      JSON.parse(
+        createCandidateDeduplicationRequest(
+          { ...plan, scopeChapterIds: scopes },
+          { ...d, scopeChapterIds: scopes },
+        ).userPrompt,
+      ).scopeChapterIds,
+    ).toEqual(scopes);
     for (const change of [
       { inputSha256: 'other' },
       { scopeChapterId: 'other' },
+      { scopeChapterIds: ['ch', 'other'] },
       { completedUnitIds: [] },
       { completedUnitIds: ['wrong'] },
     ])
@@ -222,24 +253,44 @@ describe('whole-pool candidate deduplication', () => {
   });
   test('makes one structured call for the entire pool and exposes exact prompts and response', async () => {
     vi.mocked(LLMCaller.call).mockResolvedValue({
-      output: response(),
+      output: merges(),
       usage,
       usedFallback: false,
     });
     const d = discovery();
+    d.candidates[2].recordKind = 'layer';
     const result = await deduplicateCandidates(plan, d, {
       model: {} as LanguageModel,
       maxRetries: 0,
     });
     const call = vi.mocked(LLMCaller.call).mock.calls[0][0];
-    expect(call.schema.safeParse(response()).success).toBe(true);
-    expect(
-      call.schema.safeParse({
-        groups: [{ members: ['C9'], reason: 'wrong' }],
-        uncertainMatches: [],
-      }).success,
-    ).toBe(false);
-    expect(result.response).toEqual(response());
+    const valid = {
+      mergesByKind: {
+        feature: [{ members: ['C1', 'C2'], reason: '같은 우물' }],
+        layer: [],
+      },
+      uncertainMatches: [{ left: 'C2', right: 'C3', reason: '확인 필요' }],
+    };
+    expect(call.schema.safeParse(valid).success).toBe(true);
+    for (const mergesByKind of [
+      { feature: [{ members: ['C1', 'C3'], reason: 'cross kind' }], layer: [] },
+      { feature: [{ members: ['C1', 'C9'], reason: 'unknown' }], layer: [] },
+      { feature: [{ members: ['C1'], reason: 'alone' }], layer: [] },
+      { feature: [] },
+    ])
+      expect(
+        call.schema.safeParse({ mergesByKind, uncertainMatches: [] }).success,
+      ).toBe(false);
+    expect(result.response).toEqual(merges());
+    expect(result.promptVersion).toBe('candidate-deduplication.v7');
+    expect(result.systemPrompt).toContain('MERGES STAY WITHIN ONE RECORD KIND');
+    expect(result.systemPrompt).toContain('Return only merges');
+    for (const partition of [
+      'Return a complete partition',
+      'Keep all candidates exactly once in the partition',
+      'Keep the complete partition',
+    ])
+      expect(result.systemPrompt).not.toContain(partition);
     expect(JSON.parse(result.userPrompt).candidates).toHaveLength(3);
     await expect(
       deduplicateCandidates(
@@ -265,7 +316,11 @@ test('adds full-source layer and identity-conflict review while replaying immuta
       d,
       'candidate-deduplication.v3',
     ),
-    current = createCandidateDeduplicationRequest(fullPlan, d),
+    current = createCandidateDeduplicationRequest(
+      fullPlan,
+      d,
+      'candidate-deduplication.v5',
+    ),
     oldAudit = { ...oldRequest, response: response(), usage },
     newAudit = { ...current, response: response(), usage },
     before = structuredClone({ d, fullPlan, oldAudit, newAudit });
@@ -306,7 +361,11 @@ test('replays archived v4 judgments without applying the new scope or distributi
       d,
       'candidate-deduplication.v4',
     ),
-    current = createCandidateDeduplicationRequest(plan, d),
+    current = createCandidateDeduplicationRequest(
+      plan,
+      d,
+      'candidate-deduplication.v5',
+    ),
     priorAudit = { ...prior, response: response(), usage },
     before = structuredClone({ d, priorAudit });
   expect(current.promptVersion).toBe('candidate-deduplication.v5');
@@ -393,4 +452,134 @@ test('rejects missing provenance and intra-group doubts instead of silently drop
   expect(() => groupCandidateUncertainties(invalid, d.candidates)).toThrow(
     'Identity uncertainty must link distinct groups',
   );
+});
+
+test('reads v6 groups per record kind in pool order and keeps saved v5 partitions replayable', () => {
+  const d = discovery();
+  d.candidates[0].recordKind = 'layer';
+  d.candidates[1].recordKind = 'layer';
+  const current = createCandidateDeduplicationRequest(
+    plan,
+    d,
+    'candidate-deduplication.v6',
+  );
+  const v5 = createCandidateDeduplicationRequest(
+    plan,
+    d,
+    'candidate-deduplication.v5',
+  );
+  const v6 = (response: unknown): CandidateDeduplicationAudit =>
+    ({ ...current, response, usage }) as CandidateDeduplicationAudit;
+  const groups = {
+    feature: [{ members: ['C3'], reason: '별개 대상' }],
+    layer: [{ members: ['C1', 'C2'], reason: '같은 층' }],
+  };
+
+  const result = assembleCandidateDeduplication(
+    plan,
+    d,
+    v6({ groupsByKind: groups, uncertainMatches: [] }),
+  );
+  const unknownKind = assembleCandidateDeduplication(
+    plan,
+    d,
+    v6({
+      groupsByKind: { ...groups, site: [{ members: ['C3'], reason: 'x' }] },
+      uncertainMatches: [],
+    }),
+  );
+  const mixed = assembleCandidateDeduplication(
+    plan,
+    d,
+    v6({
+      groupsByKind: {
+        layer: [{ members: ['C1', 'C2', 'C3'], reason: '섞임' }],
+      },
+      uncertainMatches: [],
+    }),
+  );
+
+  expect(current.userPrompt).toBe(v5.userPrompt);
+  expect(current.systemPrompt.startsWith(v5.systemPrompt)).toBe(true);
+  expect(v5.systemPrompt).not.toContain('GROUPS STAY WITHIN ONE RECORD KIND');
+  expect(result.issues).toEqual([]);
+  expect(result.groups.map((g) => g.memberCandidateIds)).toEqual([
+    ['a', 'b'],
+    ['c'],
+  ]);
+  expect(unknownKind.issues).toEqual([
+    'Groups listed under a kind absent from the pool: site',
+  ]);
+  expect(unknownKind.groups).toEqual([]);
+  expect(mixed.issues).toEqual(['Group 1 mixes record kinds']);
+  expect(
+    assembleCandidateDeduplication(plan, d, v6(response())).issues,
+  ).toEqual(['Invalid deduplication response schema']);
+  expect(
+    assembleCandidateDeduplication(plan, d, {
+      ...v5,
+      response: byKind(),
+      usage,
+    }).issues,
+  ).toEqual(['Invalid deduplication response schema']);
+});
+
+test('fills v7 records outside every merge as their own groups in pool order', () => {
+  const d = discovery();
+  d.candidates.push(candidate('d'), candidate('e', 'layer'));
+  const request = createCandidateDeduplicationRequest(plan, d);
+  const v7 = (response: unknown): CandidateDeduplicationAudit =>
+    ({ ...request, response, usage }) as CandidateDeduplicationAudit;
+  const merged = {
+    mergesByKind: {
+      feature: [{ members: ['C4', 'C2'], reason: '같은 우물' }],
+      layer: [],
+    },
+    uncertainMatches: [{ left: 'C1', right: 'C2', reason: '확인 필요' }],
+  };
+
+  const result = assembleCandidateDeduplication(plan, d, v7(merged));
+  const none = assembleCandidateDeduplication(
+    plan,
+    d,
+    v7({ mergesByKind: { feature: [], layer: [] }, uncertainMatches: [] }),
+  );
+  const repeated = assembleCandidateDeduplication(
+    plan,
+    d,
+    v7({
+      mergesByKind: {
+        feature: [
+          { members: ['C1', 'C2'], reason: 'a' },
+          { members: ['C2', 'C3'], reason: 'b' },
+        ],
+      },
+      uncertainMatches: [{ left: 'C2', right: 'C3', reason: 'same merge' }],
+    }),
+  );
+
+  expect(request.promptVersion).toBe('candidate-deduplication.v7');
+  expect(result.issues).toEqual([]);
+  expect(result.groups.map((g) => g.memberCandidateIds)).toEqual([
+    ['a'],
+    ['d', 'b'],
+    ['c'],
+    ['e'],
+  ]);
+  expect(result.groups[0].reason).toBe(CANDIDATE_DEDUPLICATION_UNMERGED_REASON);
+  expect(result.groups[1]).toMatchObject({
+    groupId: 'group-d',
+    reason: '같은 우물',
+  });
+  expect(result.uncertainMatches).toHaveLength(1);
+  expect(none.groups.map((g) => g.memberCandidateIds)).toEqual(
+    d.candidates.map((c) => [c.candidateId]),
+  );
+  expect(repeated.issues).toEqual([
+    'Repeated candidate ref: C2',
+    'Invalid uncertain match: C2, C3',
+  ]);
+  expect(assembleCandidateDeduplication(plan, d, v7(byKind())).issues).toEqual([
+    'Invalid deduplication response schema',
+  ]);
 });

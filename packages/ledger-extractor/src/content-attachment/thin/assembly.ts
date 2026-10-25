@@ -1,5 +1,7 @@
 import type { ContentAttachmentPlan } from '../types';
+import type { ContentAttachmentThinHandle } from './compile-types';
 import type { ContentAttachmentThinEvidence } from './inspection';
+import type { ContentAttachmentThinRequestVersion } from './prompt';
 import type { ContentAttachmentThinRoutedSegment } from './routing';
 import type {
   ContentAttachmentThinRunName,
@@ -7,7 +9,14 @@ import type {
 } from './run';
 
 import { createContentAttachmentThinInput } from './compile';
-import { CONTENT_ATTACHMENT_THIN_VERSION } from './prompt';
+import { collectiveHandles } from './compile-candidates';
+import {
+  CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
+  CONTENT_ATTACHMENT_THIN_VERSION,
+} from './prompt';
+
+/** A review item is marked with a collective only when the collective has at least this many members. */
+export const CONTENT_ATTACHMENT_THIN_COLLECTIVE_REVIEW_MIN_MEMBERS = 5;
 
 export type ContentAttachmentThinBasis =
   | 'model_unanimous'
@@ -39,10 +48,21 @@ export interface ContentAttachmentThinReviewItem extends Omit<
     relationshipSubjectAlternatives: string[][];
   } | null>;
   evidence: ContentAttachmentThinEvidence[];
+  /**
+   * The chapter collective whose members are exactly the item's confirmed and contested targets, so a reviewer
+   * can decide every such item of one collective at once. The deepest chapter wins when several match.
+   */
+  collectiveHandle?: {
+    ref: string;
+    path: string[];
+    kind: ContentAttachmentThinHandle['kind'];
+    members: number;
+  };
 }
 export interface ContentAttachmentThinResult {
   version: 'ledger-content-attachments.v2';
-  method: typeof CONTENT_ATTACHMENT_THIN_VERSION;
+  /** Prompt version of the saved calls (the first one found); without calls, the version the plan implied. */
+  method: ContentAttachmentThinRequestVersion;
   reviewStatus: 'not_reviewed';
   totalUnits: number;
   units: Array<{
@@ -98,9 +118,23 @@ export function assembleContentAttachmentThin(
   plan: ContentAttachmentPlan,
   results: ContentAttachmentThinUnitResult[],
 ): ContentAttachmentThinResult {
+  const collectives = new Map<string, ContentAttachmentThinHandle>();
+  for (const h of collectiveHandles(plan)) {
+    if (
+      h.members.length < CONTENT_ATTACHMENT_THIN_COLLECTIVE_REVIEW_MIN_MEMBERS
+    )
+      continue;
+    const key = [...h.members].sort().join('|');
+    const known = collectives.get(key);
+    if (!known || h.path.length > known.path.length) collectives.set(key, h);
+  }
   const output: ContentAttachmentThinResult = {
     version: 'ledger-content-attachments.v2',
-    method: CONTENT_ATTACHMENT_THIN_VERSION,
+    method:
+      results.flatMap((r) => r.calls)[0]?.request.version ??
+      (plan.thinPolicy?.continuity === 'linked'
+        ? CONTENT_ATTACHMENT_THIN_LINKED_VERSION
+        : CONTENT_ATTACHMENT_THIN_VERSION),
     reviewStatus: 'not_reviewed',
     totalUnits: plan.units.length,
     units: [],
@@ -183,6 +217,13 @@ export function assembleContentAttachmentThin(
       const location = span(routed.segment);
       if (routed.status === 'review') {
         const { status: _status, ...rest } = routed;
+        const proposed = [
+          ...new Set([
+            ...routed.confirmed,
+            ...routed.contested.map((v) => v.ref),
+          ]),
+        ].sort();
+        const collective = collectives.get(proposed.join('|'));
         output.reviewItems.push({
           unitId: result.unitId,
           ...location,
@@ -200,6 +241,16 @@ export function assembleContentAttachmentThin(
               : null,
           ),
           evidence,
+          ...(collective
+            ? {
+                collectiveHandle: {
+                  ref: collective.ref,
+                  path: collective.path,
+                  kind: collective.kind,
+                  members: collective.members.length,
+                },
+              }
+            : {}),
         });
         continue;
       }

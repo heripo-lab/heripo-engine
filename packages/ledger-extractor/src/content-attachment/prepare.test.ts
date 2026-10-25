@@ -336,4 +336,25 @@ describe('bounded content attachment', () => {
       false,
     ]);
   });
+
+  test('records a profile layer policy and the profile hash and source only when given', async () => {
+    const f = fixture();
+    const thinPolicy = { layers: 'local' as const };
+    const profile = { profileSha256: 'abc', source: 'manual' as const };
+
+    const plan = await prepareContentAttachment(
+      f.index,
+      f.dp,
+      f.discovery,
+      f.groups,
+      { ...f.options, thinPolicy, profile },
+    );
+
+    const base = await prepare();
+    expect(base).not.toHaveProperty('thinPolicy');
+    expect(base).not.toHaveProperty('profile');
+    expect(plan).toEqual({ ...base, thinPolicy, profile });
+    expect(plan.thinPolicy).not.toBe(thinPolicy);
+    expect(plan.profile).not.toBe(profile);
+  });
 });

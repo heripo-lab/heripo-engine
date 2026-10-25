@@ -32,7 +32,11 @@ export function sentenceSpans(words: Words): Array<[number, number]> {
   return spans;
 }
 
-/** Offer document-wide kinds, literal name-and-number matches, and same-chapter numbers present in the unit. */
+/**
+ * Offer document-wide kinds, literal name-and-number matches, and same-chapter numbers present in the unit.
+ * Under the plan's `local` layer policy a single-unit layer is offered only in its unit and in the units next to
+ * it that share its evidence chapter.
+ */
 export function offeredCandidates(
   plan: ContentAttachmentPlan,
   unit: AttachmentUnit,
@@ -80,9 +84,61 @@ export function offeredCandidates(
     )
       for (const ref of refs) offered.add(ref);
   }
+  const far = new Set<string>();
+  if (plan.thinPolicy?.layers === 'local') {
+    const at = plan.units.findIndex((u) => u.unitId === unit.unitId);
+    const paths = unit.chapters.map((c) => c.path.map((x) => x.id));
+    const entries = new Map(plan.registry.map((r) => [r.ref, r]));
+    for (const [ref, home] of localLayerHomes(plan))
+      if (
+        Math.abs(home - at) > 1 ||
+        (home !== at && !layerInChapters(entries.get(ref)!, paths))
+      )
+        far.add(ref);
+  }
   return new Set(
-    plan.registry.filter((r) => offered.has(r.ref)).map((r) => r.ref),
+    plan.registry
+      .filter((r) => offered.has(r.ref) && !far.has(r.ref))
+      .map((r) => r.ref),
   );
+}
+
+/**
+ * Whether a layer belongs to any of the given chapter paths: one of its mentions lies in a chapter on a path
+ * (the chapter itself or an ancestor). A mention without a chapter, or no paths at all, matches everywhere.
+ */
+export function layerInChapters(
+  layer: AttachmentRegistryEntry,
+  paths: string[][],
+): boolean {
+  if (!paths.length) return true;
+  return layer.mentions.some((m) => {
+    const leaf = m.chapterPath.at(-1)?.id;
+    return !leaf || paths.some((p) => p.includes(leaf));
+  });
+}
+
+/**
+ * Layers whose evidence lies in exactly one unit, with that unit's index. Layers with evidence in several
+ * units, or in none, are report-wide and stay offered everywhere.
+ */
+export function localLayerHomes(plan: ContentAttachmentPlan) {
+  const unitOf = new Map<string, number>();
+  plan.units.forEach((u, i) =>
+    u.sources.forEach((s) => unitOf.set(s.resource.key, i)),
+  );
+  const homes = new Map<string, number>();
+  for (const r of plan.registry.filter((x) => x.recordKind === 'layer')) {
+    const units = new Set(
+      r.mentions.flatMap((m) =>
+        m.evidence.flatMap((e) =>
+          unitOf.has(e.resourceKey) ? [unitOf.get(e.resourceKey)!] : [],
+        ),
+      ),
+    );
+    if (units.size === 1) homes.set(r.ref, [...units][0]);
+  }
+  return homes;
 }
 
 /** One handle per chapter node and record kind, in registry traversal order. */

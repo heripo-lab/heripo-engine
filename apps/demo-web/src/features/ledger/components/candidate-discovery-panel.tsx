@@ -13,6 +13,7 @@ import {
 
 import { useCandidateDiscovery } from '../hooks/use-candidate-discovery';
 import { useDocumentResourceIndex } from '../hooks/use-document-resource-index';
+import { useReportProfile } from '../hooks/use-report-profile';
 import { CandidateDeduplicationPanel } from './candidate-deduplication-panel';
 
 const KIND_LABELS: Record<string, string> = {
@@ -41,8 +42,8 @@ const STATUS_LABELS: Record<string, string> = {
 export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   const { data: indexData } = useDocumentResourceIndex(taskId);
   const { query, start, cancel, audit } = useCandidateDiscovery(taskId);
-  const [scope, setScope] = useState('');
-  const [modelId, setModelId] = useState('openai/gpt-6-luna');
+  const [scope, setScope] = useState<string[]>([]);
+  const [modelId, setModelId] = useState('anthropic/claude-haiku-5-5');
   const [maxTextChars, setMaxTextChars] = useState(8000);
   const [tableRowsPerUnit, setTableRowsPerUnit] = useState(12);
   const [maxRetries, setMaxRetries] = useState(0);
@@ -51,12 +52,46 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   const [selectedId, setSelectedId] = useState('');
   const chapters =
     indexData?.index.resources.filter((r) => r.kind === 'chapter') ?? [];
-  const scopeChapterId =
-    scope ||
-    chapters.find(
-      (c) => c.kind === 'chapter' && /조사\s*내용/.test(c.data.title),
-    )?.resourceId ||
-    '';
+  const defaultScope = chapters.find(
+    (c) => c.kind === 'chapter' && /조사\s*내용/.test(c.data.title),
+  )?.resourceId;
+  const scopeIds = scope.length ? scope : defaultScope ? [defaultScope] : [];
+  // one chapter keeps the original single-scope settings; several are planned in document order
+  const scopeChapterId = scopeIds.length === 1 ? scopeIds[0] : scopeIds;
+  const selectedKeys = chapters
+    .filter((c) => scopeIds.includes(c.resourceId!))
+    .map((c) => c.key);
+  const insideSelected = (key: string) =>
+    selectedKeys.some((k) => key.startsWith(`${k}/children/`));
+  const toggleScope = (id: string) =>
+    setScope(
+      scopeIds.includes(id)
+        ? scopeIds.filter((s) => s !== id)
+        : chapters
+            .map((c) => c.resourceId!)
+            .filter((s) => s === id || scopeIds.includes(s)),
+    );
+  const titleOf = (id: string) => {
+    const c = chapters.find((r) => r.resourceId === id);
+    return c?.kind === 'chapter' ? c.data.originTitle : '';
+  };
+  const profile = useReportProfile(taskId);
+  const stored = profile.query.data?.stored ?? null;
+  const profileScope = stored?.profile.scopeChapterIds ?? [];
+  // the profile scope is used only while the selection matches it exactly
+  const usingProfileScope =
+    profileScope.length > 0 &&
+    profileScope.length === scopeIds.length &&
+    profileScope.every((id) => scopeIds.includes(id));
+  const loadProfile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      profile.save.mutate(JSON.parse(await file.text()));
+    } catch {
+      profile.save.reset();
+      alert('프로필 JSON을 읽을 수 없습니다.');
+    }
+  };
   const run = query.data?.run;
   const running = run?.status === 'running';
   const candidates =
@@ -96,24 +131,92 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm">
-            후보 탐색 범위 (하위 장 포함)
-            <select
+          <div className="space-y-2 rounded border p-3 text-sm md:col-span-2">
+            <p className="font-medium">보고서 프로필</p>
+            {stored ? (
+              <>
+                <p>
+                  확인된 프로필 · 출처{' '}
+                  {stored.profile.source === 'router' ? '라우터' : '수동'} ·
+                  확인 {stored.profile.confirmedAt.slice(0, 10)}
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  범위{' '}
+                  {profileScope.map((id) => `${id} ${titleOf(id)}`).join(' · ')}{' '}
+                  · 특성 yes{' '}
+                  {Object.entries(stored.profile.traits)
+                    .filter(([, v]) => v === 'yes')
+                    .map(([k]) => k)
+                    .join(', ')}
+                </p>
+                <p className="font-mono text-xs break-all">
+                  {stored.profileSha256}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={running || usingProfileScope}
+                  onClick={() => setScope(profileScope)}
+                >
+                  {usingProfileScope
+                    ? '프로필 범위 사용 중'
+                    : '프로필 범위로 채우기'}
+                </Button>
+              </>
+            ) : (
+              <p className="text-muted-foreground text-xs">
+                확인된 프로필이 없습니다. 프로필 JSON을 불러오면 검증 후
+                저장합니다.
+              </p>
+            )}
+            <input
+              aria-label="보고서 프로필 JSON"
+              type="file"
+              accept="application/json,.json"
+              disabled={running || profile.save.isPending}
+              onChange={(e) => loadProfile(e.target.files?.[0])}
+            />
+            {profile.save.error && (
+              <p className="text-destructive text-xs">
+                {profile.save.error.message}
+              </p>
+            )}
+          </div>
+          <fieldset className="text-sm">
+            <legend>후보 탐색 범위 (하위 장 포함, 여러 장 선택 가능)</legend>
+            <div
               aria-label="후보 탐색 범위"
-              className="bg-background mt-1 w-full rounded border p-2"
-              value={scopeChapterId}
-              disabled={running}
-              onChange={(e) => setScope(e.target.value)}
+              className="bg-background mt-1 max-h-48 space-y-1 overflow-y-auto rounded border p-2"
             >
-              <option value="">장 선택</option>
-              {chapters.map((c) => (
-                <option key={c.key} value={c.resourceId!}>
-                  {c.resourceId} ·{' '}
-                  {c.kind === 'chapter' ? c.data.originTitle : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+              {chapters.map((c) => {
+                const nested = insideSelected(c.key);
+                return (
+                  <label
+                    key={c.key}
+                    className="flex items-center gap-2"
+                    style={{
+                      paddingLeft: `${(c.key.split('/children/').length - 1) * 12}px`,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={scopeIds.includes(c.resourceId!) || nested}
+                      disabled={running || nested}
+                      onChange={() => toggleScope(c.resourceId!)}
+                    />
+                    <span className={nested ? 'text-muted-foreground' : ''}>
+                      {c.resourceId} ·{' '}
+                      {c.kind === 'chapter' ? c.data.originTitle : ''}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-muted-foreground mt-1 text-xs">
+              선택한 장의 하위 장은 자동으로 포함됩니다. 여러 장의 후보는 중복
+              검토 한 번으로 함께 묶습니다.
+            </p>
+          </fieldset>
           <label className="text-sm">
             후보 판단 모델
             <input
@@ -175,7 +278,9 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
         </details>
         <div className="flex flex-wrap gap-2">
           <Button
-            disabled={!scopeChapterId || !modelId || running || start.isPending}
+            disabled={
+              !scopeIds.length || !modelId || running || start.isPending
+            }
             onClick={() =>
               start.mutate({
                 scopeChapterId,
@@ -183,6 +288,7 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 maxTextChars,
                 tableRowsPerUnit,
                 maxRetries,
+                ...(usingProfileScope ? { useProfileScope: true } : {}),
               })
             }
           >
@@ -265,7 +371,11 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 {run.result.issues.length}개
               </p>
               <p>
-                {run.result.scopeTitle} ({run.result.scopeChapterId}) · 모델{' '}
+                {run.result.scopeTitle} (
+                {(
+                  run.result.scopeChapterIds ?? [run.result.scopeChapterId]
+                ).join(', ')}
+                ){run.settings.useProfileScope ? ' · 프로필 범위' : ''} · 모델{' '}
                 {run.settings.modelId}
               </p>
               <p className="font-mono text-xs break-all">

@@ -4,6 +4,7 @@ import type {
 } from './discovery-types';
 
 import { assembleCandidateDiscovery } from './discovery-assembly';
+import { isSameCandidateDiscoveryScope } from './discovery-plan';
 
 /** Reuse successful units unchanged and schedule only units with recorded validation issues. */
 export async function prepareCandidateDiscoveryRetry(
@@ -25,7 +26,7 @@ export async function prepareCandidateDiscoveryRetry(
   const updated = options.updatedPlan ?? plan;
   if (
     updated.inputSha256 !== plan.inputSha256 ||
-    updated.scopeChapterId !== plan.scopeChapterId ||
+    !isSameCandidateDiscoveryScope(updated, plan) ||
     retryUnitIds.some(
       (id) =>
         !plan.units.some((u) => u.unitId === id) ||

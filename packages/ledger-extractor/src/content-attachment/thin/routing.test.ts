@@ -13,6 +13,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT,
+  CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT,
   checkContentAttachmentThinOutliers,
   routeContentAttachmentThinSegments,
 } from './routing';
@@ -91,6 +92,7 @@ function fixture() {
     readOnlyContext: [],
   } as unknown as AttachmentUnit;
   const plan = {
+    units: [unit],
     registry: [
       entry('R1', 'area', '사업범위'),
       entry('R2', 'feature', '수혈', '1호'),
@@ -111,6 +113,7 @@ function fixture() {
         charEnd: texts[i].length,
         llm: true,
       })),
+      handles: [],
     },
   } as unknown as ContentAttachmentThinCompilation;
   return { plan, unit, compilation, segments };
@@ -258,6 +261,47 @@ describe('routeContentAttachmentThinSegments', () => {
     });
   });
 
+  test('votes on areas like other targets under the unanimous area policy', () => {
+    const { plan, unit, compilation } = fixture();
+    plan.registry.push(entry('R7', 'area', '발굴범위'));
+    plan.thinPolicy = { layers: 'all', areas: 'unanimous' };
+
+    const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
+      run(
+        attach('E1:S1', ['R1', 'R2']),
+        attach('E2:S1', ['R7']),
+        none('E3:S1'),
+        none('E4:S1'),
+      ),
+      run(
+        attach('E1:S1', ['R1', 'R2']),
+        none('E2:S1'),
+        none('E3:S1'),
+        none('E4:S1'),
+      ),
+      run(
+        attach('E1:S1', ['R1', 'R2']),
+        none('E2:S1'),
+        none('E3:S1'),
+        none('E4:S1'),
+      ),
+    ]);
+
+    expect(routed[0]).toMatchObject({
+      status: 'auto',
+      reasons: [],
+      confirmed: ['R1', 'R2'],
+      areaSuggestions: [],
+    });
+    expect(routed[1]).toMatchObject({
+      status: 'review',
+      reasons: ['contested_targets', 'layer'],
+      confirmed: [],
+      contested: [{ ref: 'R7', votes: 1 }],
+      areaSuggestions: [],
+    });
+  });
+
   test('reviews unanimous collective attachments above the target limit', () => {
     const { plan, unit, compilation } = fixture();
     const many = Array.from(
@@ -286,6 +330,45 @@ describe('routeContentAttachmentThinSegments', () => {
     expect(routed[1].reasons).not.toContain('large_collective');
   });
 
+  test('reviews unanimous targets confirmed through handles above the handle limit', () => {
+    const { plan, unit, compilation } = fixture();
+    const big = Array.from(
+      { length: CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT + 1 },
+      (_, i) => `R${100 + i}`,
+    );
+    const small = big.slice(1);
+    plan.registry.push(...big.map((ref) => entry(ref, 'artifact', '청자')));
+    compilation.codeMap.handles = [
+      { ref: 'H1', members: big },
+      { ref: 'H2', members: small },
+    ];
+    const viaHandle = (segment: string, handle: string, members: string[]) => ({
+      ...attach(segment, members),
+      handles: [handle],
+    });
+    const decisions = () => [
+      viaHandle('E1:S1', 'H1', big),
+      viaHandle('E2:S1', 'H2', small),
+      attach('E3:S1', big),
+      viaHandle('E4:S1', 'H9', small),
+    ];
+
+    const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
+      run(...decisions()),
+      run(...decisions()),
+      run(...decisions()),
+    ]);
+
+    expect(routed[0]).toMatchObject({
+      status: 'review',
+      reasons: ['large_handle'],
+      confirmed: big,
+    });
+    expect(routed.slice(1).map((s) => s.reasons)).not.toContainEqual(
+      expect.arrayContaining(['large_handle']),
+    );
+  });
+
   test('sends every segment to review for a whole-unit review and requires a run', () => {
     const { plan, unit, compilation, segments } = fixture();
 
@@ -306,5 +389,119 @@ describe('routeContentAttachmentThinSegments', () => {
     expect(() =>
       routeContentAttachmentThinSegments(plan, unit, compilation, []),
     ).toThrow('Expected at least one run');
+  });
+
+  test('narrows a shared layer name to the nearest local layer only under the local policy', () => {
+    const { plan, unit, compilation } = fixture();
+    const setText = (i: number, text: string) => {
+      unit.sources[i].resource.data.text = text;
+      compilation.codeMap.segSpans[i].charEnd = text.length;
+    };
+    setText(0, '교란층 위 수혈 1호');
+    setText(3, '교란층 아래 표토');
+    const layer = (ref: string, key: string | null) => {
+      const e = entry(ref, 'layer', '교란층');
+      if (key)
+        e.mentions[0].evidence = [
+          { resourceKey: key } as (typeof e.mentions)[0]['evidence'][0],
+        ];
+      return e;
+    };
+    plan.registry.push(
+      layer('R10', '/chapters/0/textBlocks/1'),
+      layer('R11', '/chapters/0/textBlocks/2'),
+      layer('R12', '/chapters/9/textBlocks/0'),
+      layer('R13', null),
+    );
+    const runs = () => [
+      run(none('E1:S1'), none('E2:S1'), none('E3:S1'), none('E4:S1')),
+    ];
+
+    const all = routeContentAttachmentThinSegments(
+      plan,
+      unit,
+      compilation,
+      runs(),
+    );
+    plan.thinPolicy = { layers: 'local' };
+    compilation.codeMap.candidateRefs = ['R4', 'R10', 'R11', 'R12', 'R13'];
+    const local = routeContentAttachmentThinSegments(
+      plan,
+      unit,
+      compilation,
+      runs(),
+    );
+
+    expect(all[0].layerSuggestions).toEqual(['R10', 'R11', 'R12', 'R13']);
+    expect(all[3].layerSuggestions).toEqual(['R10', 'R11', 'R12', 'R13']);
+    expect(local[0].layerSuggestions).toEqual(['R10']);
+    expect(local[3].layerSuggestions).toEqual(['R11']);
+    expect(local[1].layerSuggestions).toEqual(['R4']);
+    compilation.codeMap.candidateRefs = ['R10', 'R11', 'R12', 'R13'];
+    expect(
+      routeContentAttachmentThinSegments(plan, unit, compilation, runs())[1]
+        .layerSuggestions,
+    ).toEqual([]);
+  });
+
+  test("suggests a neighbouring unit's layer only to a segment in its chapter under the local policy", () => {
+    const { plan, unit, compilation } = fixture();
+    unit.chapters = [
+      {
+        chapterId: 'trial',
+        path: [
+          { id: 'survey', originTitle: 'IV. 조사내용' },
+          { id: 'trial', originTitle: '2. 시굴조사' },
+        ],
+      },
+    ];
+    plan.units = [
+      {
+        ...unit,
+        unitId: 'page-0',
+        sources: [{ resource: { key: '/next/0' } }],
+      },
+      unit,
+    ] as unknown as AttachmentUnit[];
+    unit.sources[0].resource.data.text =
+      '교란층과 역석층, 아스콘층 복토층 패각층';
+    unit.sources[0].resource.chapterIds = ['trial'];
+    unit.sources[2].resource.data.text = '역석층';
+    unit.sources[3].resource.data.text = '역석층';
+    unit.sources[3].resource.chapterIds = ['unlisted'];
+    compilation.codeMap.segSpans[0].charEnd = 22;
+    compilation.codeMap.segSpans[2].charEnd = 3;
+    compilation.codeMap.segSpans[3].charEnd = 3;
+    const layer = (
+      ref: string,
+      name: string,
+      chapterId: string,
+      key: string | null = '/next/0',
+    ) => {
+      const e = entry(ref, 'layer', name);
+      e.mentions[0].chapterPath = [{ id: chapterId, originTitle: chapterId }];
+      if (key)
+        e.mentions[0].evidence = [
+          { resourceKey: key } as (typeof e.mentions)[0]['evidence'][0],
+        ];
+      return e;
+    };
+    plan.registry.push(
+      layer('R20', '교란층', 'trial'),
+      layer('R21', '역석층', 'excavation'),
+      layer('R22', '아스콘층', 'survey'),
+      layer('R23', '복토층', 'excavation', null),
+      layer('R24', '패각층', 'excavation', '/chapters/0/textBlocks/0'),
+    );
+    plan.thinPolicy = { layers: 'local' };
+    compilation.codeMap.candidateRefs = ['R20', 'R21', 'R22', 'R23', 'R24'];
+
+    const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
+      run(none('E1:S1'), none('E2:S1'), none('E3:S1'), none('E4:S1')),
+    ]);
+
+    expect(routed[0].layerSuggestions).toEqual(['R20', 'R22', 'R23', 'R24']);
+    expect(routed[2].layerSuggestions).toEqual(['R21']);
+    expect(routed[3].layerSuggestions).toEqual([]);
   });
 });

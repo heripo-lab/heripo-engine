@@ -141,11 +141,13 @@ export function stopContentAttachmentThin(taskId: string) {
  * finishes; completed units are skipped when started again, and a unit with saved calls but no result is
  * left as interrupted for a manual decision rather than re-sent. A plan whose candidate snapshot is no longer
  * the latest candidate discovery run is refused. New units stop on request, on HTTP 429,
- * on repeated failures or when the call or token budget would be exceeded.
+ * on repeated failures or when the call or token budget would be exceeded. One run keeps one model: once calls
+ * are saved, starting again with another model is refused so the three votes of a unit never mix models.
  */
 export function startContentAttachmentThin(
   taskId: string,
   budget: ContentAttachmentThinBudget,
+  modelId: string,
 ): ContentAttachmentThinState {
   const run = getContentAttachmentRun(taskId);
   if (!run || run.status === 'running')
@@ -167,15 +169,19 @@ export function startContentAttachmentThin(
   )
     throw new Error('Prepared snapshot changed; prepare a new plan');
   const plan: ContentAttachmentPlan = JSON.parse(rawPlan.toString('utf8'));
+  const previous = getContentAttachmentThinState(taskId);
+  if (previous && previous.usage.calls > 0 && previous.modelId !== modelId)
+    throw new Error(
+      `This plan was attached with ${previous.modelId}; prepare a new plan to use another model`,
+    );
   const root = thinRoot(taskId, run.runId);
   mkdirSync(join(root, 'units'), { recursive: true });
-  const previous = getContentAttachmentThinState(taskId);
   const state: ContentAttachmentThinState = {
     attachmentRunId: run.runId,
     status: 'running',
     startedAt: new Date().toISOString(),
     completedAt: null,
-    modelId: run.settings.modelId,
+    modelId,
     budget,
     usage: previous?.usage ?? {
       calls: 0,
@@ -211,7 +217,7 @@ export function startContentAttachmentThin(
   // written directly so a stop request saved by the previous start is not carried over
   write(stateFile, state);
 
-  const model = createModel(run.settings.modelId);
+  const model = createModel(modelId);
   running.add(run.runId);
   const stopReason = () => {
     persist();

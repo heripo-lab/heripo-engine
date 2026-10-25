@@ -2,6 +2,7 @@ import type {
   CandidateDiscoveryAudit,
   CandidateDiscoveryIssue,
   CandidateDiscoveryPlan,
+  CandidateDiscoveryResponse,
   CandidateDiscoveryResult,
   CandidateEvidence,
   LedgerObjectCandidate,
@@ -43,7 +44,9 @@ export async function assembleCandidateDiscovery(
           ? 'candidate-discovery.v5'
           : audit.promptVersion === 'candidate-discovery.v6'
             ? 'candidate-discovery.v6'
-            : CANDIDATE_DISCOVERY_PROMPT_VERSION,
+            : audit.promptVersion === 'candidate-discovery.v7'
+              ? 'candidate-discovery.v7'
+              : CANDIDATE_DISCOVERY_PROMPT_VERSION,
     );
     if (
       audit.promptVersion !== expected.promptVersion ||
@@ -122,6 +125,7 @@ export async function assembleCandidateDiscovery(
       )?.resource;
       const strictTableIdentifier =
         (audit.promptVersion === 'candidate-discovery.v6' ||
+          audit.promptVersion === 'candidate-discovery.v7' ||
           audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION) &&
         unit.table !== null &&
         proposal.eligibilityBasis === 'table_item';
@@ -201,11 +205,28 @@ export async function assembleCandidateDiscovery(
         evidence,
       });
     }
+    if (
+      audit.promptVersion === 'candidate-discovery.v7' ||
+      audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION
+    ) {
+      const missing = unhandledTableRows(
+        sources,
+        parsed.data,
+        unit.table?.headerRows.length ?? 0,
+      );
+      if (missing.length)
+        issues.push({
+          unitId: unit.unitId,
+          candidateIndex: null,
+          reason: `Table rows neither proposed nor excluded: ${missing.join(', ')}`,
+        });
+    }
   }
   return {
     version: 'ledger-object-candidates.v1',
     inputSha256: plan.inputSha256,
     scopeChapterId: plan.scopeChapterId,
+    ...(plan.scopeChapterIds ? { scopeChapterIds: plan.scopeChapterIds } : {}),
     scopeTitle: plan.scopeTitle,
     candidates: [...candidates.values()],
     issues,
@@ -214,4 +235,49 @@ export async function assembleCandidateDiscovery(
     totalUnits: plan.units.length,
     inspectedResourceCount,
   };
+}
+
+/**
+ * Data rows of a table unit that no proposal or exclusion references, once any row of the unit is proposed as a
+ * table item. Rows with a header cell or only empty cells are not data rows, nor are the leading grid rows the
+ * request presents to the model as headerRows, whose header marks may be missing after OCR. A table without
+ * item proposals (a log or a summary) may skip non-object rows silently, as the prompt allows.
+ */
+function unhandledTableRows(
+  sources: ReturnType<typeof getCandidateSources>,
+  response: CandidateDiscoveryResponse,
+  headerRowCount: number,
+): number[] {
+  if (!response.candidates.some((c) => c.eligibilityBasis === 'table_item'))
+    return [];
+  const rows = new Map<number, { header: boolean; text: boolean }>();
+  const rowOf = new Map<string, number>();
+  for (const { sourceId, resource } of sources) {
+    if (resource.kind !== 'tableCell') continue;
+    rowOf.set(sourceId, resource.rowIndex);
+    const row = rows.get(resource.rowIndex) ?? { header: false, text: false };
+    row.header ||= resource.data.isHeader;
+    row.text ||= resource.data.text.trim() !== '';
+    rows.set(resource.rowIndex, row);
+  }
+  const handled = new Set(
+    [
+      ...response.candidates.flatMap((c) => [
+        c.identifierSourceId,
+        ...c.evidence.map((e) => e.sourceId),
+      ]),
+      ...response.exclusions.map((e) => e.sourceId),
+    ].flatMap((id) =>
+      typeof id === 'string' && rowOf.has(id) ? [rowOf.get(id)!] : [],
+    ),
+  );
+  return [...rows]
+    .filter(
+      ([index, row]) =>
+        index >= headerRowCount &&
+        row.text &&
+        !row.header &&
+        !handled.has(index),
+    )
+    .map(([index]) => index);
 }

@@ -183,7 +183,9 @@ function routedResult(
   outputs: unknown[],
 ): ContentAttachmentThinUnitResult {
   const compilation = createContentAttachmentThinInput(plan, unit);
-  const request = createContentAttachmentThinRequest(compilation);
+  const request = createContentAttachmentThinRequest(compilation, {
+    format: 'object',
+  });
   const calls: ContentAttachmentThinCall[] = outputs.map((rawResponse, i) => ({
     run: `r${i + 1}` as ContentAttachmentThinRunName,
     status: 'completed',
@@ -320,6 +322,48 @@ describe('assembleContentAttachmentThin', () => {
     ]);
   });
 
+  test('marks review items whose proposed targets are exactly a chapter collective, preferring the deepest chapter', () => {
+    const { plan, unitA } = fixture();
+    const pits = ['R2', 'R3', 'R6', 'R7', 'R8'];
+    for (const r of plan.registry)
+      if (pits.includes(r.ref)) {
+        const m = r.mentions[0];
+        m.chapterPath = [
+          { id: 'c', originTitle: '조사' },
+          { id: 'c2', originTitle: '수혈' },
+        ];
+        r.mentions.push({
+          ...m,
+          chapterPath: [{ id: 'z', originTitle: '요약' }],
+        });
+      }
+    plan.registry.find((r) => r.ref === 'R4')!.mentions[0].chapterPath = [
+      { id: 'c', originTitle: '조사' },
+    ];
+    const a = routedResult(plan, unitA, [
+      { d: { 'E1:S1': attach(pits, []), 'E2:S1': attach(['R4'], []) } },
+      { d: { 'E1:S1': attach(pits, []), 'E2:S1': { k: 'n' } } },
+      { d: { 'E1:S1': attach(['R2'], []), 'E2:S1': { k: 'n' } } },
+    ]);
+
+    const view = assembleContentAttachmentThin(plan, [a]);
+
+    expect(
+      view.reviewItems.map((r) => [r.segment, r.collectiveHandle]),
+    ).toEqual([
+      [
+        'E1:S1',
+        {
+          ref: expect.stringMatching(/^H\d+$/),
+          path: ['조사', '수혈'],
+          kind: 'feature',
+          members: 5,
+        },
+      ],
+      ['E2:S1', undefined],
+    ]);
+  });
+
   test('keeps review segments with every final run and leaves them unattached', () => {
     const { plan, unitA } = fixture();
     const a = routedResult(plan, unitA, [
@@ -387,6 +431,14 @@ describe('assembleContentAttachmentThin', () => {
       routedResult(plan, unitA, [{ d: {} }]),
     ]);
 
+    expect(view.method).toBe('content-attachment-thin.v8');
+    expect(assembleContentAttachmentThin(plan, []).method).toBe(
+      'content-attachment-thin.v8',
+    );
+    plan.thinPolicy = { layers: 'all', continuity: 'linked' };
+    expect(assembleContentAttachmentThin(plan, []).method).toBe(
+      'content-attachment-thin.v9',
+    );
     expect(view.issues).toEqual([
       { unitId: 'page-1', reason: 'a required call failed' },
       { unitId: 'page-9', reason: 'unknown unit' },

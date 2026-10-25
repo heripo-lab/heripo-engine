@@ -5,12 +5,16 @@ import type {
   ContentAttachmentThinInspection,
 } from './inspection';
 
+import { layerInChapters, localLayerHomes } from './compile-candidates';
+
 /** A run is an outlier when it alone differs on more than this share of segments... */
 export const CONTENT_ATTACHMENT_THIN_OUTLIER_RATE = 0.25;
 /** ...and on at least this many segments. */
 export const CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT = 3;
 /** Unanimous segments confirming more targets than this (collective statements) go to review. */
 export const CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT = 50;
+/** Unanimous segments confirming more targets than this through collective handles go to review. */
+export const CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT = 10;
 /** Layer names or numbers shorter than this are too generic to suggest. */
 const LAYER_KEY_MIN_LENGTH = 3;
 
@@ -39,12 +43,13 @@ export interface ContentAttachmentThinRoutedSegment {
     | 'area'
     | 'layer'
     | 'large_collective'
+    | 'large_handle'
   >;
-  /** Non-area targets returned by every run. */
+  /** Targets returned by every run; areas only under the plan's `unanimous` area policy. */
   confirmed: string[];
   /** Targets returned by only some runs, with their vote counts. */
   contested: ContentAttachmentThinVote[];
-  /** Area candidates returned by any run; areas are never confirmed automatically. */
+  /** Area candidates returned by any run, unless the plan's area policy is `unanimous`. */
   areaSuggestions: ContentAttachmentThinVote[];
   /** Layer candidates named literally in the segment but not returned by every run. */
   layerSuggestions: string[];
@@ -71,7 +76,7 @@ const byIndex = (runs: ContentAttachmentThinInspection[]) =>
 
 /**
  * Measure how often each of three runs alone differs from the two others, which agree with each other.
- * Exactly one flagged run calls for one replacement call; a flagged replacement sends the unit to review.
+ * Exactly one flagged run calls for one replacement call; a flagged replacement routes with all four runs.
  */
 export function checkContentAttachmentThinOutliers(
   segments: string[],
@@ -103,7 +108,11 @@ export function checkContentAttachmentThinOutliers(
  * Route each judged segment of a unit from its final runs. Targets returned by every run are confirmed,
  * others are contested with votes. A segment goes to review when targets are contested, uncertainty
  * groups differ, a run is invalid for it, an area is returned, a literally named layer is not confirmed, or
- * more targets are confirmed than a collective statement may attach without review.
+ * more targets are confirmed than a collective statement may attach without review, or than a collective
+ * handle may confirm without review. Under the plan's
+ * `unanimous` area policy areas are voted on like other targets instead of always going to review.
+ * Under the plan's `local` layer policy a layer name shared by several layers suggests only the nearest local one, and a
+ * single-unit layer from a neighbouring unit is suggested only to a segment in its chapter.
  */
 export function routeContentAttachmentThinSegments(
   plan: ContentAttachmentPlan,
@@ -114,6 +123,9 @@ export function routeContentAttachmentThinSegments(
 ): ContentAttachmentThinRoutedSegment[] {
   if (!runs.length) throw new Error('Expected at least one run');
   const kinds = new Map(plan.registry.map((r) => [r.ref, r.recordKind]));
+  const handleMembers = new Map(
+    compilation.codeMap.handles.map((h) => [h.ref, h.members]),
+  );
   const order = plan.registry.map((r) => r.ref);
   const layerKeys = plan.registry
     .filter((r) => r.recordKind === 'layer')
@@ -128,6 +140,75 @@ export function routeContentAttachmentThinSegments(
     unit.sources.map((s) => [s.resource.key, s.resource.data.text]),
   );
   const indexes = byIndex(runs);
+  const sourceOrder = new Map(unit.sources.map((s, i) => [s.resource.key, i]));
+  const evidenceOrder = new Map(
+    plan.registry
+      .filter((r) => r.recordKind === 'layer')
+      .map((r) => [
+        r.ref,
+        r.mentions.flatMap((m) =>
+          m.evidence.flatMap((e) =>
+            sourceOrder.has(e.resourceKey)
+              ? [sourceOrder.get(e.resourceKey)!]
+              : [],
+          ),
+        ),
+      ]),
+  );
+  // under the local policy only layers offered to the model for this unit can be suggested
+  const local = plan.thinPolicy?.layers === 'local';
+  const votedAreas = plan.thinPolicy?.areas === 'unanimous';
+  const offered = new Set(compilation.codeMap.candidateRefs);
+  const entries = new Map(plan.registry.map((r) => [r.ref, r]));
+  const homes = local ? localLayerHomes(plan) : new Map<string, number>();
+  const unitAt = plan.units.findIndex((u) => u.unitId === unit.unitId);
+  const chapterPaths = new Map(
+    unit.chapters.map((c) => [c.chapterId, c.path.map((x) => x.id)]),
+  );
+  const segmentPaths = new Map(
+    unit.sources.map((s) => [
+      s.resource.key,
+      s.resource.chapterIds.map((id) => chapterPaths.get(id) ?? [id]),
+    ]),
+  );
+  const nameUse = new Map<string, number>();
+  for (const l of layerKeys)
+    for (const k of new Set(l.keys)) nameUse.set(k, (nameUse.get(k) ?? 0) + 1);
+  /**
+   * Local rule for a name several layers share: keep the layers with evidence in this unit, then only the
+   * one whose evidence is nearest at or before the segment. Names used by one layer are unaffected, but
+   * only layers offered to the model for this unit can be suggested, and a single-unit layer from a
+   * neighbouring unit only to a segment in its chapter.
+   */
+  const narrowLocal = (
+    named: typeof layerKeys,
+    text: string,
+    at: number,
+    paths: string[][],
+  ) => {
+    const shared = [...nameUse].flatMap(([k, n]) =>
+      n > 1 && text.includes(k) ? [k] : [],
+    );
+    const before = (ref: string) =>
+      Math.max(-1, ...evidenceOrder.get(ref)!.filter((i) => i <= at));
+    const pool = named.filter(
+      (l) =>
+        offered.has(l.ref) &&
+        (!homes.has(l.ref) ||
+          homes.get(l.ref) === unitAt ||
+          layerInChapters(entries.get(l.ref)!, paths)),
+    );
+    return pool.filter((l) => {
+      const key = shared.find((k) => l.keys.includes(k));
+      if (!key) return true;
+      if (!evidenceOrder.get(l.ref)!.length) return false;
+      const rivals = pool.filter(
+        (o) => o.keys.includes(key) && evidenceOrder.get(o.ref)!.length,
+      );
+      const best = Math.max(...rivals.map((o) => before(o.ref)));
+      return best >= 0 ? before(l.ref) === best : rivals[0] === l;
+    });
+  };
 
   return compilation.codeMap.segments.map((segment) => {
     const span = compilation.codeMap.segSpans.find((s) => s.seg === segment)!;
@@ -141,16 +222,22 @@ export function routeContentAttachmentThinSegments(
     const unanimous = (ref: string) =>
       valid.length === runs.length && votes.get(ref) === runs.length;
     const vote = (ref: string) => ({ ref, votes: votes.get(ref)! });
-    const isArea = (ref: string) => kinds.get(ref) === 'area';
+    const isArea = (ref: string) => !votedAreas && kinds.get(ref) === 'area';
     const confirmed = returned.filter((r) => unanimous(r) && !isArea(r));
     const contested = returned.filter((r) => !unanimous(r) && !isArea(r));
     const areaSuggestions = returned.filter(isArea).map(vote);
-    const layerSuggestions = layerKeys
-      .filter(
-        (l) =>
-          l.keys.some((k) => text.includes(k)) &&
-          !(votes.has(l.ref) && unanimous(l.ref)),
-      )
+    const named = layerKeys.filter((l) => l.keys.some((k) => text.includes(k)));
+    const layerSuggestions = (
+      local
+        ? narrowLocal(
+            named,
+            text,
+            sourceOrder.get(span.key)!,
+            segmentPaths.get(span.key)!,
+          )
+        : named
+    )
+      .filter((l) => !(votes.has(l.ref) && unanimous(l.ref)))
       .map((l) => l.ref);
     const groupKeys = new Set(
       valid.map((d) =>
@@ -169,6 +256,14 @@ export function routeContentAttachmentThinSegments(
     if (layerSuggestions.length) reasons.push('layer');
     if (confirmed.length > CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT)
       reasons.push('large_collective');
+    // a confirmed target counts as handle-derived when any run reached it through a returned handle
+    const viaHandle = confirmed.filter((ref) =>
+      valid.some((d) =>
+        d.handles.some((h) => handleMembers.get(h)?.includes(ref)),
+      ),
+    );
+    if (viaHandle.length > CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT)
+      reasons.push('large_handle');
     const agreedGroups = groupKeys.size === 1 && valid.length === runs.length;
     return {
       segment,

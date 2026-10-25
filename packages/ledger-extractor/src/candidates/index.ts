@@ -1,4 +1,9 @@
-export { prepareCandidateDiscovery } from './discovery-plan';
+export {
+  CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS,
+  CANDIDATE_DISCOVERY_SHORT_BLOCK_CHARS,
+  isSameCandidateDiscoveryScope,
+  prepareCandidateDiscovery,
+} from './discovery-plan';
 export { prepareCandidateDiscoveryRetry } from './discovery-retry';
 export { discoverCandidateUnit } from './discovery-unit';
 export { assembleCandidateDiscovery } from './discovery-assembly';
@@ -18,6 +23,7 @@ export {
   getCandidateGroupMembers,
   groupCandidateUncertainties,
   CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
+  CANDIDATE_DEDUPLICATION_UNMERGED_REASON,
 } from './candidate-deduplication';
 export type {
   CandidateDeduplicationAudit,

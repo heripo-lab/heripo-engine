@@ -30,7 +30,33 @@ describe('candidate discovery', () => {
       createCandidateDiscoveryRequest(unit).userPrompt,
     );
     expect(result.response).toEqual(response);
+    expect(result).not.toHaveProperty('finishReason');
+    expect(result).not.toHaveProperty('structuredAttempts');
     expect(result.systemPrompt).toContain('THIS investigation');
+    expect(result.systemPrompt).toContain(
+      'ITEM TABLES ARE ANSWERED ROW BY ROW',
+    );
+    expect(
+      createCandidateDiscoveryRequest(unit, 'candidate-discovery.v7')
+        .systemPrompt,
+    ).not.toContain('ITEM TABLES ARE ANSWERED ROW BY ROW');
+    vi.mocked(LLMCaller.call).mockResolvedValue({
+      output: response,
+      usage: { ...usage, reasoningTokens: 1 },
+      usedFallback: false,
+      finishReason: 'stop',
+      structuredAttempts: 2,
+    });
+    expect(
+      await discoverCandidateUnit(unit, {
+        model: {} as LanguageModel,
+        maxRetries: 0,
+      }),
+    ).toMatchObject({
+      finishReason: 'stop',
+      structuredAttempts: 2,
+      usage: { reasoningTokens: 1 },
+    });
     expect(LLMCaller.call).toHaveBeenCalledWith(
       expect.objectContaining({
         maxRetries: 0,

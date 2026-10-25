@@ -11,7 +11,12 @@ import { describe, expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
 import { createContentAttachmentThinInput } from './compile';
-import { CONTENT_ATTACHMENT_THIN_COMPILE_VERSION } from './compile-types';
+import {
+  CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION,
+  CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
+} from './compile-types';
 
 const cell = (text: string, isHeader = false) => ({
   text,
@@ -214,6 +219,190 @@ describe('createContentAttachmentThinInput', () => {
       { refs: ['R3', 'R9'], reason: 'offered' },
     ]);
     expect(input.chapters).toEqual(['1. 시굴조사']);
+  });
+
+  test('offers a single-unit layer only in its unit and next to it in its chapter under the local layer policy', () => {
+    const { plan, unit } = fixture();
+    const others = ['far', 'next-but-one', 'next'].map(
+      (unitId, i) =>
+        ({
+          ...unit,
+          unitId,
+          sources: [{ ...unit.sources[0], resource: { key: `/other/${i}` } }],
+        }) as unknown as AttachmentUnit,
+    );
+    plan.units = [...others, unit];
+    const layer = (
+      ref: string,
+      keys: string[],
+      chapterPath = unit.chapters[0].path,
+    ) => {
+      const e = structuredClone(plan.registry[0]);
+      e.ref = ref;
+      e.groupId = `g-${ref}`;
+      e.recordKind = 'layer';
+      e.mentions[0].chapterPath = chapterPath;
+      e.mentions[0].evidence = keys.map(
+        (resourceKey) =>
+          ({ resourceKey }) as (typeof e.mentions)[0]['evidence'][0],
+      );
+      return e;
+    };
+    plan.registry.push(
+      layer('L1', [unit.sources[0].resource.key]),
+      layer('L2', ['/other/0']),
+      layer('L3', ['/other/2']),
+      layer('L4', ['/other/0', '/other/1']),
+      layer('L5', []),
+      layer('L6', ['/elsewhere']),
+      layer('L7', ['/other/2'], [{ id: 'other', originTitle: '2. 발굴조사' }]),
+      layer('L8', ['/other/2'], []),
+      layer(
+        'L9',
+        [unit.sources[0].resource.key],
+        [{ id: 'other', originTitle: '2. 발굴조사' }],
+      ),
+    );
+
+    const all = createContentAttachmentThinInput(plan, unit);
+    plan.thinPolicy = { layers: 'local' };
+    const local = createContentAttachmentThinInput(plan, unit);
+
+    expect(all.version).toBe(CONTENT_ATTACHMENT_THIN_COMPILE_VERSION);
+    expect(all.codeMap.candidateRefs).toEqual(
+      expect.arrayContaining([
+        'L1',
+        'L2',
+        'L3',
+        'L4',
+        'L5',
+        'L6',
+        'L7',
+        'L8',
+        'L9',
+      ]),
+    );
+    expect(local.version).toBe(CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION);
+    expect(
+      local.codeMap.candidateRefs.filter((r) => r.startsWith('L')),
+    ).toEqual(['L1', 'L3', 'L4', 'L5', 'L6', 'L8', 'L9']);
+    expect(local.input.candidates.map((row) => row[0])).toEqual(
+      local.codeMap.candidateRefs,
+    );
+  });
+
+  test('links the preceding page context into the first block reading order under linked continuity', () => {
+    const { plan, unit } = fixture();
+    const prior = (key: string, text: string) => ({
+      sourceId: `source:${key}`,
+      resource: { ...unit.sources[0].resource, key, data: { text } },
+    });
+    const previous = {
+      ...unit,
+      unitId: 'page-0',
+      sources: [
+        unit.sources.find((x) => x.resource.kind === 'tableCell')!,
+        prior('/chapters/9/textBlocks/3', '앞 장 머리'),
+        prior('/chapters/9/textBlocks/4', '도로는 남북으로'),
+        prior('/chapters/9/textBlocks/5', '이어지며'),
+      ],
+    } as unknown as AttachmentUnit;
+    plan.units = [previous, unit];
+    unit.readOnlyContext = [
+      { resourceKey: '/chapters/9/textBlocks/4', text: '도로는 남북으로' },
+      { resourceKey: '/chapters/9/textBlocks/5', text: '이어지며' },
+      ...unit.readOnlyContext,
+      { resourceKey: '/chapters/8/textBlocks/0', text: '다음 장' },
+    ];
+    const at = (ref: string, key: string) => {
+      const e = plan.registry.find((r) => r.ref === ref)!;
+      e.mentions[0].evidence = [
+        {
+          ...e.mentions[0].evidence[0],
+          resourceKey: key,
+        },
+      ];
+    };
+    at('R4', '/chapters/9/textBlocks/5');
+    at('R9', '/chapters/9/textBlocks/5');
+
+    const before = createContentAttachmentThinInput(plan, unit);
+    plan.thinPolicy = { layers: 'all', continuity: 'linked' };
+    const linked = createContentAttachmentThinInput(plan, unit);
+    plan.thinPolicy = { layers: 'local', continuity: 'linked' };
+    const local = createContentAttachmentThinInput(plan, unit);
+
+    expect(before.version).toBe(CONTENT_ATTACHMENT_THIN_COMPILE_VERSION);
+    expect(before.input.bodySequences[0].slice(0, 2)).toEqual(['E1', 'E2']);
+    expect(before.input.bodySequences).toContainEqual(['X1', 'X2']);
+    expect(before.input.readOnlyContext.some((x) => 'evidenceOf' in x)).toBe(
+      false,
+    );
+    expect(linked.version).toBe(CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION);
+    expect(local.version).toBe(
+      CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION,
+    );
+    expect(linked.input.bodySequences[0].slice(0, 3)).toEqual([
+      'X1',
+      'X2',
+      'E1',
+    ]);
+    expect(linked.input.bodySequences).not.toContainEqual(['X1', 'X2']);
+    expect(linked.input.bodySequences).toContainEqual(['X5']);
+    expect(linked.input.readOnlyContext.map((x) => x.evidenceOf)).toEqual([
+      undefined,
+      ['R4'],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(linked.codeMap).toEqual(before.codeMap);
+  });
+
+  test('keeps reading order when the preceding context is in the same sequence, absent or not before text', () => {
+    const { plan, unit } = fixture();
+    plan.thinPolicy = { layers: 'all', continuity: 'linked' };
+    const previous = {
+      ...unit,
+      unitId: 'page-0',
+      sources: [
+        {
+          sourceId: 'p',
+          resource: {
+            ...unit.sources[0].resource,
+            key: '/chapters/0/textBlocks/9',
+            data: { text: '같은 장' },
+          },
+        },
+      ],
+    } as unknown as AttachmentUnit;
+    plan.units = [previous, unit];
+    unit.readOnlyContext = [
+      { resourceKey: '/chapters/0/textBlocks/9', text: '같은 장' },
+    ];
+    const plain = (u: AttachmentUnit) => {
+      const off = structuredClone(plan);
+      delete off.thinPolicy;
+      return createContentAttachmentThinInput(off, u).input;
+    };
+
+    const same = createContentAttachmentThinInput(plan, unit).input;
+    unit.readOnlyContext = [{ resourceKey: '/elsewhere', text: '다른 곳' }];
+    const absent = createContentAttachmentThinInput(plan, unit).input;
+    const absentPlain = plain(unit);
+    const tableFirst = {
+      ...unit,
+      sources: [...unit.sources].reverse(),
+    } as AttachmentUnit;
+    plan.units = [previous, tableFirst];
+
+    expect(same.bodySequences[0]).toEqual(['E1', 'E2', 'E3', 'X1']);
+    expect(same.readOnlyContext[0].evidenceOf).toBeUndefined();
+    expect(absent.bodySequences).toEqual(absentPlain.bodySequences);
+    expect(
+      createContentAttachmentThinInput(plan, tableFirst).input.bodySequences,
+    ).toEqual(plain(tableFirst).bodySequences);
   });
 
   test('builds one handle per chapter node and record kind', () => {

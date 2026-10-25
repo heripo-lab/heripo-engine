@@ -19,7 +19,10 @@ import {
 } from '~/lib/validations';
 
 const settingsSchema = z.object({
-  scopeChapterId: z.string().min(1),
+  scopeChapterId: z.union([
+    z.string().min(1),
+    z.array(z.string().min(1)).min(1).max(30),
+  ]),
   modelId: z
     .string()
     .regex(/^(openai|anthropic|google|together|ollama|lmstudio)\/.+/),
@@ -29,6 +32,7 @@ const settingsSchema = z.object({
   deduplicationOnly: z.boolean().optional(),
   retryFailedUnits: z.boolean().optional(),
   retryUnitIds: z.array(z.string().min(1)).max(100).optional(),
+  useProfileScope: z.boolean().optional(),
 });
 type Context = { params: Promise<{ taskId: string }> };
 
@@ -88,7 +92,7 @@ export async function POST(request: NextRequest, context: Context) {
     return NextResponse.json(
       {
         error:
-          'Cannot start discovery. Check the selected chapter and model configuration.',
+          'Cannot start discovery. Check the selected chapters and model configuration.',
       },
       { status: 400 },
     );
