@@ -115,7 +115,7 @@ export function ContentAttachmentThinSection({
   };
   return (
     <section className="space-y-3 rounded border p-3">
-      <h3 className="font-medium">선택 경로 · 얇은 묶음 배정 (전체 묶음)</h3>
+      <h3 className="font-medium">얇은 묶음 배정 (전체 묶음)</h3>
       <p className="text-sm">
         같은 순회 계획의 모든 묶음을 묶음당 3회 호출해 대상 단위 만장일치만 자동
         확정합니다. 이상 호출은 1회만 다시 부르고, 실패한 호출은 다시 보내지
@@ -129,42 +129,47 @@ export function ContentAttachmentThinSection({
         </p>
       )}
       {planSnapshotId && (
-        <div className="bg-muted/30 space-y-1 rounded p-2 text-sm">
-          <div>
-            적용 정책 · 층위 후보{' '}
-            {local
-              ? '근처 묶음만 제공(local): 한 묶음에서만 근거가 나온 층위는 자기 묶음과 같은 장의 앞뒤 1묶음까지만, 같은 이름 층위는 가까운 근거로 좁힘'
-              : '모두 제공(all)'}
-            {decisionNote('layers')}
+        <details>
+          <summary className="cursor-pointer text-sm">
+            세부 정보 · 계획에 고정된 배정 규칙
+          </summary>
+          <div className="bg-muted/30 mt-2 space-y-1 rounded p-2 text-sm">
+            <div>
+              적용 정책 · 층위 후보{' '}
+              {local
+                ? '근처 묶음만 제공(local): 한 묶음에서만 근거가 나온 층위는 자기 묶음과 같은 장의 앞뒤 1묶음까지만, 같은 이름 층위는 가까운 근거로 좁힘'
+                : '모두 제공(all)'}
+              {decisionNote('layers')}
+            </div>
+            <div>
+              쪽 경계 맥락{' '}
+              {linked
+                ? '연결(linked): 앞 쪽 블록을 첫 블록과 같은 읽기 순서로 잇고, 후보의 근거 블록이면 표시'
+                : '기존 방식'}
+              {decisionNote('continuity')}
+            </div>
+            <div>
+              면적 제안{' '}
+              {votedAreas
+                ? '3표 확정(unanimous): 세 호출이 모두 고른 면적은 확정, 일부만 고른 면적은 다툼 대상으로 검수'
+                : '항상 검수(기존 방식)'}
+              {decisionNote('areas')}
+            </div>
+            <div>
+              도록 항목{' '}
+              {catalogFields
+                ? '필드 줄 포함(fields, 프롬프트 v14): 번호·이름·영문명·출수 정보·계측값 줄도 그 항목의 유물을 서술'
+                : '별도 규칙 없음(프롬프트 v13)'}
+              {decisionNote('catalog')}
+            </div>
+            <p className="font-mono text-xs break-all">
+              컴파일 {compileVersion} ·{' '}
+              {profile
+                ? `프로필 출처 ${profile.source === 'router' ? '라우터 판정 후 사람 확인' : '사람 직접 작성'} · 해시 ${profile.profileSha256}`
+                : '확인된 프로필 없이 준비된 계획(기존 규칙)'}
+            </p>
           </div>
-          <div>
-            쪽 경계 맥락{' '}
-            {linked
-              ? '연결(linked): 앞 쪽 블록을 첫 블록과 같은 읽기 순서로 잇고, 후보의 근거 블록이면 표시'
-              : '기존 방식'}
-            {decisionNote('continuity')}
-          </div>
-          <div>
-            면적 제안{' '}
-            {votedAreas
-              ? '3표 확정(unanimous): 세 호출이 모두 고른 면적은 확정, 일부만 고른 면적은 다툼 대상으로 검수'
-              : '항상 검수(기존 방식)'}
-            {decisionNote('areas')}
-          </div>
-          <div>
-            도록 항목{' '}
-            {catalogFields
-              ? '필드 줄 포함(fields, 프롬프트 v14): 번호·이름·영문명·출수 정보·계측값 줄도 그 항목의 유물을 서술'
-              : '별도 규칙 없음(프롬프트 v13)'}
-            {decisionNote('catalog')}
-          </div>
-          <p className="font-mono text-xs break-all">
-            컴파일 {compileVersion} ·{' '}
-            {profile
-              ? `프로필 출처 ${profile.source === 'router' ? '라우터 판정 후 사람 확인' : '사람 직접 작성'} · 해시 ${profile.profileSha256}`
-              : '확인된 프로필 없이 준비된 계획(기존 규칙)'}
-          </p>
-        </div>
+        </details>
       )}
       {profileChanged && (
         <p className="text-sm text-amber-700" role="status">

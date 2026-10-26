@@ -197,6 +197,173 @@ The thin path is the current way to attach body sentences and table items to a f
 - **Run** — `attachContentThinUnit(plan, unit, { model, maxRetries = 0, abortSignal, onAttempt, onCall })` sends r1, then r2 and r3 together. If exactly one run is an outlier, it sends one replacement call (r4). If the replacement is also an outlier, the runs hold two readings: segments are routed with all four runs (`finalRuns` lists r1–r4), so a target confirms only when all four return it and any disagreement goes to review. If the replacement fails, the whole unit goes to review. Saved results keep the routing they recorded. Every call is reported through `onCall` with its request, raw response, usage and inspection. The result status is `routed`, `failed` or `no_llm_segments`.
 - **Assemble** — `assembleContentAttachmentThin(plan, results)` returns `ledger-content-attachments.v2`. Contents reference original segments by resource key and span with a basis of `model_unanimous`, `code_row_owner`, `code_typed_row` or `code_cell_registration`. Review items keep each final run's decision. When a review item's confirmed and contested targets are exactly the members of one chapter collective with at least five members (`CONTENT_ATTACHMENT_THIN_COLLECTIVE_REVIEW_MIN_MEMBERS`), the item carries `collectiveHandle` (handle ref, chapter path, kind and member count; the deepest chapter wins), so a reviewer can decide every item of that collective at once. Nothing is confirmed automatically by this mark. The result starts as `not_reviewed`. Relation counterparts (for example the other feature in "cut by feature 3") are not attached at this stage: `scope.relationCounterparts` is `deferred_to_link_extraction`.
 
+## Archaeology ledger
+
+`assembleArchaeologyLedger(plan, attachments, { ledgerId, processedDocumentId, extractorVersion, extractedAt, createdAt })` assembles `archaeology-ledger.v1` from what the engine extracts today, deterministically and without model calls:
+
+- **Ledger** — the ledger header: the processed document, extractor and attachment prompt versions, `validationStatus` (`not_run` until `applyLedgerValidation` decides it), `reviewStatus: 'not_reviewed'`, the candidate snapshot and, when the plan has one, the report profile with its thin rules and rule decisions.
+- **Records** — one record per frozen registry entry (`record-<groupId>`), with kind, source identifier and name, and `content`: original sentences or table phrases cut unchanged from the processed document. Identical text shares one excerpt listing every source.
+- **Sources** — where each excerpt occurs: resource key and character span (`locator`), PDF page, chapter, text block or table cell, the processed-document reference and `basis` (`registration` for the candidate's own evidence, otherwise the attachment basis). Registration evidence outside the plan falls back to its saved quote.
+- **Review items** — what a person must decide; the engine never decides it. `segment` items come from attachment review (proposed and already-confirmed records, reasons, the segment text and, when the proposal equals a chapter collective, `collective`); `identity` items from uncertain registry merges; `profile_decision` items from thin rule decisions marked `needsDecision`. A record has `needsReview` when a non-collective item proposes it without every run agreeing or its identity is uncertain; a collective item is decided once for the whole set and does not flag each member.
+- **Pending** — parent hierarchy is added by `applyLedgerParents`, media references by `applyLedgerMedia`, attributes by `applyLedgerAttributes` and links by `applyLedgerLinks` below. `attributes` and `mediaReferences` stay empty until those run, `links` holds only relations kept beside a chosen parent until `applyLedgerLinks` runs, and `pending` (`ARCHAEOLOGY_LEDGER_PENDING_PARTS`) lists what is missing so consumers show it as pending, not as empty findings.
+
+## Parent hierarchy signals and code-decided parents
+
+The functions below collect parent candidates, decide the parents code can decide, send the remaining questions to a three-run model judgment, and put the results into the ledger. All are deterministic and offline except `judgeRelationParentBatch`.
+
+- **Signals** — `collectRelationSignals(plan, ledger)` returns `relation-signals.v1`, the parent candidates of every record with their source text:
+  - `phrase`: a find-spot phrase in the record's own excerpts (`X에서 출토된`, `출수위치 X`). `finding` is false for confirming verbs (`확인`, `검출`, `발견`).
+  - `table_row`: another record named in the record's own table row. `header` is the column's first-row cell, and `finding` is true only for a find-spot or membership column (`출토`, `출수`, `수습`, `위치`, `소속`); a cell elsewhere in the row, such as a trench's list of features, only proposes a candidate.
+  - `heading_scope`: the record heading the record's first text falls under in reading order. Numbered headings that name no record close the scope.
+  - `chapter_title`: the record's own chapter title naming a record.
+
+  Names match by identifier with name, longest name first, in the exact form and in a looser form without `호` after a number, so `98호 수혈` meets a record registered as `98` and `수혈`. When several records answer one place — a report that restarts numbering per period registers `29호 수혈` and `29 수혈` in different chapters — the records nearest the speaking record by chapter path are kept, then the exact form among those still tied; records still tied stay an ambiguous target. A place that names the record itself is no find-spot. The relation-sentence finder below chooses names the same way. A numbered place (`98호 수혈`) never matches a record that has only the bare name. Same-kind records are skipped for rows, headings and chapter titles, since they are siblings or classification headings. No kind hierarchy is assumed. A finding phrase whose place matches no record is kept with no target.
+
+- **Code-decided parents** — `resolveRelationParents(signals, ledger)` returns `relation-parents.v1`:
+  - A parent is set only when finding phrases and membership-column table rows name exactly one record. When they name one feature and records of other kinds, the feature is chosen and the others become link candidates.
+  - Heading-scope and chapter-title signals never set a parent. They become questions, as do confirming phrases, other table rows (`row_only`), unmatched places, ambiguous or conflicting targets, and parents that would close a cycle.
+  - Questions keep their candidates and signals for a later judgment or a person.
+- **Parent judgment** — For questions code cannot decide, a model judges the parent. Only `judgeRelationParentBatch` calls the caller's model.
+  - `createRelationParentRequests(plan, ledger, parents, { batchSize = 12, maxCandidates = 15 })` builds `relation-parent-judgment.v2` requests without a model call. Questions follow ledger order in batches.
+  - Each question offers the candidates its signals named. For a finding phrase whose place matched no record, it also offers records of another kind that share a name word and, when the place has numbers, a number: `발굴 1구역` offers `23-1 구역`.
+  - For a place that matched no record, up to three context records are shown, never offered as answers. These are records of an offered candidate's kind whose names contain a place word no candidate has, with their excerpts that carry numbered codes. For example, `발굴 1구역` brings the area `정밀발굴조사` and its "23-1~6구역" statement, so the model can tie the short form to `23-1 구역` only when the text states the coverage.
+  - Evidence is the signal text and the record's first excerpts with up to 300 characters of their surrounding block. The model answers each question with a candidate ID or `none`, evidence IDs and a short reason. The rules require stated containment, never kind order, nearness or assumed spellings.
+  - `inspectRelationParentResponse(request, rawResponse)` checks every answer against its question without repairing it.
+  - `judgeRelationParentBatch(request, { model, maxRetries = 0, abortSignal, onAttempt, onCall })` sends r1, then r2 and r3 together. A failed call is not re-sent and sends the whole batch to review.
+  - `decideRelationParents(request, inspections)` sets a parent, or `none`, only when every run validly agrees. Anything else is left for review.
+- **Into the ledger** — `applyLedgerParents(ledger, parents, judgments = [])` returns the ledger with `parentRecordId`, `parentBasis` (`code` or `judgment`) and `parentEvidence` on each decided record.
+  - Every other question becomes a `parent` review item with reason `unresolved_parent`, its candidates and the runs' votes, and flags the record. This covers questions not judged, judgments the runs split on, and a unanimous `none` for a stated place no record matched: the place is written but not registered.
+  - A unanimous `none` for any other question leaves the record without a parent and without review.
+  - Parents that would close a cycle are undone and reviewed. Link candidates beside a chosen parent become `links`, and `parent_hierarchy` leaves `pending`.
+- **Place aliases** — A person can decide once how a report's short place names correspond to registered names, such as `발굴 {n}구역` → `23-{n} 구역`, and inject them as `place-aliases.v1` (`PlaceAliasTable`), like a report profile.
+  - **Table:** the input hash, `source: 'manual'` and a confirmation time. Each rule has an `id`, its `written` forms, the `registered` name, an optional `numbers` range for the `{n}` placeholder, an optional `recordKind`, and a required `basis.quote`: the report text that states the correspondence.
+  - **`validatePlaceAliases(plan, ledger, table)`** returns `{ errors, warnings }` without changing the table.
+    - Errors make it unusable: version, input, source or time; no rules; missing or repeated IDs; empty forms; `{n}` not used once everywhere or nowhere; bad ranges; unknown kinds; a basis quote not found in the document; one written form sent to two names.
+    - Warnings, for a table without errors: a registered name matching no record or several; a rule whose written forms never occur; a record registered under a written form, left for an identity review.
+  - `PlaceAliasValidationError` carries the errors for callers that refuse an invalid table.
+  - **Applying:** pass the table as `collectRelationSignals(plan, ledger, { placeAliases, placeAliasesSha256 })`. `placeAliasesSha256(table)` hashes a table with sorted keys; a table with errors throws.
+    - A finding phrase or membership-column table cell whose place no record name matched is retried through the rules. The written form must end the place, ignoring trailing punctuation, and its number must be in range. When the registered name, of the rule's kind, names one record, that record is the target and the signal keeps the rule as `alias`; otherwise the place stays unresolved (`alias_unresolved`).
+    - A parent decided only through rules has basis `alias`. In the ledger it gets `parentBasis: 'alias'` and, besides the phrase or cell, an `alias_rule` evidence entry with the rule, `<written> → <registered>` and the basis quote.
+    - Records registered under a written form (`발굴 2구역` beside `23-2 구역`) get no parent from the rules. They become `identity` review items (`alias_duplicate`) with their registered record, without merging, and no parent question.
+    - The ledger header records the applied table (`placeAliases`: rule IDs, source, confirmation time, input hash and, when given, the table hash).
+
+## Figure and photo references
+
+These functions link records to images and put the links into the ledger, deterministically and without model calls.
+
+- **Caption index** — `indexMediaCaptions(index)` returns `media-caption-index.v1`.
+  - Each captioned image gets a label from its caption number (`도면 1`, `사진 45`, `원색도판 3`, `도 12-1`; types in `MEDIA_LABEL_TYPES`). The caption text is kept unchanged.
+  - Labels shared by several images are visible in `byLabel`. Images without a caption, or whose number is not such a label, are listed apart.
+- **Text references** — `collectMediaReferences(captions, ledger)` returns `media-references.v1`.
+  - It finds the labels each record's own excerpts cite, such as `(도면 31, 사진 143)` in an artifact heading. Ranges (`사진 45~49`, up to 60 numbers) and lists (`도판 10· 11`, `사진 45, 46`) are expanded. A label right after a Hangul letter is not a reference, so `마도23-1` is not figure `도 23-1`.
+  - A label one image has links the record to that image (`text_reference`), with the excerpt that cites it. A label no image has is `missing`; a label several images share is `ambiguous`.
+- **Caption references** — `collectCaptionReferences(captions, plan, ledger, textReferences)` returns `caption-references.v1`.
+  - A caption naming exactly one numbered record that is not an artifact (`도면 41 … 1호 수혈 평면도`) links it (`caption_name`). Unnumbered names such as `지점` are not used, since they name kinds as often as records.
+  - A numbered series (`11~20호 수혈`, `1~4호 건물지와 주변…`) links each numbered record of that name (`caption_range`).
+  - Numbering can restart across sections, so a caption's chapter-title words before the name (such as `조선시대`) rule out records whose chapter titles lack them while other records of the kind have them. Words that name records of that kind (`수혈`) do not count. Among the rest the exact name form, then the image's chapter, decides; otherwise the number is reported as unresolved.
+  - Parenthesized artifact numbers (`출토유물(24~28)`) create no links. They check the artifacts that text references linked to the same image (`artifactNumberChecks`: agreeing and disagreeing).
+- **Same-page candidates** — `collectSamePageCandidates(index, ledger)` groups uncaptioned images with the records whose excerpts are on the same PDF page, such as a catalogue page with two artifacts and six photos. Without a caption or a layout position, code cannot tell which image shows which record, so nothing is linked; each page is a review group.
+- **Into the ledger** — `applyLedgerMedia(ledger, { captions, text, caption, samePage })` fills `mediaReferences`.
+  - Text references come first, then caption names and series. Each record–image pair is kept once, with every excerpt or caption that linked it, the caption text as written and its label words (`mediaType`, `sequenceNo`), and its `ordinal` among the record's images.
+  - `media` review items are added for a cited label several images share (`media_ambiguous`, which flags the record), a caption naming several records (`media_caption_several`) and same-page groups (`media_same_page`). The last two concern images and do not flag records.
+  - Cited labels no image has and disagreeing artifact numbers go to `issues` as `REFERENCE_LABEL_MISMATCH` warnings, unresolved caption series as `MEDIA_MATCH_AMBIGUOUS` warnings, and `media_references` leaves `pending`.
+
+## Table attributes
+
+`collectTableAttributes(index, plan)` returns `table-attributes.v2`, the first source of attributes, deterministically and without model calls.
+
+- A record owns a table row segment from its original identifier cell to the right; this is the row-owner rule of content attachment. So a trench row's `도로유구 1기` cell stays the trench's attribute.
+- `logicalTableCells(tableKey, table)` places each stored cell in the logical grid. Processed grids leave out the cells a merge covers, so a stored column index can differ from the real column.
+- Column keys come from the rows above the first owned row, read top to bottom through the logical grid (`규모(cm) / 길이`); the input's header flags are not relied on. Rows of numbers only are not headers. A header part counts only when it names something (a Hangul letter or a two-letter word), so the numbers of a table fused alongside give no key; such cells are listed in `cellsWithoutHeader`. A header whose horizontal merge was lost in preprocessing (stored as one cell followed by empty cells over named sub-headers, `크기(cm)` over `길이/높이 · 입지름/너비 · …`) is carried right over those empty cells, so every column keeps `크기(cm) / …` and its unit.
+- A two-column table of text labels with no owned rows is a key–value table. When exactly one record is registered in it, every other row gives that record an attribute keyed by the row's label.
+- Each attribute keeps the cell text as `valueText` and `sourceText`, a unit written in parentheses in the key as `unitText` (`(cm)`), `extractionMethod: 'table_mapping'` and its table, row, logical column and page. A record's own registration cells and empty cells are not attributes; nothing is converted or normalized.
+
+`collectTextAttributes(plan, ledger)` returns `text-attributes.v2`, the second source, from each record's own excerpts, also without model calls.
+
+- In one sentence, consecutive measurements joined by commas or `와·과·및` form one value, kept as written and never split: `길이 4.9m, 너비 3.89m이상, 깊이 3.7m`, `높이 7.8cm 입지름(추정) 16.0cm 굽지름 6.6cm`, `238×28×32cm`. Dimension words may carry a qualifier (`잔존 너비`), an attached prefix (`굽지름`) or a parenthesized qualifier (`높이(잔존)`), and a value may carry a part written after it with further values of the same dimension (`굽높이 0.5cm(내) 0.5cm(외)`), so no value is dropped. Sentences end only at a period before whitespace or a line break, so `4.9m` is not split.
+- The key is the label written right before the run (`전체 규모는` → `전체 규모`, `조사면적은` → `조사면적`); a modifier ending in a particle (`수혈의 규모는`) is dropped. Otherwise the key is the single dimension word, or `크기` for an unlabeled run. `unitText` is set when every measurement in the run uses the same unit; nothing is converted.
+- A quantity right after an unnumbered (collective) record's own name (`수혈 5기`) becomes `수량`.
+- When the sentence also names another numbered record of the same kind, the value is not assigned and becomes an owner question (`ownerQuestions`) with those records.
+
+`applyLedgerAttributes(ledger, { table, text })` puts both into the ledger's `attributes`, table attributes first, as `attribute-N` with key, value, unit, source text, `extractionMethod` and where the value is (`tableId` and `cellKey`, or `sourceId` and `locator`, with the page). Values found in several places are all kept; nothing is merged. Each owner question becomes an `attribute` review item (`attribute_owner_ambiguous`) whose `candidateRecordIds` are the other records named and whose `detail` is `key: value`, and flags its record. Owned cells without a header are counted per table in `issues` as `UNMAPPED_TABLE_CELL` info. `attributes` leaves `pending`.
+
+## Record links
+
+Three steps collect, decide and record links between records, and decide them deterministically and without model calls; relation labels are short source words, not ontology predicates.
+
+- `collectRelationSentences(plan, ledger, tableAttributes?)` returns `relation-sentences.v1`. It keeps a sentence of a record's own excerpt when the sentence names another registered record and a clause carries a relation cue (overlap, cutting, adjacency, distance, connection, joining, enclosure) once record names are masked. Every name of a numbered record is used. An unnumbered name is used only when it has three or more letters, belongs to one record and is not the class name numbered records share (`트렌치`, `구상유구`). A name that is the record's ancestor or descendant is containment and left out. Layer order (`차례로`) is not a cue. Owned cells of a column whose header names a relation (`중복관계`, `선후관계`) are kept with the records they name.
+- `resolveRecordLinks(sentences)` returns `record-links.v1`. A link is made only when, inside one comma-separated clause, the predicate follows the name with its particle:
+  - `B와 중복`, `B와 인접`, `B와 접합` and `B와 연결될 가능성` give symmetric links.
+  - `B를 파괴` and `B에 의해 파괴` give directed links.
+  - Distance and direction (`B가 4.3m 떨어져`, `B와 8.5m 거리를 두고`, `동쪽으로 B가 위치`) give `위치` links.
+  - A relation column's cell naming one record gives a link labeled with the header.
+- Coordinated names (`72호 수혈 및 96호 수혈과 중복`) share the predicate. A symmetric pair is one link carrying the evidence from both records.
+- The rest go elsewhere:
+  - **Questions:** enclosure (`B로 감싸여진`, `B 내부`, `B를 사이에 두고`) gives `link_enclosure`; names without a predicate in a cue clause, or list items placed by direction, give `link_several_targets` or `link_unclear`.
+  - **Unresolved:** a name several records share, and an unregistered `N호 …` name.
+  - **Skipped and counted:** a place the record is in (`B 내`, `B 중앙부`, or `A는 B 북쪽 …`), names inside a number span (`2~4호 건물지`) and names in clauses without a cue.
+
+`applyLedgerLinks(ledger, recordLinks)` puts the decided links into `links` with `basis` (`rule` or `table_column`), `symmetric` and every stating sentence (`excerpt` evidence) or cell (`table_cell` evidence). A link equal to one kept beside a parent (same label and pair) adds its evidence there. Each question becomes a `link` review item with its reason, candidate records and sentence, and flags the speaking record. Unresolved targets go to `issues` as `UNRESOLVED_LINK_TARGET` warnings. `links` leaves `pending`.
+
+## Ledger validation
+
+`validateArchaeologyLedger(ledger, { document, plan, attachments? })` returns `ledger-validation.v1`. It checks the assembled ledger against the processed document it came from (implementation spec §22), deterministically and without model calls. Nothing in the ledger changes, and `reviewStatus` is never touched.
+
+- Each check reports how many items it looked at and how many failed, so `0/0` is told apart from a check that did not run. Failures become issues with a spec code, a severity, the record, attribute or link, and a locator.
+- **Structure:** unique IDs, records named by sources, attributes, media, links, review items and parents, ledger IDs, image IDs.
+- **Hierarchy:** no self-parent, no cycle, every parent with a basis and evidence.
+- **Source:**
+  - a registration source for each record
+  - excerpt sources that exist, belong to the record and carry its text
+  - source resources and character spans equal to the document text
+  - sourceRefs and table cell pointers
+  - a source for each attribute
+  - with `attachments`, a tracked attachment for each planned unit
+- **Fidelity:** attribute values and units written in their source, and link evidence stated in either record's text.
+- **Severities:**
+  - Every contract violation is an `error`.
+  - A name or identifier found in none of the record's registration excerpts and name anchors, captions of its registration tables, chapter titles or candidate evidence is a `warning` (`UNSUPPORTED_CONTENT_CLAIM`).
+
+`applyLedgerNameAnchors(ledger, plan, document)` adds where a record's name is written when that evidence misses it. Catalogs print `번호 / 이름(한자) / 영문명 / …` as separate blocks and headings print a scope's name a block above its text, so the registration evidence can miss the name line. The blocks within `NAME_ANCHOR_DISTANCE` (3) of a registration text block in the same chapter are searched for the name, spaces ignored; a short heading-like block wins, then the nearest, then the earlier. The name's exact original span becomes a `name_anchor` source. Names, excerpts and `content` are not changed; a name the document itself misreads (OCR) stays as written.
+
+- Excerpts that differ only in spacing, and a key with differing values, are `info` (`DIFFERING_SOURCE_VALUES`); both are kept as written.
+- Records of one kind sharing a name (`29호 수혈` and `29 수혈` when numbering restarts per period) are `info` (`AMBIGUOUS_RECORD_IDENTITY`); they stay separate records told apart by chapter.
+- `status` is `failed` with any error, `warnings` with warnings only, and `passed` otherwise.
+
+Ledger `issues` are structured the same way for every step: `{ code, severity, stage, recordId?, attributeId?, linkId?, imageId?, message, locator? }`, with `stage` naming `assembly`, `media`, `attributes`, `links` or `validation`. Assembly reports attachment problems (`UNRESOLVED_EVIDENCE_ASSIGNMENT`; a missing unit is an error). The `apply*` stages add their issues but never set `validationStatus`; the ledger stays `not_run` until `applyLedgerValidation(ledger, report)` appends the report's issues, flags `needsReview` on records a warning names and decides `validationStatus` once from every issue's severity.
+
+## Building the ledger in one call
+
+`buildArchaeologyLedger({ document, plan, attachments, meta, placeAliases?, parentJudgments? })` runs every ledger step in order, deterministically and without model calls:
+
+1. assembly from the saved thin attachment result
+2. the place alias table, applied only when `validatePlaceAliases` finds no errors
+3. relation signals, code parents and saved parent judgments
+4. figures and photos
+5. table and text attributes
+6. record links
+7. name anchors (`applyLedgerNameAnchors`)
+8. full validation, which decides `validationStatus`
+9. the spec §23 order
+
+Model steps (candidate discovery, thin attachment, parent judgments) run elsewhere; their saved results are the inputs, so the same inputs always give the same ledger. `meta` takes the ledger ID, extractor version and timestamps; `processedDocumentId` defaults to the document's `reportId`.
+
+It resolves to `{ result, validation, placeAliases, stages }`:
+
+- `placeAliases` says whether the table was applied: `none`, `applied` with rule IDs, hash and warnings, or `invalid` with errors.
+- `stages` holds what each step produced (signals, parents, caption index, media references, attribute sources, relation sentences, record links) for measurement and debugging.
+
+`sortArchaeologyLedger(ledger, document)` applies the order on its own without changing any ID or value:
+
+- records by parent depth, parent, `ordinal` and ID
+- excerpts by the document order of their first source
+- attributes by record and source position
+- sources by record, PDF page and locator
+- media references by record and ordinal
+- links by their records and label
+
+Display can still sort by `ordinal` for reading order.
+
 ## Body/table content attachment preview
 
 > The sections from here to the end document the plan preparation shared with the thin path and the earlier per-unit and per-segment paths (prompts up to `content-attachment.v74`, `segment-recipients.v26` and the evidence-window contracts). Those APIs remain exported so saved audits stay replayable.

@@ -3,6 +3,9 @@ export const taskKeys = {
     ['tasks', 'detail', taskId, 'content-attachment'] as const,
   candidates: (taskId: string) =>
     ['tasks', 'detail', taskId, 'candidates'] as const,
+  ledger: (taskId: string) => ['tasks', 'detail', taskId, 'ledger'] as const,
+  placeAliases: (taskId: string) =>
+    ['tasks', 'detail', taskId, 'place-aliases'] as const,
   reportProfile: (taskId: string) =>
     ['tasks', 'detail', taskId, 'report-profile'] as const,
   all: ['tasks'] as const,

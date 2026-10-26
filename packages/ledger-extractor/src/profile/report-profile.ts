@@ -259,15 +259,20 @@ const canonical = (value: unknown): unknown =>
         )
       : value;
 
-/** SHA-256 of a profile with sorted keys, so the same judgments hash the same regardless of key order. */
-export async function reportProfileSha256(
-  profile: ReportProfile,
-): Promise<string> {
+/** SHA-256 of a JSON value with sorted keys, so the same content hashes the same regardless of key order. */
+export async function canonicalSha256(value: unknown): Promise<string> {
   const hash = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(JSON.stringify(canonical(profile))),
+    new TextEncoder().encode(JSON.stringify(canonical(value))),
   );
   return Array.from(new Uint8Array(hash), (b) =>
     b.toString(16).padStart(2, '0'),
   ).join('');
+}
+
+/** SHA-256 of a profile with sorted keys, so the same judgments hash the same regardless of key order. */
+export async function reportProfileSha256(
+  profile: ReportProfile,
+): Promise<string> {
+  return canonicalSha256(profile);
 }

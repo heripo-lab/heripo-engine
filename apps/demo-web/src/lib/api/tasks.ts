@@ -1,6 +1,7 @@
 import type {
   DocumentResourceIndex,
   LedgerExtractionPreview,
+  PlaceAliasTable,
 } from '@heripo/ledger-extractor';
 import type {
   Chapter,
@@ -11,6 +12,7 @@ import type {
   TokenUsageReport,
 } from '@heripo/model';
 
+import type { ArchaeologyLedgerView } from '~/lib/ledger/archaeology-ledger';
 import type {
   CandidateDiscoveryRun,
   CandidateDiscoveryRunSettings,
@@ -367,6 +369,44 @@ export async function fetchThinContentAttachmentResult(
   return handleResponse(
     await fetch(`/api/tasks/${taskId}/content-attachment?thin=result`),
   );
+}
+
+/** The task's saved place alias table, if any. */
+export async function fetchPlaceAliases(
+  taskId: string,
+): Promise<{ table: PlaceAliasTable | null }> {
+  return handleResponse(await fetch(`/api/tasks/${taskId}/place-aliases`));
+}
+/** Save a place alias table; it is refused with its validation errors when invalid. */
+export async function savePlaceAliasesRequest(
+  taskId: string,
+  table: unknown,
+): Promise<{ table: PlaceAliasTable; warnings: string[] }> {
+  const response = await fetch(`/api/tasks/${taskId}/place-aliases`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(table),
+  });
+  const body = await response.json();
+  if (!response.ok)
+    throw new Error(
+      [body.error ?? 'Request failed', ...(body.issues ?? [])].join(': '),
+    );
+  return body;
+}
+export async function deletePlaceAliasesRequest(
+  taskId: string,
+): Promise<{ table: null }> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/place-aliases`, { method: 'DELETE' }),
+  );
+}
+
+/** The archaeology ledger assembled from the latest thin attachment run, or null before one exists. */
+export async function fetchArchaeologyLedger(taskId: string): Promise<{
+  ledger: ArchaeologyLedgerView | null;
+}> {
+  return handleResponse(await fetch(`/api/tasks/${taskId}/ledger`));
 }
 
 export async function fetchReportProfile(taskId: string): Promise<{

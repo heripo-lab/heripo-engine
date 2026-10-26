@@ -26,6 +26,7 @@ import {
   CardTitle,
 } from '~/components/ui/card';
 
+import { ArchaeologyLedgerView } from './archaeology-ledger-view';
 import { CandidateDiscoveryPanel } from './candidate-discovery-panel';
 import { ContentAttachmentPanel } from './content-attachment-panel';
 import { DocumentResourceInspector } from './document-resource-inspector';
@@ -92,7 +93,7 @@ export function LedgerValidationContent({
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">
-              원장 개발 · 자원 색인과 객체 후보 검토
+              고고학 데이터 원장
             </h1>
             <p className="text-muted-foreground mt-1">
               {task.originalFilename} · reportId:{' '}
@@ -102,8 +103,8 @@ export function LedgerValidationContent({
               </span>
             </p>
             <p className="text-muted-foreground mt-1 text-sm">
-              전처리 자원을 확인하고, 선택한 조사내용 범위에서 원장 객체 후보를
-              제안받아 검토합니다.
+              보고서에서 찾은 고고학 객체와 원문 근거, 사람이 결정할 항목을 보여
+              줍니다. 추출 단계와 전처리 문서는 아래에 접혀 있습니다.
             </p>
           </div>
           <Button variant="outline" onClick={handleExportJson}>
@@ -112,48 +113,61 @@ export function LedgerValidationContent({
           </Button>
         </div>
 
-        {/* Counts */}
-        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
-          <MetricCard
-            title="Chapters"
-            value={counts.chapters}
-            icon={<ListOrdered className="text-muted-foreground h-4 w-4" />}
-          />
-          <MetricCard
-            title="Text Blocks"
-            value={counts.textBlocks}
-            icon={<FileText className="text-muted-foreground h-4 w-4" />}
-          />
-          <MetricCard
-            title="Images"
-            value={counts.images}
-            icon={<ImageIcon className="text-muted-foreground h-4 w-4" />}
-          />
-          <MetricCard
-            title="Tables"
-            value={counts.tables}
-            icon={<TableIcon className="text-muted-foreground h-4 w-4" />}
-          />
-          <MetricCard
-            title="Table Cells"
-            value={counts.tableCells}
-            icon={<TableIcon className="text-muted-foreground h-4 w-4" />}
-          />
-          <MetricCard
-            title="Footnotes"
-            value={counts.footnotes}
-            icon={<StickyNote className="text-muted-foreground h-4 w-4" />}
-          />
-        </div>
+        <ArchaeologyLedgerView taskId={task.id} />
 
-        <CandidateDiscoveryPanel taskId={task.id} />
-        <ContentAttachmentPanel taskId={task.id} />
-        <DocumentResourceInspector taskId={task.id} />
-
-        <details className="space-y-6">
-          <summary className="cursor-pointer text-sm">
-            기존 요약 샘플과 미리보기 JSON
+        <details className="rounded-lg border p-4">
+          <summary className="cursor-pointer font-medium">
+            추출 실행 · 객체 후보 탐색, 보고서 유형, 원문 배정
           </summary>
+          <p className="text-muted-foreground mt-2 text-sm">
+            원장을 만드는 단계들입니다. 모델 호출이 필요한 단계는 비용이
+            발생하며, 결과는 위 원장에 반영됩니다.
+          </p>
+          <div className="mt-4 space-y-6">
+            <CandidateDiscoveryPanel taskId={task.id} />
+            <ContentAttachmentPanel taskId={task.id} />
+          </div>
+        </details>
+
+        <details className="space-y-6 rounded-lg border p-4">
+          <summary className="cursor-pointer font-medium">
+            전처리 문서 확인 · 자원 색인, 요약 샘플, 미리보기 JSON
+          </summary>
+          {/* Counts */}
+          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+            <MetricCard
+              title="Chapters"
+              value={counts.chapters}
+              icon={<ListOrdered className="text-muted-foreground h-4 w-4" />}
+            />
+            <MetricCard
+              title="Text Blocks"
+              value={counts.textBlocks}
+              icon={<FileText className="text-muted-foreground h-4 w-4" />}
+            />
+            <MetricCard
+              title="Images"
+              value={counts.images}
+              icon={<ImageIcon className="text-muted-foreground h-4 w-4" />}
+            />
+            <MetricCard
+              title="Tables"
+              value={counts.tables}
+              icon={<TableIcon className="text-muted-foreground h-4 w-4" />}
+            />
+            <MetricCard
+              title="Table Cells"
+              value={counts.tableCells}
+              icon={<TableIcon className="text-muted-foreground h-4 w-4" />}
+            />
+            <MetricCard
+              title="Footnotes"
+              value={counts.footnotes}
+              icon={<StickyNote className="text-muted-foreground h-4 w-4" />}
+            />
+          </div>
+
+          <DocumentResourceInspector taskId={task.id} />
           <div className="grid gap-6 lg:grid-cols-2">
             {/* Sample chapter titles */}
             <Card>

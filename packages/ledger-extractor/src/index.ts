@@ -31,3 +31,8 @@ export * from './resources';
 export * from './validators';
 export * from './content-attachment';
 export * from './profile';
+export * from './ledger';
+export * from './relations';
+export * from './media';
+export * from './attributes';
+export * from './links';

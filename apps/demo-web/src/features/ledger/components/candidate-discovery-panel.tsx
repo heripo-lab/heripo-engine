@@ -129,7 +129,7 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>조사내용 객체 후보 추출과 전체 중복 통합</CardTitle>
+        <CardTitle>1. 객체 후보 탐색과 보고서 유형</CardTitle>
         <CardDescription>
           선택한 장과 하위 장의 본문·표를 검사합니다. 원문 인용을 확인한 후보만
           목록에 담은 뒤 LLM이 전체 후보를 검토해 중복을 묶습니다. 모든 후보는
@@ -226,7 +226,14 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 {profile.route.error.message}
               </p>
             )}
-            {router && <ReportRouterSummary router={router} />}
+            {router && (
+              <details>
+                <summary className="cursor-pointer text-xs">
+                  세부 정보 · 최근 자동 분류 판정
+                </summary>
+                <ReportRouterSummary router={router} />
+              </details>
+            )}
           </div>
           <fieldset className="text-sm">
             <legend>후보 탐색 범위 (하위 장 포함, 여러 장 선택 가능)</legend>
@@ -444,16 +451,21 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
               {run.error && <p role="alert">{run.error}</p>}
             </div>
             {run.deduplication && (
-              <CandidateDeduplicationPanel
-                result={run.deduplication}
-                candidates={run.result.candidates}
-                index={indexData?.index}
-              />
+              <details>
+                <summary className="cursor-pointer text-sm">
+                  세부 정보 · 후보 중복 통합 결과
+                </summary>
+                <CandidateDeduplicationPanel
+                  result={run.deduplication}
+                  candidates={run.result.candidates}
+                  index={indexData?.index}
+                />
+              </details>
             )}
-            <details open={!run.deduplication}>
+            <details>
               <summary className="cursor-pointer text-sm">
-                통합 전 원래 후보 {run.result.candidates.length}개와 추출 검사
-                보기
+                세부 정보 · 통합 전 원래 후보 {run.result.candidates.length}개와
+                추출 검사 보기
               </summary>
               <div className="flex flex-wrap gap-3">
                 <input
