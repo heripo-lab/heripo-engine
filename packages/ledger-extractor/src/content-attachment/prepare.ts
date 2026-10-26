@@ -39,6 +39,7 @@ export async function prepareContentAttachment(
     maxUnitChars: number;
     registrationDecisions?: ContentRegistrationDecision[];
     thinPolicy?: ContentAttachmentPlan['thinPolicy'];
+    thinPolicyDecisions?: ContentAttachmentPlan['thinPolicyDecisions'];
     profile?: ContentAttachmentPlan['profile'];
   },
 ): Promise<ContentAttachmentPlan> {
@@ -225,6 +226,9 @@ export async function prepareContentAttachment(
     pages,
     units,
     ...(options.thinPolicy ? { thinPolicy: { ...options.thinPolicy } } : {}),
+    ...(options.thinPolicyDecisions
+      ? { thinPolicyDecisions: structuredClone(options.thinPolicyDecisions) }
+      : {}),
     ...(options.profile ? { profile: { ...options.profile } } : {}),
   };
 }

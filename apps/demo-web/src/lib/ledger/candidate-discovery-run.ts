@@ -120,6 +120,10 @@ export async function startCandidateDiscovery(
     : null;
   if (requested.useProfileScope && !stored)
     throw new Error('A valid confirmed report profile is required');
+  if (stored?.profile.scopeStatus === 'proposed')
+    throw new Error(
+      'The profile scope is a router proposal; choose the scope chapters before discovery',
+    );
   // the profile scope replaces any chapters sent with the request
   const settings: CandidateDiscoveryRunSettings = stored
     ? { ...requested, scopeChapterId: stored.profile.scopeChapterIds }

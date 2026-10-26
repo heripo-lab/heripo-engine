@@ -17,7 +17,10 @@ import type {
 } from '~/lib/ledger/candidate-discovery-run';
 import type { ContentAttachmentRun } from '~/lib/ledger/content-attachment-run';
 import type { ContentAttachmentThinState } from '~/lib/ledger/content-attachment-thin-run';
-import type { StoredReportProfile } from '~/lib/ledger/report-profile';
+import type {
+  ReportRouterRunSummary,
+  StoredReportProfile,
+} from '~/lib/ledger/report-profile';
 
 import type { ProcessingOptions } from '~/features/upload';
 
@@ -366,10 +369,28 @@ export async function fetchThinContentAttachmentResult(
   );
 }
 
-export async function fetchReportProfile(
-  taskId: string,
-): Promise<{ stored: StoredReportProfile | null }> {
+export async function fetchReportProfile(taskId: string): Promise<{
+  stored: StoredReportProfile | null;
+  router: ReportRouterRunSummary | null;
+}> {
   return handleResponse(await fetch(`/api/tasks/${taskId}/report-profile`));
+}
+
+/** Classify the report automatically with one router call. */
+export async function runReportRouterRequest(
+  taskId: string,
+  modelId: string,
+): Promise<{
+  stored: StoredReportProfile | null;
+  router: ReportRouterRunSummary;
+}> {
+  return handleResponse(
+    await fetch(`/api/tasks/${taskId}/report-profile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'route', modelId }),
+    }),
+  );
 }
 
 /** Save a confirmed profile; validation problems from the server are listed in the error message. */

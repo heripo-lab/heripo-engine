@@ -11,6 +11,7 @@ import { useState } from 'react';
 
 import type { ContentAttachmentThinState } from '~/lib/ledger/content-attachment-thin-run';
 
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 
@@ -34,6 +35,7 @@ export function ContentAttachmentThinSection({
   planSnapshotId,
   latestSnapshotId,
   thinPolicy,
+  thinPolicyDecisions,
   profile,
 }: {
   taskId: string;
@@ -41,6 +43,7 @@ export function ContentAttachmentThinSection({
   planSnapshotId: string | null;
   latestSnapshotId: string | null;
   thinPolicy?: ContentAttachmentPlan['thinPolicy'];
+  thinPolicyDecisions?: ContentAttachmentPlan['thinPolicyDecisions'];
   profile?: ContentAttachmentPlan['profile'];
 }) {
   const stale = !!planSnapshotId && planSnapshotId !== latestSnapshotId;
@@ -53,6 +56,32 @@ export function ContentAttachmentThinSection({
   const linked = thinPolicy?.continuity === 'linked';
   const votedAreas = thinPolicy?.areas === 'unanimous';
   const catalogFields = thinPolicy?.catalog === 'fields';
+  // how a branch was decided: caller override, profile trait or default, and whether it still needs a decision
+  const decisionNote = (
+    branch: NonNullable<
+      ContentAttachmentPlan['thinPolicyDecisions']
+    >[number]['branch'],
+  ) => {
+    const d = thinPolicyDecisions?.find((x) => x.branch === branch);
+    if (!d) return null;
+    const source = {
+      policy_override: '외부에서 분기 지정',
+      trait_override: `외부에서 특성 지정 ${d.trait}=${d.traitValue}`,
+      trait: `특성 ${d.trait}=${d.traitValue}`,
+      profile: '확인된 프로필',
+      default: d.trait ? `기본값(특성 ${d.trait}=${d.traitValue})` : '기본값',
+    }[d.source];
+    return (
+      <span className="text-muted-foreground ml-1 text-xs">
+        [{source}]
+        {d.needsDecision && (
+          <Badge variant="warning" className="ml-1">
+            결정 필요
+          </Badge>
+        )}
+      </span>
+    );
+  };
   const compileVersion = linked
     ? local
       ? CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION
@@ -101,30 +130,34 @@ export function ContentAttachmentThinSection({
       )}
       {planSnapshotId && (
         <div className="bg-muted/30 space-y-1 rounded p-2 text-sm">
-          <p>
+          <div>
             적용 정책 · 층위 후보{' '}
             {local
               ? '근처 묶음만 제공(local): 한 묶음에서만 근거가 나온 층위는 자기 묶음과 같은 장의 앞뒤 1묶음까지만, 같은 이름 층위는 가까운 근거로 좁힘'
               : '모두 제공(all)'}
-          </p>
-          <p>
+            {decisionNote('layers')}
+          </div>
+          <div>
             쪽 경계 맥락{' '}
             {linked
               ? '연결(linked): 앞 쪽 블록을 첫 블록과 같은 읽기 순서로 잇고, 후보의 근거 블록이면 표시'
               : '기존 방식'}
-          </p>
-          <p>
+            {decisionNote('continuity')}
+          </div>
+          <div>
             면적 제안{' '}
             {votedAreas
               ? '3표 확정(unanimous): 세 호출이 모두 고른 면적은 확정, 일부만 고른 면적은 다툼 대상으로 검수'
               : '항상 검수(기존 방식)'}
-          </p>
-          <p>
+            {decisionNote('areas')}
+          </div>
+          <div>
             도록 항목{' '}
             {catalogFields
               ? '필드 줄 포함(fields, 프롬프트 v14): 번호·이름·영문명·출수 정보·계측값 줄도 그 항목의 유물을 서술'
               : '별도 규칙 없음(프롬프트 v13)'}
-          </p>
+            {decisionNote('catalog')}
+          </div>
           <p className="font-mono text-xs break-all">
             컴파일 {compileVersion} ·{' '}
             {profile

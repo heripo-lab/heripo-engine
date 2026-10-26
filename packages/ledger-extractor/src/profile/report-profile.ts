@@ -32,6 +32,11 @@ export interface ReportProfile {
   traits: Record<string, ReportTraitValue>;
   /** Distinct, non-nested chapters that hold this investigation's objects. */
   scopeChapterIds: string[];
+  /**
+   * `proposed`: the scope is a router proposal that a person or caller has not decided; candidate discovery
+   * should not start from it. Absent: the scope was decided (manual profile or injected scope).
+   */
+  scopeStatus?: 'proposed';
   source: 'router' | 'manual';
   routerRunId?: string;
   confirmedAt: string;
@@ -94,6 +99,8 @@ export function validateReportProfile(
     roots.some((a) => roots.some((b) => b.key.startsWith(`${a.key}/children/`)))
   )
     issues.push('Scope chapters are nested');
+  if (profile.scopeStatus !== undefined && profile.scopeStatus !== 'proposed')
+    issues.push('Unknown scope status');
   if (!['router', 'manual'].includes(profile.source))
     issues.push('Unknown profile source');
   if (Number.isNaN(Date.parse(profile.confirmedAt)))
@@ -101,24 +108,144 @@ export function validateReportProfile(
   return issues;
 }
 
+/** Traits that currently drive a thin attachment branch; other traits do not change any rule yet. */
+export const CONTENT_ATTACHMENT_THIN_POLICY_TRAITS: readonly ReportTraitId[] = [
+  'local_stratigraphy',
+  'catalog_artifacts',
+];
+
+/** Thin attachment branches a caller can decide directly; `none` and `review` turn a branch off. */
+export interface ContentAttachmentThinPolicyOverrides {
+  layers?: 'all' | 'local';
+  continuity?: 'linked' | 'none';
+  areas?: 'unanimous' | 'review';
+  catalog?: 'fields' | 'none';
+}
+export type ContentAttachmentThinBranch =
+  keyof ContentAttachmentThinPolicyOverrides;
 /**
- * Map profile traits to thin attachment rules. Report-wide layers stay offered everywhere under `local`,
- * so an unclear stratigraphy judgment also uses `local`; only a confirmed `no`, or no profile, keeps `all`.
- * A confirmed profile also links page-boundary context and confirms unanimous areas, and a confirmed catalog
- * of artifacts adds the catalog-entry rule; without a profile the rules stay as before.
+ * How one branch of the thin policy was decided. `policy_override` and `trait_override` are caller decisions;
+ * `trait` follows a yes/no profile trait; `profile` applies to every confirmed profile; `default` is the rule
+ * used without a decisive trait. `needsDecision` marks a branch that a profile left to the default because its
+ * trait is unclear or missing, so an outside reviewer can decide it.
  */
+export interface ContentAttachmentThinPolicyDecision {
+  branch: ContentAttachmentThinBranch;
+  value: string;
+  source:
+    'policy_override' | 'trait_override' | 'trait' | 'profile' | 'default';
+  trait?: ReportTraitId;
+  traitValue?: ReportTraitValue;
+  needsDecision: boolean;
+}
+
+const BRANCH_VALUES: Record<ContentAttachmentThinBranch, string[]> = {
+  layers: ['all', 'local'],
+  continuity: ['linked', 'none'],
+  areas: ['unanimous', 'review'],
+  catalog: ['fields', 'none'],
+};
+
+/**
+ * Resolve the thin attachment rules in priority order: a branch decided directly (`policyOverrides`), then a
+ * trait decided by the caller (`traitOverrides`), then the profile's trait, then the default. Without a profile
+ * and without overrides the rules stay as before. Report-wide layers stay offered everywhere under `local`, so
+ * an unclear stratigraphy judgment uses `local`; page-boundary linking and unanimous areas follow any confirmed
+ * profile; the catalog-entry rule needs a confirmed catalog of artifacts. Every branch is recorded with its source.
+ */
+export function resolveContentAttachmentThinPolicy(
+  profile?: ReportProfile,
+  options: {
+    traitOverrides?: Partial<Record<ReportTraitId, ReportTraitValue>>;
+    policyOverrides?: ContentAttachmentThinPolicyOverrides;
+  } = {},
+): {
+  policy: ContentAttachmentThinPolicy;
+  decisions: ContentAttachmentThinPolicyDecision[];
+} {
+  const traitOverrides = options.traitOverrides ?? {};
+  const policyOverrides = options.policyOverrides ?? {};
+  for (const [id, value] of Object.entries(traitOverrides))
+    if (
+      !(REPORT_TRAIT_IDS as readonly string[]).includes(id) ||
+      !TRAIT_VALUES.has(value)
+    )
+      throw new Error(`Invalid trait override ${id}`);
+  for (const [branch, value] of Object.entries(policyOverrides))
+    if (!BRANCH_VALUES[branch as ContentAttachmentThinBranch]?.includes(value))
+      throw new Error(`Invalid policy override ${branch}`);
+  const traitOf = (id: ReportTraitId) => {
+    if (traitOverrides[id])
+      return { value: traitOverrides[id], overridden: true };
+    return { value: profile?.traits[id] ?? 'unclear', overridden: false };
+  };
+  const decide = (
+    branch: ContentAttachmentThinBranch,
+    fromProfile: () => Omit<ContentAttachmentThinPolicyDecision, 'branch'>,
+  ): ContentAttachmentThinPolicyDecision =>
+    policyOverrides[branch]
+      ? {
+          branch,
+          value: policyOverrides[branch],
+          source: 'policy_override',
+          needsDecision: false,
+        }
+      : { branch, ...fromProfile() };
+  const byTrait = (
+    id: ReportTraitId,
+    yes: string,
+    no: string,
+    unclear: string,
+  ): Omit<ContentAttachmentThinPolicyDecision, 'branch'> => {
+    const t = traitOf(id);
+    const decisive = t.value !== 'unclear';
+    if (!profile && !t.overridden)
+      return { value: no, source: 'default', needsDecision: false };
+    return {
+      value: t.value === 'yes' ? yes : t.value === 'no' ? no : unclear,
+      source: t.overridden ? 'trait_override' : decisive ? 'trait' : 'default',
+      trait: id,
+      traitValue: t.value,
+      needsDecision: !decisive,
+    };
+  };
+  const byProfile = (on: string, off: string) => ({
+    value: profile ? on : off,
+    source: profile ? ('profile' as const) : ('default' as const),
+    needsDecision: false,
+  });
+  const decisions = [
+    decide('layers', () =>
+      byTrait('local_stratigraphy', 'local', 'all', 'local'),
+    ),
+    decide('continuity', () => byProfile('linked', 'none')),
+    decide('areas', () => byProfile('unanimous', 'review')),
+    decide('catalog', () =>
+      byTrait('catalog_artifacts', 'fields', 'none', 'none'),
+    ),
+  ];
+  const value = (branch: ContentAttachmentThinBranch) =>
+    decisions.find((d) => d.branch === branch)!.value;
+  return {
+    policy: {
+      layers: value('layers') as ContentAttachmentThinPolicy['layers'],
+      ...(value('continuity') === 'linked'
+        ? { continuity: 'linked' as const }
+        : {}),
+      ...(value('areas') === 'unanimous'
+        ? { areas: 'unanimous' as const }
+        : {}),
+      ...(value('catalog') === 'fields' ? { catalog: 'fields' as const } : {}),
+    },
+    decisions,
+  };
+}
+
+/** The thin attachment rules of a profile without caller overrides (see `resolveContentAttachmentThinPolicy`). */
 export function contentAttachmentThinPolicyFromProfile(
   profile?: ReportProfile,
 ): ContentAttachmentThinPolicy {
-  if (!profile) return { layers: 'all' };
-  return {
-    layers: profile.traits.local_stratigraphy === 'no' ? 'all' : 'local',
-    continuity: 'linked',
-    areas: 'unanimous',
-    ...(profile.traits.catalog_artifacts === 'yes'
-      ? { catalog: 'fields' as const }
-      : {}),
-  };
+  return resolveContentAttachmentThinPolicy(profile).policy;
 }
 
 const canonical = (value: unknown): unknown =>

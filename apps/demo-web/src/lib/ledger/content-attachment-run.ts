@@ -12,10 +12,10 @@ import {
   assembleContentAttachment,
   attachContentUnit,
   buildDocumentResourceIndex,
-  contentAttachmentThinPolicyFromProfile,
   createContentAttachmentRequest,
   createContentAttachmentTableAnchorInput,
   prepareContentAttachment,
+  resolveContentAttachmentThinPolicy,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
 import {
@@ -59,6 +59,8 @@ export interface ContentAttachmentRun {
   settings: { modelId: string; maxRetries: number; maxUnitChars: number };
   /** Thin rules fixed into the plan from the confirmed profile; absent on plans prepared without one. */
   thinPolicy?: ContentAttachmentPlan['thinPolicy'];
+  /** How each branch of the thin rules was decided, with branches a profile left unclear marked. */
+  thinPolicyDecisions?: ContentAttachmentPlan['thinPolicyDecisions'];
   profile?: ContentAttachmentPlan['profile'];
   result: ContentAttachmentResult;
   modelResponse?:
@@ -156,6 +158,9 @@ export async function prepareContentAttachmentRun(
   )
     throw new Error('Candidate snapshot audit does not replay');
   const stored = await getReportProfile(taskId);
+  const resolved = stored
+    ? resolveContentAttachmentThinPolicy(stored.profile)
+    : null;
   const plan = await prepareContentAttachment(
     buildDocumentResourceIndex(document),
     snapshot.plan,
@@ -167,9 +172,10 @@ export async function prepareContentAttachmentRun(
       pdfPageNumbers: Object.keys(document.pageRangeMap).map(Number),
       maxUnitChars: options.maxUnitChars,
       registrationDecisions: options.registrationDecisions,
-      ...(stored
+      ...(stored && resolved
         ? {
-            thinPolicy: contentAttachmentThinPolicyFromProfile(stored.profile),
+            thinPolicy: resolved.policy,
+            thinPolicyDecisions: resolved.decisions,
             profile: {
               profileSha256: stored.profileSha256,
               source: stored.profile.source,
@@ -224,6 +230,9 @@ export async function prepareContentAttachmentRun(
       maxUnitChars: options.maxUnitChars,
     },
     ...(plan.thinPolicy ? { thinPolicy: plan.thinPolicy } : {}),
+    ...(plan.thinPolicyDecisions
+      ? { thinPolicyDecisions: plan.thinPolicyDecisions }
+      : {}),
     ...(plan.profile ? { profile: plan.profile } : {}),
     result: assembleContentAttachment(plan, []),
     error: null,

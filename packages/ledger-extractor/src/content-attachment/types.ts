@@ -8,6 +8,7 @@ import type {
 } from '../candidates/discovery-types';
 import type {
   ContentAttachmentThinPolicy,
+  ContentAttachmentThinPolicyDecision,
   ReportProfile,
 } from '../profile/report-profile';
 import type { DocumentResource } from '../resources/document-resource-index';
@@ -83,6 +84,8 @@ export interface ContentAttachmentPlan {
   units: AttachmentUnit[];
   /** Thin attachment rules from a confirmed report profile; without it every rule stays as before. */
   thinPolicy?: ContentAttachmentThinPolicy;
+  /** How each branch of `thinPolicy` was decided, with branches left to a default marked `needsDecision`. */
+  thinPolicyDecisions?: ContentAttachmentThinPolicyDecision[];
   /** The confirmed profile the rules came from: its hash and source only; the profile file is kept apart. */
   profile?: { profileSha256: string; source: ReportProfile['source'] };
 }

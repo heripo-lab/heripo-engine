@@ -341,20 +341,32 @@ describe('bounded content attachment', () => {
     const f = fixture();
     const thinPolicy = { layers: 'local' as const };
     const profile = { profileSha256: 'abc', source: 'manual' as const };
+    const thinPolicyDecisions = [
+      {
+        branch: 'layers' as const,
+        value: 'local',
+        source: 'trait' as const,
+        trait: 'local_stratigraphy' as const,
+        traitValue: 'yes' as const,
+        needsDecision: false,
+      },
+    ];
 
     const plan = await prepareContentAttachment(
       f.index,
       f.dp,
       f.discovery,
       f.groups,
-      { ...f.options, thinPolicy, profile },
+      { ...f.options, thinPolicy, thinPolicyDecisions, profile },
     );
 
     const base = await prepare();
     expect(base).not.toHaveProperty('thinPolicy');
+    expect(base).not.toHaveProperty('thinPolicyDecisions');
     expect(base).not.toHaveProperty('profile');
-    expect(plan).toEqual({ ...base, thinPolicy, profile });
+    expect(plan).toEqual({ ...base, thinPolicy, thinPolicyDecisions, profile });
     expect(plan.thinPolicy).not.toBe(thinPolicy);
+    expect(plan.thinPolicyDecisions).not.toBe(thinPolicyDecisions);
     expect(plan.profile).not.toBe(profile);
   });
 });

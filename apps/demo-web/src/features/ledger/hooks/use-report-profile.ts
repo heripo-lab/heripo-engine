@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { fetchReportProfile, saveReportProfileRequest } from '~/lib/api/tasks';
+import {
+  fetchReportProfile,
+  runReportRouterRequest,
+  saveReportProfileRequest,
+} from '~/lib/api/tasks';
 import { taskKeys } from '~/lib/query-keys';
 
 export function useReportProfile(taskId: string) {
@@ -12,7 +16,11 @@ export function useReportProfile(taskId: string) {
   });
   const save = useMutation({
     mutationFn: (profile: unknown) => saveReportProfileRequest(taskId, profile),
+    onSuccess: () => client.invalidateQueries({ queryKey }),
+  });
+  const route = useMutation({
+    mutationFn: (modelId: string) => runReportRouterRequest(taskId, modelId),
     onSuccess: (data) => client.setQueryData(queryKey, data),
   });
-  return { query, save };
+  return { query, save, route };
 }

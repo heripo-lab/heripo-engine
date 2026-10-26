@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import {
   Card,
@@ -10,11 +11,13 @@ import {
   CardHeader,
   CardTitle,
 } from '~/components/ui/card';
+import { Input } from '~/components/ui/input';
 
 import { useCandidateDiscovery } from '../hooks/use-candidate-discovery';
 import { useDocumentResourceIndex } from '../hooks/use-document-resource-index';
 import { useReportProfile } from '../hooks/use-report-profile';
 import { CandidateDeduplicationPanel } from './candidate-deduplication-panel';
+import { ReportRouterSummary } from './report-router-summary';
 
 const KIND_LABELS: Record<string, string> = {
   site: '유적',
@@ -77,9 +80,14 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   };
   const profile = useReportProfile(taskId);
   const stored = profile.query.data?.stored ?? null;
+  const router = profile.query.data?.router ?? null;
+  const [routerModel, setRouterModel] = useState('anthropic/claude-haiku-5-5');
   const profileScope = stored?.profile.scopeChapterIds ?? [];
+  // a router-proposed scope is never used as the profile scope; filling it in counts as a person's choice
+  const scopeProposed = stored?.profile.scopeStatus === 'proposed';
   // the profile scope is used only while the selection matches it exactly
   const usingProfileScope =
+    !scopeProposed &&
     profileScope.length > 0 &&
     profileScope.length === scopeIds.length &&
     profileScope.every((id) => scopeIds.includes(id));
@@ -140,15 +148,20 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                   {stored.profile.source === 'router' ? '라우터' : '수동'} ·
                   확인 {stored.profile.confirmedAt.slice(0, 10)}
                 </p>
-                <p className="text-muted-foreground text-xs">
-                  범위{' '}
+                <div className="text-muted-foreground text-xs">
+                  {scopeProposed ? (
+                    <Badge variant="warning" className="mr-1">
+                      범위 결정 필요
+                    </Badge>
+                  ) : null}
+                  {scopeProposed ? '라우터 제안 범위' : '범위'}{' '}
                   {profileScope.map((id) => `${id} ${titleOf(id)}`).join(' · ')}{' '}
                   · 특성 yes{' '}
                   {Object.entries(stored.profile.traits)
                     .filter(([, v]) => v === 'yes')
                     .map(([k]) => k)
                     .join(', ')}
-                </p>
+                </div>
                 <p className="font-mono text-xs break-all">
                   {stored.profileSha256}
                 </p>
@@ -158,9 +171,11 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                   disabled={running || usingProfileScope}
                   onClick={() => setScope(profileScope)}
                 >
-                  {usingProfileScope
-                    ? '프로필 범위 사용 중'
-                    : '프로필 범위로 채우기'}
+                  {scopeProposed
+                    ? '제안 범위로 채우기(직접 선택으로 실행)'
+                    : usingProfileScope
+                      ? '프로필 범위 사용 중'
+                      : '프로필 범위로 채우기'}
                 </Button>
               </>
             ) : (
@@ -181,6 +196,37 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 {profile.save.error.message}
               </p>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                aria-label="자동 분류 모델"
+                className="h-8 w-64 text-xs"
+                value={routerModel}
+                onChange={(e) => setRouterModel(e.target.value)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={running || profile.route.isPending}
+                onClick={() => {
+                  if (
+                    confirm(
+                      `${routerModel}로 보고서 자동 분류를 1회 호출합니다. 결과 프로필이 검증을 통과하면 현재 프로필을 대신합니다.`,
+                    )
+                  )
+                    profile.route.mutate(routerModel);
+                }}
+              >
+                {profile.route.isPending
+                  ? '자동 분류 중…'
+                  : '자동 분류 실행 (모델 1회 호출)'}
+              </Button>
+            </div>
+            {profile.route.error && (
+              <p className="text-destructive text-xs">
+                {profile.route.error.message}
+              </p>
+            )}
+            {router && <ReportRouterSummary router={router} />}
           </div>
           <fieldset className="text-sm">
             <legend>후보 탐색 범위 (하위 장 포함, 여러 장 선택 가능)</legend>

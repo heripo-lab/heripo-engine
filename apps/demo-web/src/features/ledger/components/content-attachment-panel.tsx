@@ -75,6 +75,7 @@ export function ContentAttachmentPanel({ taskId }: { taskId: string }) {
           planSnapshotId={run?.candidateSnapshotId ?? null}
           latestSnapshotId={candidate?.runId ?? null}
           thinPolicy={run?.thinPolicy}
+          thinPolicyDecisions={run?.thinPolicyDecisions}
           profile={run?.profile}
         />
         {(query.error || prepare.error || execute.error || audit.error) && (

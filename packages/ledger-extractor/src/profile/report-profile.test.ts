@@ -10,6 +10,7 @@ import {
   REPORT_TRAIT_IDS,
   contentAttachmentThinPolicyFromProfile,
   reportProfileSha256,
+  resolveContentAttachmentThinPolicy,
   validateReportProfile,
 } from './report-profile';
 
@@ -53,6 +54,13 @@ describe('report profile', () => {
     const before = structuredClone(input);
 
     expect(validateReportProfile(index, 'hash', input)).toEqual([]);
+    expect(
+      validateReportProfile(
+        index,
+        'hash',
+        profile({ scopeStatus: 'proposed' }),
+      ),
+    ).toEqual([]);
     expect(input).toEqual(before);
     expect(REPORT_TRAIT_IDS).toContain('grid_survey');
   });
@@ -68,6 +76,7 @@ describe('report profile', () => {
           trench_survey: 'maybe' as ReportProfile['traits'][string],
         },
         scopeChapterIds: ['results', 'trenches', 'results', 'missing'],
+        scopeStatus: 'maybe' as ReportProfile['scopeStatus'],
         source: 'guess' as ReportProfile['source'],
         confirmedAt: 'later',
       }),
@@ -81,6 +90,7 @@ describe('report profile', () => {
       'Scope chapter missing not found',
       'Scope chapters are repeated',
       'Scope chapters are nested',
+      'Unknown scope status',
       'Unknown profile source',
       'Profile confirmation time is invalid',
     ]);
@@ -118,6 +128,129 @@ describe('report profile', () => {
       areas: 'unanimous',
       catalog: 'fields',
     });
+  });
+
+  test('records how each branch was decided and marks branches a profile left unclear', () => {
+    expect(resolveContentAttachmentThinPolicy().decisions).toEqual([
+      {
+        branch: 'layers',
+        value: 'all',
+        source: 'default',
+        needsDecision: false,
+      },
+      {
+        branch: 'continuity',
+        value: 'none',
+        source: 'default',
+        needsDecision: false,
+      },
+      {
+        branch: 'areas',
+        value: 'review',
+        source: 'default',
+        needsDecision: false,
+      },
+      {
+        branch: 'catalog',
+        value: 'none',
+        source: 'default',
+        needsDecision: false,
+      },
+    ]);
+
+    const resolved = resolveContentAttachmentThinPolicy(
+      profile({ traits: { local_stratigraphy: 'no' } }),
+    );
+
+    expect(resolved.decisions).toEqual([
+      {
+        branch: 'layers',
+        value: 'all',
+        source: 'trait',
+        trait: 'local_stratigraphy',
+        traitValue: 'no',
+        needsDecision: false,
+      },
+      {
+        branch: 'continuity',
+        value: 'linked',
+        source: 'profile',
+        needsDecision: false,
+      },
+      {
+        branch: 'areas',
+        value: 'unanimous',
+        source: 'profile',
+        needsDecision: false,
+      },
+      {
+        branch: 'catalog',
+        value: 'none',
+        source: 'default',
+        trait: 'catalog_artifacts',
+        traitValue: 'unclear',
+        needsDecision: true,
+      },
+    ]);
+  });
+
+  test('lets caller trait and branch decisions override the profile, in that priority', () => {
+    const resolved = resolveContentAttachmentThinPolicy(
+      profile({
+        traits: { local_stratigraphy: 'unclear', catalog_artifacts: 'no' },
+      }),
+      {
+        traitOverrides: { local_stratigraphy: 'no', catalog_artifacts: 'yes' },
+        policyOverrides: {
+          catalog: 'none',
+          continuity: 'none',
+          areas: 'review',
+        },
+      },
+    );
+    const withoutProfile = resolveContentAttachmentThinPolicy(undefined, {
+      traitOverrides: { catalog_artifacts: 'yes' },
+    });
+
+    expect(resolved.policy).toEqual({ layers: 'all' });
+    expect(
+      resolved.decisions.map((d) => [
+        d.branch,
+        d.value,
+        d.source,
+        d.needsDecision,
+      ]),
+    ).toEqual([
+      ['layers', 'all', 'trait_override', false],
+      ['continuity', 'none', 'policy_override', false],
+      ['areas', 'review', 'policy_override', false],
+      ['catalog', 'none', 'policy_override', false],
+    ]);
+    expect(withoutProfile.policy).toEqual({ layers: 'all', catalog: 'fields' });
+    expect(withoutProfile.decisions[3]).toMatchObject({
+      source: 'trait_override',
+      traitValue: 'yes',
+    });
+    expect(() =>
+      resolveContentAttachmentThinPolicy(undefined, {
+        traitOverrides: { 'x-unknown': 'yes' } as never,
+      }),
+    ).toThrow('Invalid trait override x-unknown');
+    expect(() =>
+      resolveContentAttachmentThinPolicy(undefined, {
+        traitOverrides: { catalog_artifacts: 'maybe' as never },
+      }),
+    ).toThrow('Invalid trait override catalog_artifacts');
+    expect(() =>
+      resolveContentAttachmentThinPolicy(undefined, {
+        policyOverrides: { layers: 'some' as never },
+      }),
+    ).toThrow('Invalid policy override layers');
+    expect(() =>
+      resolveContentAttachmentThinPolicy(undefined, {
+        policyOverrides: { other: 'x' } as never,
+      }),
+    ).toThrow('Invalid policy override other');
   });
 
   test('hashes the same judgments the same regardless of key order', async () => {
