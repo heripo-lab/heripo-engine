@@ -1218,6 +1218,25 @@ export function ArchaeologyLedgerView({ taskId }: { taskId: string }) {
                 {new Set(ledger.attributes.map((a) => a.recordId)).size}개 객체
               </Badge>
             )}
+            {view.discoveryScope && (
+              <Badge
+                variant="outline"
+                title={view.discoveryScope
+                  .map(
+                    (c) =>
+                      `${c.title}${c.added ? ' (조사 장 신호로 추가)' : ''}`,
+                  )
+                  .join(' · ')}
+              >
+                탐색 범위 {view.discoveryScope.length}장
+                {view.discoveryScope.some((c) => c.added)
+                  ? ` · 신호로 추가 ${view.discoveryScope
+                      .filter((c) => c.added)
+                      .map((c) => c.title)
+                      .join(', ')}`
+                  : ''}
+              </Badge>
+            )}
             {view.placeAliases.status === 'applied' && (
               <Badge variant="outline">
                 사람 지정 대응 규칙 {view.placeAliases.ruleIds.length}개

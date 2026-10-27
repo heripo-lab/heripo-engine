@@ -4,7 +4,6 @@ import type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryResponse,
   CandidateDiscoveryResult,
-  CandidateEvidence,
   LedgerObjectCandidate,
 } from './discovery-types';
 
@@ -12,8 +11,20 @@ import {
   CANDIDATE_DISCOVERY_PROMPT_VERSION,
   createCandidateDiscoveryRequest,
   getCandidateSources,
+  isSectionHeading,
 } from './discovery-request';
+import {
+  columnBlocks,
+  unansweredItemTableBlocks,
+  unansweredItemTableRows,
+} from './discovery-rows';
 import { candidateDiscoveryResponseSchema } from './discovery-types';
+import {
+  anchorKey,
+  candidateCheckLevel,
+  checkCandidate,
+  planCandidateDiscoveryFollowUp,
+} from './discovery-validation';
 
 export async function candidateId(value: string): Promise<string> {
   const hash = await crypto.subtle.digest(
@@ -21,6 +32,55 @@ export async function candidateId(value: string): Promise<string> {
     new TextEncoder().encode(value),
   );
   return `candidate-${Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * The follow-up candidates a v11 assembly keeps. A candidate that repeats the kind and anchor of a kept valid
+ * candidate of the first response is dropped rather than reported as a duplicate. In the section of a reconsidered
+ * heading, only a candidate anchored at the heading itself is kept, so a reconsideration adds the heading's object,
+ * not every object its description mentions.
+ */
+function followUpCandidates(
+  unit: CandidateDiscoveryPlan['units'][number],
+  first: CandidateDiscoveryResponse,
+  kept: CandidateDiscoveryResponse['candidates'],
+  reconsidered: number[],
+  candidates: CandidateDiscoveryResponse['candidates'],
+  level: ReturnType<typeof candidateCheckLevel>,
+) {
+  // every kept candidate is valid: invalid ones were sent back as corrections
+  const anchors = new Set(
+    kept.map((proposal) =>
+      anchorKey(
+        proposal.recordKind,
+        checkCandidate(unit, proposal, first.tableRole, level).evidence[0],
+      ),
+    ),
+  );
+  const sources = getCandidateSources(unit);
+  const sectionBody = new Set<string>();
+  for (const index of reconsidered) {
+    const at = sources.findIndex(
+      (s) => s.sourceId === first.exclusions[index].sourceId,
+    );
+    for (
+      let next = at + 1;
+      next < sources.length &&
+      !isSectionHeading(sources[next].resource.data.text);
+      next++
+    )
+      sectionBody.add(sources[next].sourceId);
+  }
+  return candidates.filter((proposal) => {
+    if (sectionBody.has(proposal.evidence[0].sourceId)) return false;
+    const { evidence, invalid } = checkCandidate(
+      unit,
+      proposal,
+      first.tableRole,
+      level,
+    );
+    return invalid || !anchors.has(anchorKey(proposal.recordKind, evidence[0]));
+  });
 }
 
 /** Validate saved responses against exact input locations; invalid proposals stay issues. */
@@ -46,7 +106,15 @@ export async function assembleCandidateDiscovery(
             ? 'candidate-discovery.v6'
             : audit.promptVersion === 'candidate-discovery.v7'
               ? 'candidate-discovery.v7'
-              : CANDIDATE_DISCOVERY_PROMPT_VERSION,
+              : audit.promptVersion === 'candidate-discovery.v8'
+                ? 'candidate-discovery.v8'
+                : audit.promptVersion === 'candidate-discovery.v9'
+                  ? 'candidate-discovery.v9'
+                  : audit.promptVersion === 'candidate-discovery.v10'
+                    ? 'candidate-discovery.v10'
+                    : audit.promptVersion === 'candidate-discovery.v11'
+                      ? 'candidate-discovery.v11'
+                      : CANDIDATE_DISCOVERY_PROMPT_VERSION,
     );
     if (
       audit.promptVersion !== expected.promptVersion ||
@@ -62,7 +130,10 @@ export async function assembleCandidateDiscovery(
       continue;
     }
     const parsed = candidateDiscoveryResponseSchema.safeParse(audit.response);
-    if (!parsed.success) {
+    const followUp = audit.followUp
+      ? candidateDiscoveryResponseSchema.safeParse(audit.followUp.response)
+      : null;
+    if (!parsed.success || followUp?.success === false) {
       issues.push({
         unitId: unit.unitId,
         candidateIndex: null,
@@ -70,10 +141,68 @@ export async function assembleCandidateDiscovery(
       });
       continue;
     }
+    const level = candidateCheckLevel(audit.promptVersion);
+    if (audit.followUp) {
+      const plan = planCandidateDiscoveryFollowUp(
+        unit,
+        parsed.data,
+        audit.promptVersion,
+      );
+      if (
+        !plan ||
+        JSON.stringify(plan.rowIndexes) !==
+          JSON.stringify(audit.followUp.rowIndexes) ||
+        JSON.stringify(plan.rowBlocks) !==
+          JSON.stringify(audit.followUp.rowBlocks ?? []) ||
+        JSON.stringify(plan.corrections) !==
+          JSON.stringify(audit.followUp.corrections ?? []) ||
+        JSON.stringify(plan.reconsiderations) !==
+          JSON.stringify(audit.followUp.reconsiderations ?? []) ||
+        plan.userPrompt !== audit.followUp.userPrompt
+      ) {
+        issues.push({
+          unitId: unit.unitId,
+          candidateIndex: null,
+          reason:
+            'Saved follow-up does not match the unanswered rows, corrections and reconsidered headings of this unit',
+        });
+        continue;
+      }
+    }
+    // corrected candidates and reconsidered exclusions of the first response are replaced by the follow-up's answer
+    const corrected = new Set(
+      (audit.followUp?.corrections ?? []).map((c) => c.candidateIndex),
+    );
+    const reconsidered = new Set(
+      (audit.followUp?.reconsiderations ?? []).map((r) => r.exclusionIndex),
+    );
+    const kept = parsed.data.candidates.filter((_, i) => !corrected.has(i));
+    const response: CandidateDiscoveryResponse = followUp?.data
+      ? {
+          ...parsed.data,
+          candidates: [
+            ...kept,
+            ...(level.v11
+              ? followUpCandidates(
+                  unit,
+                  parsed.data,
+                  kept,
+                  [...reconsidered],
+                  followUp.data.candidates,
+                  level,
+                )
+              : followUp.data.candidates),
+          ],
+          exclusions: [
+            ...parsed.data.exclusions.filter((_, i) => !reconsidered.has(i)),
+            ...followUp.data.exclusions,
+          ],
+        }
+      : parsed.data;
     completedUnitIds.push(unit.unitId);
     inspectedResourceCount += unit.resources.length;
     const sources = getCandidateSources(unit);
-    for (const exclusion of parsed.data.exclusions) {
+    for (const exclusion of response.exclusions) {
       const selected = sources.find(
         (source) => source.sourceId === exclusion.sourceId,
       );
@@ -82,6 +211,7 @@ export async function assembleCandidateDiscovery(
           unitId: unit.unitId,
           sourceId: exclusion.sourceId,
           resourceKey: selected.resource.key,
+          ...(exclusion.category && { category: exclusion.category }),
           reason: exclusion.reason,
         });
       else
@@ -91,84 +221,13 @@ export async function assembleCandidateDiscovery(
           reason: 'Exclusion references a resource outside the unit',
         });
     }
-    for (const [candidateIndex, proposal] of parsed.data.candidates.entries()) {
-      const evidence: CandidateEvidence[] = [];
-      for (const pointer of proposal.evidence) {
-        const resource = sources.find(
-          (source) => source.sourceId === pointer.sourceId,
-        )?.resource;
-        const start = resource?.data.text.indexOf(pointer.quote) ?? -1;
-        if (!resource || start < 0) break;
-        evidence.push({
-          sourceId: pointer.sourceId,
-          resourceKey: resource.key,
-          resourceId: resource.resourceId,
-          sourceRefs: resource.sourceRefs,
-          pdfPageNo: resource.pdfPageNo,
-          logicalPageRange: resource.logicalPageRange,
-          quote: pointer.quote,
-          charStart: start,
-          charEnd: start + pointer.quote.length,
-        });
-      }
-      const sourceText = [
-        ...unit.resources.map((r) => r.data.text),
-        ...unit.context.map((r) => r.text),
-        ...unit.chapterPath.map((c) => c.originTitle),
-        unit.table?.caption ?? '',
-      ];
-      const identifierCell = sources.find(
-        (source) => source.sourceId === proposal.identifierSourceId,
+    for (const [candidateIndex, proposal] of response.candidates.entries()) {
+      const { evidence, invalid } = checkCandidate(
+        unit,
+        proposal,
+        response.tableRole,
+        level,
       );
-      const firstCell = sources.find(
-        (source) => source.sourceId === proposal.evidence[0].sourceId,
-      )?.resource;
-      const strictTableIdentifier =
-        (audit.promptVersion === 'candidate-discovery.v6' ||
-          audit.promptVersion === 'candidate-discovery.v7' ||
-          audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION) &&
-        unit.table !== null &&
-        proposal.eligibilityBasis === 'table_item';
-      let invalid = '';
-      if (evidence.length !== proposal.evidence.length)
-        invalid = 'Evidence does not match an exact input quote in this unit';
-      else if (!sourceText.some((t) => t.includes(proposal.sourceName)))
-        invalid = 'Source name is not verbatim in the supplied input';
-      else if (
-        proposal.sourceIdentifier !== null &&
-        !evidence.some((e) => e.quote.includes(proposal.sourceIdentifier!))
-      )
-        invalid = 'Source identifier is not present in the quoted evidence';
-      else if (
-        strictTableIdentifier &&
-        (proposal.sourceIdentifier !== null ||
-          (firstCell?.kind === 'tableCell' &&
-            /^\d+(?:호)?$/u.test(firstCell.data.text))) &&
-        (!identifierCell ||
-          identifierCell.resource.kind !== 'tableCell' ||
-          identifierCell.resource.data.isHeader ||
-          proposal.sourceIdentifier !== identifierCell.resource.data.text ||
-          proposal.evidence[0].sourceId !== proposal.identifierSourceId ||
-          proposal.evidence[0].quote !== identifierCell.resource.data.text)
-      )
-        invalid =
-          'Table identifier must equal the selected original number cell and first evidence';
-      else if (
-        ['feature', 'artifact'].includes(proposal.recordKind) &&
-        proposal.eligibilityBasis === 'explicit_context_unit'
-      )
-        invalid =
-          'Feature/artifact candidates require independent body or table evidence';
-      else if (
-        proposal.eligibilityBasis === 'table_item' &&
-        unit.table === null
-      )
-        invalid = 'Table candidate has no original table input';
-      else if (
-        proposal.eligibilityBasis === 'independent_body' &&
-        unit.table !== null
-      )
-        invalid = 'Body candidate has no body input';
       if (invalid) {
         issues.push({ unitId: unit.unitId, candidateIndex, reason: invalid });
         continue;
@@ -177,10 +236,7 @@ export async function assembleCandidateDiscovery(
       const id = await candidateId(
         JSON.stringify([
           plan.inputSha256,
-          proposal.recordKind,
-          anchor.resourceKey,
-          anchor.charStart,
-          anchor.charEnd,
+          ...JSON.parse(anchorKey(proposal.recordKind, anchor)),
         ]),
       );
       const existing = candidates.get(id);
@@ -205,15 +261,28 @@ export async function assembleCandidateDiscovery(
         evidence,
       });
     }
-    if (
+    if (level.v11 && columnBlocks(unit)) {
+      const missing = unansweredItemTableBlocks(unit, response);
+      if (missing.length)
+        issues.push({
+          unitId: unit.unitId,
+          candidateIndex: null,
+          reason: `Table row blocks neither proposed nor excluded with a row-level category: ${missing.map((b) => `${b.rowIndex}:${b.block}`).join(', ')}`,
+        });
+    } else if (level.v9) {
+      const missing = unansweredItemTableRows(unit, response);
+      if (missing.length)
+        issues.push({
+          unitId: unit.unitId,
+          candidateIndex: null,
+          reason: `Table rows neither proposed nor excluded with a row-level category: ${missing.join(', ')}`,
+        });
+    } else if (
       audit.promptVersion === 'candidate-discovery.v7' ||
-      audit.promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION
+      audit.promptVersion === 'candidate-discovery.v8'
     ) {
-      const missing = unhandledTableRows(
-        sources,
-        parsed.data,
-        unit.table?.headerRows.length ?? 0,
-      );
+      // without tableRole and categories, any table item makes an item table and any exclusion answers its row
+      const missing = unansweredItemTableRows(unit, parsed.data);
       if (missing.length)
         issues.push({
           unitId: unit.unitId,
@@ -235,49 +304,4 @@ export async function assembleCandidateDiscovery(
     totalUnits: plan.units.length,
     inspectedResourceCount,
   };
-}
-
-/**
- * Data rows of a table unit that no proposal or exclusion references, once any row of the unit is proposed as a
- * table item. Rows with a header cell or only empty cells are not data rows, nor are the leading grid rows the
- * request presents to the model as headerRows, whose header marks may be missing after OCR. A table without
- * item proposals (a log or a summary) may skip non-object rows silently, as the prompt allows.
- */
-function unhandledTableRows(
-  sources: ReturnType<typeof getCandidateSources>,
-  response: CandidateDiscoveryResponse,
-  headerRowCount: number,
-): number[] {
-  if (!response.candidates.some((c) => c.eligibilityBasis === 'table_item'))
-    return [];
-  const rows = new Map<number, { header: boolean; text: boolean }>();
-  const rowOf = new Map<string, number>();
-  for (const { sourceId, resource } of sources) {
-    if (resource.kind !== 'tableCell') continue;
-    rowOf.set(sourceId, resource.rowIndex);
-    const row = rows.get(resource.rowIndex) ?? { header: false, text: false };
-    row.header ||= resource.data.isHeader;
-    row.text ||= resource.data.text.trim() !== '';
-    rows.set(resource.rowIndex, row);
-  }
-  const handled = new Set(
-    [
-      ...response.candidates.flatMap((c) => [
-        c.identifierSourceId,
-        ...c.evidence.map((e) => e.sourceId),
-      ]),
-      ...response.exclusions.map((e) => e.sourceId),
-    ].flatMap((id) =>
-      typeof id === 'string' && rowOf.has(id) ? [rowOf.get(id)!] : [],
-    ),
-  );
-  return [...rows]
-    .filter(
-      ([index, row]) =>
-        index >= headerRowCount &&
-        row.text &&
-        !row.header &&
-        !handled.has(index),
-    )
-    .map(([index]) => index);
 }

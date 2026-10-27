@@ -20,8 +20,20 @@ export const basisSchema = z.enum([
   'table_item',
   'explicit_context_unit',
 ]);
+/** Why a selectable source holds no candidate; there is deliberately no category for an object of this investigation. */
+export const exclusionCategorySchema = z.enum([
+  'previous_or_external',
+  'passing_mention',
+  'summary_row',
+  'header_row',
+  'non_item_table',
+]);
+/** Whether a table unit lists individual objects; a body unit is none. */
+export const tableRoleSchema = z.enum(['item_table', 'non_item_table', 'none']);
+/** Fields added in prompt v9 are optional here so earlier saved responses still parse. */
 export function responseSchema(sourceId: z.ZodType<string>) {
   return z.object({
+    tableRole: tableRoleSchema.optional(),
     candidates: z.array(
       z.object({
         recordKind: kindSchema,
@@ -39,6 +51,7 @@ export function responseSchema(sourceId: z.ZodType<string>) {
             'Exact object identifier copied from original evidence, separately from sourceName. Do not add missing suffixes or use a section ordinal.',
           ),
         identifierSourceId: sourceId.nullable().optional(),
+        nameSourceId: sourceId.nullable().optional(),
         eligibilityBasis: basisSchema,
         reason: z.string().min(1),
         evidence: z
@@ -56,7 +69,13 @@ export function responseSchema(sourceId: z.ZodType<string>) {
           .min(1),
       }),
     ),
-    exclusions: z.array(z.object({ sourceId, reason: z.string() })),
+    exclusions: z.array(
+      z.object({
+        sourceId,
+        category: exclusionCategorySchema.optional(),
+        reason: z.string(),
+      }),
+    ),
   });
 }
 export const candidateDiscoveryResponseSchema = responseSchema(z.string());
@@ -114,18 +133,62 @@ export interface LedgerObjectCandidate {
   unitIds: string[];
   evidence: CandidateEvidence[];
 }
+/** An invalid candidate of a first response sent back for correction (prompt v10 on). */
+export interface CandidateDiscoveryCorrection {
+  candidateIndex: number;
+  issue: string;
+  fix: string;
+}
+/** An exclusion of a section heading sent back for reconsideration (prompt v11 on). */
+export interface CandidateDiscoveryReconsideration {
+  exclusionIndex: number;
+  issue: string;
+  fix: string;
+}
+/** A side-by-side table's repeated column groups, found from the first header row (prompt v11 on). */
+export interface CandidateDiscoveryColumnBlocks {
+  count: number;
+  columnsPerBlock: number;
+}
+/** One column block of one data row of a side-by-side table. */
+export interface CandidateDiscoveryRowBlock {
+  rowIndex: number;
+  block: number;
+}
+/**
+ * A second call asking the item-table rows the first response left unanswered (prompt v9 on), from v10 correcting
+ * its invalid candidates, and from v11 reconsidering its excluded headings and asking side-by-side tables by block.
+ */
+export interface CandidateDiscoveryFollowUp {
+  rowIndexes: number[];
+  /** Present when a side-by-side table left row blocks unanswered (prompt v11 on). */
+  rowBlocks?: CandidateDiscoveryRowBlock[];
+  /** Present when the follow-up corrects candidates; their corrected versions replace them. */
+  corrections?: CandidateDiscoveryCorrection[];
+  /** Present when excluded headings are reconsidered; the follow-up's answer replaces those exclusions. */
+  reconsiderations?: CandidateDiscoveryReconsideration[];
+  userPrompt: string;
+  response: CandidateDiscoveryResponse;
+  usage: ExtendedTokenUsage;
+  finishReason?: string;
+  structuredAttempts?: number;
+}
 export interface CandidateDiscoveryAudit {
   unitId: string;
   promptVersion: string;
   systemPrompt: string;
   userPrompt: string;
   response: CandidateDiscoveryResponse;
-  /** Includes reasoningTokens when the provider reports thinking tokens. */
+  /** Includes reasoningTokens when the provider reports thinking tokens; covers the follow-up call too. */
   usage: ExtendedTokenUsage;
   /** How the producing call ended, when the SDK reports it (absent in older audits). */
   finishReason?: string;
-  /** Structured-output attempts including schema-mismatch retries; usage counts only the last one. */
+  /**
+   * Structured-output attempts including schema-mismatch retries, summed with the follow-up's; usage counts only
+   * the last attempt of each call.
+   */
   structuredAttempts?: number;
+  followUp?: CandidateDiscoveryFollowUp;
 }
 export interface CandidateDiscoveryIssue {
   unitId: string;
@@ -145,6 +208,8 @@ export interface CandidateDiscoveryResult {
     unitId: string;
     sourceId: string;
     resourceKey: string;
+    /** Present for responses from prompt v9 on. */
+    category?: z.infer<typeof exclusionCategorySchema>;
     reason: string;
   }>;
   completedUnitIds: string[];

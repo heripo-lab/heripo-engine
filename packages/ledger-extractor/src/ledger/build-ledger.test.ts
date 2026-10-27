@@ -258,4 +258,25 @@ describe('buildArchaeologyLedger', () => {
     expect(collectRelationSignals).toHaveBeenCalledWith(plan, 'assembled', {});
     expect(built.placeAliases).toEqual({ status: 'invalid', errors: ['bad'] });
   });
+
+  test('records a completed discovery scope in the ledger header', async () => {
+    vi.mocked(assembleArchaeologyLedger).mockReturnValueOnce({
+      ledger: { id: 'ledger-1' },
+    } as never);
+    const discoveryScope = { scopeChapterIds: ['ch-1'] } as never;
+
+    await buildArchaeologyLedger({
+      document,
+      plan,
+      attachments,
+      meta,
+      discoveryScope,
+    });
+
+    expect(collectRelationSignals).toHaveBeenCalledWith(
+      plan,
+      { ledger: { id: 'ledger-1', discoveryScope } },
+      {},
+    );
+  });
 });

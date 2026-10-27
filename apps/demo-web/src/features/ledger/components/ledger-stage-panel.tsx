@@ -16,19 +16,22 @@ import {
   useRateLimitCheck,
 } from '~/features/upload';
 
+import { DEFAULT_LEDGER_MODEL } from '../constants/ledger-run';
 import { useCreateLedgerTask } from '../hooks/use-create-ledger-task';
 import { LedgerJsonDropzone } from './ledger-json-dropzone';
+import { LedgerModelSelect } from './ledger-model-select';
 
 /**
  * Upload panel for the Ledger Extraction stage.
  *
- * Accepts a single processed-document.json file and creates a ledger task.
- * PDF processing options and LLM model settings do not apply here, so none
- * are shown. The same public-demo protections as the PDF flow are reused
+ * Accepts a single processed-document.json file and the model of the
+ * automatic ledger run (default Claude Haiku 5.5), and creates a ledger task.
+ * PDF processing options do not apply here. The same public-demo protections as the PDF flow are reused
  * (consent + Turnstile, OTP bypass, rate limits enforced server-side).
  */
 export function LedgerStagePanel() {
   const [file, setFile] = useState<File | null>(null);
+  const [modelId, setModelId] = useState(DEFAULT_LEDGER_MODEL);
   const [consentDialogOpen, setConsentDialogOpen] = useState(false);
   const [bypassDialogOpen, setBypassDialogOpen] = useState(false);
   const [bypassCode, setBypassCode] = useState('');
@@ -58,6 +61,7 @@ export function LedgerStagePanel() {
     createLedgerTaskMutation.mutate(
       {
         file,
+        modelId,
         bypassCode: code || undefined,
         turnstileToken: turnstileTokenRef.current,
       },
@@ -127,16 +131,13 @@ export function LedgerStagePanel() {
         <CardContent className="flex items-start gap-3 py-4">
           <Info className="text-primary mt-0.5 h-5 w-5 flex-shrink-0" />
           <div className="text-muted-foreground text-sm">
-            <p className="text-foreground font-medium">
-              Ledger extraction preview
-            </p>
+            <p className="text-foreground font-medium">원장 추출</p>
             <p className="mt-1">
-              This stage takes the <code>processed-document.json</code> file
-              produced by the raw data extraction stage and validates that the
-              data was delivered intact (temporary validation view). PDF parsing
-              and document preprocessing are skipped entirely. Image paths must
-              be public CDN URLs; they are used as-is and never fetched during
-              extraction.
+              전처리 단계가 만든 <code>processed-document.json</code>을 받아
+              문서를 검증한 뒤, 고른 모델로 보고서 유형 분류 → 객체 후보 탐색 →
+              원문 배정을 차례로 실행하고 원장을 조립합니다. PDF 파싱과 전처리는
+              다시 하지 않습니다. 이미지 경로는 공개 CDN URL을 그대로 쓰며 추출
+              중에 내려받지 않습니다.
             </p>
           </div>
         </CardContent>
@@ -161,6 +162,12 @@ export function LedgerStagePanel() {
           setFile(nextFile);
           setSubmitError(null);
         }}
+        disabled={isPending}
+      />
+
+      <LedgerModelSelect
+        value={modelId}
+        onChange={setModelId}
         disabled={isPending}
       />
 

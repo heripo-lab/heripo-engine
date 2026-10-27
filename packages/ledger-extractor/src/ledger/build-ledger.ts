@@ -10,6 +10,7 @@ import type { CaptionReferences } from '../media/caption-references';
 import type { MediaCaptionIndex } from '../media/media-captions';
 import type { MediaReferences } from '../media/media-references';
 import type { MediaSamePageGroup } from '../media/same-page-candidates';
+import type { ReportScopeCompletion } from '../profile/report-scope';
 import type { RelationParentJudgment } from '../relations/parent-judgment';
 import type { PlaceAliasTable } from '../relations/place-aliases';
 import type { RelationParents } from '../relations/relation-parents';
@@ -61,6 +62,8 @@ export interface BuildArchaeologyLedgerInput {
   placeAliases?: unknown;
   /** Saved parent judgment runs; without them parent questions stay as review items. */
   parentJudgments?: RelationParentJudgment[];
+  /** How the discovery scope was completed, recorded in the ledger header. */
+  discoveryScope?: ReportScopeCompletion;
 }
 /** Whether the given place alias table was applied. */
 export type PlaceAliasOutcome =
@@ -99,13 +102,19 @@ export async function buildArchaeologyLedger(
   input: BuildArchaeologyLedgerInput,
 ): Promise<BuildArchaeologyLedgerResult> {
   const { document, plan, attachments, meta } = input;
-  const assembled = assembleArchaeologyLedger(plan, attachments, {
+  const base = assembleArchaeologyLedger(plan, attachments, {
     ledgerId: meta.ledgerId,
     processedDocumentId: meta.processedDocumentId ?? document.reportId,
     extractorVersion: meta.extractorVersion,
     extractedAt: meta.extractedAt,
     createdAt: meta.createdAt,
   });
+  const assembled = input.discoveryScope
+    ? {
+        ...base,
+        ledger: { ...base.ledger, discoveryScope: input.discoveryScope },
+      }
+    : base;
 
   let placeAliases: PlaceAliasOutcome = { status: 'none' };
   let aliasOptions = {};

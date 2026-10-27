@@ -247,6 +247,8 @@ export async function createTask(
 
 export interface CreateLedgerTaskInput {
   file: File;
+  /** The model of the automatic ledger run. */
+  modelId: string;
   bypassCode?: string;
   turnstileToken?: string;
 }
@@ -260,6 +262,7 @@ export async function createLedgerTask(
 ): Promise<CreateTaskResponse> {
   const formData = new FormData();
   formData.append('file', input.file);
+  formData.append('modelId', input.modelId);
   if (input.bypassCode) {
     formData.append('bypassCode', input.bypassCode);
   }
@@ -272,6 +275,27 @@ export async function createLedgerTask(
     body: formData,
   });
   return handleResponse<CreateTaskResponse>(response);
+}
+
+/** The ledger task this session made from a completed PDF processing task, if any. */
+export async function getLedgerTaskForSource(
+  taskId: string,
+): Promise<{ ledgerTask: { id: string; status: string } | null }> {
+  const response = await fetch(`/api/tasks/${taskId}/ledger-task`);
+  return handleResponse(response);
+}
+
+/** Make a ledger task from a completed PDF processing task in this session; an existing one is returned. */
+export async function createLedgerTaskFromResult(input: {
+  taskId: string;
+  modelId: string;
+}): Promise<{ taskId: string; existing: boolean }> {
+  const response = await fetch(`/api/tasks/${input.taskId}/ledger-task`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelId: input.modelId }),
+  });
+  return handleResponse(response);
 }
 
 export async function deleteTask(

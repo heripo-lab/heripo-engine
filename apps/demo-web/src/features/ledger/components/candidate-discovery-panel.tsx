@@ -13,6 +13,7 @@ import {
 } from '~/components/ui/card';
 import { Input } from '~/components/ui/input';
 
+import { discoveryMaxTextChars } from '../constants/ledger-run';
 import { useCandidateDiscovery } from '../hooks/use-candidate-discovery';
 import { useDocumentResourceIndex } from '../hooks/use-document-resource-index';
 import { useReportProfile } from '../hooks/use-report-profile';
@@ -47,7 +48,9 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   const { query, start, cancel, audit } = useCandidateDiscovery(taskId);
   const [scope, setScope] = useState<string[]>([]);
   const [modelId, setModelId] = useState('anthropic/claude-haiku-5-5');
-  const [maxTextChars, setMaxTextChars] = useState(8000);
+  const [maxTextChars, setMaxTextChars] = useState(
+    discoveryMaxTextChars('anthropic/claude-haiku-5-5'),
+  );
   const [tableRowsPerUnit, setTableRowsPerUnit] = useState(12);
   const [maxRetries, setMaxRetries] = useState(0);
   const [filter, setFilter] = useState('');
@@ -277,7 +280,10 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
               className="bg-background mt-1 w-full rounded border p-2 font-mono"
               value={modelId}
               disabled={running}
-              onChange={(e) => setModelId(e.target.value)}
+              onChange={(e) => {
+                setModelId(e.target.value);
+                setMaxTextChars(discoveryMaxTextChars(e.target.value));
+              }}
             />
           </label>
         </div>

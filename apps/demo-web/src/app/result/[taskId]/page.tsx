@@ -1,6 +1,7 @@
 'use client';
 
-import { Suspense, use } from 'react';
+import { useRouter } from 'next/navigation';
+import { Suspense, use, useEffect } from 'react';
 
 import type { RawDataTaskResultResponse } from '~/lib/api/tasks';
 
@@ -38,6 +39,14 @@ interface PageProps {
   params: Promise<{ taskId: string }>;
 }
 
+function LedgerRedirect({ taskId }: { taskId: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace(`/ledger/validation/${taskId}`);
+  }, [router, taskId]);
+  return <ResultLoading />;
+}
+
 function ResultContent({ taskId }: { taskId: string }) {
   const { data, isLoading, error } = useTaskResult(taskId, {
     retryOnNotCompleted: true,
@@ -47,20 +56,9 @@ function ResultContent({ taskId }: { taskId: string }) {
   if (error) return <ResultError message={error.message} />;
   if (!data) return null;
 
-  // Ledger result page is intentionally an empty placeholder: its design is
-  // not decided yet. Use /ledger/validation/[taskId] to inspect the upload.
+  // a ledger task's result is the archaeology ledger page
   if (data.resultKind === 'ledger-preview') {
-    return (
-      <div className="container mx-auto px-4 py-10 xl:px-0">
-        <MobileWarningBanner />
-        <div className="mx-auto max-w-7xl space-y-8">
-          <PipelineBreadcrumb currentStage="ledger" />
-          <h1 className="text-3xl font-bold tracking-tight">
-            Ledger Extraction Result
-          </h1>
-        </div>
-      </div>
-    );
+    return <LedgerRedirect taskId={taskId} />;
   }
 
   return <RawDataResultContent taskId={taskId} data={data} />;
@@ -163,7 +161,7 @@ function RawDataResultContent({
             tokenUsage={task.tokenUsage}
             tokenCostUSD={task.tokenCostUSD}
           />
-          <NextStageBanner />
+          <NextStageBanner taskId={taskId} />
         </div>
       </div>
       <ContentViewerModal />

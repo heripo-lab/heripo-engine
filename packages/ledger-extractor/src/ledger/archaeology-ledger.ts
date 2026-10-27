@@ -7,6 +7,7 @@ import type {
   ContentAttachmentPlan,
   TextSource,
 } from '../content-attachment/types';
+import type { ReportScopeCompletion } from '../profile/report-scope';
 import type { PlaceAliasSummary } from '../relations/place-aliases';
 
 export const ARCHAEOLOGY_LEDGER_VERSION = 'archaeology-ledger.v1' as const;
@@ -32,6 +33,8 @@ export interface ArchaeologyLedger {
   /** `not_run` until `applyLedgerValidation`; then from the severities of every issue. */
   validationStatus: 'not_run' | 'passed' | 'warnings' | 'failed';
   reviewStatus: 'not_reviewed';
+  /** How the discovery scope was set, when the run completed a proposed scope (`completeReportScope`). */
+  discoveryScope?: ReportScopeCompletion;
   /** The confirmed profile and the thin rules fixed in the attachment plan, when the plan has them. */
   reportProfile?: {
     profileSha256: string;

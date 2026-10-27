@@ -9,6 +9,7 @@ import {
   input,
   prepare,
   proposal,
+  registry,
   usage,
 } from './candidate-discovery.test-fixture';
 import { assembleCandidateDiscovery } from './discovery-assembly';
@@ -18,6 +19,7 @@ import {
   createCandidateDiscoverySchema,
   getCandidateSources,
 } from './discovery-request';
+import { createFollowUpUnit } from './discovery-rows';
 
 vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
 
@@ -458,7 +460,11 @@ test('keeps distinct explicit investigation areas eligible in a stratigraphy uni
       ],
       exclusions: [],
     };
-  expect(current.userPrompt).toBe(old.userPrompt);
+  expect(
+    createCandidateDiscoveryRequest(unit, 'candidate-discovery.v9').userPrompt,
+  ).toBe(old.userPrompt);
+  // from v10 body sources carry their heading section
+  expect(current.userPrompt).toContain('"section":"S0","sectionHeading":false');
   expect(current.systemPrompt).toContain(
     'EXPLICIT INVESTIGATION AREAS REQUIRE A SEPARATE REVIEW',
   );
@@ -483,7 +489,7 @@ test('keeps distinct explicit investigation areas eligible in a stratigraphy uni
   expect({ plan, oldAudit, currentAudit }).toEqual(before);
 });
 
-test('reports item-table data rows below the headerRows that are neither proposed nor excluded, from prompt v7 on', async () => {
+test('reports item-table data rows below the headerRows that are neither proposed nor excluded in prompts v7 and v8', async () => {
   const cell = (text: string, isHeader = false) => ({
     text,
     colSpan: 1,
@@ -542,7 +548,10 @@ test('reports item-table data rows below the headerRows that are neither propose
   };
 
   const current = await assembleCandidateDiscovery(plan, [
-    audit(unit, response),
+    {
+      ...v6,
+      ...createCandidateDiscoveryRequest(unit, 'candidate-discovery.v8'),
+    },
   ]);
   const old = await assembleCandidateDiscovery(plan, [v6]);
   const v7 = await assembleCandidateDiscovery(plan, [
@@ -585,7 +594,185 @@ test('reports item-table data rows below the headerRows that are neither propose
   expect(old.issues).toEqual([]);
   expect(old.candidates).toEqual(current.candidates);
   expect(noItems.issues).toEqual([]);
+  expect(
+    (
+      await assembleCandidateDiscovery(plan, [
+        {
+          ...v6,
+          ...createCandidateDiscoveryRequest(unit, 'candidate-discovery.v8'),
+          response: { candidates: [], exclusions: [] },
+        },
+      ])
+    ).issues,
+  ).toEqual([]);
   expect(unit.table?.headerRows).toHaveLength(2);
   expect(laterItem.candidates).toHaveLength(1);
   expect(laterItem.issues).toEqual([]);
+});
+
+describe('prompt v9 table roles, exclusion categories and follow-ups', () => {
+  test('requires a row-level category for unanswered item-table rows and keeps earlier responses without categories', async () => {
+    const { plan, unit, id, item } = registry();
+    const answered = await assembleCandidateDiscovery(plan, [
+      audit(unit, {
+        tableRole: 'item_table',
+        candidates: [item('2', '뚜껑')],
+        exclusions: [
+          { sourceId: id('3'), category: 'passing_mention', reason: '언급' },
+          { sourceId: id('합계'), category: 'summary_row', reason: '합계' },
+        ],
+      }),
+    ]);
+    const nonItem = await assembleCandidateDiscovery(plan, [
+      audit(unit, {
+        tableRole: 'non_item_table',
+        candidates: [item('2', '뚜껑')],
+        exclusions: [],
+      }),
+    ]);
+    const uncategorized = await assembleCandidateDiscovery(plan, [
+      audit(unit, {
+        candidates: [item('2', '뚜껑')],
+        exclusions: ['3', '4', '합계'].map((text) => ({
+          sourceId: id(text),
+          reason: '제외',
+        })),
+      }),
+    ]);
+
+    expect(answered.candidates).toHaveLength(1);
+    expect(answered.issues).toEqual([
+      {
+        unitId: unit.unitId,
+        candidateIndex: null,
+        reason:
+          'Table rows neither proposed nor excluded with a row-level category: 3, 4',
+      },
+    ]);
+    expect(answered.exclusions.map((e) => e.category)).toEqual([
+      'passing_mention',
+      'summary_row',
+    ]);
+    expect(nonItem.candidates).toEqual([]);
+    expect(nonItem.issues.map((i) => i.reason)).toEqual([
+      'Table item proposed in a unit answered as a non-item table',
+    ]);
+    expect(uncategorized.issues).toEqual([]);
+    expect(uncategorized.exclusions[0]).not.toHaveProperty('category');
+  });
+
+  test('rejects header names, names outside the selected body cell and figure references in identifiers', async () => {
+    const { plan, unit, id, item } = registry();
+    const reasons = async (
+      candidate: CandidateDiscoveryResponse['candidates'][number],
+    ) =>
+      (
+        await assembleCandidateDiscovery(plan, [
+          audit(unit, { candidates: [candidate], exclusions: [] }),
+        ])
+      ).issues.map((i) => i.reason);
+
+    expect(
+      await reasons({ ...item('2', '뚜껑'), sourceName: '유물명' }),
+    ).toContain('Table item name is a column header');
+    const nameRule =
+      'Table item name must come from its selected body cell, the caption, the chapter titles or the context';
+    for (const nameSourceId of [id('번호'), id('3'), 'path:missing'])
+      expect(await reasons({ ...item('2', '뚜껑'), nameSourceId })).toContain(
+        nameRule,
+      );
+    // named from the chapter title while selecting the number cell
+    expect(
+      await reasons({
+        ...item('2', '뚜껑'),
+        sourceName: '조사 내용',
+        nameSourceId: id('2'),
+      }),
+    ).not.toContain(nameRule);
+    expect(
+      await reasons({
+        ...item('2', '뚜껑'),
+        sourceIdentifier: '도면 1',
+        identifierSourceId: id('도면 1'),
+        nameSourceId: null,
+        evidence: [{ sourceId: id('도면 1'), quote: '도면 1' }],
+      }),
+    ).toContain('Source identifier includes a figure or plate reference');
+    expect(
+      await reasons({ ...item('2', '뚜껑'), nameSourceId: null }),
+    ).not.toContain(nameRule);
+    const body = prepare();
+    expect(
+      (
+        await assembleCandidateDiscovery(body, [
+          audit(body.units[0], {
+            candidates: [{ ...proposal(body.units[0]), nameSourceId: 'id:a' }],
+            exclusions: [],
+          }),
+        ])
+      ).issues,
+    ).toEqual([]);
+  });
+
+  test('merges a follow-up that asks exactly the unanswered rows and rejects a mismatched or malformed one', async () => {
+    const { plan, unit, id, item } = registry();
+    const first: CandidateDiscoveryResponse = {
+      tableRole: 'item_table',
+      candidates: [item('2', '뚜껑')],
+      exclusions: [
+        { sourceId: id('합계'), category: 'summary_row', reason: '합계' },
+      ],
+    };
+    const followUp = {
+      rowIndexes: [3, 4],
+      userPrompt: createCandidateDiscoveryRequest(
+        createFollowUpUnit(unit, [3, 4]),
+      ).userPrompt,
+      response: {
+        tableRole: 'item_table' as const,
+        candidates: [item('3', '삼족기')],
+        exclusions: [
+          {
+            sourceId: id('4'),
+            category: 'previous_or_external' as const,
+            reason: '이전 조사',
+          },
+        ],
+      },
+      usage,
+    };
+    const assemble = (overrides: object) =>
+      assembleCandidateDiscovery(plan, [
+        { ...audit(unit, first), followUp, ...overrides },
+      ]);
+
+    const merged = await assemble({});
+    expect(merged.candidates.map((c) => c.sourceName)).toEqual([
+      '뚜껑',
+      '삼족기',
+    ]);
+    expect(merged.issues).toEqual([]);
+    expect(merged.exclusions).toHaveLength(2);
+    const mismatch =
+      'Saved follow-up does not match the unanswered rows, corrections and reconsidered headings of this unit';
+    expect(
+      (await assemble({ followUp: { ...followUp, rowIndexes: [3] } })).issues[0]
+        .reason,
+    ).toBe(mismatch);
+    expect(
+      (await assemble({ followUp: { ...followUp, userPrompt: '{}' } }))
+        .issues[0].reason,
+    ).toBe(mismatch);
+    expect(
+      (
+        await assemble({
+          ...createCandidateDiscoveryRequest(unit, 'candidate-discovery.v8'),
+        })
+      ).issues[0].reason,
+    ).toBe(mismatch);
+    expect(
+      (await assemble({ followUp: { ...followUp, response: null } })).issues[0]
+        .reason,
+    ).toBe('Invalid saved model response schema');
+  });
 });

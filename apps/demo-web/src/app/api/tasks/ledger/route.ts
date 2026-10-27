@@ -1,10 +1,8 @@
 import type { NextRequest } from 'next/server';
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { NextResponse } from 'next/server';
 
 import { enforcePublicDemoGuards } from '~/lib/api/public-demo-guard';
-import { createTask } from '~/lib/db/repositories/task-repository';
 import {
   LEDGER_ERROR_CODES,
   LEDGER_INPUT_MAX_SIZE_BYTES,
@@ -12,22 +10,21 @@ import {
   isAllowedLedgerInputFile,
   parseLedgerInputText,
 } from '~/lib/ledger/ledger-input';
-import { paths } from '~/lib/paths';
-import { runTaskWorker } from '~/lib/queue/task-dispatcher';
-import { TaskQueueManager } from '~/lib/queue/task-queue-manager';
+import { createLedgerTask } from '~/lib/ledger/ledger-task';
+import {
+  DEFAULT_LEDGER_MODEL,
+  LEDGER_RUN_BUDGET,
+  isLedgerModel,
+} from '~/lib/ledger/ledger-task-options';
 import { getOrCreateSessionId } from '~/lib/session';
 import { extractClientInfo } from '~/lib/utils/request-info';
-import { createTaskStartedPayload, sendWebhookAsync } from '~/lib/webhook';
-
-function generateTaskId(): string {
-  return `task_${crypto.randomUUID()}`;
-}
 
 /**
  * Creates a ledger extraction task from a single processed-document.json
- * upload. Unlike PDF tasks, ledger tasks have no processing options; the
- * same public-demo protections (Turnstile, OTP bypass, weekly lockout,
- * rate limit, session isolation) apply.
+ * upload. Unlike PDF tasks, ledger tasks take only the model for their
+ * automatic run (`modelId`, default Claude Haiku 5.5); the same public-demo
+ * protections (Turnstile, OTP bypass, weekly lockout, rate limit, session
+ * isolation) apply.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -37,9 +34,17 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const bypassCode = formData.get('bypassCode') as string | null;
     const turnstileToken = formData.get('turnstileToken') as string | null;
+    const modelId =
+      (formData.get('modelId') as string | null) ?? DEFAULT_LEDGER_MODEL;
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    }
+    if (!isLedgerModel(modelId)) {
+      return NextResponse.json(
+        { error: `Unknown model: ${modelId}` },
+        { status: 400 },
+      );
     }
 
     // Step 1: file extension and MIME type (single JSON file only, no ZIP)
@@ -96,52 +101,15 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    // Step 6: create the ledger task
-    const taskId = generateTaskId();
-    const taskPaths = paths.task(taskId);
-
-    if (!existsSync(taskPaths.root)) {
-      mkdirSync(taskPaths.root, { recursive: true });
-    }
-    writeFileSync(taskPaths.inputJson, rawText, 'utf8');
-
-    const task = createTask({
-      id: taskId,
-      kind: 'ledger',
-      sessionId,
-      originalFilename: file.name,
-      filePath: taskPaths.inputJson,
-      options: null,
-      clientIp: clientInfo.ip,
-      userAgent: clientInfo.userAgent,
-      isOtpBypass,
-    });
-
-    // Step 7: enqueue; the dispatcher runs the ledger worker by task kind
-    const queueManager = TaskQueueManager.getInstance();
-    queueManager.setWorkerFactory(runTaskWorker);
-
-    await queueManager.enqueue({
-      kind: 'ledger',
-      taskId,
-      filePath: taskPaths.inputJson,
-      addedAt: new Date(),
-      sessionId,
-      clientIP: clientInfo.ip,
-      userAgent: clientInfo.userAgent,
+    // Step 6-7: create and enqueue the ledger task; it runs every ledger step with the chosen model
+    const task = await createLedgerTask({
+      rawText,
       filename: file.name,
+      sessionId,
+      clientInfo,
       isOtpBypass,
+      options: { modelId, budget: LEDGER_RUN_BUDGET },
     });
-
-    sendWebhookAsync(
-      createTaskStartedPayload({
-        ...clientInfo,
-        taskId,
-        sessionId,
-        filename: file.name,
-        otpMode: isOtpBypass,
-      }),
-    );
 
     return NextResponse.json({
       taskId: task.id,

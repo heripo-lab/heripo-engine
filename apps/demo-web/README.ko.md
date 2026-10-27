@@ -21,7 +21,7 @@ Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으
 - 실시간 처리 상태 모니터링 (SSE)
 - 처리 결과 시각화 (목차, 이미지, 표, 병합 셀, 원천 페이지)
 - 처리 결과 ZIP 다운로드 (`result-processed.json`, 원천 Docling JSON, source handoff manifest, 이미지, 렌더링 페이지 포함)
-- `processed-document.json` 업로드 기반 원장 추출 미리보기 (PDF 파싱 전체 생략)
+- `processed-document.json` 업로드 또는 전처리 결과에서 바로 이어지는 고고학 데이터 원장 (모델 하나 선택, 기본 Claude Haiku 5.5)
 - 작업 큐 관리
 
 ### 기술 스택
@@ -210,19 +210,19 @@ pnpm dev
 - 작업 삭제
 - 이전 작업 결과 재확인
 
-### 5. 원장 추출 (미리보기)
+### 5. 원장 추출
 
-파이프라인 스텝퍼의 `Ledger Extraction` 단계는 PDF 파싱과 문서 전처리를 건너뛰고, 전처리된 문서에 `@heripo/ledger-extractor`를 바로 실행합니다:
+`Ledger Extraction` 단계는 PDF 파싱과 문서 전처리를 건너뛰고, 전처리된 문서로 `@heripo/ledger-extractor`의 고고학 데이터 원장을 만듭니다. 두 가지로 시작할 수 있습니다.
 
-1. 홈 페이지 파이프라인 스텝퍼에서 **Ledger Extraction** 선택
-2. 단일 `processed-document.json` 파일 첨부 (최대 100MB, ZIP은 지원하지 않음)
-3. "Start Ledger Extraction" 클릭 — 확장자/MIME → 파일 크기 → JSON 파싱 → `ProcessedDocument` 런타임 검증 순으로 확인 후 원장 작업이 큐에 등록됩니다
-4. **전처리 파일 검증 페이지**(`/ledger/validation/[taskId]`)에서 `LedgerExtractionPreview` 확인: reportId, schemaVersion, 집계 카운트, 챕터 제목/텍스트 블록/이미지 URL/테이블 샘플, 원본 preview JSON
+- **단독 실행:** 파이프라인 스텝퍼에서 **Ledger Extraction**을 고르고 `processed-document.json` 하나(최대 100MB, ZIP 불가)를 첨부한 뒤 모델(기본 Claude Haiku 5.5)을 골라 "Start Ledger Extraction"을 누릅니다. 확장자/MIME → 파일 크기 → JSON 파싱 → `ProcessedDocument` 런타임 검증을 거쳐 작업이 큐에 등록됩니다.
+- **전처리 후 이어서:** 완료된 Raw Data Extraction 결과 페이지의 "이 결과로 원장 만들기"에서 같은 방식으로 모델을 고릅니다. 원장 작업은 그 결과의 전처리 문서를 그대로 쓰고 같은 브라우저 세션에 속합니다. 이후 카드는 두 번째 실행을 만들지 않고 그 원장으로 연결합니다(실패·취소된 실행은 다시 만들 수 있음).
+
+작업은 문서 미리보기를 쓴 뒤, 고른 모델로 원장 단계를 사람 개입 없이 차례로 실행합니다: 보고서 유형 분류(라우터 1회, 제안 범위에 코드가 제목으로 찾은 조사 장을 더해 쓰고 더한 장은 원장 머리에 표시), 객체 후보 탐색과 중복 검토, 원문 배정 계획, 모든 묶음의 얇은 원문 배정, 전체 검증을 포함한 원장 조립. 한 번 실행은 모델 호출 600회·13,000,000토큰을 넘지 않습니다. 남은 예산이 단계의 최대 사용량을 덮지 못하면 그 단계를 시작하지 않고 이유와 함께 작업이 실패합니다. 진행 페이지에서 단계와 로그를 볼 수 있습니다. 저장된 부모 판단과 장소 약칭 표가 있으면 반영하며, 원장 페이지의 단계별 수동 패널로 단계를 다시 실행할 수 있습니다.
+
+완료된 원장 작업은 Tasks 페이지에서 "원장" 표시와 함께 보이고, 누르면 고고학 데이터 원장(`/ledger/validation/[taskId]`)이 열립니다. 원장 작업의 `/result/[taskId]`는 그 페이지로 넘어갑니다.
 
 참고:
 
-- 이 단계는 **미리보기 전용**입니다. 입력 데이터가 온전히 전달되었는지 요약할 뿐, 실제 원장 추출(LLM 기반 추출, 도메인 스키마, DB 저장)은 후속 작업입니다.
-- 검증 페이지는 업로드 확인용 임시 화면입니다. 실제 원장 결과 페이지(`/result/[taskId]`)는 디자인이 결정될 때까지 타이틀만 있는 placeholder로 비워져 있습니다.
 - JSON은 `@heripo/model`의 `ProcessedDocument` 타입(`packages/model/src/types/processed-document.ts`)과 호환되어야 합니다.
 - `ProcessedImage.path`에는 `heripo-web` export 스크립트가 생성한 완전한 public CDN URL이 들어와야 하며, 데모는 이 URL을 그대로 사용할 뿐 fetch하거나 재서명하지 않습니다.
 - 테스트용 JSON은 `heripo-web` export 스크립트로 생성하거나, 완료된 Raw Data Extraction 작업의 결과 JSON export로 만들 수 있습니다.

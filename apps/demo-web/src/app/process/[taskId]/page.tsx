@@ -73,6 +73,7 @@ export default function ProcessPage({ params }: PageProps) {
         <PipelineBreadcrumb currentStage={taskKind} />
         <ProcessHeader
           status={status}
+          kind={taskKind}
           filename={filename}
           onCancel={handleCancelClick}
           isCancelling={deleteTaskMutation.isPending}

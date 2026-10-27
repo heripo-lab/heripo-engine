@@ -12,6 +12,8 @@ import { createOllama } from 'ai-sdk-ollama';
 
 import type { ProcessingOptions } from '~/features/upload';
 
+import { reconnectingFetch } from './local-model-reconnect';
+
 const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 const DEFAULT_LMSTUDIO_BASE_URL = 'http://localhost:1234/v1';
 
@@ -61,6 +63,7 @@ function getOllama() {
   if (!ollamaProvider) {
     ollamaProvider = createOllama({
       baseURL: process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL,
+      fetch: reconnectingFetch,
     });
   }
   return ollamaProvider;
@@ -73,6 +76,7 @@ function getLmStudio() {
       baseURL: process.env.LMSTUDIO_BASE_URL || DEFAULT_LMSTUDIO_BASE_URL,
       apiKey: process.env.LMSTUDIO_API_KEY || 'lmstudio',
       supportsStructuredOutputs: true,
+      fetch: reconnectingFetch,
     });
   }
   return lmstudioProvider;

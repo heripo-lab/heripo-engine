@@ -16,6 +16,8 @@ import {
   LedgerInputError,
   parseLedgerInputText,
 } from '../ledger/ledger-input';
+import { runLedgerPipeline } from '../ledger/ledger-pipeline';
+import { readLedgerTaskOptions } from '../ledger/ledger-task-options';
 import { paths } from '../paths';
 import {
   createTaskCompletedPayload,
@@ -26,10 +28,15 @@ import { createTaskLogger } from './task-logger';
 
 const LEDGER_STEPS = [
   { id: 'upload', name: 'Uploading JSON', weight: 0 },
-  { id: 'json-parse', name: 'JSON Parsing', weight: 20 },
-  { id: 'document-validate', name: 'Document Validation', weight: 25 },
-  { id: 'ledger-extract', name: 'Ledger Extraction', weight: 50 },
-  { id: 'complete', name: 'Complete', weight: 5 },
+  { id: 'json-parse', name: 'JSON Parsing', weight: 5 },
+  { id: 'document-validate', name: 'Document Validation', weight: 5 },
+  { id: 'ledger-extract', name: 'Document Preview', weight: 5 },
+  // the automatic run of every ledger step, for tasks created with a model
+  { id: 'report-profile', name: 'Report Profile', weight: 5 },
+  { id: 'candidate-discovery', name: 'Candidate Discovery', weight: 25 },
+  { id: 'content-attachment', name: 'Content Attachment', weight: 50 },
+  { id: 'ledger-build', name: 'Ledger Build', weight: 3 },
+  { id: 'complete', name: 'Complete', weight: 2 },
 ] as const;
 
 function calculateLedgerProgress(
@@ -57,7 +64,9 @@ function throwIfAborted(abortSignal?: AbortSignal): void {
 /**
  * Worker for 'ledger' tasks: reads the uploaded processed-document.json,
  * validates it, runs the LedgerExtractor preview, and stores the result as
- * ledger-preview.json. No PDF parser or DocumentProcessor is involved.
+ * ledger-preview.json. A task created with a model (ledger options) then runs
+ * every ledger step automatically before it completes. No PDF parser or
+ * DocumentProcessor is involved.
  */
 export async function runLedgerTaskWorker(
   task: LedgerQueuedTask,
@@ -114,8 +123,6 @@ export async function runLedgerTaskWorker(
 
     // Step 5: persist preview result
     throwIfAborted(abortSignal);
-    emitStep('complete');
-
     const taskPaths = paths.task(taskId);
     if (!existsSync(taskPaths.outputRoot)) {
       mkdirSync(taskPaths.outputRoot, { recursive: true });
@@ -124,6 +131,19 @@ export async function runLedgerTaskWorker(
       taskPaths.ledgerPreviewJson,
       JSON.stringify(preview, null, 2),
     );
+
+    // Step 6: a task created with a model runs every ledger step automatically
+    const ledgerOptions = readLedgerTaskOptions(taskId);
+    if (ledgerOptions) {
+      await runLedgerPipeline(taskId, ledgerOptions, {
+        onStep: (step) => emitStep(step),
+        log: (message) => logger.info(message),
+        abortSignal,
+      });
+    }
+
+    throwIfAborted(abortSignal);
+    emitStep('complete');
 
     updateLedgerTaskResult(taskId, {
       outputResultPath: taskPaths.ledgerPreviewJson,

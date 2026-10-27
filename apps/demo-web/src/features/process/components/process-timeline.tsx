@@ -62,9 +62,33 @@ const LEDGER_STEPS: TimelineStep[] = [
   },
   {
     id: 'ledger-extract',
-    title: 'Ledger Extraction',
+    title: 'Document Preview',
     description: 'Summarize the document into a ledger extraction preview',
+    progressThreshold: 10,
+  },
+  {
+    id: 'report-profile',
+    title: 'Report Profile',
+    description: 'Classify the report and its investigation scope (1 call)',
+    progressThreshold: 15,
+  },
+  {
+    id: 'candidate-discovery',
+    title: 'Candidate Discovery',
+    description: 'Find archaeological records and review duplicates',
+    progressThreshold: 20,
+  },
+  {
+    id: 'content-attachment',
+    title: 'Content Attachment',
+    description: 'Attach source sentences and table cells to each record',
     progressThreshold: 45,
+  },
+  {
+    id: 'ledger-build',
+    title: 'Ledger Build',
+    description: 'Parents, attributes, figures, links and validation',
+    progressThreshold: 95,
   },
 ];
 

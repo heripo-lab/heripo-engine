@@ -7,7 +7,14 @@ export {
 export { prepareCandidateDiscoveryRetry } from './discovery-retry';
 export { discoverCandidateUnit } from './discovery-unit';
 export { assembleCandidateDiscovery } from './discovery-assembly';
-export { CANDIDATE_DISCOVERY_PROMPT_VERSION } from './discovery-request';
+export {
+  CANDIDATE_DISCOVERY_PROMPT_VERSION,
+  RECONSIDERED_EXCLUSIONS_RULE,
+  SIDE_BY_SIDE_TABLES_RULE,
+  createCandidateDiscoveryRequest,
+  isSectionHeading,
+} from './discovery-request';
+export { CANDIDATE_DISCOVERY_NAME_LEAD_CHARS } from './discovery-validation';
 export type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryUnit,

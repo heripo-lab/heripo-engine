@@ -20,6 +20,7 @@ import {
   getContentAttachmentThinResult,
   getContentAttachmentThinState,
 } from './content-attachment-thin-run';
+import { readDiscoveryScope } from './discovery-scope';
 import { readPlaceAliases } from './place-aliases';
 
 /** Version of the extractor package the demo bundles; recorded on the ledger. */
@@ -58,6 +59,11 @@ export interface ArchaeologyLedgerView {
    * such as `B. 조선시대`.
    */
   scopes: Record<string, string>;
+  /**
+   * The discovery scope of an automatic run: each chapter with its title and whether the code added it to the
+   * router's proposal; null when the scope was a person's.
+   */
+  discoveryScope: Array<{ id: string; title: string; added: boolean }> | null;
 }
 /**
  * Saved parent judgments (`RelationParentJudgment[]`) for this attachment run, written outside the demo; the
@@ -162,6 +168,7 @@ export async function getArchaeologyLedger(
     ? read(judgmentsFile)
     : [];
   const table = readPlaceAliases(taskId);
+  const scope = readDiscoveryScope(taskId);
   const built = await buildArchaeologyLedger({
     document,
     plan,
@@ -169,6 +176,7 @@ export async function getArchaeologyLedger(
     meta,
     ...(table ? { placeAliases: table } : {}),
     parentJudgments: judgments,
+    ...(scope ? { discoveryScope: scope } : {}),
   });
   const ledger = built.result;
   const shown = new Set([
@@ -215,5 +223,12 @@ export async function getArchaeologyLedger(
     images,
     checks: built.validation.checks,
     scopes: sameNameScopes(plan, ledger.records),
+    discoveryScope: scope
+      ? scope.scopeChapterIds.map((id) => ({
+          id,
+          title: titles[id] ?? id,
+          added: scope.addedChapterIds.includes(id),
+        }))
+      : null,
   };
 }

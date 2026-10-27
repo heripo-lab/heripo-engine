@@ -16,6 +16,11 @@ export type {
   ReportTraitId,
   ReportTraitValue,
 } from './report-profile';
+export {
+  REPORT_SCOPE_COMPLETION_VERSION,
+  completeReportScope,
+} from './report-scope';
+export type { ReportScopeCompletion } from './report-scope';
 export { REPORT_SIGNALS_VERSION, collectReportSignals } from './report-signals';
 export type {
   ReportIdentifierVariant,
