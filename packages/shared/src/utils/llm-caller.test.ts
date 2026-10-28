@@ -467,6 +467,38 @@ describe('LLMCaller', () => {
       });
     });
 
+    test('marks the system prompt as a cache breakpoint when asked', async () => {
+      vi.mocked(generateText).mockResolvedValueOnce(
+        createMockGenerateTextResult(
+          { result: 'success' },
+          { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        ),
+      );
+
+      await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'System prompt text',
+        userPrompt: 'User prompt text',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 0,
+        component: 'TestExtractor',
+        phase: 'testing',
+        cacheSystemPrompt: true,
+        providerOptions: { anthropic: { effort: 'low' } },
+      });
+
+      expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
+        providerOptions: { anthropic: { effort: 'low' } },
+        instructions: {
+          role: 'system',
+          content: 'System prompt text',
+          providerOptions: {
+            anthropic: { cacheControl: { type: 'ephemeral' } },
+          },
+        },
+      });
+    });
+
     test('should handle missing usage information', async () => {
       const mockResponse = createMockGenerateTextResult(
         { result: 'success' },

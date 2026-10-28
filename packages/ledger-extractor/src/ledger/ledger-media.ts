@@ -5,6 +5,7 @@ import type { MediaSamePageGroup } from '../media/same-page-candidates';
 import type {
   ArchaeologyLedgerResult,
   LedgerExtractionIssue,
+  LedgerMediaCandidate,
   LedgerMediaReference,
   LedgerReviewItem,
 } from './archaeology-ledger';
@@ -14,10 +15,11 @@ import type {
  * Text references come first, then caption names and series; a record–image pair is kept once with the
  * evidence of every source that linked it. The caption text and its label words are kept as written.
  *
- * Review items (`kind: 'media'`) are added for a label the record's own text cites that several images share
- * (`media_ambiguous`, which also flags the record), a caption naming several records (`media_caption_several`)
- * and uncaptioned images on a page where records are described (`media_same_page`); the last two do not flag
- * records, since they are questions about images. Cited labels no image has, unresolved caption series and
+ * Uncaptioned images on a page where records are described become page-level `mediaCandidates` (basis
+ * `same_page`), not links and not review items. Review items (`kind: 'media'`) are added for a label the
+ * record's own text cites that several images share (`media_ambiguous`, which also flags the record) and a
+ * caption naming several records (`media_caption_several`, which does not flag records, since it is a question
+ * about an image). Cited labels no image has, unresolved caption series and
  * caption artifact numbers that do not list a text-linked artifact go to `issues`. `media_references` leaves
  * `pending`.
  */
@@ -96,15 +98,17 @@ export function applyLedgerMedia(
       imageIds: [p.imageId],
       text: entryOf.get(p.imageId)!.captionText,
     })),
-    ...(media.samePage ?? []).map((g) => ({
-      kind: 'media' as const,
-      recordIds: g.recordIds,
-      confirmedRecordIds: [],
-      reasons: ['media_same_page'],
-      imageIds: g.imageIds,
-      pdfPageNo: g.pdfPageNo,
-    })),
   ];
+  const candidates: LedgerMediaCandidate[] = (media.samePage ?? []).map(
+    (g, i) => ({
+      id: `media-candidate-${result.mediaCandidates.length + i + 1}`,
+      ledgerId: result.ledger.id,
+      pdfPageNo: g.pdfPageNo,
+      imageIds: g.imageIds,
+      recordIds: g.recordIds,
+      basis: 'same_page',
+    }),
+  );
   const ambiguous = new Set(media.text.ambiguous.map((p) => p.recordId));
   const nameOf = new Map(
     result.records.map((r) => [
@@ -149,6 +153,7 @@ export function applyLedgerMedia(
       ambiguous.has(r.id) ? { ...r, needsReview: true } : r,
     ),
     mediaReferences: [...result.mediaReferences, ...references],
+    mediaCandidates: [...result.mediaCandidates, ...candidates],
     pending: result.pending.filter((p) => p !== 'media_references'),
     reviewItems: [
       ...result.reviewItems,

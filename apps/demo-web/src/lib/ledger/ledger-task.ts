@@ -11,7 +11,7 @@ import { ledgerOptionsFile } from './ledger-task-options';
 
 /**
  * Create and enqueue a ledger task from a validated processed-document JSON text, in the caller's session.
- * The worker validates the input, writes the preview and then runs every ledger step with `options.modelId`.
+ * The worker validates the input, writes the preview and then runs every ledger step with its model in `options.models`.
  */
 export async function createLedgerTask(input: {
   rawText: string;

@@ -7,17 +7,17 @@ import { useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
 import { LedgerModelSelect } from '~/features/ledger/components/ledger-model-select';
-import { DEFAULT_LEDGER_MODEL } from '~/features/ledger/constants/ledger-run';
+import { DEFAULT_LEDGER_MODELS } from '~/features/ledger/constants/ledger-run';
 import { useLedgerFromResult } from '~/features/ledger/hooks/use-ledger-from-result';
 
 /**
  * The next stage after preprocessing: make the archaeology ledger from this result's processed document in
- * the same session, or open the one already made. The ledger runs every step with the chosen model.
+ * the same session, or open the one already made. The ledger runs every step with its chosen model.
  */
 export function NextStageBanner({ taskId }: { taskId: string }) {
   const router = useRouter();
   const { query, create } = useLedgerFromResult(taskId);
-  const [modelId, setModelId] = useState(DEFAULT_LEDGER_MODEL);
+  const [models, setModels] = useState(DEFAULT_LEDGER_MODELS);
   const ledgerTask = query.data?.ledgerTask ?? null;
   const again =
     ledgerTask && ['failed', 'cancelled'].includes(ledgerTask.status);
@@ -70,8 +70,8 @@ export function NextStageBanner({ taskId }: { taskId: string }) {
               </p>
             )}
             <LedgerModelSelect
-              value={modelId}
-              onChange={setModelId}
+              value={models}
+              onChange={setModels}
               disabled={create.isPending || query.isLoading}
             />
             {create.error && (
@@ -81,7 +81,7 @@ export function NextStageBanner({ taskId }: { taskId: string }) {
               <Button
                 disabled={create.isPending || query.isLoading}
                 onClick={() =>
-                  create.mutate(modelId, {
+                  create.mutate(models, {
                     onSuccess: (data) => router.push(`/process/${data.taskId}`),
                   })
                 }

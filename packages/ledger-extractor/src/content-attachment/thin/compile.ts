@@ -11,6 +11,7 @@ import type {
 import { createContentAttachmentGroundedInput } from '../grounding';
 import {
   collectiveHandles,
+  isContentAttachmentThinTrivialText,
   offeredCandidates,
   sentenceSpans,
   wordOffsets,
@@ -30,7 +31,9 @@ import {
 /**
  * Compile one attachment unit into the thin per-unit model input and its code-only map.
  * Deterministic and offline: prefiltered candidates, collective handles, Q/L word windows,
- * sentence segments in Q/L, original reading order, captions and code-assigned table rows.
+ * sentence segments in Q/L, original reading order, captions and code-assigned table rows. Under the plan's
+ * `trivial: 'code'` policy, trivial segments stay readable in their windows but are decided by code as
+ * describing no candidate and are not listed for the model.
  */
 export function createContentAttachmentThinInput(
   plan: ContentAttachmentPlan,
@@ -89,7 +92,9 @@ export function createContentAttachmentThinInput(
     unit,
   );
 
+  const trivialByCode = plan.thinPolicy?.trivial === 'code';
   const segments: string[] = [];
+  const codeNone: string[] = [];
   const codeAssigned: Array<[string, ...string[]]> = [];
   const segSpans: ContentAttachmentThinSegmentSpan[] = [];
   const bodyBlocks: ContentAttachmentThinInput['bodyBlocks'] = [];
@@ -101,17 +106,24 @@ export function createContentAttachmentThinInput(
     if (r.kind === 'text') {
       const { words, rows } = toWindows(ref, text);
       const off = wordOffsets(r.data.text);
-      const spans = sentenceSpans(words).map(([a, b], i) => {
+      const spans = sentenceSpans(words).flatMap(([a, b], i) => {
         const seg = `${ref}:S${i + 1}`;
+        const charStart = off[a][0];
+        const charEnd = off[b][1];
+        const trivial =
+          trivialByCode &&
+          isContentAttachmentThinTrivialText(
+            r.data.text.slice(charStart, charEnd),
+          );
+        segSpans.push({ seg, key: r.key, charStart, charEnd, llm: !trivial });
+        if (trivial) {
+          codeNone.push(seg);
+          return [];
+        }
         segments.push(seg);
-        segSpans.push({
-          seg,
-          key: r.key,
-          charStart: off[a][0],
-          charEnd: off[b][1],
-          llm: true,
-        });
-        return [seg, wordSpanToRanges(ref, a + 1, b + 1)] as [string, string[]];
+        return [
+          [seg, wordSpanToRanges(ref, a + 1, b + 1)] as [string, string[]],
+        ];
       });
       bodyBlocks.push({ ref, windows: rows, segments: spans });
       return;
@@ -134,12 +146,14 @@ export function createContentAttachmentThinInput(
     if (!r.data.isHeader && text) {
       const off = wordOffsets(r.data.text);
       const seg = `${ref}:S1`;
+      const trivial =
+        !owner && trivialByCode && isContentAttachmentThinTrivialText(text);
       segSpans.push({
         seg,
         key: r.key,
         charStart: off[0][0],
         charEnd: off.at(-1)![1],
-        llm: !owner,
+        llm: !owner && !trivial,
         owner,
         codeTargets,
       });
@@ -147,7 +161,8 @@ export function createContentAttachmentThinInput(
         cell.rowOwner = owner;
         if (registered.length) cell.registeredInCell = registered;
         codeAssigned.push([seg, ...codeTargets] as [string, ...string[]]);
-      } else {
+      } else if (trivial) codeNone.push(seg);
+      else {
         segments.push(seg);
         cell.segments = [
           [seg, cellWindows.map(([q, ws]) => `${q}:L1-L${ws.length}`)],
@@ -280,6 +295,7 @@ export function createContentAttachmentThinInput(
       candidateRefs: [...offered],
       windows,
       codeAssigned,
+      ...(trivialByCode ? { codeNone } : {}),
       segSpans,
       rowBindings,
       handles: handles.map((h) => ({ ref: h.ref, members: h.members })),

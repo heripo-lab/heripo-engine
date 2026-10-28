@@ -108,7 +108,12 @@ describe('report profile', () => {
       contentAttachmentThinPolicyFromProfile(
         profile({ traits: { local_stratigraphy: 'no' } }),
       ),
-    ).toEqual({ layers: 'all', continuity: 'linked', areas: 'unanimous' });
+    ).toEqual({
+      layers: 'all',
+      continuity: 'linked',
+      areas: 'unanimous',
+      trivial: 'code',
+    });
     const localTraits: Array<ReportProfile['traits']> = [
       { local_stratigraphy: 'yes' },
       { local_stratigraphy: 'unclear' },
@@ -117,7 +122,12 @@ describe('report profile', () => {
     for (const traits of localTraits)
       expect(
         contentAttachmentThinPolicyFromProfile(profile({ traits })),
-      ).toEqual({ layers: 'local', continuity: 'linked', areas: 'unanimous' });
+      ).toEqual({
+        layers: 'local',
+        continuity: 'linked',
+        areas: 'unanimous',
+        trivial: 'code',
+      });
     expect(
       contentAttachmentThinPolicyFromProfile(
         profile({ traits: { catalog_artifacts: 'yes' } }),
@@ -127,6 +137,7 @@ describe('report profile', () => {
       continuity: 'linked',
       areas: 'unanimous',
       catalog: 'fields',
+      trivial: 'code',
     });
   });
 
@@ -153,6 +164,12 @@ describe('report profile', () => {
       {
         branch: 'catalog',
         value: 'none',
+        source: 'default',
+        needsDecision: false,
+      },
+      {
+        branch: 'trivial',
+        value: 'model',
         source: 'default',
         needsDecision: false,
       },
@@ -191,6 +208,12 @@ describe('report profile', () => {
         traitValue: 'unclear',
         needsDecision: true,
       },
+      {
+        branch: 'trivial',
+        value: 'code',
+        source: 'profile',
+        needsDecision: false,
+      },
     ]);
   });
 
@@ -205,6 +228,7 @@ describe('report profile', () => {
           catalog: 'none',
           continuity: 'none',
           areas: 'review',
+          trivial: 'model',
         },
       },
     );
@@ -225,6 +249,7 @@ describe('report profile', () => {
       ['continuity', 'none', 'policy_override', false],
       ['areas', 'review', 'policy_override', false],
       ['catalog', 'none', 'policy_override', false],
+      ['trivial', 'model', 'policy_override', false],
     ]);
     expect(withoutProfile.policy).toEqual({ layers: 'all', catalog: 'fields' });
     expect(withoutProfile.decisions[3]).toMatchObject({

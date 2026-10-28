@@ -101,6 +101,7 @@ export function validateArchaeologyLedger(
     ...result.sources,
     ...result.attributes,
     ...result.mediaReferences,
+    ...result.mediaCandidates,
     ...result.links,
     ...result.reviewItems,
   ].map((x) => x.id);
@@ -125,6 +126,9 @@ export function validateArchaeologyLedger(
       `media ${m.id}`,
       m.recordId,
     ]),
+    ...result.mediaCandidates.flatMap((m) =>
+      m.recordIds.map((id): [string, string] => [`media ${m.id}`, id]),
+    ),
     ...result.links.flatMap((l): Array<[string, string]> => [
       [`link ${l.id}`, l.fromRecordId],
       [`link ${l.id}`, l.toRecordId],
@@ -151,7 +155,12 @@ export function validateArchaeologyLedger(
         ? null
         : { message: `${from} names missing record ${id}` },
   );
-  const owned = [...result.records, ...result.mediaReferences, ...result.links];
+  const owned = [
+    ...result.records,
+    ...result.mediaReferences,
+    ...result.mediaCandidates,
+    ...result.links,
+  ];
   check(
     'ledger_ids',
     'structure',
@@ -165,6 +174,7 @@ export function validateArchaeologyLedger(
   );
   const imageRefs = [
     ...result.mediaReferences.map((m) => m.imageId),
+    ...result.mediaCandidates.flatMap((m) => m.imageIds),
     ...result.reviewItems.flatMap((i) => i.imageIds ?? []),
   ];
   check(

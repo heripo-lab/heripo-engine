@@ -133,6 +133,11 @@ const ledger = {
     { id: 'm1', recordId: 'child', ordinal: 1, imageId: 'img-1' },
     { id: 'm0', recordId: 'root', ordinal: 5, imageId: 'img-9' },
   ],
+  mediaCandidates: [
+    { id: 'mc-b', pdfPageNo: 9 },
+    { id: 'mc-c', pdfPageNo: 2 },
+    { id: 'mc-a', pdfPageNo: 9 },
+  ],
   links: [
     {
       id: 'l3',
@@ -202,6 +207,7 @@ describe('sortArchaeologyLedger', () => {
       'a-no-source',
     ]);
     expect(ids(result.mediaReferences)).toEqual(['m0', 'm1', 'm2', 'm3']);
+    expect(ids(result.mediaCandidates)).toEqual(['mc-c', 'mc-a', 'mc-b']);
     expect(ids(result.links)).toEqual(['l1', 'l0', 'l2', 'l3']);
     expect(result.reviewItems).toBe(ledger.reviewItems);
   });

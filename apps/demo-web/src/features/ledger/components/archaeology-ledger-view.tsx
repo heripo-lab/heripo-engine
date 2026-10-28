@@ -66,7 +66,6 @@ const REASON_LABEL: Record<string, string> = {
   alias_duplicate: '약칭 중복',
   media_ambiguous: '같은 번호의 이미지 여럿',
   media_caption_several: '캡션이 여러 객체를 가리킴',
-  media_same_page: '같은 쪽의 캡션 없는 이미지',
   attribute_owner_ambiguous: '문장이 다른 객체도 언급함',
   link_enclosure: '둘러쌈 서술',
   link_several_targets: '나열된 여러 객체',
@@ -84,6 +83,7 @@ const PARENT_BASIS_LABEL = {
 const BASIS_LABEL: Record<string, string> = {
   registration: '객체 등록 근거',
   model_unanimous: '모든 호출 일치',
+  model_majority: '세 호출 중 둘 일치',
   code_row_owner: '표 행 소유 객체',
   code_typed_row: '표 유형 행',
   code_cell_registration: '표 칸 등록',
@@ -404,7 +404,9 @@ function RecordDetail({
   const media = view.ledger.mediaReferences.filter(
     (m) => m.recordId === record.id,
   );
-  const samePage = itemsOf.filter((i) => i.reasons.includes('media_same_page'));
+  const samePage = view.ledger.mediaCandidates.filter((c) =>
+    c.recordIds.includes(record.id),
+  );
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -535,10 +537,11 @@ function RecordDetail({
               />
             ))}
           </div>
-          {samePage.map((i) => (
-            <p key={i.id} className="text-muted-foreground mt-2 text-xs">
-              PDF {i.pdfPageNo}쪽 캡션 없는 이미지 {i.imageIds?.length}장은 어느
-              객체의 것인지 정해지지 않았습니다(검수).
+          {samePage.map((c) => (
+            <p key={c.id} className="text-muted-foreground mt-2 text-xs">
+              PDF {c.pdfPageNo}쪽 캡션 없는 이미지 {c.imageIds.length}장이 이
+              쪽의 객체 {c.recordIds.length}개와 관련된 쪽 단위 후보입니다.
+              이미지별 객체는 정하지 않았습니다.
             </p>
           ))}
         </div>
@@ -823,16 +826,14 @@ function MediaList({
   const byImage = new Map<string, LedgerMediaReference[]>();
   for (const m of view.ledger.mediaReferences)
     byImage.set(m.imageId, [...(byImage.get(m.imageId) ?? []), m]);
-  const groups = view.ledger.reviewItems.filter((i) =>
-    i.reasons.includes('media_same_page'),
-  );
+  const groups = view.ledger.mediaCandidates;
   const images = [...byImage];
   return (
     <div className="space-y-6 text-sm">
       <p className="text-muted-foreground text-xs">
         이미지 {images.length}장에 객체{' '}
         {new Set(view.ledger.mediaReferences.map((m) => m.recordId)).size}개
-        연결 · 같은 쪽 검수 묶음 {groups.length}개
+        연결 · 같은 쪽 후보 {groups.length}쪽
       </p>
       <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {images.slice(0, limit).map(([imageId, refs]) => (
@@ -869,14 +870,16 @@ function MediaList({
       )}
       {groups.length > 0 && (
         <section className="space-y-3">
-          <h3 className="font-medium">같은 쪽의 캡션 없는 이미지 (검수)</h3>
+          <h3 className="font-medium">
+            같은 쪽의 캡션 없는 이미지 (쪽 단위 후보)
+          </h3>
           {groups.slice(0, 6).map((g) => (
             <div key={g.id} className="space-y-1 rounded border p-2">
               <div className="text-xs">
                 PDF {g.pdfPageNo}쪽 · 객체 {g.recordIds.map(nameOf).join(', ')}
               </div>
               <div className="flex flex-wrap gap-2">
-                {g.imageIds?.map((id) => (
+                {g.imageIds.map((id) => (
                   <MediaThumb key={id} view={view} imageId={id} />
                 ))}
               </div>
@@ -884,7 +887,7 @@ function MediaList({
           ))}
           {groups.length > 6 && (
             <p className="text-muted-foreground text-xs">
-              외 {groups.length - 6}개 쪽은 검수 항목 탭에 있습니다.
+              외 {groups.length - 6}개 쪽은 각 객체 화면에 있습니다.
             </p>
           )}
         </section>
@@ -1239,7 +1242,10 @@ export function ArchaeologyLedgerView({ taskId }: { taskId: string }) {
             )}
             {view.placeAliases.status === 'applied' && (
               <Badge variant="outline">
-                사람 지정 대응 규칙 {view.placeAliases.ruleIds.length}개
+                {view.placeAliases.source === 'model'
+                  ? '자동 제안'
+                  : '사람 지정'}{' '}
+                대응 규칙 {view.placeAliases.ruleIds.length}개
               </Badge>
             )}
             {view.placeAliases.status === 'invalid' && (

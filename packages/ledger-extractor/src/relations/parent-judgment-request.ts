@@ -92,20 +92,20 @@ export function createRelationParentSchema(questionRefs: string[]) {
 const norm = (text: string) => text.replace(/\s+/g, '');
 const clip = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max)}…` : text;
-const labelOf = (r: LedgerRecord) =>
+export const labelOf = (r: LedgerRecord) =>
   r.sourceIdentifier && !r.sourceName.includes(r.sourceIdentifier)
     ? `${r.sourceIdentifier} ${r.sourceName}`
     : r.sourceName;
 const numbersOf = (text: string): string[] => text.match(/\d+/g) ?? [];
 /** Name words of at least two letters, numbers removed (`23-1 구역` → `구역`). */
-const wordsOf = (text: string) =>
+export const wordsOf = (text: string) =>
   text.replace(/[\d-]+/g, ' ').match(/[가-힣A-Za-z]{2,}/g) ?? [];
 
 /**
  * Records a stated but unregistered place may mean: another kind, a name word found in the place and, when the
  * place has numbers, a shared number. `발굴 1구역` offers `23-1 구역` (구역, 1) but `98호 수혈` offers no `96호 수혈`.
  */
-function placeCandidates(
+export function placeCandidates(
   place: string,
   child: LedgerRecord,
   records: LedgerRecord[],
@@ -129,7 +129,7 @@ function placeCandidates(
  * area `정밀발굴조사`. Without offered candidates there is nothing to tie the place to. Records with more
  * excerpts come first.
  */
-function contextRecords(
+export function contextRecords(
   place: string,
   child: LedgerRecord,
   records: LedgerRecord[],

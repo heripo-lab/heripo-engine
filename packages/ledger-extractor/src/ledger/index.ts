@@ -37,6 +37,7 @@ export type {
   LedgerExtractionIssueCode,
   LedgerExtractionStage,
   LedgerIssueSeverity,
+  LedgerMediaCandidate,
   LedgerMediaReference,
   LedgerRecordAttribute,
   LedgerParentEvidence,

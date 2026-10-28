@@ -11,6 +11,7 @@ import { describe, expect, test } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
 import { createContentAttachmentThinInput } from './compile';
+import { isContentAttachmentThinTrivialText } from './compile-candidates';
 import {
   CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
   CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION,
@@ -549,6 +550,79 @@ describe('createContentAttachmentThinInput', () => {
       owner: null,
       codeTargets: [],
     });
+  });
+
+  test('decides trivial body and cell segments by code under the trivial policy and keeps their windows', () => {
+    const { plan, unit } = fixture();
+    const block = unit.sources.find(
+      (s) => s.resource.key === '/chapters/0/textBlocks/1',
+    )!.resource;
+    block.data.text = '사진 12 수혈 3호 출토유물(1~3) 6월 7일 끝.';
+
+    const before = createContentAttachmentThinInput(plan, unit);
+    const { input, codeMap } = createContentAttachmentThinInput(
+      { ...plan, thinPolicy: { layers: 'all', trivial: 'code' } },
+      unit,
+    );
+
+    expect(before.codeMap.codeNone).toBeUndefined();
+    expect(before.codeMap.segments).toContain('E10:S1');
+    expect(codeMap.codeNone).toEqual(['E10:S1']);
+    expect(codeMap.segments).not.toContain('E10:S1');
+    expect(codeMap.segSpans.find((s) => s.seg === 'E10:S1')).toMatchObject({
+      llm: false,
+      owner: null,
+    });
+    expect(input.tables[0].rows[2].cells[0]).toEqual({
+      ref: 'E10',
+      header: false,
+      windows: [['Q8', ['9']]],
+    });
+    expect(input.bodyBlocks[1].windows.length).toBeGreaterThan(0);
+
+    block.data.text = '사진 12 수혈 3호 출토유물(1~3)';
+    const trivialBody = createContentAttachmentThinInput(
+      { ...plan, thinPolicy: { layers: 'all', trivial: 'code' } },
+      unit,
+    );
+    expect(trivialBody.codeMap.codeNone).toEqual(['E2:S1', 'E10:S1']);
+    expect(trivialBody.input.bodyBlocks[1].segments).toEqual([]);
+    expect(
+      trivialBody.codeMap.segSpans.find((s) => s.seg === 'E2:S1'),
+    ).toMatchObject({ llm: false });
+  });
+
+  test('treats numbers, dates and short non-sentence labels as trivial text', () => {
+    for (const text of [
+      '171',
+      ' 1,123 28 ',
+      '34,000',
+      '(3.5)',
+      '6월 7일',
+      '2023년 6월 7일',
+      '2023년8월19일(토)',
+      '2023년 8월 19일 (토요일)',
+      '14:30~15:30(60분)',
+      '09:49~10:17 (2시간)',
+      '사진 148 조선시대 건물지 주변 구상유구 출토유물2(80~83)',
+      '도면 54 조선시대 1~4호 건물지와 주변 구상유구 평면도(S=1/100)',
+      '표 1 주변 유적 분포 현황',
+    ])
+      expect(isContentAttachmentThinTrivialText(text)).toBe(true);
+    for (const text of [
+      '2,776㎡',
+      '내저원각지름',
+      '-',
+      '표 3에서 보듯이 1호 주거지는 방형이다.',
+      '사진 1 수혈은 원형이다',
+      '사진 2 수혈 확인.',
+      `사진 3 ${'유물 '.repeat(40)}`,
+      '29. 목록',
+      '(토)',
+      '1호(토)',
+      '2023년8월19일(토) 제토조사',
+    ])
+      expect(isContentAttachmentThinTrivialText(text)).toBe(false);
   });
 
   test('adds read-only context, captions and original reading order', () => {

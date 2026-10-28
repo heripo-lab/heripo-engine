@@ -25,8 +25,19 @@ const STATUS: Record<ContentAttachmentThinState['status'], string> = {
   interrupted: '서버 재시작으로 중단 · 다시 시작하면 끝난 묶음은 건너뜀',
 };
 
+const BATCH_STATUS: Record<
+  NonNullable<ContentAttachmentThinState['batch']>['status'],
+  string
+> = {
+  in_progress:
+    '처리 대기 중 (결과가 나오면 자동 저장, 서버 재시작 후에도 이어서 확인)',
+  canceling: '취소 중',
+  ended: '종료 · 결과 저장 중',
+  processed: '결과 저장 완료',
+};
+
 /**
- * Optional thin path: every unit of the prepared plan, three calls per unit, at most one replacement.
+ * Optional thin path: every unit of the prepared plan, two calls per unit.
  * The default first-unit flow above is unchanged.
  */
 export function ContentAttachmentThinSection({
@@ -56,6 +67,7 @@ export function ContentAttachmentThinSection({
   const linked = thinPolicy?.continuity === 'linked';
   const votedAreas = thinPolicy?.areas === 'unanimous';
   const catalogFields = thinPolicy?.catalog === 'fields';
+  const trivialByCode = thinPolicy?.trivial === 'code';
   // how a branch was decided: caller override, profile trait or default, and whether it still needs a decision
   const decisionNote = (
     branch: NonNullable<
@@ -99,6 +111,10 @@ export function ContentAttachmentThinSection({
     modelInput ??
     (thin?.usage.calls ? thin.modelId : 'anthropic/claude-haiku-5-5');
   const modelLocked = !!thin?.usage.calls;
+  // the Message Batches API halves the price of Anthropic calls; other providers are always called directly
+  const [batchInput, setBatchInput] = useState(true);
+  const anthropicModel = modelId.startsWith('anthropic/');
+  const batch = batchInput && anthropicModel;
   const isRunning = thin?.status === 'running';
   const units = Object.values(thin?.units ?? {});
   const count = (s: string) => units.filter((u) => u === s).length;
@@ -117,10 +133,12 @@ export function ContentAttachmentThinSection({
     <section className="space-y-3 rounded border p-3">
       <h3 className="font-medium">얇은 묶음 배정 (전체 묶음)</h3>
       <p className="text-sm">
-        같은 순회 계획의 모든 묶음을 묶음당 3회 호출해 대상 단위 만장일치만 자동
-        확정합니다. 이상 호출은 1회만 다시 부르고, 실패한 호출은 다시 보내지
-        않습니다. 층위와 결과가 갈린 구간, 그리고 면적 3표 확정 정책이 아닌
-        계획의 면적은 검수 항목으로 남습니다. 호출 비용이 발생합니다.
+        같은 순회 계획의 모든 묶음을 묶음당 2회 호출해 두 호출이 같은 대상만
+        자동 확정합니다. 일괄 처리를 켜면 예산 안의 묶음을 한 번에 제출하고, 각
+        호출의 입력 길이와 출력 상한 32,000토큰을 미리 예산에서 잡습니다. 실패한
+        호출은 다시 보내지 않습니다. 층위와 결과가 갈린 구간, 그리고 면적
+        만장일치 확정 정책이 아닌 계획의 면적은 검수 항목으로 남습니다. 호출
+        비용이 발생합니다.
       </p>
       {planSnapshotId && (
         <p className="font-mono text-xs">
@@ -151,7 +169,7 @@ export function ContentAttachmentThinSection({
             <div>
               면적 제안{' '}
               {votedAreas
-                ? '3표 확정(unanimous): 세 호출이 모두 고른 면적은 확정, 일부만 고른 면적은 다툼 대상으로 검수'
+                ? '만장일치 확정(unanimous): 모든 호출이 고른 면적은 확정, 일부만 고른 면적은 다툼 대상으로 검수'
                 : '항상 검수(기존 방식)'}
               {decisionNote('areas')}
             </div>
@@ -161,6 +179,13 @@ export function ContentAttachmentThinSection({
                 ? '필드 줄 포함(fields, 프롬프트 v14): 번호·이름·영문명·출수 정보·계측값 줄도 그 항목의 유물을 서술'
                 : '별도 규칙 없음(프롬프트 v13)'}
               {decisionNote('catalog')}
+            </div>
+            <div>
+              단순 구간{' '}
+              {trivialByCode
+                ? '코드 판정(code): 숫자만 있는 구간, 날짜, 문장이 아닌 그림·사진·표 번호 구간은 모델에 묻지 않고 배정 없음'
+                : '모델 판정(기존 방식)'}
+              {decisionNote('trivial')}
             </div>
             <p className="font-mono text-xs break-all">
               컴파일 {compileVersion} ·{' '}
@@ -218,11 +243,22 @@ export function ContentAttachmentThinSection({
             onChange={(e) => setMaxTotalTokens(Number(e.target.value))}
           />
         </label>
+        <label className="flex items-center gap-2 pb-2">
+          <input
+            type="checkbox"
+            checked={batch}
+            disabled={isRunning || !anthropicModel}
+            onChange={(e) => setBatchInput(e.target.checked)}
+          />
+          <span>일괄 처리 (Anthropic만 · 요금 50% · 최대 24시간)</span>
+        </label>
         <Button
           disabled={
             !planReady || stale || !modelId || isRunning || runThin.isPending
           }
-          onClick={() => runThin.mutate({ maxCalls, maxTotalTokens, modelId })}
+          onClick={() =>
+            runThin.mutate({ maxCalls, maxTotalTokens, modelId, batch })
+          }
         >
           {thin ? '얇은 배정 이어서 실행' : '얇은 배정 실행'}
         </Button>
@@ -269,6 +305,14 @@ export function ContentAttachmentThinSection({
             {thin.usage.failures}회 · 이번 예산 {thin.budget.maxCalls}회 /{' '}
             {thin.budget.maxTotalTokens.toLocaleString()}토큰
           </p>
+          {thin.batch && (
+            <p>
+              일괄 처리 {thin.batch.id} · {BATCH_STATUS[thin.batch.status]} ·
+              묶음 {thin.batch.unitIds.length}개 · 예약 토큰{' '}
+              {thin.batch.reservedTokens.toLocaleString()} · 제출{' '}
+              {new Date(thin.batch.submittedAt).toLocaleString()}
+            </p>
+          )}
           {thin.stoppedBy && <p>중단 사유: {thin.stoppedBy}</p>}
           {thin.summary && (
             <p>

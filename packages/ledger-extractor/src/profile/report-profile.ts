@@ -59,6 +59,11 @@ export interface ContentAttachmentThinPolicy {
   areas?: 'unanimous';
   /** `fields`: requests add the rule that every line of a catalog entry describes its object (prompt v12, v14 with the collective-summary rule). */
   catalog?: 'fields';
+  /**
+   * `code`: segments that are only numbers, a short figure, photo, plate or table label, or a date are decided
+   * by code as describing no candidate and are not asked of the model. Absent: the model judges every segment.
+   */
+  trivial?: 'code';
 }
 
 const TRAIT_VALUES = new Set<string>(['yes', 'no', 'unclear']);
@@ -120,6 +125,7 @@ export interface ContentAttachmentThinPolicyOverrides {
   continuity?: 'linked' | 'none';
   areas?: 'unanimous' | 'review';
   catalog?: 'fields' | 'none';
+  trivial?: 'code' | 'model';
 }
 export type ContentAttachmentThinBranch =
   keyof ContentAttachmentThinPolicyOverrides;
@@ -144,6 +150,7 @@ const BRANCH_VALUES: Record<ContentAttachmentThinBranch, string[]> = {
   continuity: ['linked', 'none'],
   areas: ['unanimous', 'review'],
   catalog: ['fields', 'none'],
+  trivial: ['code', 'model'],
 };
 
 /**
@@ -151,7 +158,8 @@ const BRANCH_VALUES: Record<ContentAttachmentThinBranch, string[]> = {
  * trait decided by the caller (`traitOverrides`), then the profile's trait, then the default. Without a profile
  * and without overrides the rules stay as before. Report-wide layers stay offered everywhere under `local`, so
  * an unclear stratigraphy judgment uses `local`; page-boundary linking and unanimous areas follow any confirmed
- * profile; the catalog-entry rule needs a confirmed catalog of artifacts. Every branch is recorded with its source.
+ * profile; the catalog-entry rule needs a confirmed catalog of artifacts; code-decided trivial segments follow any
+ * confirmed profile. Every branch is recorded with its source.
  */
 export function resolveContentAttachmentThinPolicy(
   profile?: ReportProfile,
@@ -223,6 +231,7 @@ export function resolveContentAttachmentThinPolicy(
     decide('catalog', () =>
       byTrait('catalog_artifacts', 'fields', 'none', 'none'),
     ),
+    decide('trivial', () => byProfile('code', 'model')),
   ];
   const value = (branch: ContentAttachmentThinBranch) =>
     decisions.find((d) => d.branch === branch)!.value;
@@ -236,6 +245,7 @@ export function resolveContentAttachmentThinPolicy(
         ? { areas: 'unanimous' as const }
         : {}),
       ...(value('catalog') === 'fields' ? { catalog: 'fields' as const } : {}),
+      ...(value('trivial') === 'code' ? { trivial: 'code' as const } : {}),
     },
     decisions,
   };

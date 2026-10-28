@@ -98,9 +98,10 @@ export const proposal = (
 export const audit = (
   unit: CandidateDiscoveryUnit,
   response: CandidateDiscoveryResponse,
+  promptVersion?: Parameters<typeof createCandidateDiscoveryRequest>[1],
 ): CandidateDiscoveryAudit => ({
   unitId: unit.unitId,
-  ...createCandidateDiscoveryRequest(unit),
+  ...createCandidateDiscoveryRequest(unit, promptVersion),
   response,
   usage,
 });

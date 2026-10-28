@@ -8,19 +8,27 @@ import {
   assembleCandidateDeduplication,
   assembleCandidateDiscovery,
   buildDocumentResourceIndex,
-  createCandidateDeduplicationRequest,
-  deduplicateCandidates,
+  deduplicateCandidateBlocks,
   discoverCandidateUnit,
   isSameCandidateDiscoveryScope,
   prepareCandidateDiscovery,
   prepareCandidateDiscoveryRetry,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'fs';
 import { join } from 'path';
 
 import { paths } from '../paths';
 import { createModel } from '../processing/model-factory';
+import { isAnthropicModelId } from './anthropic-batch';
+import { answerDeduplicationBlocksByBatch } from './deduplication-batch';
+import { discoverUnitsByBatch } from './discovery-batch';
 import { parseLedgerInputText } from './ledger-input';
 import { getReportProfile } from './report-profile';
 
@@ -28,6 +36,12 @@ export interface CandidateDiscoveryRunSettings {
   /** One chapter subtree, or several distinct, non-nested chapter subtrees. */
   scopeChapterId: string | string[];
   modelId: string;
+  /** The model of the duplicate review; the discovery model when left out. */
+  deduplicationModelId?: string;
+  /** Answer the duplicate review blocks through the Anthropic Message Batches API (Anthropic models only). */
+  deduplicationBatch?: boolean;
+  /** Discover candidates through the Anthropic Message Batches API, first calls then follow-ups (Anthropic only). */
+  discoveryBatch?: boolean;
   maxTextChars: number;
   tableRowsPerUnit: number;
   maxRetries: number;
@@ -192,6 +206,15 @@ export async function startCandidateDiscovery(
     initialResult = retry.result;
   }
   const model = createModel(settings.modelId);
+  const deduplicationModelId =
+    settings.deduplicationModelId ?? settings.modelId;
+  if (settings.deduplicationBatch && !isAnthropicModelId(deduplicationModelId))
+    throw new Error('Batch duplicate review needs an Anthropic model');
+  if (settings.discoveryBatch && !isAnthropicModelId(settings.modelId))
+    throw new Error('Batch discovery needs an Anthropic model');
+  const deduplicationModel = settings.deduplicationModelId
+    ? createModel(settings.deduplicationModelId)
+    : model;
   const runId = randomUUID();
   const directory = join(rootFor(taskId), runId);
   mkdirSync(directory, { recursive: true });
@@ -239,6 +262,34 @@ export async function startCandidateDiscovery(
   void (async () => {
     const audits: CandidateDiscoveryAudit[] = [...retainedAudits];
     try {
+      if (settings.discoveryBatch) {
+        const open = plan.units.flatMap((unit, index) =>
+          audits.some((a) => a.unitId === unit.unitId) ? [] : [{ index, unit }],
+        );
+        if (open.length) {
+          const batch = await discoverUnitsByBatch({
+            units: open,
+            modelId: settings.modelId,
+            directory,
+            abortSignal: controller.signal,
+          });
+          for (const { index, audit } of batch.audits) {
+            writeFileSync(
+              join(directory, `unit-${String(index).padStart(4, '0')}.json`),
+              JSON.stringify(audit, null, 2),
+            );
+            audits.push(audit);
+          }
+          run.result = await assembleCandidateDiscovery(plan, audits);
+          run.completedUnits = run.result.completedUnitIds.length;
+          save();
+          // the answered units stay saved; the failed ones can be asked again with a retry of failed units
+          if (batch.failures.length)
+            throw new Error(
+              `Discovery batch failures: ${batch.failures.join('; ')}`,
+            );
+        }
+      }
       for (const [i, unit] of plan.units.entries()) {
         controller.signal.throwIfAborted();
         if (audits.some((a) => a.unitId === unit.unitId)) continue;
@@ -260,15 +311,35 @@ export async function startCandidateDiscovery(
       save();
       controller.signal.throwIfAborted();
       if (run.result.candidates.length) {
-        const request = createCandidateDeduplicationRequest(plan, run.result);
-        writeFileSync(
-          join(directory, 'deduplication-request.json'),
-          JSON.stringify(request, null, 2),
-        );
-        const audit = await deduplicateCandidates(plan, run.result, {
-          model,
+        // code merges same numbers and number correspondences; a model judges the remaining blocks one by one,
+        // each saved as it finishes so a restarted run does not send it again
+        const blockDir = join(directory, 'deduplication-blocks');
+        mkdirSync(blockDir, { recursive: true });
+        const completed = readdirSync(blockDir)
+          .filter((f) => f.endsWith('.json'))
+          .map((f) => readJson(join(blockDir, f)));
+        if (settings.deduplicationBatch)
+          completed.push(
+            ...(await answerDeduplicationBlocksByBatch({
+              plan,
+              discovery: run.result,
+              modelId: deduplicationModelId,
+              blockDir,
+              batchFile: join(directory, 'deduplication-batch.json'),
+              completed,
+              abortSignal: controller.signal,
+            })),
+          );
+        const audit = await deduplicateCandidateBlocks(plan, run.result, {
+          model: deduplicationModel,
           maxRetries: settings.maxRetries,
           abortSignal: controller.signal,
+          completed,
+          onBlock: (block) =>
+            writeFileSync(
+              join(blockDir, `${block.blockId}.json`),
+              JSON.stringify(block, null, 2),
+            ),
         });
         writeFileSync(
           join(directory, 'deduplication-audit.json'),

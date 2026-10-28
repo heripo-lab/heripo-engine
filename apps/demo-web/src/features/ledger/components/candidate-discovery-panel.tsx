@@ -48,6 +48,16 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
   const { query, start, cancel, audit } = useCandidateDiscovery(taskId);
   const [scope, setScope] = useState<string[]>([]);
   const [modelId, setModelId] = useState('anthropic/claude-haiku-5-5');
+  const [deduplicationModelId, setDeduplicationModelId] = useState(
+    'anthropic/claude-haiku-5-5',
+  );
+  // duplicate review blocks of an Anthropic model go out as one Message Batch at half the price
+  const [deduplicationBatchInput, setDeduplicationBatchInput] = useState(true);
+  const anthropicDeduplication = deduplicationModelId.startsWith('anthropic/');
+  const deduplicationBatch = deduplicationBatchInput && anthropicDeduplication;
+  const [discoveryBatchInput, setDiscoveryBatchInput] = useState(true);
+  const discoveryBatch =
+    discoveryBatchInput && modelId.startsWith('anthropic/');
   const [maxTextChars, setMaxTextChars] = useState(
     discoveryMaxTextChars('anthropic/claude-haiku-5-5'),
   );
@@ -269,8 +279,8 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
               })}
             </div>
             <p className="text-muted-foreground mt-1 text-xs">
-              선택한 장의 하위 장은 자동으로 포함됩니다. 여러 장의 후보는 중복
-              검토 한 번으로 함께 묶습니다.
+              선택한 장의 하위 장은 자동으로 포함됩니다. 여러 장의 후보도 같은
+              중복 검토에서 함께 묶습니다.
             </p>
           </fieldset>
           <label className="text-sm">
@@ -285,6 +295,35 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 setMaxTextChars(discoveryMaxTextChars(e.target.value));
               }}
             />
+          </label>
+          <label className="text-sm">
+            중복 검토 모델
+            <input
+              aria-label="중복 검토 모델"
+              className="bg-background mt-1 w-full rounded border p-2 font-mono"
+              value={deduplicationModelId}
+              disabled={running}
+              onChange={(e) => setDeduplicationModelId(e.target.value)}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={discoveryBatch}
+              disabled={running || !modelId.startsWith('anthropic/')}
+              onChange={(e) => setDiscoveryBatchInput(e.target.checked)}
+            />
+            후보 판단 일괄 처리 (Anthropic만 · 요금 50% · 첫 질문과 후속 질문
+            각각 최대 24시간)
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={deduplicationBatch}
+              disabled={running || !anthropicDeduplication}
+              onChange={(e) => setDeduplicationBatchInput(e.target.checked)}
+            />
+            중복 검토 일괄 처리 (Anthropic만 · 요금 50% · 최대 24시간)
           </label>
         </div>
         <details>
@@ -338,12 +377,19 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={
-              !scopeIds.length || !modelId || running || start.isPending
+              !scopeIds.length ||
+              !modelId ||
+              !deduplicationModelId ||
+              running ||
+              start.isPending
             }
             onClick={() =>
               start.mutate({
                 scopeChapterId,
                 modelId,
+                deduplicationModelId,
+                deduplicationBatch,
+                discoveryBatch,
                 maxTextChars,
                 tableRowsPerUnit,
                 maxRetries,
@@ -356,11 +402,13 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
           {run && run.completedUnits === run.totalUnits && !running && (
             <Button
               variant="outline"
-              disabled={start.isPending || !modelId}
+              disabled={start.isPending || !deduplicationModelId}
               onClick={() =>
                 start.mutate({
                   ...run.settings,
                   modelId,
+                  deduplicationModelId,
+                  deduplicationBatch,
                   deduplicationOnly: true,
                   retryFailedUnits: false,
                 })
@@ -380,6 +428,9 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                   start.mutate({
                     ...run.settings,
                     modelId,
+                    deduplicationModelId,
+                    deduplicationBatch,
+                    discoveryBatch,
                     deduplicationOnly: false,
                     retryFailedUnits: true,
                   })
@@ -436,6 +487,9 @@ export function CandidateDiscoveryPanel({ taskId }: { taskId: string }) {
                 ).join(', ')}
                 ){run.settings.useProfileScope ? ' · 프로필 범위' : ''} · 모델{' '}
                 {run.settings.modelId}
+                {run.settings.deduplicationModelId &&
+                  run.settings.deduplicationModelId !== run.settings.modelId &&
+                  ` · 중복 검토 ${run.settings.deduplicationModelId}`}
               </p>
               <p className="font-mono text-xs break-all">
                 실행 {run.runId} · 입력 {run.result.inputSha256}

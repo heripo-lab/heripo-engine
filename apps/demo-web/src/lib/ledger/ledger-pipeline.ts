@@ -1,18 +1,29 @@
+import type { RelationParentJudgment } from '@heripo/ledger-extractor';
+
 import type { LedgerTaskOptions } from './ledger-task-options';
 
 import {
   buildDocumentResourceIndex,
   collectReportSignals,
   completeReportScope,
+  judgeRelationParentBatch,
   prepareCandidateDiscovery,
+  proposePlaceAliases,
 } from '@heripo/ledger-extractor';
 import { createHash } from 'crypto';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 
 import { discoveryMaxTextChars } from '~/features/ledger/constants/ledger-run';
 
 import { paths } from '../paths';
-import { getArchaeologyLedger } from './archaeology-ledger';
+import { createModel } from '../processing/model-factory';
+import {
+  getArchaeologyLedger,
+  getParentJudgmentRequests,
+  getPlaceAliasProposalRequest,
+  saveParentJudgments,
+} from './archaeology-ledger';
 import {
   cancelCandidateDiscovery,
   getCandidateDiscoveryAudit,
@@ -27,6 +38,8 @@ import {
 } from './content-attachment-thin-run';
 import { saveDiscoveryScope } from './discovery-scope';
 import { parseLedgerInputText } from './ledger-input';
+import { usesBatch } from './ledger-task-options';
+import { readPlaceAliases, savePlaceAliases } from './place-aliases';
 import { getReportProfile, runReportRouter } from './report-profile';
 
 /** Steps of the automatic run, in order; the worker reports each as a progress step. */
@@ -51,6 +64,10 @@ const RESERVE = {
   tokensPerDiscoveryUnit: 120_000,
   deduplicationTokens: 250_000,
   thinTokensInFlight: 400_000,
+  // output reserved per parent judgment call; its answers are a record ID, evidence IDs and a short reason
+  parentOutputTokens: 16_000,
+  // output reserved per place alias proposal call; its answers are a few rules with statement IDs
+  aliasOutputTokens: 16_000,
 };
 const POLL_MS = 2000;
 
@@ -76,7 +93,13 @@ function discoveryUsage(taskId: string): Usage {
     taskId,
     run,
   );
-  const all = [...audits, ...(deduplicationAudit ? [deduplicationAudit] : [])];
+  // a split review saves one audit per model block
+  const deduplication = !deduplicationAudit
+    ? []
+    : 'blocks' in deduplicationAudit
+      ? deduplicationAudit.blocks
+      : [deduplicationAudit];
+  const all = [...audits, ...deduplication];
   return {
     calls: all.reduce((n, a) => n + (a.structuredAttempts ?? 1), 0),
     totalTokens: all.reduce((n, a) => n + (a.usage?.totalTokens ?? 0), 0),
@@ -84,10 +107,11 @@ function discoveryUsage(taskId: string): Usage {
 }
 
 /**
- * Run every ledger step of a task with one model, in order, without a person in between: the report router
+ * Run every ledger step of a task with its chosen model, in order, without a person in between: the report router
  * (a proposed scope is completed with the code's investigation chapters and saved for the ledger header),
- * candidate discovery with duplicate review, the content attachment plan, thin attachment of every unit, and
- * the ledger build with validation. Each step runs through the same functions as the manual panels, so its
+ * candidate discovery with duplicate review, the content attachment plan, thin attachment of every unit, a
+ * two-run place alias proposal when no person's table is saved, a three-run judgment of the parent questions code leaves open (with the attachment model), and the ledger build
+ * with validation. Each step runs through the same functions as the manual panels, so its
  * artifacts appear there. A step starts only when the calls and tokens left in `options.budget` cover its
  * reserved worst case; the run stops with an error otherwise or when a step fails.
  */
@@ -100,7 +124,7 @@ export async function runLedgerPipeline(
     abortSignal?: AbortSignal;
   },
 ) {
-  const { modelId, budget } = options;
+  const { models, budget } = options;
   const { onStep, log, abortSignal } = hooks;
   const used: Usage = { calls: 0, totalTokens: 0 };
   const left = () => ({
@@ -118,8 +142,8 @@ export async function runLedgerPipeline(
   // 1. report profile: one router call
   onStep('report-profile');
   require('Report router', 1, 50_000);
-  log(`Classifying the report with ${modelId}...`);
-  const router = await runReportRouter(taskId, modelId);
+  log(`Classifying the report with ${models.router}...`);
+  const router = await runReportRouter(taskId, models.router);
   used.calls += 1;
   used.totalTokens += router.usage.totalTokens;
   const stored = await getReportProfile(taskId);
@@ -155,7 +179,7 @@ export async function runLedgerPipeline(
   const units = prepareCandidateDiscovery(index, {
     scopeChapterId,
     ...DISCOVERY,
-    maxTextChars: discoveryMaxTextChars(modelId),
+    maxTextChars: discoveryMaxTextChars(models.discovery),
     inputSha256: 'count',
   }).units.length;
   require('Candidate discovery', units * RESERVE.callsPerDiscoveryUnit +
@@ -165,11 +189,17 @@ export async function runLedgerPipeline(
       ? `Discovering candidates in ${units} units of ${scope.join(', ')} (router proposal ${completion.proposedChapterIds.join(', ') || 'none'}; added from investigation chapters: ${completion.addedChapterIds.join(', ') || 'none'})...`
       : `Discovering candidates in ${units} units of ${scope.join(', ')} (profile scope)...`,
   );
+  log(
+    `Discovery model ${models.discovery}, duplicate review model ${models.deduplication}`,
+  );
   await startCandidateDiscovery(taskId, {
     scopeChapterId,
-    modelId,
+    modelId: models.discovery,
+    deduplicationModelId: models.deduplication,
+    deduplicationBatch: usesBatch(options, models.deduplication),
+    discoveryBatch: usesBatch(options, models.discovery),
     ...DISCOVERY,
-    maxTextChars: discoveryMaxTextChars(modelId),
+    maxTextChars: discoveryMaxTextChars(models.discovery),
     ...(decided ? { useProfileScope: true } : {}),
   });
   try {
@@ -193,18 +223,29 @@ export async function runLedgerPipeline(
 
   // 3. content attachment plan (no calls) and thin attachment of every unit
   onStep('content-attachment');
+  // a proposal that failed discovery checks is already left out of the candidates; the run goes on and the
+  // ledger lists it as a warning instead of the whole run stopping on it
+  const dropped = discovery.result.issues;
+  if (dropped.length)
+    log(
+      `Left out ${dropped.length} discovery proposals that failed their checks: ${dropped.map((d) => d.reason).join('; ')}`,
+    );
   const plan = await prepareContentAttachmentRun(taskId, {
     maxUnitChars: MAX_UNIT_CHARS,
+    acceptDroppedProposals: true,
   });
+  // a batch reserves the worst case of every call it holds before it is sent, so nothing is kept in flight
+  const batch = usesBatch(options, models.attachment);
+  const inFlight = batch ? 0 : RESERVE.thinTokensInFlight;
   const thinBudget = {
     maxCalls: left().calls,
-    maxTotalTokens: left().totalTokens - RESERVE.thinTokensInFlight,
+    maxTotalTokens: left().totalTokens - inFlight,
   };
-  require('Content attachment', 4, RESERVE.thinTokensInFlight + 1);
+  require('Content attachment', 4, inFlight + 1);
   log(
-    `Attaching source text to ${plan.registryCount} records in ${plan.totalUnits} units (budget ${thinBudget.maxCalls} calls, ${thinBudget.maxTotalTokens} tokens)...`,
+    `Attaching source text to ${plan.registryCount} records in ${plan.totalUnits} units with ${models.attachment}${batch ? ' through the Message Batches API' : ''} (budget ${thinBudget.maxCalls} calls, ${thinBudget.maxTotalTokens} tokens)...`,
   );
-  startContentAttachmentThin(taskId, thinBudget, modelId);
+  startContentAttachmentThin(taskId, thinBudget, models.attachment, { batch });
   try {
     while (getContentAttachmentThinState(taskId)?.status === 'running')
       await sleep(POLL_MS, abortSignal);
@@ -223,13 +264,97 @@ export async function runLedgerPipeline(
     `Attached ${thin.summary?.excerpts ?? 0} excerpts (${thin.usage.calls} calls, ${thin.usage.totalTokens} tokens)`,
   );
 
-  // 4. ledger build and validation (no calls)
+  // 4. place aliases: without a person's table, two runs propose how the report writes its places in short
+  // form; rules both runs give alike and code accepts are saved as the task's table (source `model`)
   onStep('ledger-build');
+  if (!readPlaceAliases(taskId)) {
+    const proposal = await getPlaceAliasProposalRequest(taskId);
+    if (proposal) {
+      const { plan, ledger, request } = proposal;
+      require('Place alias proposal', 2, 2 *
+        (request.systemPrompt.length +
+          request.userPrompt.length +
+          RESERVE.aliasOutputTokens));
+      log(
+        `Proposing place aliases for ${request.places.length} written places with ${models.attachment}...`,
+      );
+      abortSignal?.throwIfAborted();
+      const result = await proposePlaceAliases(plan, ledger, request, {
+        model: createModel(models.attachment),
+        maxRetries: 0,
+        abortSignal,
+      });
+      const aliasUsed = result.calls.reduce(
+        (n, c) => n + (c.usage?.totalTokens ?? 0),
+        0,
+      );
+      used.calls += result.calls.length;
+      used.totalTokens += aliasUsed;
+      writeFileSync(
+        join(paths.task(taskId).outputRoot, 'place-alias-proposal.json'),
+        JSON.stringify(result, null, 2),
+      );
+      if (result.table) savePlaceAliases(taskId, result.table);
+      log(
+        result.status === 'failed'
+          ? `Place alias proposal failed (${aliasUsed} tokens): ${result.calls
+              .map((c) => c.error)
+              .filter(Boolean)
+              .join('; ')}`
+          : `Kept ${result.table?.rules.length ?? 0} place alias rules, dropped ${result.dropped.length} (${result.calls.length} calls, ${aliasUsed} tokens)`,
+      );
+    }
+  }
+
+  // 5. parent judgment: the parent questions code leaves open, three runs per batch, saved beside the plan
+  const parentRequests = await getParentJudgmentRequests(taskId);
+  if (parentRequests.length) {
+    const questions = parentRequests.reduce(
+      (n, r) => n + r.questions.length,
+      0,
+    );
+    require('Parent judgment', parentRequests.length * 3, parentRequests.reduce(
+      (n, r) =>
+        n +
+        3 *
+          (r.systemPrompt.length +
+            r.userPrompt.length +
+            RESERVE.parentOutputTokens),
+      0,
+    ));
+    log(
+      `Judging ${questions} parent questions in ${parentRequests.length} batches with ${models.attachment}...`,
+    );
+    const model = createModel(models.attachment);
+    const judgments: RelationParentJudgment[] = [];
+    const parentUsed: Usage = { calls: 0, totalTokens: 0 };
+    for (const request of parentRequests) {
+      abortSignal?.throwIfAborted();
+      const result = await judgeRelationParentBatch(request, {
+        model,
+        maxRetries: 0,
+        abortSignal,
+      });
+      for (const call of result.calls) {
+        parentUsed.calls++;
+        parentUsed.totalTokens += call.usage?.totalTokens ?? 0;
+      }
+      judgments.push(...result.judgments);
+    }
+    saveParentJudgments(taskId, judgments);
+    used.calls += parentUsed.calls;
+    used.totalTokens += parentUsed.totalTokens;
+    log(
+      `Judged ${judgments.filter((j) => j.status !== 'review').length} of ${questions} parent questions (${parentUsed.calls} calls, ${parentUsed.totalTokens} tokens)`,
+    );
+  }
+
+  // 6. ledger build and validation (no calls)
   const view = await getArchaeologyLedger(taskId);
   if (!view) throw new Error('The ledger could not be assembled');
   const { ledger } = view;
   log(
-    `Ledger: ${ledger.records.length} records, ${ledger.attributes.length} attributes, ${ledger.mediaReferences.length} media links, ${ledger.links.length} links, ${ledger.reviewItems.length} review items; validation ${ledger.ledger.validationStatus}`,
+    `Ledger: ${ledger.records.length} records, ${ledger.attributes.length} attributes, ${ledger.mediaReferences.length} media links, ${ledger.mediaCandidates.length} same-page image candidates, ${ledger.links.length} links, ${ledger.reviewItems.length} review items; validation ${ledger.ledger.validationStatus}`,
   );
   log(
     `Model usage: ${used.calls} calls, ${used.totalTokens} tokens of ${budget.maxCalls} calls and ${budget.maxTotalTokens} tokens`,

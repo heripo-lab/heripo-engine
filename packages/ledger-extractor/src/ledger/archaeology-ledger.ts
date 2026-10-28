@@ -153,6 +153,21 @@ export interface LedgerMediaReference {
   }>;
   needsReview: boolean;
 }
+/**
+ * Uncaptioned images on a page where records are described, kept as a page-level candidate: the images relate
+ * to the page's records, but no image is tied to one record. Without a caption or layout position code cannot
+ * tell which image shows which record (a catalogue page with two artifacts and six images), and it is not a
+ * review question.
+ */
+export interface LedgerMediaCandidate {
+  id: string;
+  ledgerId: string;
+  pdfPageNo: number;
+  imageIds: string[];
+  /** Records with an excerpt on the page, in ledger order. */
+  recordIds: string[];
+  basis: 'same_page';
+}
 /** Where an excerpt of a record occurs in the processed document. */
 export interface LedgerRecordSource {
   id: string;
@@ -176,10 +191,11 @@ export interface LedgerRecordSource {
 }
 /** Steps that report issues: assembly, the `apply*` stages and full validation. */
 export type LedgerExtractionStage =
-  'assembly' | 'media' | 'attributes' | 'links' | 'validation';
+  'discovery' | 'assembly' | 'media' | 'attributes' | 'links' | 'validation';
 /**
  * Issue codes of the implementation spec (§22), with `DUPLICATE_ID` for repeated ledger IDs and
- * `UNMAPPED_TABLE_CELL` for owned table cells left without a header.
+ * `UNMAPPED_TABLE_CELL` for owned table cells left without a header, and `DROPPED_CANDIDATE_PROPOSAL` for a
+ * discovery proposal that failed its checks and so registered no record.
  */
 export type LedgerExtractionIssueCode =
   | 'DUPLICATE_ID'
@@ -198,7 +214,8 @@ export type LedgerExtractionIssueCode =
   | 'UNSUPPORTED_CONTENT_CLAIM'
   | 'SOURCE_VALUE_MISMATCH'
   | 'UNRESOLVED_EVIDENCE_ASSIGNMENT'
-  | 'DIFFERING_SOURCE_VALUES';
+  | 'DIFFERING_SOURCE_VALUES'
+  | 'DROPPED_CANDIDATE_PROPOSAL';
 export type LedgerIssueSeverity = 'info' | 'warning' | 'error';
 export interface LedgerExtractionIssue {
   code: LedgerExtractionIssueCode;
@@ -250,6 +267,8 @@ export interface ArchaeologyLedgerResult {
   attributes: LedgerRecordAttribute[];
   /** Records linked to images; empty until `applyLedgerMedia` runs. */
   mediaReferences: LedgerMediaReference[];
+  /** Page-level image candidates; empty until `applyLedgerMedia` runs. */
+  mediaCandidates: LedgerMediaCandidate[];
   /** Relations kept beside a chosen parent; full relation extraction is still pending. */
   links: LedgerRecordLink[];
   pending: ArchaeologyLedgerPendingPart[];
@@ -488,6 +507,7 @@ export function assembleArchaeologyLedger(
     sources,
     attributes: [],
     mediaReferences: [],
+    mediaCandidates: [],
     links: [],
     pending: [...ARCHAEOLOGY_LEDGER_PENDING_PARTS],
     reviewItems,

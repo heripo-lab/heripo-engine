@@ -20,6 +20,7 @@ export const CONTENT_ATTACHMENT_THIN_COLLECTIVE_REVIEW_MIN_MEMBERS = 5;
 
 export type ContentAttachmentThinBasis =
   | 'model_unanimous'
+  | 'model_majority'
   | 'code_row_owner'
   | 'code_typed_row'
   | 'code_cell_registration';
@@ -259,7 +260,10 @@ export function assembleContentAttachmentThin(
           unitId: result.unitId,
           segment: routed.segment,
           ...location,
-          basis: 'model_unanimous',
+          basis:
+            routed.decidedBy === 'majority'
+              ? 'model_majority'
+              : 'model_unanimous',
         });
       if (evidence.length)
         output.segmentEvidence.push({

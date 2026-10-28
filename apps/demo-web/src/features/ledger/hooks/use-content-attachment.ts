@@ -40,6 +40,7 @@ export function useContentAttachment(taskId: string) {
       maxCalls: number;
       maxTotalTokens: number;
       modelId: string;
+      batch: boolean;
     }) => runThinContentAttachment(taskId, budget),
     onSuccess: (data) => client.setQueryData(queryKey, data),
   });

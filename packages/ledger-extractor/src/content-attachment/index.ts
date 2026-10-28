@@ -144,6 +144,10 @@ export {
   CONTENT_ATTACHMENT_THIN_WINDOW_WORDS,
 } from './thin/compile-types';
 export { createContentAttachmentThinInput } from './thin/compile';
+export {
+  CONTENT_ATTACHMENT_THIN_TRIVIAL_LABEL_MAX_LENGTH,
+  isContentAttachmentThinTrivialText,
+} from './thin/compile-candidates';
 export type {
   ContentAttachmentThinCell,
   ContentAttachmentThinCodeMap,
@@ -193,7 +197,9 @@ export {
   CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT,
   CONTENT_ATTACHMENT_THIN_OUTLIER_RATE,
   checkContentAttachmentThinOutliers,
+  isContentAttachmentThinTiebreakable,
   routeContentAttachmentThinSegments,
+  routeContentAttachmentThinTiebreak,
 } from './thin/routing';
 export type {
   ContentAttachmentThinLoneRate,
@@ -201,9 +207,20 @@ export type {
   ContentAttachmentThinRoutedSegment,
   ContentAttachmentThinVote,
 } from './thin/routing';
-export { attachContentThinUnit } from './thin/run';
+export {
+  attachContentThinUnit,
+  CONTENT_ATTACHMENT_THIN_DEFAULT_RUNS,
+  CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+  contentAttachmentThinNextRun,
+  isContentAttachmentThinDegenerate,
+  createContentAttachmentThinUnitRequest,
+  recordContentAttachmentThinCall,
+  routeContentAttachmentThinTwoRuns,
+} from './thin/run';
 export type {
   ContentAttachmentThinCall,
+  ContentAttachmentThinCallInput,
+  ContentAttachmentThinProviderOptions,
   ContentAttachmentThinRunName,
   ContentAttachmentThinRunOptions,
   ContentAttachmentThinUnitResult,

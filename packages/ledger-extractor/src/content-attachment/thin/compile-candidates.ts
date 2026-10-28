@@ -19,6 +19,33 @@ export const titleCore = (title: string) =>
 export const wordOffsets = (text: string) =>
   [...text.matchAll(/\S+/g)].map((m) => [m.index, m.index + m[0].length]);
 
+const TRIVIAL_NUMBER = /^[\d\s,.~\-–—()%×x:/]*\d[\d\s,.~\-–—()%×x:/]*$/;
+const TRIVIAL_DATE = /^(?:\d{4}년\s*)?\d{1,2}월\s*\d{1,2}일$/;
+/** A trailing weekday (`(토)`, `(토요일)`) or duration (`(60분)`, `(2시간)`) of a log entry's date or time. */
+const TRIVIAL_SUFFIX =
+  /\s*\(\s*(?:[월화수목금토일](?:요일)?|\d+\s*(?:분|시간))\s*\)$/;
+const TRIVIAL_LABEL = /^(?:사진|도면|도판|표|그림|삽도|원색사진)\s*\d/;
+const SENTENCE_END = /(?:다|음|임|함|됨)\s*[.。]?$|[.。!?]$/;
+/** Longest figure, photo, plate or table label treated as a caption rather than body text. */
+export const CONTENT_ATTACHMENT_THIN_TRIVIAL_LABEL_MAX_LENGTH = 120;
+
+/**
+ * Whether a segment's text describes no candidate on its face: only numbers (page numbers, table counts,
+ * clock times and measurements without units), a date, either with a trailing weekday or duration as survey
+ * log tables write them (`2023년8월19일(토)`, `14:30~15:30(60분)`), or a short figure, photo, plate or table
+ * label that does not end like a sentence. A label sentence such as "표 3에서 보듯이 … 확인된다." is left to the model.
+ */
+export function isContentAttachmentThinTrivialText(text: string): boolean {
+  const t = text.trim();
+  const bare = t.replace(TRIVIAL_SUFFIX, '');
+  if (TRIVIAL_NUMBER.test(bare) || TRIVIAL_DATE.test(bare)) return true;
+  return (
+    TRIVIAL_LABEL.test(t) &&
+    !SENTENCE_END.test(t) &&
+    t.length <= CONTENT_ATTACHMENT_THIN_TRIVIAL_LABEL_MAX_LENGTH
+  );
+}
+
 /** Split words into sentences at terminal punctuation, ignoring list numbers such as "29.". */
 export function sentenceSpans(words: Words): Array<[number, number]> {
   const spans: Array<[number, number]> = [];

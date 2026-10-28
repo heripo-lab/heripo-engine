@@ -16,7 +16,7 @@ import {
   useRateLimitCheck,
 } from '~/features/upload';
 
-import { DEFAULT_LEDGER_MODEL } from '../constants/ledger-run';
+import { DEFAULT_LEDGER_MODELS } from '../constants/ledger-run';
 import { useCreateLedgerTask } from '../hooks/use-create-ledger-task';
 import { LedgerJsonDropzone } from './ledger-json-dropzone';
 import { LedgerModelSelect } from './ledger-model-select';
@@ -24,14 +24,14 @@ import { LedgerModelSelect } from './ledger-model-select';
 /**
  * Upload panel for the Ledger Extraction stage.
  *
- * Accepts a single processed-document.json file and the model of the
- * automatic ledger run (default Claude Haiku 5.5), and creates a ledger task.
+ * Accepts a single processed-document.json file and the model of each step
+ * of the automatic ledger run (default Claude Haiku 5.5), and creates a ledger task.
  * PDF processing options do not apply here. The same public-demo protections as the PDF flow are reused
  * (consent + Turnstile, OTP bypass, rate limits enforced server-side).
  */
 export function LedgerStagePanel() {
   const [file, setFile] = useState<File | null>(null);
-  const [modelId, setModelId] = useState(DEFAULT_LEDGER_MODEL);
+  const [models, setModels] = useState(DEFAULT_LEDGER_MODELS);
   const [consentDialogOpen, setConsentDialogOpen] = useState(false);
   const [bypassDialogOpen, setBypassDialogOpen] = useState(false);
   const [bypassCode, setBypassCode] = useState('');
@@ -61,7 +61,7 @@ export function LedgerStagePanel() {
     createLedgerTaskMutation.mutate(
       {
         file,
-        modelId,
+        models,
         bypassCode: code || undefined,
         turnstileToken: turnstileTokenRef.current,
       },
@@ -134,10 +134,10 @@ export function LedgerStagePanel() {
             <p className="text-foreground font-medium">원장 추출</p>
             <p className="mt-1">
               전처리 단계가 만든 <code>processed-document.json</code>을 받아
-              문서를 검증한 뒤, 고른 모델로 보고서 유형 분류 → 객체 후보 탐색 →
-              원문 배정을 차례로 실행하고 원장을 조립합니다. PDF 파싱과 전처리는
-              다시 하지 않습니다. 이미지 경로는 공개 CDN URL을 그대로 쓰며 추출
-              중에 내려받지 않습니다.
+              문서를 검증한 뒤, 구간마다 고른 모델로 보고서 유형 분류 → 객체
+              후보 탐색 → 후보 중복 검토 → 원문 배정을 차례로 실행하고 원장을
+              조립합니다. PDF 파싱과 전처리는 다시 하지 않습니다. 이미지 경로는
+              공개 CDN URL을 그대로 쓰며 추출 중에 내려받지 않습니다.
             </p>
           </div>
         </CardContent>
@@ -166,8 +166,8 @@ export function LedgerStagePanel() {
       />
 
       <LedgerModelSelect
-        value={modelId}
-        onChange={setModelId}
+        value={models}
+        onChange={setModels}
         disabled={isPending}
       />
 

@@ -70,6 +70,18 @@ export interface LLMCallConfig<TSchema extends z.ZodType> {
    * Structured metadata attached to token usage for this call.
    */
   metadata?: TokenUsageMetadata;
+
+  /**
+   * Mark the system prompt as a prompt-cache breakpoint for providers that support it (Anthropic), so calls that
+   * share the system prompt read it from the cache. Other providers ignore the mark.
+   */
+  cacheSystemPrompt?: boolean;
+
+  /**
+   * Provider options passed to the AI SDK unchanged, such as `{ anthropic: { effort: 'low' } }`. A provider
+   * ignores the options of other providers.
+   */
+  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
 }
 
 /**
@@ -488,8 +500,19 @@ export class LLMCaller {
   ): Promise<LLMCallResult<TOutput>> {
     return this.executeWithFallback(config, (model) =>
       this.generateStructuredOutput(model, config.schema, {
-        instructions: config.systemPrompt,
+        instructions: config.cacheSystemPrompt
+          ? {
+              role: 'system',
+              content: config.systemPrompt,
+              providerOptions: {
+                anthropic: { cacheControl: { type: 'ephemeral' } },
+              },
+            }
+          : config.systemPrompt,
         prompt: config.userPrompt,
+        ...(config.providerOptions && {
+          providerOptions: config.providerOptions,
+        }),
         temperature: config.temperature,
         maxRetries: config.maxRetries,
         abortSignal: config.abortSignal,

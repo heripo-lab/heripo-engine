@@ -24,6 +24,7 @@ import {
   candidateCheckLevel,
   checkCandidate,
   planCandidateDiscoveryFollowUp,
+  unansweredNumberedBlocks,
 } from './discovery-validation';
 
 export async function candidateId(value: string): Promise<string> {
@@ -114,7 +115,13 @@ export async function assembleCandidateDiscovery(
                     ? 'candidate-discovery.v10'
                     : audit.promptVersion === 'candidate-discovery.v11'
                       ? 'candidate-discovery.v11'
-                      : CANDIDATE_DISCOVERY_PROMPT_VERSION,
+                      : audit.promptVersion === 'candidate-discovery.v12'
+                        ? 'candidate-discovery.v12'
+                        : audit.promptVersion === 'candidate-discovery.v13'
+                          ? 'candidate-discovery.v13'
+                          : audit.promptVersion === 'candidate-discovery.v14'
+                            ? 'candidate-discovery.v14'
+                            : CANDIDATE_DISCOVERY_PROMPT_VERSION,
     );
     if (
       audit.promptVersion !== expected.promptVersion ||
@@ -158,13 +165,15 @@ export async function assembleCandidateDiscovery(
           JSON.stringify(audit.followUp.corrections ?? []) ||
         JSON.stringify(plan.reconsiderations) !==
           JSON.stringify(audit.followUp.reconsiderations ?? []) ||
+        JSON.stringify(plan.numberedBlocks) !==
+          JSON.stringify(audit.followUp.numberedBlocks ?? []) ||
         plan.userPrompt !== audit.followUp.userPrompt
       ) {
         issues.push({
           unitId: unit.unitId,
           candidateIndex: null,
           reason:
-            'Saved follow-up does not match the unanswered rows, corrections and reconsidered headings of this unit',
+            'Saved follow-up does not match the unanswered rows, corrections, reconsidered headings and numbered blocks of this unit',
         });
         continue;
       }
@@ -240,6 +249,14 @@ export async function assembleCandidateDiscovery(
         ]),
       );
       const existing = candidates.get(id);
+      // from v15 a proposal identical to one already kept (same anchor, name and number) is the same candidate
+      if (
+        existing &&
+        level.v15 &&
+        existing.sourceName === proposal.sourceName &&
+        existing.sourceIdentifier === proposal.sourceIdentifier
+      )
+        continue;
       if (existing) {
         issues.push({
           unitId: unit.unitId,
@@ -261,6 +278,17 @@ export async function assembleCandidateDiscovery(
         evidence,
       });
     }
+    const numbered = unansweredNumberedBlocks(
+      unit,
+      response,
+      audit.promptVersion,
+    );
+    if (numbered.length)
+      issues.push({
+        unitId: unit.unitId,
+        candidateIndex: null,
+        reason: `Numbered body blocks neither proposed nor excluded: ${numbered.map((b) => b.number).join(', ')}`,
+      });
     if (level.v11 && columnBlocks(unit)) {
       const missing = unansweredItemTableBlocks(unit, response);
       if (missing.length)

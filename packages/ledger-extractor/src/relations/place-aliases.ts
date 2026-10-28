@@ -6,6 +6,8 @@ import { canonicalSha256 } from '../profile/report-profile';
 import { createRecordNamer } from './record-names';
 
 export const PLACE_ALIASES_VERSION = 'place-aliases.v1' as const;
+export type PlaceAliasSource = 'manual' | 'model';
+const SOURCES: readonly string[] = ['manual', 'model'];
 
 /**
  * One person-decided correspondence between how a report writes a place and the name a record is registered
@@ -25,12 +27,15 @@ export interface PlaceAliasRule {
   basis: { quote: string };
   note?: string;
 }
-/** Place alias table (`place-aliases.v1`), injected from outside like a report profile. */
+/**
+ * Place alias table (`place-aliases.v1`), injected from outside like a report profile (`manual`) or proposed by
+ * a model and kept only where code checks and two runs agree (`model`, `proposePlaceAliases`).
+ */
 export interface PlaceAliasTable {
   version: typeof PLACE_ALIASES_VERSION;
   /** SHA-256 of the processed-document input the table was decided for. */
   inputSha256: string;
-  source: 'manual';
+  source: PlaceAliasSource;
   confirmedAt: string;
   rules: PlaceAliasRule[];
   notes?: string;
@@ -72,7 +77,7 @@ const KINDS: readonly string[] = kindSchema.options;
 
 /**
  * Check a place alias table against the attachment plan and the assembled ledger without changing it, like
- * `validateReportProfile`. Errors: an unsupported version, another input, a source other than `manual`, an
+ * `validateReportProfile`. Errors: an unsupported version, another input, a source other than `manual` or `model`, an
  * invalid time, no rules, a missing or repeated ID, empty forms, `{n}` not once in every form and the
  * registered name (or nowhere), a bad number range, an unknown record kind, a basis quote that is missing or
  * not found in the document's text, and a written form two rules send to different names. Warnings, only for
@@ -92,7 +97,8 @@ export function validatePlaceAliases(
     errors.push('Unsupported place alias version');
   if (t.inputSha256 !== plan.inputSha256)
     errors.push('Place aliases belong to a different input');
-  if (t.source !== 'manual') errors.push('Unknown place alias source');
+  if (!SOURCES.includes(t.source as string))
+    errors.push('Unknown place alias source');
   if (
     typeof t.confirmedAt !== 'string' ||
     Number.isNaN(Date.parse(t.confirmedAt))
@@ -229,7 +235,7 @@ export interface PlaceAliasDuplicate {
 /** What the ledger header records about an applied table. */
 export interface PlaceAliasSummary {
   ruleIds: string[];
-  source: 'manual';
+  source: PlaceAliasSource;
   confirmedAt: string;
   inputSha256: string;
   sha256?: string;

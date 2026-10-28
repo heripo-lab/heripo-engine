@@ -155,9 +155,16 @@ export interface CandidateDiscoveryRowBlock {
   rowIndex: number;
   block: number;
 }
+/** A body block that opens with an object number of a proposed identifier's form but that no answer cites (v13 on). */
+export interface CandidateDiscoveryNumberedBlock {
+  sourceId: string;
+  /** The leading number as it appears in the block, without whitespace. */
+  number: string;
+}
 /**
  * A second call asking the item-table rows the first response left unanswered (prompt v9 on), from v10 correcting
- * its invalid candidates, and from v11 reconsidering its excluded headings and asking side-by-side tables by block.
+ * its invalid candidates, from v11 reconsidering its excluded headings and asking side-by-side tables by block, and
+ * from v13 asking numbered body blocks.
  */
 export interface CandidateDiscoveryFollowUp {
   rowIndexes: number[];
@@ -167,6 +174,8 @@ export interface CandidateDiscoveryFollowUp {
   corrections?: CandidateDiscoveryCorrection[];
   /** Present when excluded headings are reconsidered; the follow-up's answer replaces those exclusions. */
   reconsiderations?: CandidateDiscoveryReconsideration[];
+  /** Present when numbered body blocks are asked (prompt v13 on). */
+  numberedBlocks?: CandidateDiscoveryNumberedBlock[];
   userPrompt: string;
   response: CandidateDiscoveryResponse;
   usage: ExtendedTokenUsage;

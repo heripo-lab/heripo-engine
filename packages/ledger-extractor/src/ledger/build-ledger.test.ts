@@ -204,7 +204,7 @@ describe('buildArchaeologyLedger', () => {
   });
 
   test('applies a valid place alias table and saved judgments', async () => {
-    const table = { rules: [{ id: 'rule-1' }] };
+    const table = { source: 'manual', rules: [{ id: 'rule-1' }] };
     const judgments = [{ recordId: 'r1' }] as RelationParentJudgment[];
 
     const built = await buildArchaeologyLedger({
@@ -235,6 +235,7 @@ describe('buildArchaeologyLedger', () => {
     expect(built.placeAliases).toEqual({
       status: 'applied',
       ruleIds: ['rule-1'],
+      source: 'manual',
       sha256: 'sha',
       warnings: ['w'],
     });
@@ -276,6 +277,47 @@ describe('buildArchaeologyLedger', () => {
     expect(collectRelationSignals).toHaveBeenCalledWith(
       plan,
       { ledger: { id: 'ledger-1', discoveryScope } },
+      {},
+    );
+  });
+
+  test('lists dropped discovery proposals as warnings', async () => {
+    vi.mocked(assembleArchaeologyLedger).mockReturnValueOnce({
+      ledger: { id: 'ledger-1' },
+      issues: ['earlier'],
+    } as never);
+
+    await buildArchaeologyLedger({
+      document,
+      plan,
+      attachments,
+      meta,
+      droppedProposals: [
+        { unitId: 'u1', candidateIndex: 1, reason: 'not named' },
+        { unitId: 'u2', candidateIndex: null, reason: 'unanswered' },
+      ],
+    });
+
+    expect(collectRelationSignals).toHaveBeenCalledWith(
+      plan,
+      {
+        ledger: { id: 'ledger-1' },
+        issues: [
+          'earlier',
+          {
+            code: 'DROPPED_CANDIDATE_PROPOSAL',
+            severity: 'warning',
+            stage: 'discovery',
+            message: 'Unit u1 proposal 1: not named',
+          },
+          {
+            code: 'DROPPED_CANDIDATE_PROPOSAL',
+            severity: 'warning',
+            stage: 'discovery',
+            message: 'Unit u2: unanswered',
+          },
+        ],
+      },
       {},
     );
   });

@@ -26,6 +26,12 @@ const settingsSchema = z.object({
   modelId: z
     .string()
     .regex(/^(openai|anthropic|google|together|ollama|lmstudio)\/.+/),
+  deduplicationModelId: z
+    .string()
+    .regex(/^(openai|anthropic|google|together|ollama|lmstudio)\/.+/)
+    .optional(),
+  deduplicationBatch: z.boolean().optional(),
+  discoveryBatch: z.boolean().optional(),
   maxTextChars: z.number().int().min(1000).max(40000),
   tableRowsPerUnit: z.number().int().min(1).max(30),
   maxRetries: z.number().int().min(0).max(3),

@@ -17,7 +17,11 @@ import {
   getCandidateSources,
 } from './discovery-request';
 import { createFollowUpUnit } from './discovery-rows';
-import { discoverCandidateUnit } from './discovery-unit';
+import {
+  createCandidateDiscoveryUnitCall,
+  discoverCandidateUnit,
+  recordCandidateDiscoveryUnit,
+} from './discovery-unit';
 
 vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
 
@@ -222,6 +226,7 @@ describe('candidate discovery', () => {
         userPrompt: createCandidateDiscoveryRequest(
           createFollowUpUnit(unit, [3, 4]),
         ).userPrompt,
+        cacheSystemPrompt: true,
         metadata: expect.objectContaining({ followUp: true }),
       }),
     );
@@ -260,6 +265,43 @@ describe('candidate discovery', () => {
     expect(plain.structuredAttempts).toBe(2);
     expect(plain.followUp).not.toHaveProperty('finishReason');
     expect(plain.followUp).not.toHaveProperty('structuredAttempts');
+  });
+
+  test('records calls made elsewhere and refuses a missing or unneeded follow-up', () => {
+    const { unit, id, item } = registry();
+    const first = {
+      tableRole: 'item_table' as const,
+      candidates: [item('2', '뚜껑')],
+      exclusions: [
+        {
+          sourceId: id('합계'),
+          category: 'summary_row' as const,
+          reason: '합계',
+        },
+      ],
+    };
+    const done = {
+      tableRole: 'item_table' as const,
+      candidates: [item('2', '뚜껑'), item('3', '삼족기'), item('4', '기대')],
+      exclusions: first.exclusions,
+    };
+
+    expect(createCandidateDiscoveryUnitCall(unit).userPrompt).toBe(
+      createCandidateDiscoveryRequest(unit).userPrompt,
+    );
+    expect(() =>
+      recordCandidateDiscoveryUnit(unit, { output: first, usage }),
+    ).toThrow(`Unit ${unit.unitId} needs its follow-up call`);
+    expect(() =>
+      recordCandidateDiscoveryUnit(
+        unit,
+        { output: done, usage },
+        { output: done, usage },
+      ),
+    ).toThrow(`Unit ${unit.unitId} needs no follow-up call`);
+    expect(
+      recordCandidateDiscoveryUnit(unit, { output: done, usage }).followUp,
+    ).toBeUndefined();
   });
 
   test('sends invalid candidates back once with the whole unit and records the corrections', async () => {
@@ -343,5 +385,33 @@ describe('candidate discovery', () => {
       expect.objectContaining({ exclusionIndex: 0 }),
     ]);
     expect(headings.followUp).not.toHaveProperty('rowBlocks');
+  });
+
+  test('records the numbered body blocks a v13 follow-up asks', async () => {
+    const { unit, body } = sections();
+    const [heading] = getCandidateSources(unit).slice(1);
+    const first = {
+      tableRole: 'none' as const,
+      candidates: [body('건물지', '1호', heading.sourceId, '(1) 1호 건물지')],
+      exclusions: [],
+    };
+    const empty = {
+      tableRole: 'none' as const,
+      candidates: [],
+      exclusions: [],
+    };
+    vi.mocked(LLMCaller.call)
+      .mockResolvedValueOnce({ output: first, usage, usedFallback: false })
+      .mockResolvedValueOnce({ output: empty, usage, usedFallback: false });
+
+    const result = await discoverCandidateUnit(unit, {
+      model: {} as LanguageModel,
+      maxRetries: 0,
+    });
+
+    expect(result.followUp?.numberedBlocks).toEqual([
+      { sourceId: getCandidateSources(unit)[5].sourceId, number: '96호' },
+    ]);
+    expect(result.followUp).not.toHaveProperty('corrections');
   });
 });

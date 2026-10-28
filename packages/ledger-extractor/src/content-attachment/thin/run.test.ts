@@ -12,7 +12,17 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
 import { createContentAttachmentThinInput } from './compile';
 import { createContentAttachmentThinRequest } from './prompt';
-import { attachContentThinUnit } from './run';
+import { isContentAttachmentThinTiebreakable } from './routing';
+import {
+  CONTENT_ATTACHMENT_THIN_DEFAULT_RUNS,
+  CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+  attachContentThinUnit,
+  contentAttachmentThinNextRun,
+  createContentAttachmentThinUnitRequest,
+  isContentAttachmentThinDegenerate,
+  recordContentAttachmentThinCall,
+  routeContentAttachmentThinTwoRuns,
+} from './run';
 
 vi.mock('ai', async (importOriginal) => ({
   ...(await importOriginal<typeof Ai>()),
@@ -151,6 +161,7 @@ describe('attachContentThinUnit', () => {
 
     const result = await attachContentThinUnit(plan, unit, {
       model,
+      runs: 3,
       onCall,
       onAttempt,
       abortSignal,
@@ -168,6 +179,10 @@ describe('attachContentThinUnit', () => {
       prompt: request.userPrompt,
       maxRetries: 0,
       abortSignal,
+      providerOptions: CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+    });
+    expect(CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS).toEqual({
+      anthropic: { effort: 'low' },
     });
     expect(createAuditedModel).toHaveBeenCalledWith(model, onAttempt);
     expect(result.status).toBe('routed');
@@ -203,12 +218,183 @@ describe('attachContentThinUnit', () => {
     ]);
   });
 
+  test('sends r1 then r2 by default and confirms only the segments both runs agree on', async () => {
+    const { plan, unit } = fixture();
+    const events: string[] = [];
+    let n = 0;
+    const outputs = [agreed(), outlier()];
+    vi.mocked(generateText).mockImplementation((async () => {
+      const i = ++n;
+      events.push(`start ${i}`);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      events.push(`end ${i}`);
+      return reply(outputs[i - 1]);
+    }) as unknown as typeof generateText);
+    const onCall = vi.fn();
+
+    const result = await attachContentThinUnit(plan, unit, {
+      model,
+      onCall,
+      tiebreak: false,
+    });
+
+    expect(CONTENT_ATTACHMENT_THIN_DEFAULT_RUNS).toBe(2);
+    expect(events).toEqual(['start 1', 'end 1', 'start 2', 'end 2']);
+    expect(onCall).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe('routed');
+    expect(result.calls.map((c) => c.run)).toEqual(['r1', 'r2']);
+    expect(result.outliers).toEqual({
+      finalRuns: ['r1', 'r2'],
+      wholeUnitReview: false,
+    });
+    expect(result.segments.map((s) => [s.segment, s.status])).toEqual([
+      ['E1:S1', 'review'],
+      ['E2:S1', 'review'],
+      ['E3:S1', 'review'],
+      ['E4:S1', 'auto'],
+    ]);
+
+    respond(agreed(), new Error('timeout'));
+    const r2Failed = await attachContentThinUnit(plan, unit, {
+      model,
+      providerOptions: {},
+    });
+
+    expect(r2Failed).toMatchObject({ status: 'failed', segments: [] });
+    expect(r2Failed.calls[1].providerOptions).toEqual({});
+    expect(
+      (
+        vi.mocked(generateText).mock.calls.at(-1)![0] as unknown as {
+          providerOptions: unknown;
+        }
+      ).providerOptions,
+    ).toEqual({});
+    expect(r2Failed.calls.map((c) => [c.run, c.status])).toEqual([
+      ['r1', 'completed'],
+      ['r2', 'failed'],
+    ]);
+  });
+
+  test('sends a tie-breaking r3 when r1 and r2 disagree and decides those segments by majority', async () => {
+    const { plan, unit } = fixture();
+    // r3 agrees with r1 on E1 and E2, leaves E3 out (invalid) and agrees with both on E4
+    const third = items({ 'E1:S1': attachR1, 'E2:S1': none, 'E4:S1': none });
+    respond(agreed(), outlier(), third);
+    const onCall = vi.fn();
+
+    const result = await attachContentThinUnit(plan, unit, { model, onCall });
+
+    expect(result.calls.map((c) => c.run)).toEqual(['r1', 'r2', 'r3']);
+    expect(onCall).toHaveBeenCalledTimes(3);
+    expect(result.outliers?.finalRuns).toEqual(['r1', 'r2', 'r3']);
+    expect(
+      result.segments.map((s) => [
+        s.segment,
+        s.status,
+        s.confirmed,
+        s.decidedBy,
+      ]),
+    ).toEqual([
+      ['E1:S1', 'auto', ['R1'], 'majority'],
+      ['E2:S1', 'auto', [], 'majority'],
+      ['E3:S1', 'review', [], undefined],
+      ['E4:S1', 'auto', [], undefined],
+    ]);
+    expect(result.segments[2].reasons).toContain('invalid_run');
+    expect(contentAttachmentThinNextRun(plan, unit, result.calls)).toBeNull();
+
+    respond(agreed(), outlier(), new Error('overloaded'));
+    const failedTiebreak = await attachContentThinUnit(plan, unit, { model });
+
+    expect(failedTiebreak.calls.map((c) => [c.run, c.status])).toEqual([
+      ['r1', 'completed'],
+      ['r2', 'completed'],
+      ['r3', 'failed'],
+    ]);
+    expect(failedTiebreak.outliers?.finalRuns).toEqual(['r1', 'r2']);
+    expect(failedTiebreak.segments[0].status).toBe('review');
+
+    respond(agreed(), agreed());
+    const agreeing = await attachContentThinUnit(plan, unit, { model });
+    expect(agreeing.calls).toHaveLength(2);
+    expect(contentAttachmentThinNextRun(plan, unit, agreeing.calls)).toBeNull();
+    expect(
+      contentAttachmentThinNextRun(plan, unit, failedTiebreak.calls),
+    ).toBeNull();
+    expect(
+      contentAttachmentThinNextRun(plan, unit, [failedTiebreak.calls[0]]),
+    ).toBeNull();
+  });
+
+  test('replaces degenerate runs that leave most segments undecided, up to r4', async () => {
+    const { plan, unit } = fixture();
+    const empty = items({});
+    respond(empty, agreed(), agreed());
+
+    const replaced = await attachContentThinUnit(plan, unit, { model });
+
+    expect(replaced.calls.map((c) => c.run)).toEqual(['r1', 'r2', 'r3']);
+    expect(isContentAttachmentThinDegenerate(replaced.calls[0], 4)).toBe(true);
+    expect(isContentAttachmentThinDegenerate(replaced.calls[1], 4)).toBe(false);
+    expect(replaced.outliers?.finalRuns).toEqual(['r2', 'r3']);
+    expect(replaced.segments.every((s) => s.status === 'auto')).toBe(true);
+
+    respond(empty, agreed(), empty, agreed());
+    const twice = await attachContentThinUnit(plan, unit, { model });
+
+    expect(twice.calls.map((c) => c.run)).toEqual(['r1', 'r2', 'r3', 'r4']);
+    expect(twice.outliers?.finalRuns).toEqual(['r2', 'r4']);
+
+    respond(empty, agreed(), empty, empty);
+    const exhausted = await attachContentThinUnit(plan, unit, { model });
+
+    expect(exhausted.calls).toHaveLength(4);
+    expect(exhausted.outliers?.finalRuns).toEqual(['r1', 'r2']);
+    expect(exhausted.segments.every((s) => s.status === 'review')).toBe(true);
+    expect(
+      isContentAttachmentThinDegenerate(
+        { ...exhausted.calls[0], status: 'failed', inspection: undefined },
+        4,
+      ),
+    ).toBe(false);
+  });
+
+  test('settles by majority only segments in review for disagreement alone', () => {
+    const segment = {
+      segment: 'E1:S1',
+      status: 'review' as const,
+      reasons: ['contested_targets' as const],
+      confirmed: [],
+      contested: [],
+      areaSuggestions: [],
+      layerSuggestions: [],
+      recipientIdentityAlternatives: [],
+      relationshipSubjectAlternatives: [],
+    };
+
+    expect(isContentAttachmentThinTiebreakable(segment)).toBe(true);
+    expect(
+      isContentAttachmentThinTiebreakable({
+        ...segment,
+        reasons: ['contested_targets', 'area'],
+      }),
+    ).toBe(false);
+    expect(
+      isContentAttachmentThinTiebreakable({
+        ...segment,
+        status: 'auto',
+        reasons: [],
+      }),
+    ).toBe(false);
+  });
+
   test('replaces a single outlier with r4 and keeps the two agreeing runs', async () => {
     const { plan, unit } = fixture();
     respond(agreed(), outlier(), agreed(), agreed());
 
     const result = await attachContentThinUnit(plan, unit, {
       model,
+      runs: 3,
       maxRetries: 2,
     });
 
@@ -220,7 +406,7 @@ describe('attachContentThinUnit', () => {
       ).maxRetries,
     ).toBe(2);
     expect(result.calls.map((c) => c.run)).toEqual(['r1', 'r2', 'r3', 'r4']);
-    expect(result.outliers?.first.flagged).toEqual([1]);
+    expect(result.outliers?.first?.flagged).toEqual([1]);
     expect(result.outliers?.replacement?.flagged).toEqual([]);
     expect(result.outliers?.finalRuns).toEqual(['r1', 'r3', 'r4']);
     expect(result.outliers?.wholeUnitReview).toBe(false);
@@ -231,7 +417,10 @@ describe('attachContentThinUnit', () => {
     const { plan, unit } = fixture();
     respond(agreed(), outlier(), agreed(), outlier());
 
-    const again = await attachContentThinUnit(plan, unit, { model });
+    const again = await attachContentThinUnit(plan, unit, {
+      model,
+      runs: 3,
+    });
 
     expect(again.outliers?.wholeUnitReview).toBe(false);
     expect(again.outliers?.replacement?.flagged).toEqual([2]);
@@ -247,6 +436,7 @@ describe('attachContentThinUnit', () => {
     respond(agreed(), outlier(), agreed(), new Error('rate limited'));
     const failedReplacement = await attachContentThinUnit(plan, unit, {
       model,
+      runs: 3,
     });
 
     expect(failedReplacement.calls.at(-1)).toMatchObject({
@@ -287,7 +477,10 @@ describe('attachContentThinUnit', () => {
     });
 
     respond(agreed(), new Error('timeout'), agreed());
-    const r2Failed = await attachContentThinUnit(plan, unit, { model });
+    const r2Failed = await attachContentThinUnit(plan, unit, {
+      model,
+      runs: 3,
+    });
 
     expect(r2Failed.status).toBe('failed');
     expect(r2Failed.calls.map((c) => c.status).sort()).toEqual([
@@ -310,6 +503,98 @@ describe('attachContentThinUnit', () => {
       calls: [],
       segments: [],
     });
+  });
+
+  test('records externally obtained calls and routes two runs without calling a model', () => {
+    const { plan, unit } = fixture();
+    const request = createContentAttachmentThinUnitRequest(plan, unit)!;
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+
+    const r1 = recordContentAttachmentThinCall(plan, unit, {
+      run: 'r1',
+      request,
+      rawResponse: agreed(),
+      usage: usage as never,
+      finishReason: 'stop',
+    });
+    const r2 = recordContentAttachmentThinCall(plan, unit, {
+      run: 'r2',
+      request,
+      rawResponse: agreed(),
+    });
+    const failed = recordContentAttachmentThinCall(plan, unit, {
+      run: 'r2',
+      request,
+      error: 'batch item expired',
+    });
+
+    expect(request).toEqual(
+      createContentAttachmentThinRequest(
+        createContentAttachmentThinInput(plan, unit),
+      ),
+    );
+    expect(r1).toMatchObject({
+      run: 'r1',
+      status: 'completed',
+      rawResponse: agreed(),
+      usage,
+      finishReason: 'stop',
+      callAttempts: [],
+    });
+    expect(r1.inspection?.issues).toEqual([]);
+    expect(r2).not.toHaveProperty('usage');
+    expect(r2).not.toHaveProperty('finishReason');
+    expect(failed).toEqual({
+      run: 'r2',
+      status: 'failed',
+      request,
+      error: 'batch item expired',
+      callAttempts: [],
+    });
+    const routed = routeContentAttachmentThinTwoRuns(plan, unit, [r1, r2]);
+    expect(routed).toMatchObject({
+      status: 'routed',
+      outliers: { finalRuns: ['r1', 'r2'], wholeUnitReview: false },
+    });
+    expect(routed.segments.every((x) => x.status === 'auto')).toBe(true);
+    expect(routeContentAttachmentThinTwoRuns(plan, unit, [r1])).toMatchObject({
+      status: 'failed',
+      segments: [],
+    });
+    expect(
+      routeContentAttachmentThinTwoRuns(plan, unit, [r1, failed]).status,
+    ).toBe('failed');
+    expect(() =>
+      routeContentAttachmentThinTwoRuns(plan, unit, [
+        r1,
+        { ...r2, request: { ...request, userPrompt: 'other' } },
+      ]),
+    ).toThrow("Call r2 does not answer this unit's request");
+    expect(() =>
+      routeContentAttachmentThinTwoRuns(plan, unit, [
+        { ...r1, request: { ...request, systemPrompt: 'other' } },
+      ]),
+    ).toThrow("Call r1 does not answer this unit's request");
+    expect(() =>
+      routeContentAttachmentThinTwoRuns(plan, unit, [
+        { ...r1, request: { ...request, version: 'other' as never } },
+      ]),
+    ).toThrow("Call r1 does not answer this unit's request");
+
+    const empty = fixture(['']);
+    expect(createContentAttachmentThinUnitRequest(empty.plan, empty.unit)).toBe(
+      null,
+    );
+    expect(
+      routeContentAttachmentThinTwoRuns(empty.plan, empty.unit, []),
+    ).toEqual({
+      unitId: 'page-1',
+      codeAssigned: [],
+      status: 'no_llm_segments',
+      calls: [],
+      segments: [],
+    });
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   test('uses the segments compiled for the fixture', () => {

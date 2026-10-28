@@ -56,7 +56,21 @@ export interface ContentAttachmentThinRoutedSegment {
   /** Uncertainty groups when every run returned the same groups. */
   recipientIdentityAlternatives: string[][];
   relationshipSubjectAlternatives: string[][];
+  /** `majority`: two of three runs agreed after the first two disagreed (see `routeContentAttachmentThinTiebreak`). */
+  decidedBy?: 'majority';
 }
+
+/** Review reasons a third run can settle: the runs disagree on targets or uncertainty, or one run is invalid. */
+const TIEBREAK_REASONS = new Set<
+  ContentAttachmentThinRoutedSegment['reasons'][number]
+>(['contested_targets', 'uncertainty_differs', 'invalid_run']);
+
+/** Whether a routed segment is in review only for reasons a third run can settle. */
+export const isContentAttachmentThinTiebreakable = (
+  segment: ContentAttachmentThinRoutedSegment,
+) =>
+  segment.status === 'review' &&
+  segment.reasons.every((r) => TIEBREAK_REASONS.has(r));
 
 const norm = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, '');
 const groups = (gs: string[][]) => gs.map((g) => [...g].sort()).sort();
@@ -280,5 +294,44 @@ export function routeContentAttachmentThinSegments(
         ? valid[0].relationshipSubjectAlternatives
         : [],
     };
+  });
+}
+
+/**
+ * Route a unit from r1, r2 and a tie-breaking r3. A segment r1 and r2 agree on keeps that routing. A segment in
+ * review only because the two disagreed (or one was invalid) is decided by whichever of r1 or r2 agrees with r3,
+ * marked `decidedBy: 'majority'`; when neither does, or the segment is in review for another reason (areas, layers,
+ * large collectives, a whole-unit review), it stays in review with all three runs.
+ */
+export function routeContentAttachmentThinTiebreak(
+  plan: ContentAttachmentPlan,
+  unit: AttachmentUnit,
+  compilation: ContentAttachmentThinCompilation,
+  runs: [
+    ContentAttachmentThinInspection,
+    ContentAttachmentThinInspection,
+    ContentAttachmentThinInspection,
+  ],
+): ContentAttachmentThinRoutedSegment[] {
+  const route = (list: ContentAttachmentThinInspection[]) =>
+    new Map(
+      routeContentAttachmentThinSegments(plan, unit, compilation, list).map(
+        (s) => [s.segment, s],
+      ),
+    );
+  const [r1, r2, r3] = runs;
+  const all = route(runs);
+  const pairs = [route([r1, r3]), route([r2, r3])];
+  return routeContentAttachmentThinSegments(plan, unit, compilation, [
+    r1,
+    r2,
+  ]).map((segment) => {
+    if (!isContentAttachmentThinTiebreakable(segment)) return segment;
+    const settled = pairs
+      .map((p) => p.get(segment.segment)!)
+      .find((s) => s.status === 'auto');
+    return settled
+      ? { ...settled, decidedBy: 'majority' as const }
+      : all.get(segment.segment)!;
   });
 }

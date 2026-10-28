@@ -1,3 +1,5 @@
+import type { LedgerStageModels } from '../constants/ledger-run';
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -14,8 +16,8 @@ export function useLedgerFromResult(taskId: string) {
     queryFn: () => getLedgerTaskForSource(taskId),
   });
   const create = useMutation({
-    mutationFn: (modelId: string) =>
-      createLedgerTaskFromResult({ taskId, modelId }),
+    mutationFn: (models: LedgerStageModels) =>
+      createLedgerTaskFromResult({ taskId, models }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },

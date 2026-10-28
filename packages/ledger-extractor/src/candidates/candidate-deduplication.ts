@@ -1,6 +1,7 @@
 import type { ExtendedTokenUsage } from '@heripo/shared';
 import type { LanguageModel } from 'ai';
 
+import type { CandidateDeduplicationSplitAudit } from './candidate-deduplication-split';
 import type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
@@ -10,6 +11,7 @@ import type {
 import { LLMCaller } from '@heripo/shared';
 import { z } from 'zod';
 
+import { assembleCandidateDeduplicationSplit } from './candidate-deduplication-split';
 import { isSameCandidateDiscoveryScope } from './discovery-plan';
 
 export const CANDIDATE_DEDUPLICATION_PROMPT_VERSION =
@@ -63,7 +65,8 @@ const PARTITION_TO_MERGES: Array<[string, string]> = [
   ['Keep the complete partition,', 'Keep each candidate in at most one merge,'],
 ];
 
-const SYSTEM_PROMPT =
+/** The v7 prompt; v8 block requests add one block rule to it. */
+export const SYSTEM_PROMPT =
   PARTITION_TO_MERGES.reduce(
     (prompt, [from, to]) => prompt.replace(from, to),
     SYSTEM_PROMPT_V5,
@@ -88,7 +91,7 @@ const groupSchema = (ref: z.ZodType<string>) =>
     z.object({ members: z.array(ref).min(1), reason: z.string().min(1) }),
   );
 /** v7: merges of two or more refs per record kind, each kind's members limited to that kind's refs. */
-function mergeSchemaByKind(
+export function mergeSchemaByKind(
   kinds: Array<[string, [string, ...string[]]]>,
   refs: [string, ...string[]],
 ) {
@@ -119,7 +122,7 @@ const savedResponseByKindSchema = z.object({
   groupsByKind: z.record(z.string(), groupSchema(z.string())),
   uncertainMatches: savedResponseSchema.shape.uncertainMatches,
 });
-const savedMergesByKindSchema = z.object({
+export const savedMergesByKindSchema = z.object({
   mergesByKind: z.record(
     z.string(),
     z.array(
@@ -192,32 +195,7 @@ export function createCandidateDeduplicationRequest(
     ref: `C${i + 1}`,
     ...candidate,
   }));
-  const evidenceKeys = new Set(
-    candidates.flatMap((c) => c.evidence.map((e) => e.resourceKey)),
-  );
-  const units = plan.units.map((u) => {
-    const selectedRows = new Set(
-      u.resources.flatMap((r) =>
-        r.kind === 'tableCell' && evidenceKeys.has(r.key) ? [r.rowIndex] : [],
-      ),
-    );
-    return {
-      unitId: u.unitId,
-      chapterPath: u.chapterPath,
-      table: u.table,
-      readOnlyContext: u.context,
-      sources: u.resources
-        .filter((r) => r.kind === 'text' || selectedRows.has(r.rowIndex))
-        .map((r) => ({
-          key: r.key,
-          resourceId: r.resourceId,
-          text: r.data.text,
-          ...(r.kind === 'tableCell'
-            ? { rowIndex: r.rowIndex, columnIndex: r.columnIndex }
-            : {}),
-        })),
-    };
-  });
+  const units = deduplicationUnits(plan, candidates);
   return {
     promptVersion,
     systemPrompt:
@@ -240,6 +218,46 @@ export function createCandidateDeduplicationRequest(
       units,
     }),
   };
+}
+
+/**
+ * The original context of a deduplication request: every body block of each unit and the table rows that hold a
+ * candidate's evidence. With `evidenceUnitsOnly`, only units holding evidence of the given candidates are kept.
+ */
+export function deduplicationUnits(
+  plan: CandidateDiscoveryPlan,
+  candidates: LedgerObjectCandidate[],
+  evidenceUnitsOnly = false,
+) {
+  const evidenceKeys = new Set(
+    candidates.flatMap((c) => c.evidence.map((e) => e.resourceKey)),
+  );
+  const kept = evidenceUnitsOnly
+    ? plan.units.filter((u) => u.resources.some((r) => evidenceKeys.has(r.key)))
+    : plan.units;
+  return kept.map((u) => {
+    const selectedRows = new Set(
+      u.resources.flatMap((r) =>
+        r.kind === 'tableCell' && evidenceKeys.has(r.key) ? [r.rowIndex] : [],
+      ),
+    );
+    return {
+      unitId: u.unitId,
+      chapterPath: u.chapterPath,
+      table: u.table,
+      readOnlyContext: u.context,
+      sources: u.resources
+        .filter((r) => r.kind === 'text' || selectedRows.has(r.rowIndex))
+        .map((r) => ({
+          key: r.key,
+          resourceId: r.resourceId,
+          text: r.data.text,
+          ...(r.kind === 'tableCell'
+            ? { rowIndex: r.rowIndex, columnIndex: r.columnIndex }
+            : {}),
+        })),
+    };
+  });
 }
 
 export async function deduplicateCandidates(
@@ -327,12 +345,17 @@ function parseSavedResponse(
     : { success: false };
 }
 
-/** Reject invalid partitions atomically; never infer, repair or discard model assignments. */
+/**
+ * Reject invalid partitions atomically; never infer, repair or discard model assignments. A split audit (v8) is
+ * assembled from its rule merges and block merges (`assembleCandidateDeduplicationSplit`).
+ */
 export function assembleCandidateDeduplication(
   plan: CandidateDiscoveryPlan,
   discovery: CandidateDiscoveryResult,
-  audit: CandidateDeduplicationAudit,
+  audit: CandidateDeduplicationAudit | CandidateDeduplicationSplitAudit,
 ): CandidateDeduplicationResult {
+  if ('blocks' in audit)
+    return assembleCandidateDeduplicationSplit(plan, discovery, audit);
   const expected = createCandidateDeduplicationRequest(
     plan,
     discovery,

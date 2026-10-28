@@ -11,10 +11,9 @@ import {
 } from '~/lib/ledger/ledger-input';
 import { createLedgerTask } from '~/lib/ledger/ledger-task';
 import {
-  DEFAULT_LEDGER_MODEL,
   LEDGER_RUN_BUDGET,
   findLedgerTaskForSource,
-  isLedgerModel,
+  resolveLedgerStageModels,
 } from '~/lib/ledger/ledger-task-options';
 import { getOrCreateSessionId } from '~/lib/session';
 import { extractClientInfo } from '~/lib/utils/request-info';
@@ -51,7 +50,7 @@ export async function GET(
 
 /**
  * Make a ledger task from a completed PDF processing task's processed document, in the caller's session, and
- * run every ledger step with the chosen model (default Claude Haiku 5.5). A session that already made one from
+ * run every ledger step with its chosen model (`models`, or `modelId` for every step; default Claude Haiku 5.5). A session that already made one from
  * the same result gets that task back instead of a second run, unless that run failed or was cancelled.
  */
 export async function POST(
@@ -63,16 +62,15 @@ export async function POST(
     if ('error' in found) return found.error;
     const { task, sessionId } = found;
     const body = (await request.json().catch(() => ({}))) as {
+      models?: unknown;
       modelId?: string;
+      batch?: boolean;
       bypassCode?: string;
       turnstileToken?: string;
     };
-    const modelId = body.modelId ?? DEFAULT_LEDGER_MODEL;
-    if (!isLedgerModel(modelId))
-      return NextResponse.json(
-        { error: `Unknown model: ${modelId}` },
-        { status: 400 },
-      );
+    const resolved = resolveLedgerStageModels(body);
+    if ('error' in resolved)
+      return NextResponse.json({ error: resolved.error }, { status: 400 });
     // one run per result: a failed or cancelled run can be made again
     const existing = findLedgerTaskForSource(task.id, sessionId);
     if (existing && !['failed', 'cancelled'].includes(existing.status))
@@ -107,9 +105,10 @@ export async function POST(
       clientInfo,
       isOtpBypass: guard.isOtpBypass,
       options: {
-        modelId,
+        models: resolved.models,
         budget: LEDGER_RUN_BUDGET,
         sourceTaskId: task.id,
+        ...(body.batch === false ? { batch: false } : {}),
       },
     });
     return NextResponse.json({ taskId: created.id, existing: false });

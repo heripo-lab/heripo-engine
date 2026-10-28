@@ -24,6 +24,7 @@ const ledger = (issues: unknown[] = []): ArchaeologyLedgerResult =>
       { recordId: 'r3', pdfPageNo: null },
     ],
     mediaReferences: [],
+    mediaCandidates: [],
     pending: ['attributes', 'media_references', 'links'],
     reviewItems: [{ id: 'review-1', kind: 'identity' }],
     issues,
@@ -135,7 +136,7 @@ describe('collectSamePageCandidates', () => {
 });
 
 describe('applyLedgerMedia', () => {
-  test('links records to images once with all evidence, adds media review items and issues', () => {
+  test('links records to images once with all evidence, keeps same-page images as candidates and adds media review items and issues', () => {
     const result = applyLedgerMedia(ledger(), {
       captions,
       text,
@@ -201,14 +202,15 @@ describe('applyLedgerMedia', () => {
         imageIds: ['img-2'],
         text: '사진 2 캡션',
       },
+    ]);
+    expect(result.mediaCandidates).toEqual([
       {
-        id: 'review-4',
-        kind: 'media',
-        recordIds: ['r1', 'r2'],
-        confirmedRecordIds: [],
-        reasons: ['media_same_page'],
-        imageIds: ['img-a'],
+        id: 'media-candidate-1',
+        ledgerId: 'ledger-1',
         pdfPageNo: 9,
+        imageIds: ['img-a'],
+        recordIds: ['r1', 'r2'],
+        basis: 'same_page',
       },
     ]);
     expect(result.records.map((r) => r.needsReview)).toEqual([
@@ -259,6 +261,7 @@ describe('applyLedgerMedia', () => {
 
     expect(passed.mediaReferences).toHaveLength(2);
     expect(passed.reviewItems).toHaveLength(1);
+    expect(passed.mediaCandidates).toEqual([]);
     expect(passed.issues).toEqual([]);
     expect(warned.issues).toEqual(['earlier']);
   });

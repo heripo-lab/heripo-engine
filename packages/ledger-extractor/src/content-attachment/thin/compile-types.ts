@@ -105,6 +105,8 @@ export interface ContentAttachmentThinCodeMap {
   windows: ContentAttachmentThinWindow[];
   /** [segment, row owner, ...candidates registered from the cell] */
   codeAssigned: Array<[string, ...string[]]>;
+  /** Under `trivial: 'code'`: segments decided by code as describing no candidate, never asked of the model. */
+  codeNone?: string[];
   segSpans: ContentAttachmentThinSegmentSpan[];
   rowBindings: ContentAttachmentThinRowBinding[];
   handles: Array<{ ref: string; members: string[] }>;

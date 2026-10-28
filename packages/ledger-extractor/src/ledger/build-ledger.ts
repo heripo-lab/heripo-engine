@@ -2,6 +2,7 @@ import type { ProcessedDocument } from '@heripo/model';
 
 import type { TableAttributes } from '../attributes/table-attributes';
 import type { TextAttributes } from '../attributes/text-attributes';
+import type { CandidateDiscoveryIssue } from '../candidates/discovery-types';
 import type { ContentAttachmentThinResult } from '../content-attachment/thin/assembly';
 import type { ContentAttachmentPlan } from '../content-attachment/types';
 import type { RecordLinks } from '../links/record-links';
@@ -12,10 +13,16 @@ import type { MediaReferences } from '../media/media-references';
 import type { MediaSamePageGroup } from '../media/same-page-candidates';
 import type { ReportScopeCompletion } from '../profile/report-scope';
 import type { RelationParentJudgment } from '../relations/parent-judgment';
-import type { PlaceAliasTable } from '../relations/place-aliases';
+import type {
+  PlaceAliasSource,
+  PlaceAliasTable,
+} from '../relations/place-aliases';
 import type { RelationParents } from '../relations/relation-parents';
 import type { RelationSignals } from '../relations/relation-signals';
-import type { ArchaeologyLedgerResult } from './archaeology-ledger';
+import type {
+  ArchaeologyLedgerResult,
+  LedgerExtractionIssue,
+} from './archaeology-ledger';
 import type { LedgerValidationReport } from './ledger-validation';
 
 import { collectTableAttributes } from '../attributes/table-attributes';
@@ -64,11 +71,23 @@ export interface BuildArchaeologyLedgerInput {
   parentJudgments?: RelationParentJudgment[];
   /** How the discovery scope was completed, recorded in the ledger header. */
   discoveryScope?: ReportScopeCompletion;
+  /**
+   * Discovery proposals that failed their checks and were left out of the candidates the ledger was built from
+   * (`CandidateDiscoveryResult.issues`); each becomes a `DROPPED_CANDIDATE_PROPOSAL` warning in `issues`.
+   */
+  droppedProposals?: CandidateDiscoveryIssue[];
 }
 /** Whether the given place alias table was applied. */
 export type PlaceAliasOutcome =
   | { status: 'none' }
-  | { status: 'applied'; ruleIds: string[]; sha256: string; warnings: string[] }
+  | {
+      status: 'applied';
+      ruleIds: string[];
+      /** Who decided the table: a person (`manual`) or a model proposal kept by code checks (`model`). */
+      source: PlaceAliasSource;
+      sha256: string;
+      warnings: string[];
+    }
   /** The table no longer fits the plan or ledger; it is not applied. */
   | { status: 'invalid'; errors: string[] };
 export interface BuildArchaeologyLedgerResult {
@@ -109,12 +128,23 @@ export async function buildArchaeologyLedger(
     extractedAt: meta.extractedAt,
     createdAt: meta.createdAt,
   });
-  const assembled = input.discoveryScope
+  const dropped = (input.droppedProposals ?? []).map(
+    (d): LedgerExtractionIssue => ({
+      code: 'DROPPED_CANDIDATE_PROPOSAL',
+      severity: 'warning',
+      stage: 'discovery',
+      message: `Unit ${d.unitId}${d.candidateIndex === null ? '' : ` proposal ${d.candidateIndex}`}: ${d.reason}`,
+    }),
+  );
+  const scoped = input.discoveryScope
     ? {
         ...base,
         ledger: { ...base.ledger, discoveryScope: input.discoveryScope },
       }
     : base;
+  const assembled = dropped.length
+    ? { ...scoped, issues: [...scoped.issues, ...dropped] }
+    : scoped;
 
   let placeAliases: PlaceAliasOutcome = { status: 'none' };
   let aliasOptions = {};
@@ -132,6 +162,7 @@ export async function buildArchaeologyLedger(
       placeAliases = {
         status: 'applied',
         ruleIds: table.rules.map((r) => r.id),
+        source: table.source,
         sha256,
         warnings,
       };

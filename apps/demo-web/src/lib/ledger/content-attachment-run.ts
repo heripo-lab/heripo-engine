@@ -119,12 +119,18 @@ export function getContentAttachmentAudit(
       : null,
   };
 }
-/** Prepare a separate immutable candidate snapshot; this function makes no model calls. */
+/**
+ * Prepare a separate immutable candidate snapshot; this function makes no model calls. Discovery must be
+ * complete with its duplicate review valid. Proposals that failed discovery checks block the snapshot unless
+ * `acceptDroppedProposals` is set (the automatic run): they are already left out of the candidates, and the
+ * ledger lists them as warnings.
+ */
 export async function prepareContentAttachmentRun(
   taskId: string,
   options: {
     maxUnitChars: number;
     registrationDecisions?: ContentRegistrationDecision[];
+    acceptDroppedProposals?: boolean;
   },
 ): Promise<ContentAttachmentRun> {
   const existing = getContentAttachmentRun(taskId);
@@ -135,7 +141,7 @@ export async function prepareContentAttachmentRun(
     !source ||
     source.status !== 'completed' ||
     !source.deduplication ||
-    source.result.issues.length ||
+    (source.result.issues.length && !options.acceptDroppedProposals) ||
     source.deduplication.issues.length
   )
     throw new Error('Completed validated candidate snapshot required');

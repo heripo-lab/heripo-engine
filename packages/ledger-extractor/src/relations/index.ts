@@ -45,6 +45,21 @@ export type {
   RelationParentRunOptions,
 } from './parent-judgment';
 export {
+  PLACE_ALIAS_PROPOSAL_VERSION,
+  assemblePlaceAliasProposal,
+  createPlaceAliasProposalRequest,
+  createPlaceAliasProposalSchema,
+  proposePlaceAliases,
+} from './place-alias-proposal';
+export type {
+  PlaceAliasProposalCall,
+  PlaceAliasProposalDrop,
+  PlaceAliasProposalOutcome,
+  PlaceAliasProposalRequest,
+  PlaceAliasProposalResult,
+  PlaceAliasProposalRunName,
+} from './place-alias-proposal';
+export {
   PLACE_ALIASES_VERSION,
   PlaceAliasValidationError,
   placeAliasesSha256,
@@ -54,6 +69,7 @@ export type {
   PlaceAliasDuplicate,
   PlaceAliasMatch,
   PlaceAliasRule,
+  PlaceAliasSource,
   PlaceAliasSummary,
   PlaceAliasTable,
   PlaceAliasValidation,

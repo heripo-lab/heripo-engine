@@ -6,8 +6,14 @@ import type {
 } from '@heripo/ledger-extractor';
 
 import {
+  CONTENT_ATTACHMENT_THIN_DEFAULT_RUNS,
+  CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
   assembleContentAttachmentThin,
   attachContentThinUnit,
+  contentAttachmentThinNextRun,
+  createContentAttachmentThinUnitRequest,
+  recordContentAttachmentThinCall,
+  routeContentAttachmentThinTwoRuns,
 } from '@heripo/ledger-extractor';
 import { createHash } from 'crypto';
 import {
@@ -21,14 +27,31 @@ import { join } from 'path';
 
 import { paths } from '../paths';
 import { createModel } from '../processing/model-factory';
+import {
+  anthropicBatchResults,
+  anthropicMessageParams,
+  cancelAnthropicBatch,
+  createAnthropicBatch,
+  isAnthropicModelId,
+  readAnthropicBatchItem,
+  retrieveAnthropicBatch,
+} from './anthropic-batch';
 import { getCandidateDiscoveryRun } from './candidate-discovery-run';
 import { getContentAttachmentRun } from './content-attachment-run';
 
-/** Units processed at the same time; each unit already sends r2 and r3 together. */
+/** Units processed at the same time; each unit sends r1 and then r2. */
 const UNIT_CONCURRENCY = 3;
-/** Calls one unit can need at most (r1-r3 plus one replacement). */
-const MAX_CALLS_PER_UNIT = 4;
+/** Calls one unit can need: r1 and r2 (the package default), then r3 and r4 to replace or break a tie. */
+const MAX_CALLS_PER_UNIT = CONTENT_ATTACHMENT_THIN_DEFAULT_RUNS + 2;
 const MAX_CONSECUTIVE_FAILURES = 5;
+/**
+ * Output limit of a batch item. Every item of a batch is in flight at once, so the budget reserves this much
+ * output per call; the largest saved thin answer was about 18,300 tokens. A longer answer fails the call.
+ */
+const BATCH_MAX_OUTPUT_TOKENS = 32_000;
+/** Input tokens reserved per prompt character; saved thin calls used at most 0.64. */
+const BATCH_INPUT_TOKENS_PER_CHAR = 1;
+const BATCH_POLL_MS = 60_000;
 const MAX_TOTAL_FAILURES = 10;
 
 export interface ContentAttachmentThinBudget {
@@ -41,6 +64,18 @@ export interface ContentAttachmentThinState {
   startedAt: string;
   completedAt: string | null;
   modelId: string;
+  /** direct: calls sent one unit at a time; batch: one Anthropic Message Batch for the units of a start. */
+  mode?: 'direct' | 'batch';
+  /** The batch of the latest batch start; `processed` once its results are saved. */
+  batch?: {
+    id: string;
+    submittedAt: string;
+    unitIds: string[];
+    reservedTokens: number;
+    status: 'in_progress' | 'canceling' | 'ended' | 'processed';
+    /** pair: r1 and r2 of open units (also when absent); tiebreak: the next run (r3 or r4) of units that need one. */
+    phase?: 'pair' | 'tiebreak';
+  } | null;
   budget: ContentAttachmentThinBudget;
   usage: {
     calls: number;
@@ -104,6 +139,19 @@ export function getContentAttachmentThinState(
   const file = join(thinRoot(taskId, run.runId), 'state.json');
   if (!existsSync(file)) return null;
   const state: ContentAttachmentThinState = read(file);
+  if (
+    state.status === 'running' &&
+    !running.has(run.runId) &&
+    state.batch &&
+    state.batch.status !== 'processed'
+  ) {
+    try {
+      resumeBatch(taskId, state);
+      return state;
+    } catch (error) {
+      console.error('Cannot resume the thin attachment batch:', error);
+    }
+  }
   if (state.status === 'running' && !running.has(run.runId)) {
     state.status = 'interrupted';
     state.stoppedBy = 'server restarted';
@@ -136,24 +184,22 @@ export function stopContentAttachmentThin(taskId: string) {
   return state;
 }
 
-/**
- * Attach every unit of the prepared plan with the thin method, in the background. Each call is saved as it
- * finishes; completed units are skipped when started again, and a unit with saved calls but no result is
- * left as interrupted for a manual decision rather than re-sent. A plan whose candidate snapshot is no longer
- * the latest candidate discovery run is refused. New units stop on request, on HTTP 429,
- * on repeated failures or when the call or token budget would be exceeded. One run keeps one model: once calls
- * are saved, starting again with another model is refused so the three votes of a unit never mix models.
- */
-export function startContentAttachmentThin(
-  taskId: string,
-  budget: ContentAttachmentThinBudget,
-  modelId: string,
-): ContentAttachmentThinState {
+interface ThinContext {
+  taskId: string;
+  runId: string;
+  plan: ContentAttachmentPlan;
+  root: string;
+  state: ContentAttachmentThinState;
+  stateFile: string;
+  budget: ContentAttachmentThinBudget;
+  atStart: ContentAttachmentThinState['usage'];
+}
+
+/** Load the prepared plan of the task's current attachment run, refusing a stale or changed snapshot. */
+function loadPlan(taskId: string) {
   const run = getContentAttachmentRun(taskId);
   if (!run || run.status === 'running')
     throw new Error('Prepare a content attachment plan first');
-  if (running.has(run.runId))
-    throw new Error('Thin attachment already running');
   // a plan prepared before a newer candidate discovery run would attach to an outdated registry
   if (getCandidateDiscoveryRun(taskId)?.runId !== run.candidateSnapshotId)
     throw new Error('Candidate snapshot changed; prepare a new plan');
@@ -169,7 +215,358 @@ export function startContentAttachmentThin(
   )
     throw new Error('Prepared snapshot changed; prepare a new plan');
   const plan: ContentAttachmentPlan = JSON.parse(rawPlan.toString('utf8'));
+  return { run, plan, root: thinRoot(taskId, run.runId) };
+}
+
+const persistState = (ctx: ThinContext) => {
+  const onDisk = existsSync(ctx.stateFile) ? read(ctx.stateFile) : null;
+  if (onDisk?.stopRequested) ctx.state.stopRequested = true;
+  write(ctx.stateFile, ctx.state);
+};
+
+const recordUsage = (
+  state: ContentAttachmentThinState,
+  call: ContentAttachmentThinCall,
+) => {
+  state.usage.calls++;
+  state.usage.totalTokens += call.usage?.totalTokens ?? 0;
+  if (call.status === 'failed') {
+    state.usage.failures++;
+    state.usage.consecutiveFailures++;
+  } else state.usage.consecutiveFailures = 0;
+};
+
+/** Assemble the saved unit results into the ledger attachment view and its summary. */
+function assembleSaved(ctx: ThinContext) {
+  const results = ctx.plan.units
+    .map((u) => join(unitDir(ctx.root, u.unitId), 'result.json'))
+    .filter(existsSync)
+    .map((f) => read(f) as ContentAttachmentThinUnitResult);
+  const view = assembleContentAttachmentThin(ctx.plan, results);
+  write(join(ctx.root, 'ledger-content-attachments.v2.json'), view);
+  ctx.state.summary = summarize(view, results);
+}
+
+/**
+ * Submit the open units that fit the budget as one Message Batch: r1 and r2 of each unit, built exactly as the
+ * direct call would send them except for a fixed output limit. Units without model-judged segments are
+ * routed without calls. Every item is in flight at once, so each call reserves its prompt length in tokens and
+ * the full output limit before the batch is sent; units beyond the budget stay open for a later start.
+ */
+async function submitBatch(ctx: ThinContext, modelId: string) {
+  const { plan, state } = ctx;
+  const open = plan.units.filter((u) => !state.units[u.unitId]);
+  const items: Array<{
+    custom_id: string;
+    params: Awaited<ReturnType<typeof anthropicMessageParams>>;
+  }> = [];
+  const unitIds: string[] = [];
+  let calls = state.usage.calls - ctx.atStart.calls;
+  let tokens = state.usage.totalTokens - ctx.atStart.totalTokens;
+  let reservedTokens = 0;
+  let limitedBy: string | null = null;
+  for (const unit of open) {
+    const request = createContentAttachmentThinUnitRequest(plan, unit);
+    if (!request) {
+      const u = unitDir(ctx.root, unit.unitId);
+      mkdirSync(u, { recursive: true });
+      write(
+        join(u, 'result.json'),
+        routeContentAttachmentThinTwoRuns(plan, unit, []),
+      );
+      state.units[unit.unitId] = 'completed';
+      continue;
+    }
+    const reserve =
+      Math.ceil(
+        (request.systemPrompt.length + request.userPrompt.length) *
+          BATCH_INPUT_TOKENS_PER_CHAR,
+      ) + BATCH_MAX_OUTPUT_TOKENS;
+    if (calls + 2 > ctx.budget.maxCalls) limitedBy ??= 'call budget';
+    else if (tokens + 2 * reserve > ctx.budget.maxTotalTokens)
+      limitedBy ??= 'token budget';
+    if (limitedBy) continue;
+    const params = {
+      ...(await anthropicMessageParams(
+        modelId,
+        request,
+        CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+      )),
+      max_tokens: BATCH_MAX_OUTPUT_TOKENS,
+    };
+    const index = plan.units.indexOf(unit);
+    for (const r of ['r1', 'r2'])
+      items.push({ custom_id: `u${index}-${r}`, params });
+    unitIds.push(unit.unitId);
+    calls += 2;
+    tokens += 2 * reserve;
+    reservedTokens += 2 * reserve;
+  }
+  persistState(ctx);
+  if (!items.length) return limitedBy;
+  const batch = await createAnthropicBatch(items);
+  state.batch = {
+    id: batch.id,
+    submittedAt: new Date().toISOString(),
+    unitIds,
+    reservedTokens,
+    status: batch.processing_status,
+    phase: 'pair',
+  };
+  persistState(ctx);
+  return limitedBy;
+}
+
+/** The saved calls of a unit, in run order. */
+const savedCalls = (u: string) =>
+  (['r1', 'r2', 'r3', 'r4'] as const).flatMap((run) =>
+    existsSync(join(u, `${run}.json`))
+      ? [read(join(u, `${run}.json`)) as ContentAttachmentThinCall]
+      : [],
+  );
+
+/**
+ * Submit the next run of every saved unit that needs one (`contentAttachmentThinNextRun`: r3, then r4, to replace a
+ * degenerate run or to break a tie between disagreeing runs), within what is left of the budget, as one batch.
+ */
+async function submitTiebreak(ctx: ThinContext, modelId: string) {
+  const { plan, state } = ctx;
+  const items: Array<{
+    custom_id: string;
+    params: Awaited<ReturnType<typeof anthropicMessageParams>>;
+  }> = [];
+  const unitIds: string[] = [];
+  let calls = state.usage.calls - ctx.atStart.calls;
+  let tokens = state.usage.totalTokens - ctx.atStart.totalTokens;
+  let reservedTokens = 0;
+  let limitedBy: string | null = null;
+  for (const unit of plan.units) {
+    const u = unitDir(ctx.root, unit.unitId);
+    if (state.units[unit.unitId] !== 'completed') continue;
+    const next = contentAttachmentThinNextRun(plan, unit, savedCalls(u));
+    if (!next) continue;
+    const request = createContentAttachmentThinUnitRequest(plan, unit)!;
+    const reserve =
+      Math.ceil(
+        (request.systemPrompt.length + request.userPrompt.length) *
+          BATCH_INPUT_TOKENS_PER_CHAR,
+      ) + BATCH_MAX_OUTPUT_TOKENS;
+    if (calls + 1 > ctx.budget.maxCalls) limitedBy ??= 'call budget';
+    else if (tokens + reserve > ctx.budget.maxTotalTokens)
+      limitedBy ??= 'token budget';
+    if (limitedBy) continue;
+    items.push({
+      custom_id: `u${plan.units.indexOf(unit)}-${next}`,
+      params: {
+        ...(await anthropicMessageParams(
+          modelId,
+          request,
+          CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+        )),
+        max_tokens: BATCH_MAX_OUTPUT_TOKENS,
+      },
+    });
+    unitIds.push(unit.unitId);
+    calls++;
+    tokens += reserve;
+    reservedTokens += reserve;
+  }
+  if (!items.length) return limitedBy;
+  const batch = await createAnthropicBatch(items);
+  state.batch = {
+    id: batch.id,
+    submittedAt: new Date().toISOString(),
+    unitIds,
+    reservedTokens,
+    status: batch.processing_status,
+    phase: 'tiebreak',
+  };
+  persistState(ctx);
+  return limitedBy;
+}
+
+/**
+ * Wait for the batch to end, cancelling it on a stop request, then save every answered unit: its r1 and r2
+ * calls, recorded without repair, and its two-run result. A unit whose two items were both cancelled or
+ * expired made no call and stays open for a later start. A tie-break batch adds each answered r3 and routes the
+ * unit again with all three runs; a cancelled or expired r3 leaves the two-run result.
+ */
+async function finishBatch(ctx: ThinContext) {
+  const { plan, state } = ctx;
+  const batch = state.batch!;
+  for (;;) {
+    const current = await retrieveAnthropicBatch(batch.id);
+    batch.status = current.processing_status;
+    if (batch.status === 'ended') break;
+    if (state.stopRequested && batch.status === 'in_progress')
+      batch.status = (await cancelAnthropicBatch(batch.id)).processing_status;
+    persistState(ctx);
+    await new Promise((resolve) => setTimeout(resolve, BATCH_POLL_MS));
+    persistState(ctx);
+  }
+  const items = new Map(
+    (await anthropicBatchResults(batch.id)).map((item) => [
+      item.custom_id,
+      item,
+    ]),
+  );
+  for (const unitId of batch.phase === 'tiebreak' ? batch.unitIds : []) {
+    const unit = plan.units.find((u) => u.unitId === unitId)!;
+    const index = plan.units.indexOf(unit);
+    const run = (['r3', 'r4'] as const).find((r) =>
+      items.has(`u${index}-${r}`),
+    );
+    const item = run && items.get(`u${index}-${run}`);
+    if (
+      !run ||
+      !item ||
+      item.result.type === 'canceled' ||
+      item.result.type === 'expired'
+    )
+      continue;
+    const u = unitDir(ctx.root, unitId);
+    const call = recordContentAttachmentThinCall(plan, unit, {
+      run,
+      request: createContentAttachmentThinUnitRequest(plan, unit)!,
+      providerOptions: CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+      ...readAnthropicBatchItem(item),
+    });
+    write(join(u, `${run}.json`), { ...call, batchId: batch.id });
+    recordUsage(state, call);
+    write(
+      join(u, 'result.json'),
+      routeContentAttachmentThinTwoRuns(plan, unit, savedCalls(u)),
+    );
+  }
+  for (const unitId of batch.phase === 'tiebreak' ? [] : batch.unitIds) {
+    const unit = plan.units.find((u) => u.unitId === unitId)!;
+    const index = plan.units.indexOf(unit);
+    const answered = (['r1', 'r2'] as const).flatMap((run) => {
+      const item = items.get(`u${index}-${run}`);
+      return item &&
+        item.result.type !== 'canceled' &&
+        item.result.type !== 'expired'
+        ? [{ run, item }]
+        : [];
+    });
+    if (!answered.length) continue;
+    const request = createContentAttachmentThinUnitRequest(plan, unit)!;
+    const u = unitDir(ctx.root, unitId);
+    mkdirSync(u, { recursive: true });
+    const calls = (['r1', 'r2'] as const).map((run) => {
+      const item = items.get(`u${index}-${run}`);
+      const call = recordContentAttachmentThinCall(plan, unit, {
+        run,
+        request,
+        providerOptions: CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+        ...(item
+          ? readAnthropicBatchItem(item)
+          : { error: 'batch item missing' }),
+      });
+      write(join(u, `${run}.json`), { ...call, batchId: batch.id });
+      recordUsage(state, call);
+      return call;
+    });
+    const result = routeContentAttachmentThinTwoRuns(plan, unit, calls);
+    write(join(u, 'result.json'), result);
+    state.units[unitId] = result.status === 'failed' ? 'failed' : 'completed';
+  }
+  batch.status = 'processed';
+  persistState(ctx);
+}
+
+/**
+ * Run a batch start in the background: collect a batch whose results were not saved, then submit and collect
+ * batches until every open unit is done. A batch holds the units whose worst case fits what is left of the
+ * budget; once its actual usage is known, the units it could not hold go out in the next batch. A start that
+ * resumes after a restart only collects its batch. Units cancelled or expired stay open for a later start.
+ */
+function runBatch(ctx: ThinContext, modelId: string, resume: boolean) {
+  running.add(ctx.runId);
+  void (async () => {
+    const { state } = ctx;
+    try {
+      if (state.batch && state.batch.status !== 'processed')
+        await finishBatch(ctx);
+      let limitedBy: string | null = null;
+      while (!resume && !state.stopRequested) {
+        const previous = state.batch?.id;
+        limitedBy = await submitBatch(ctx, modelId);
+        if (!state.batch || state.batch.id === previous) break;
+        await finishBatch(ctx);
+        if (!limitedBy) break;
+      }
+      // units with a degenerate run or disagreeing runs get their next run (r3, then r4), batch by batch
+      while (!resume && !state.stopRequested) {
+        const previous = state.batch?.id;
+        // r4 may follow r3 in the next wave; a wave without items ends the loop
+        await submitTiebreak(ctx, modelId);
+        if (!state.batch || state.batch.id === previous) break;
+        await finishBatch(ctx);
+      }
+      assembleSaved(ctx);
+      const open = ctx.plan.units.some((u) => !state.units[u.unitId]);
+      state.status = open ? 'stopped' : 'completed';
+      state.stoppedBy = open
+        ? state.stopRequested
+          ? 'stop requested'
+          : (limitedBy ?? 'batch items cancelled or expired')
+        : null;
+    } catch (error) {
+      console.error('Thin content attachment batch failed:', error);
+      state.status = 'stopped';
+      state.stoppedBy = 'unexpected error';
+    } finally {
+      state.completedAt = new Date().toISOString();
+      write(ctx.stateFile, state);
+      running.delete(ctx.runId);
+    }
+  })();
+}
+
+/**
+ * Pick up a submitted batch after a server restart: the batch keeps running at the provider, so its results
+ * are fetched and saved instead of marking the run interrupted.
+ */
+function resumeBatch(taskId: string, state: ContentAttachmentThinState) {
+  const { run, plan, root } = loadPlan(taskId);
+  const ctx: ThinContext = {
+    taskId,
+    runId: run.runId,
+    plan,
+    root,
+    state,
+    stateFile: join(root, 'state.json'),
+    budget: state.budget,
+    atStart: { ...state.usage },
+  };
+  runBatch(ctx, state.modelId, true);
+}
+
+/**
+ * Attach every unit of the prepared plan with the thin method, in the background. Each call is saved as it
+ * finishes; completed units are skipped when started again, and a unit with saved calls but no result is
+ * left as interrupted for a manual decision rather than re-sent. A plan whose candidate snapshot is no longer
+ * the latest candidate discovery run is refused. New units stop on request, on HTTP 429,
+ * on repeated failures or when the call or token budget would be exceeded. One run keeps one model: once calls
+ * are saved, starting again with another model is refused so the votes of a unit never mix models.
+ * With `batch` (Anthropic models only), the open units go out as Message Batches at half the price, each holding
+ * the units whose worst case fits what is left of the budget; the run stays `running` until the last batch ends,
+ * also across a server restart. A batch whose results were not saved, for example after a failed download, is
+ * collected by the next start instead of being submitted again.
+ */
+export function startContentAttachmentThin(
+  taskId: string,
+  budget: ContentAttachmentThinBudget,
+  modelId: string,
+  options: { batch?: boolean } = {},
+): ContentAttachmentThinState {
+  if (options.batch && !isAnthropicModelId(modelId))
+    throw new Error('Batch attachment needs an Anthropic model');
+  const { run, plan } = loadPlan(taskId);
   const previous = getContentAttachmentThinState(taskId);
+  if (running.has(run.runId))
+    throw new Error('Thin attachment already running');
   if (previous && previous.usage.calls > 0 && previous.modelId !== modelId)
     throw new Error(
       `This plan was attached with ${previous.modelId}; prepare a new plan to use another model`,
@@ -182,6 +579,8 @@ export function startContentAttachmentThin(
     startedAt: new Date().toISOString(),
     completedAt: null,
     modelId,
+    mode: options.batch ? 'batch' : 'direct',
+    batch: previous?.batch ?? null,
     budget,
     usage: previous?.usage ?? {
       calls: 0,
@@ -216,6 +615,26 @@ export function startContentAttachmentThin(
   }
   // written directly so a stop request saved by the previous start is not carried over
   write(stateFile, state);
+  // a batch whose results were not saved is collected first, never submitted again
+  const pendingBatch = !!state.batch && state.batch.status !== 'processed';
+  if (options.batch || pendingBatch) {
+    state.mode = 'batch';
+    runBatch(
+      {
+        taskId,
+        runId: run.runId,
+        plan,
+        root,
+        state,
+        stateFile,
+        budget,
+        atStart,
+      },
+      modelId,
+      !options.batch,
+    );
+    return state;
+  }
 
   const model = createModel(modelId);
   running.add(run.runId);
@@ -255,12 +674,7 @@ export function startContentAttachmentThin(
                 },
                 onCall: (call: ContentAttachmentThinCall) => {
                   write(join(u, `${call.run}.json`), call);
-                  state.usage.calls++;
-                  state.usage.totalTokens += call.usage?.totalTokens ?? 0;
-                  if (call.status === 'failed') {
-                    state.usage.failures++;
-                    state.usage.consecutiveFailures++;
-                  } else state.usage.consecutiveFailures = 0;
+                  recordUsage(state, call);
                   persist();
                 },
               });

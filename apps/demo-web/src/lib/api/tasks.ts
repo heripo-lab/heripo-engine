@@ -24,6 +24,7 @@ import type {
   StoredReportProfile,
 } from '~/lib/ledger/report-profile';
 
+import type { LedgerStageModels } from '~/features/ledger/constants/ledger-run';
 import type { ProcessingOptions } from '~/features/upload';
 
 export type TaskStatus =
@@ -247,8 +248,8 @@ export async function createTask(
 
 export interface CreateLedgerTaskInput {
   file: File;
-  /** The model of the automatic ledger run. */
-  modelId: string;
+  /** The model of each step of the automatic ledger run. */
+  models: LedgerStageModels;
   bypassCode?: string;
   turnstileToken?: string;
 }
@@ -262,7 +263,7 @@ export async function createLedgerTask(
 ): Promise<CreateTaskResponse> {
   const formData = new FormData();
   formData.append('file', input.file);
-  formData.append('modelId', input.modelId);
+  formData.append('models', JSON.stringify(input.models));
   if (input.bypassCode) {
     formData.append('bypassCode', input.bypassCode);
   }
@@ -288,12 +289,12 @@ export async function getLedgerTaskForSource(
 /** Make a ledger task from a completed PDF processing task in this session; an existing one is returned. */
 export async function createLedgerTaskFromResult(input: {
   taskId: string;
-  modelId: string;
+  models: LedgerStageModels;
 }): Promise<{ taskId: string; existing: boolean }> {
   const response = await fetch(`/api/tasks/${input.taskId}/ledger-task`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ modelId: input.modelId }),
+    body: JSON.stringify({ models: input.models }),
   });
   return handleResponse(response);
 }
@@ -362,7 +363,12 @@ export async function fetchContentAttachmentAudit(
 }
 export async function runThinContentAttachment(
   taskId: string,
-  budget: { maxCalls: number; maxTotalTokens: number; modelId: string },
+  budget: {
+    maxCalls: number;
+    maxTotalTokens: number;
+    modelId: string;
+    batch: boolean;
+  },
 ): Promise<{
   run: ContentAttachmentRun | null;
   thin: ContentAttachmentThinState;

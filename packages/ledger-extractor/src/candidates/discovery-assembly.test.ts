@@ -137,8 +137,13 @@ describe('candidate discovery', () => {
     const plan = prepare();
     const unit = plan.units[0];
     const p = proposal(unit);
+    // up to v14 even an identical repeated proposal is a duplicate anchor
     const duplicates = await assembleCandidateDiscovery(plan, [
-      audit(unit, { candidates: [p, p], exclusions: [] }),
+      audit(
+        unit,
+        { candidates: [p, p], exclusions: [] },
+        'candidate-discovery.v14',
+      ),
     ]);
     expect(duplicates.candidates).toHaveLength(1);
     expect(duplicates.issues[0].reason).toContain('Duplicate anchor');
@@ -754,7 +759,7 @@ describe('prompt v9 table roles, exclusion categories and follow-ups', () => {
     expect(merged.issues).toEqual([]);
     expect(merged.exclusions).toHaveLength(2);
     const mismatch =
-      'Saved follow-up does not match the unanswered rows, corrections and reconsidered headings of this unit';
+      'Saved follow-up does not match the unanswered rows, corrections, reconsidered headings and numbered blocks of this unit';
     expect(
       (await assemble({ followUp: { ...followUp, rowIndexes: [3] } })).issues[0]
         .reason,

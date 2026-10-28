@@ -18,7 +18,7 @@ export function readPlaceAliases(taskId: string): PlaceAliasTable | null {
 }
 
 /**
- * Save a person-decided place alias table after validating it against the task's latest attachment plan and
+ * Save a place alias table (a person's, or a proposal kept by code checks) after validating it against the task's latest attachment plan and
  * its assembled ledger; a table with errors is refused. The saved file is the table exactly as given.
  */
 export function savePlaceAliases(taskId: string, table: unknown) {

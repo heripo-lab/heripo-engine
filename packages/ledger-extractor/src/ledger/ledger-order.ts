@@ -85,6 +85,9 @@ export function sortArchaeologyLedger(
     mediaReferences: [...result.mediaReferences].sort(
       byKeys((m) => [rank(m.recordId), m.ordinal, m.imageId]),
     ),
+    mediaCandidates: [...result.mediaCandidates].sort(
+      byKeys((m) => [m.pdfPageNo, m.id]),
+    ),
     links: [...result.links].sort(
       byKeys((l) => [
         rank(l.fromRecordId),

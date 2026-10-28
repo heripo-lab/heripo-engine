@@ -286,6 +286,15 @@ describe('assembleContentAttachmentThin', () => {
       ['R5', ['E6:S1:code_cell_registration']],
       ['R6', ['E7:S1:code_typed_row', 'E8:S1:code_typed_row']],
     ]);
+    const majority = assembleContentAttachmentThin(plan, [
+      {
+        ...a,
+        segments: a.segments.map((x) =>
+          x.segment === 'E1:S1' ? { ...x, decidedBy: 'majority' as const } : x,
+        ),
+      },
+    ]);
+    expect(majority.contents[0].excerpts[0].basis).toBe('model_majority');
     expect(view.contents[0].excerpts[0]).toEqual({
       unitId: 'page-1',
       segment: 'E1:S1',

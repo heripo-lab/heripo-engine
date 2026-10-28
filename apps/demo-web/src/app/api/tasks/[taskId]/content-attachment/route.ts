@@ -70,6 +70,7 @@ const schema = z.discriminatedUnion('action', [
       modelId: z
         .string()
         .regex(/^(openai|anthropic|google|together|ollama|lmstudio)\/.+/),
+      batch: z.boolean().optional(),
     })
     .strict(),
   z.object({ action: z.literal('stop-thin') }).strict(),
@@ -103,6 +104,7 @@ export async function POST(request: NextRequest, context: Context) {
                     maxTotalTokens: parsed.data.maxTotalTokens,
                   },
                   parsed.data.modelId,
+                  { batch: parsed.data.batch },
                 )
               : stopContentAttachmentThin(task.taskId!),
         },

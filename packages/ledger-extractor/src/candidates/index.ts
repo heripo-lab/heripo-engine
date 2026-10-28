@@ -5,11 +5,19 @@ export {
   prepareCandidateDiscovery,
 } from './discovery-plan';
 export { prepareCandidateDiscoveryRetry } from './discovery-retry';
-export { discoverCandidateUnit } from './discovery-unit';
+export {
+  createCandidateDiscoveryFollowUpCall,
+  createCandidateDiscoveryUnitCall,
+  discoverCandidateUnit,
+  recordCandidateDiscoveryUnit,
+} from './discovery-unit';
+export type { CandidateDiscoveryCallResult } from './discovery-unit';
 export { assembleCandidateDiscovery } from './discovery-assembly';
 export {
   CANDIDATE_DISCOVERY_PROMPT_VERSION,
   RECONSIDERED_EXCLUSIONS_RULE,
+  UNANSWERED_NUMBERED_BLOCKS_RULE,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
   SIDE_BY_SIDE_TABLES_RULE,
   createCandidateDiscoveryRequest,
   isSectionHeading,
@@ -32,6 +40,24 @@ export {
   CANDIDATE_DEDUPLICATION_PROMPT_VERSION,
   CANDIDATE_DEDUPLICATION_UNMERGED_REASON,
 } from './candidate-deduplication';
+export {
+  assembleCandidateDeduplicationSplit,
+  CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION,
+  CANDIDATE_DEDUPLICATION_BLOCK_PROVIDER_OPTIONS,
+  CANDIDATE_DEDUPLICATION_CONTEXT_KINDS,
+  CANDIDATE_DEDUPLICATION_SPLIT_VERSION,
+  createCandidateDeduplicationBlockRequest,
+  createCandidateDeduplicationBlockSchema,
+  deduplicateCandidateBlocks,
+  planCandidateDeduplication,
+} from './candidate-deduplication-split';
+export type {
+  CandidateDeduplicationBlockAudit,
+  CandidateDeduplicationRule,
+  CandidateDeduplicationSplit,
+  CandidateDeduplicationSplitAudit,
+  CandidateDeduplicationSplitVersion,
+} from './candidate-deduplication-split';
 export type {
   CandidateDeduplicationAudit,
   CandidateDeduplicationResult,

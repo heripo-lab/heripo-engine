@@ -1,5 +1,6 @@
 import type {
   CandidateDiscoveryCorrection,
+  CandidateDiscoveryNumberedBlock,
   CandidateDiscoveryReconsideration,
   CandidateDiscoveryResponse,
   CandidateDiscoveryUnit,
@@ -10,6 +11,8 @@ import {
   CANDIDATE_DISCOVERY_PROMPT_VERSION,
   RECONSIDERED_EXCLUSIONS_RULE,
   SIDE_BY_SIDE_TABLES_RULE,
+  UNANSWERED_NUMBERED_BLOCKS_RULE,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
   createCandidateDiscoveryRequest,
   getCandidateSources,
   isSectionHeading,
@@ -32,7 +35,7 @@ const compact = (text: string) => text.replace(/\s+/gu, '');
 /**
  * Version-dependent checks: strict table identifiers from v6, table roles and name cells from v9, name leads and
  * corrections from v10, heading reconsideration and row blocks from v11, follow-up rules in the follow-up input from
- * v12.
+ * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15.
  */
 export interface CandidateCheckLevel {
   strictTableIdentifier: boolean;
@@ -40,12 +43,18 @@ export interface CandidateCheckLevel {
   v10: boolean;
   v11: boolean;
   v12: boolean;
+  v13: boolean;
+  v14: boolean;
+  v15: boolean;
 }
 
 export function candidateCheckLevel(
   promptVersion: string,
 ): CandidateCheckLevel {
-  const v12 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v15 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v14 = v15 || promptVersion === 'candidate-discovery.v14';
+  const v13 = v14 || promptVersion === 'candidate-discovery.v13';
+  const v12 = v13 || promptVersion === 'candidate-discovery.v12';
   const v11 = v12 || promptVersion === 'candidate-discovery.v11';
   const v10 = v11 || promptVersion === 'candidate-discovery.v10';
   const v9 = v10 || promptVersion === 'candidate-discovery.v9';
@@ -61,6 +70,9 @@ export function candidateCheckLevel(
     v10,
     v11,
     v12,
+    v13,
+    v14,
+    v15,
   };
 }
 
@@ -156,6 +168,15 @@ export function checkCandidate(
       });
     });
   };
+  // a catalog entry such as "13. 삼족기" opens its block with the object number right before the name
+  const catalogNumber = (key: string, name: string) => {
+    const match = /^\s*(\d+)\.\s*([\s\S]*)$/u.exec(
+      sources.find((s) => s.resource.key === key)!.resource.data.text,
+    );
+    return match && compact(match[2]).startsWith(compact(name))
+      ? match[1]
+      : null;
+  };
   let invalid = '';
   if (evidence.length !== proposal.evidence.length)
     invalid = 'Evidence does not match an exact input quote in this unit';
@@ -233,6 +254,14 @@ export function checkCandidate(
   )
     invalid =
       'Independent body candidate is not named at the start of any evidence block';
+  else if (
+    level.v14 &&
+    proposal.recordKind === 'artifact' &&
+    proposal.eligibilityBasis === 'independent_body' &&
+    proposal.sourceIdentifier === null &&
+    catalogNumber(evidence[0].resourceKey, proposal.sourceName) !== null
+  )
+    invalid = `Body artifact block opens with catalog number ${catalogNumber(evidence[0].resourceKey, proposal.sourceName)} before its name; copy that number unchanged as sourceIdentifier`;
   return { evidence, invalid };
 }
 
@@ -343,10 +372,66 @@ export function headingReconsiderations(
 }
 
 /**
+ * The form of an identifier with every digit run generalised, such as 마도\d+-\d+ for "마도23-5" or \d+호 for "3호";
+ * null for an identifier without both a digit and a letter, since a bare number ("12", "23-1") would match any
+ * numbered block.
+ */
+const AREA_LABEL =
+  '[0-9A-Za-z]*\\d[0-9A-Za-z-]*(?:구역|지구|트렌치|그리드|피트)';
+
+function identifierShape(identifier: string | null) {
+  if (!identifier || !/\d/u.test(identifier)) return null;
+  const text = compact(identifier);
+  if (!/\p{L}/u.test(text.replace(/\d/gu, ''))) return null;
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/\d+/gu, '\\d+');
+}
+
+/**
+ * Body blocks of a v13 response that open with a number of the same form as an identifier the response proposed,
+ * after any leading marks, while no candidate or exclusion cites the block and no candidate uses that number. A model
+ * can stop part way through a run of numbered accounts without saying so; these blocks ask it about the rest.
+ */
+export function unansweredNumberedBlocks(
+  unit: CandidateDiscoveryUnit,
+  response: CandidateDiscoveryResponse,
+  promptVersion: string,
+): CandidateDiscoveryNumberedBlock[] {
+  const level = candidateCheckLevel(promptVersion);
+  if (!level.v13 || unit.table) return [];
+  const shapes = [
+    ...new Set(
+      response.candidates.flatMap(
+        (c) => identifierShape(c.sourceIdentifier) ?? [],
+      ),
+    ),
+    // a numbered area, trench or grid label such as 23-1구역 or 3트렌치; a field label before it (출수위치 발굴 6구역)
+    // is a findspot line, not an area's own account
+    ...(level.v15 ? [AREA_LABEL] : []),
+  ];
+  if (!shapes.length) return [];
+  const leading = new RegExp(`^(?:${shapes.join('|')})`, 'u');
+  const numbers = new Set(
+    response.candidates.map((c) => compact(c.sourceIdentifier ?? '')),
+  );
+  const cited = new Set([
+    ...response.candidates.flatMap((c) => c.evidence.map((e) => e.sourceId)),
+    ...response.exclusions.map((e) => e.sourceId),
+  ]);
+  return getCandidateSources(unit).flatMap(({ sourceId, resource }) => {
+    if (cited.has(sourceId)) return [];
+    const number = compact(resource.data.text)
+      .replace(/^[^\p{L}0-9]+/u, '')
+      .match(leading)?.[0];
+    return number && !numbers.has(number) ? [{ sourceId, number }] : [];
+  });
+}
+
+/**
  * The single follow-up a response needs, or null: unanswered item-table rows (v9 on) or, for a side-by-side table
  * from v11, row blocks; from v10, corrections of invalid candidates; from v11, excluded headings to reconsider. Rows
  * alone narrow the unit to those rows (or blocks); otherwise the whole unit goes with the corrections, unanswered rows
- * and headings listed in the input. From v12 the rules for headings and blocks travel as followUpRules in that input.
+ * and headings listed in the input. From v12 the rules for headings and blocks travel as followUpRules in that input;
+ * from v13 numbered body blocks that no answer cites are asked the same way.
  */
 export function planCandidateDiscoveryFollowUp(
   unit: CandidateDiscoveryUnit,
@@ -355,13 +440,19 @@ export function planCandidateDiscoveryFollowUp(
 ) {
   const level = candidateCheckLevel(promptVersion);
   if (!level.v9) return null;
-  const version = level.v12
+  const version = level.v15
     ? CANDIDATE_DISCOVERY_PROMPT_VERSION
-    : level.v11
-      ? 'candidate-discovery.v11'
-      : level.v10
-        ? 'candidate-discovery.v10'
-        : 'candidate-discovery.v9';
+    : level.v14
+      ? 'candidate-discovery.v14'
+      : level.v13
+        ? 'candidate-discovery.v13'
+        : level.v12
+          ? 'candidate-discovery.v12'
+          : level.v11
+            ? 'candidate-discovery.v11'
+            : level.v10
+              ? 'candidate-discovery.v10'
+              : 'candidate-discovery.v9';
   // a side-by-side table answers by row blocks from v11, so its rows are asked through those blocks only
   const blocks = level.v11 ? columnBlocks(unit) : null;
   const rowBlocks = blocks ? unansweredItemTableBlocks(unit, response) : [];
@@ -374,13 +465,30 @@ export function planCandidateDiscoveryFollowUp(
     response,
     promptVersion,
   );
-  if (!rowIndexes.length && !corrections.length && !reconsiderations.length)
+  const numberedBlocks = unansweredNumberedBlocks(
+    unit,
+    response,
+    promptVersion,
+  );
+  if (
+    !rowIndexes.length &&
+    !corrections.length &&
+    !reconsiderations.length &&
+    !numberedBlocks.length
+  )
     return null;
   // from v12 the rules for reconsidered headings and row blocks come with the follow-up that needs them
   const rules = level.v12
     ? [
         ...(reconsiderations.length ? [RECONSIDERED_EXCLUSIONS_RULE] : []),
         ...(rowBlocks.length ? [SIDE_BY_SIDE_TABLES_RULE] : []),
+        ...(numberedBlocks.length
+          ? [
+              level.v15
+                ? UNANSWERED_NUMBERED_BLOCKS_RULE_V15
+                : UNANSWERED_NUMBERED_BLOCKS_RULE,
+            ]
+          : []),
       ]
     : [];
   const withRules = (request: Record<string, unknown>) =>
@@ -393,7 +501,11 @@ export function planCandidateDiscoveryFollowUp(
           table: { ...(request.table as object), columnBlocks: blocks },
         }
       : request;
-  if (!corrections.length && !reconsiderations.length) {
+  if (
+    !corrections.length &&
+    !reconsiderations.length &&
+    !numberedBlocks.length
+  ) {
     const target = createFollowUpUnit(unit, rowIndexes, rowBlocks);
     const { userPrompt } = createCandidateDiscoveryRequest(target, version);
     return {
@@ -401,6 +513,7 @@ export function planCandidateDiscoveryFollowUp(
       rowBlocks,
       corrections,
       reconsiderations,
+      numberedBlocks,
       unit: target,
       userPrompt: rowBlocks.length
         ? JSON.stringify(withRules(withBlocks(JSON.parse(userPrompt))))
@@ -412,6 +525,7 @@ export function planCandidateDiscoveryFollowUp(
     rowBlocks,
     corrections,
     reconsiderations,
+    numberedBlocks,
     unit,
     userPrompt: JSON.stringify(
       withRules({
@@ -431,6 +545,9 @@ export function planCandidateDiscoveryFollowUp(
             issue: r.issue,
             fix: r.fix,
           })),
+        }),
+        ...(numberedBlocks.length > 0 && {
+          unansweredNumberedBlocks: numberedBlocks,
         }),
       }),
     ),

@@ -1,3 +1,5 @@
+import type { CandidateDiscoveryResponse } from './discovery-types';
+
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -14,6 +16,8 @@ import {
   SYSTEM_PROMPT,
   SYSTEM_PROMPT_V10,
   SYSTEM_PROMPT_V11,
+  UNANSWERED_NUMBERED_BLOCKS_RULE,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
   createCandidateDiscoveryRequest,
   isSectionHeading,
 } from './discovery-request';
@@ -22,6 +26,7 @@ import {
   candidateCorrections,
   headingReconsiderations,
   planCandidateDiscoveryFollowUp,
+  unansweredNumberedBlocks,
 } from './discovery-validation';
 
 describe('discovery v10 sections, name lead and corrections', () => {
@@ -94,6 +99,75 @@ describe('discovery v10 sections, name lead and corrections', () => {
       v10: false,
       v11: false,
       v12: false,
+      v13: false,
+      v14: false,
+      v15: false,
+    });
+  });
+
+  test('asks a v14 body artifact whose block opens with a catalog number for that number', async () => {
+    const { plan, unit, body } = sections();
+    const ids = Object.fromEntries(
+      unit.resources.map((r) => [
+        r.data.text.slice(0, 4),
+        `id:${r.resourceId}`,
+      ]),
+    );
+    const unnumbered = body('호 구연편', null, ids['21. '], '21. 호 구연편');
+    const assemble = (
+      version?: 'candidate-discovery.v13' | 'candidate-discovery.v14',
+      candidates = [unnumbered],
+    ) =>
+      assembleCandidateDiscovery(plan, [
+        {
+          ...audit(unit, {
+            tableRole: 'none',
+            candidates,
+            exclusions: [],
+          }),
+          ...(version && createCandidateDiscoveryRequest(unit, version)),
+        },
+      ]);
+
+    expect(
+      (await assemble()).issues.map((i) => [i.candidateIndex, i.reason]),
+    ).toEqual([
+      [
+        0,
+        'Body artifact block opens with catalog number 21 before its name; copy that number unchanged as sourceIdentifier',
+      ],
+    ]);
+    expect((await assemble('candidate-discovery.v13')).issues).toEqual([]);
+    expect(
+      (await assemble('candidate-discovery.v14')).issues.map((i) => i.reason),
+    ).toEqual([
+      'Body artifact block opens with catalog number 21 before its name; copy that number unchanged as sourceIdentifier',
+    ]);
+    // a later name after the number, or a block without a catalog number, is not asked
+    for (const other of [
+      body('구연편', null, ids['21. '], '21. 호 구연편'),
+      body('백자', null, ids['96호 '], '백자'),
+    ])
+      expect(
+        (await assemble(undefined, [other])).issues.map((i) => i.reason),
+      ).not.toContainEqual(expect.stringMatching(/^Body artifact block/));
+    expect(
+      planCandidateDiscoveryFollowUp(
+        unit,
+        { tableRole: 'none', candidates: [unnumbered], exclusions: [] },
+        'candidate-discovery.v13',
+      ),
+    ).toBeNull();
+    expect(
+      planCandidateDiscoveryFollowUp(
+        unit,
+        { tableRole: 'none', candidates: [unnumbered], exclusions: [] },
+        CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      )?.corrections,
+    ).toHaveLength(1);
+    expect(candidateCheckLevel('candidate-discovery.v13')).toMatchObject({
+      v13: true,
+      v14: false,
     });
   });
 
@@ -246,9 +320,14 @@ describe('assembled v10 corrections', () => {
       },
       usage: audit(unit, first).usage,
     };
+    // the sections fixture leaves "96호 수혈" uncited, which v13 would also ask; this test covers corrections only
     const assemble = (overrides: object) =>
       assembleCandidateDiscovery(plan, [
-        { ...audit(unit, first), followUp, ...overrides },
+        {
+          ...audit(unit, first, 'candidate-discovery.v12'),
+          followUp,
+          ...overrides,
+        },
       ]);
 
     const merged = await assemble({});
@@ -261,7 +340,7 @@ describe('assembled v10 corrections', () => {
       (await assemble({ followUp: { ...followUp, corrections: [] } })).issues[0]
         .reason,
     ).toBe(
-      'Saved follow-up does not match the unanswered rows, corrections and reconsidered headings of this unit',
+      'Saved follow-up does not match the unanswered rows, corrections, reconsidered headings and numbered blocks of this unit',
     );
   });
 });
@@ -457,10 +536,11 @@ describe('assembled v11 follow-ups', () => {
         },
       ],
     };
+    // v12: the uncited "96호 수혈" block would add a v13 numbered-block question to this reconsideration
     const planned = planCandidateDiscoveryFollowUp(
       unit,
       first,
-      CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      'candidate-discovery.v12',
     )!;
     const building = {
       ...body('건물지', '1호', ids['(1) '], '(1) 1호 건물지'),
@@ -491,11 +571,11 @@ describe('assembled v11 follow-ups', () => {
     };
 
     const merged = await assembleCandidateDiscovery(plan, [
-      { ...audit(unit, first), followUp },
+      { ...audit(unit, first, 'candidate-discovery.v12'), followUp },
     ]);
     const mismatched = await assembleCandidateDiscovery(plan, [
       {
-        ...audit(unit, first),
+        ...audit(unit, first, 'candidate-discovery.v12'),
         followUp: { ...followUp, reconsiderations: [] },
       },
     ]);
@@ -512,7 +592,7 @@ describe('assembled v11 follow-ups', () => {
     ]);
     expect(merged.exclusions.map((e) => e.sourceId)).toEqual([ids['유구는 ']]);
     expect(mismatched.issues[0].reason).toBe(
-      'Saved follow-up does not match the unanswered rows, corrections and reconsidered headings of this unit',
+      'Saved follow-up does not match the unanswered rows, corrections, reconsidered headings and numbered blocks of this unit',
     );
   });
 
@@ -655,5 +735,203 @@ describe('assembled v11 follow-ups', () => {
       expect.stringContaining('Duplicate anchor requires review'),
     ]);
     expect(result.exclusions).toHaveLength(1);
+  });
+});
+
+describe('discovery v15 repeated proposals', () => {
+  test('keeps an identical repeated proposal once and still reports a different one at the same anchor', async () => {
+    const { plan, unit, body } = sections();
+    const ids = Object.fromEntries(
+      unit.resources.map((r) => [
+        r.data.text.slice(0, 4),
+        `id:${r.resourceId}`,
+      ]),
+    );
+    const named = body('호 구연편', '21', ids['21. '], '21. 호 구연편');
+    const assemble = (
+      candidates: CandidateDiscoveryResponse['candidates'],
+      version?: 'candidate-discovery.v14',
+    ) =>
+      assembleCandidateDiscovery(plan, [
+        {
+          ...audit(unit, { tableRole: 'none', candidates, exclusions: [] }),
+          ...(version && createCandidateDiscoveryRequest(unit, version)),
+        },
+      ]);
+
+    const repeated = await assemble([named, named]);
+    expect(repeated.issues).toEqual([]);
+    expect(repeated.candidates).toHaveLength(1);
+    expect(
+      (await assemble([named, { ...named, sourceName: '구연편' }])).issues.map(
+        (i) => i.reason,
+      ),
+    ).toEqual([expect.stringContaining('Duplicate anchor requires review')]);
+    expect(
+      (await assemble([named, named], 'candidate-discovery.v14')).issues.map(
+        (i) => i.reason,
+      ),
+    ).toEqual([expect.stringContaining('Duplicate anchor requires review')]);
+  });
+});
+
+describe('discovery v13 numbered body blocks', () => {
+  const setup = () => {
+    const { plan, unit, body } = sections();
+    const ids = Object.fromEntries(
+      unit.resources.map((r) => [
+        r.data.text.slice(0, 4),
+        `id:${r.resourceId}`,
+      ]),
+    );
+    const building = body('건물지', '1호', ids['(1) '], '(1) 1호 건물지');
+    const first: CandidateDiscoveryResponse = {
+      tableRole: 'none',
+      candidates: [building],
+      exclusions: [],
+    };
+    return { plan, unit, body, ids, building, first };
+  };
+
+  test('finds uncited body blocks that open with a number of a proposed identifier form', () => {
+    const { unit, body, ids, building, first } = setup();
+    const current = CANDIDATE_DISCOVERY_PROMPT_VERSION;
+    const withCandidates = (
+      candidates: (typeof first)['candidates'],
+      exclusions: (typeof first)['exclusions'] = [],
+    ) =>
+      unansweredNumberedBlocks(
+        unit,
+        { ...first, candidates, exclusions },
+        current,
+      );
+
+    // "1호 건물지는" opens with a number a candidate uses; "2024. 12. 16" and "21. 호" do not match "N호"
+    expect(unansweredNumberedBlocks(unit, first, current)).toEqual([
+      { sourceId: ids['96호 '], number: '96호' },
+    ]);
+    // an unnumbered candidate beside a numbered one adds no form and no number
+    expect(
+      withCandidates([building, body('백자', null, ids['21. '], '21. 호')]),
+    ).toEqual([{ sourceId: ids['96호 '], number: '96호' }]);
+    expect(
+      unansweredNumberedBlocks(unit, first, 'candidate-discovery.v12'),
+    ).toEqual([]);
+    expect(
+      withCandidates(
+        [building],
+        [
+          {
+            sourceId: ids['96호 '],
+            category: 'passing_mention',
+            reason: '언급',
+          },
+        ],
+      ),
+    ).toEqual([]);
+    // identifiers without both a digit and a letter give no form to look for
+    expect(
+      withCandidates([
+        body('호 구연편', '21', ids['21. '], '21. 호 구연편'),
+        body('백자', null, ids['96호 '], '백자'),
+        body('호 구연편', '호', ids['21. '], '21. 호 구연편'),
+      ]),
+    ).toEqual([]);
+    expect(
+      unansweredNumberedBlocks(
+        registry().unit,
+        { tableRole: 'item_table', candidates: [building], exclusions: [] },
+        current,
+      ),
+    ).toEqual([]);
+  });
+
+  test('also finds uncited blocks that open with a numbered area label from v15', () => {
+    const { unit, ids } = setup();
+    const area = unit.resources.find(
+      (r) => `id:${r.resourceId}` === ids['21. '],
+    )!;
+    area.data.text = '23-4구역은 3구역과 같은 양상이며 백자가 출수되었다.';
+    const none = { tableRole: 'none' as const, candidates: [], exclusions: [] };
+
+    expect(
+      unansweredNumberedBlocks(unit, none, CANDIDATE_DISCOVERY_PROMPT_VERSION),
+    ).toEqual([{ sourceId: ids['21. '], number: '23-4구역' }]);
+    expect(
+      unansweredNumberedBlocks(unit, none, 'candidate-discovery.v14'),
+    ).toEqual([]);
+  });
+
+  test('asks the numbered blocks in a whole-unit follow-up with its rule', () => {
+    const { unit, ids, first } = setup();
+
+    const planned = planCandidateDiscoveryFollowUp(
+      unit,
+      first,
+      CANDIDATE_DISCOVERY_PROMPT_VERSION,
+    )!;
+    const input = JSON.parse(planned.userPrompt);
+
+    expect(planned.numberedBlocks).toEqual([
+      { sourceId: ids['96호 '], number: '96호' },
+    ]);
+    expect(planned.unit).toBe(unit);
+    expect(input.unansweredNumberedBlocks).toEqual(planned.numberedBlocks);
+    expect(input.followUpRules).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V15]);
+    expect(
+      JSON.parse(
+        planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v14')!
+          .userPrompt,
+      ).followUpRules,
+    ).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE]);
+    expect(input).not.toHaveProperty('reconsiderExclusions');
+    expect(
+      planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v12'),
+    ).toBeNull();
+  });
+
+  test('merges the answer to numbered blocks and reports blocks left unanswered', async () => {
+    const { plan, unit, ids, first } = setup();
+    const planned = planCandidateDiscoveryFollowUp(
+      unit,
+      first,
+      CANDIDATE_DISCOVERY_PROMPT_VERSION,
+    )!;
+    const followUp = {
+      rowIndexes: planned.rowIndexes,
+      numberedBlocks: planned.numberedBlocks,
+      userPrompt: planned.userPrompt,
+      response: {
+        tableRole: 'none' as const,
+        candidates: [],
+        exclusions: [
+          {
+            sourceId: ids['96호 '],
+            category: 'passing_mention' as const,
+            reason: '출토 위치 언급',
+          },
+        ],
+      },
+      usage: audit(unit, first).usage,
+    };
+    const assemble = (overrides: object) =>
+      assembleCandidateDiscovery(plan, [
+        { ...audit(unit, first), ...overrides },
+      ]);
+
+    const merged = await assemble({ followUp });
+    const unasked = await assemble({});
+    const mismatched = await assemble({
+      followUp: { ...followUp, numberedBlocks: [] },
+    });
+
+    expect(merged.issues).toEqual([]);
+    expect(merged.candidates.map((c) => c.sourceName)).toEqual(['건물지']);
+    expect(unasked.issues.map((i) => i.reason)).toEqual([
+      'Numbered body blocks neither proposed nor excluded: 96호',
+    ]);
+    expect(mismatched.issues[0].reason).toBe(
+      'Saved follow-up does not match the unanswered rows, corrections, reconsidered headings and numbered blocks of this unit',
+    );
   });
 });

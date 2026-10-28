@@ -10,11 +10,14 @@ import type { Chapter, ProcessedDocument } from '@heripo/model';
 import {
   assembleArchaeologyLedger,
   buildArchaeologyLedger,
+  createPlaceAliasProposalRequest,
+  createRelationParentRequests,
 } from '@heripo/ledger-extractor';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 import { paths } from '../paths';
+import { getCandidateDiscoveryRun } from './candidate-discovery-run';
 import { getContentAttachmentRun } from './content-attachment-run';
 import {
   getContentAttachmentThinResult,
@@ -66,8 +69,8 @@ export interface ArchaeologyLedgerView {
   discoveryScope: Array<{ id: string; title: string; added: boolean }> | null;
 }
 /**
- * Saved parent judgments (`RelationParentJudgment[]`) for this attachment run, written outside the demo; the
- * demo itself does not call the judgment model.
+ * Saved parent judgments (`RelationParentJudgment[]`) for this attachment run: written by the automatic ledger
+ * run (`saveParentJudgments`) or outside the demo.
  */
 const JUDGMENTS_FILE = 'relation-parent-judgments.json';
 
@@ -151,6 +154,68 @@ export function getLedgerBase(taskId: string) {
 }
 
 /**
+ * The parent questions code leaves open in the task's ledger, as judgment requests (`createRelationParentRequests`),
+ * built from the same inputs as the ledger itself (place aliases included) without saved judgments. Empty when
+ * the ledger cannot be built yet or code decided every parent.
+ */
+export async function getParentJudgmentRequests(taskId: string) {
+  const inputs = getLedgerInputs(taskId);
+  if (!inputs) return [];
+  const { plan, document, attachments, meta } = inputs;
+  const table = readPlaceAliases(taskId);
+  const scope = readDiscoveryScope(taskId);
+  const built = await buildArchaeologyLedger({
+    document,
+    plan,
+    attachments,
+    meta,
+    ...(table ? { placeAliases: table } : {}),
+    parentJudgments: [],
+    ...(scope ? { discoveryScope: scope } : {}),
+  });
+  return createRelationParentRequests(plan, built.result, built.stages.parents);
+}
+
+/**
+ * The place alias proposal request for the parent questions code leaves open in the task's ledger without a
+ * place alias table (`createPlaceAliasProposalRequest`), with the plan and ledger it was built from; null when
+ * the ledger cannot be built yet or no open question has a written place that no record name matched.
+ */
+export async function getPlaceAliasProposalRequest(taskId: string) {
+  const inputs = getLedgerInputs(taskId);
+  if (!inputs) return null;
+  const { plan, document, attachments, meta } = inputs;
+  const scope = readDiscoveryScope(taskId);
+  const built = await buildArchaeologyLedger({
+    document,
+    plan,
+    attachments,
+    meta,
+    parentJudgments: [],
+    ...(scope ? { discoveryScope: scope } : {}),
+  });
+  const request = createPlaceAliasProposalRequest(
+    plan,
+    built.result,
+    built.stages.parents,
+  );
+  return request ? { plan, ledger: built.result, request } : null;
+}
+
+/** Save parent judgments beside the attachment plan, where the ledger build reads them. */
+export function saveParentJudgments(
+  taskId: string,
+  judgments: RelationParentJudgment[],
+) {
+  const inputs = getLedgerInputs(taskId);
+  if (!inputs) throw new Error('No ledger inputs to judge parents for');
+  writeFileSync(
+    join(inputs.planFile, '..', JUDGMENTS_FILE),
+    JSON.stringify(judgments, null, 2),
+  );
+}
+
+/**
  * Build the archaeology ledger from the task's latest attachment plan and its saved thin result in one engine
  * call, with the task's saved place alias table (applied only when it still validates) and, when saved beside
  * the plan, the parent judgment runs; other parent questions stay as review items. Deterministic and offline;
@@ -169,6 +234,7 @@ export async function getArchaeologyLedger(
     : [];
   const table = readPlaceAliases(taskId);
   const scope = readDiscoveryScope(taskId);
+  const dropped = getCandidateDiscoveryRun(taskId)?.result?.issues ?? [];
   const built = await buildArchaeologyLedger({
     document,
     plan,
@@ -177,10 +243,12 @@ export async function getArchaeologyLedger(
     ...(table ? { placeAliases: table } : {}),
     parentJudgments: judgments,
     ...(scope ? { discoveryScope: scope } : {}),
+    ...(dropped.length ? { droppedProposals: dropped } : {}),
   });
   const ledger = built.result;
   const shown = new Set([
     ...ledger.mediaReferences.map((m) => m.imageId),
+    ...ledger.mediaCandidates.flatMap((m) => m.imageIds),
     ...ledger.reviewItems.flatMap((i) => i.imageIds ?? []),
   ]);
   const images = Object.fromEntries(

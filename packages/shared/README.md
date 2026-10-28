@@ -35,7 +35,7 @@ console.log(batches, results);
 
 ## LLM Calls and Usage
 
-Recognizes OpenAI, Google, Anthropic, Together AI, Ollama and LM Studio. Together AI/Ollama use tool calls; the other providers use structured output. Zod validates the response schema. Configuration requires a model, schema, prompts (or vision messages), `maxRetries`, `component` and `phase`; `fallbackModel`, `abortSignal`, `temperature` and `metadata` are optional.
+Recognizes OpenAI, Google, Anthropic, Together AI, Ollama and LM Studio. Together AI/Ollama use tool calls; the other providers use structured output. Zod validates the response schema. Configuration requires a model, schema, prompts (or vision messages), `maxRetries`, `component` and `phase`; `fallbackModel`, `abortSignal`, `temperature` and `metadata` are optional. `cacheSystemPrompt: true` marks the system prompt as an Anthropic prompt-cache breakpoint, so calls sharing it read it from the cache; other providers ignore the mark. `providerOptions` is passed to the AI SDK unchanged, such as `{ anthropic: { effort: 'low' } }`.
 
 Calls return `{ output, usage, usedFallback }`, plus `finishReason` and `structuredAttempts` when known. Structured output is retried up to ten more times on a schema mismatch regardless of `maxRetries`; `structuredAttempts` counts those attempts, and `usage` covers only the attempt that produced the output. `usage.reasoningTokens` is set when the provider reports reasoning tokens. Pass `usage` to the aggregator's `track()`. `getReport()` includes component/phase/model totals and metadata. Multiple models in one phase produce model-separated phase rows, so phase names need not be unique. Usage covers tracked calls and is not guaranteed to match provider billing.
 

@@ -12,17 +12,17 @@ import {
 } from '~/lib/ledger/ledger-input';
 import { createLedgerTask } from '~/lib/ledger/ledger-task';
 import {
-  DEFAULT_LEDGER_MODEL,
   LEDGER_RUN_BUDGET,
-  isLedgerModel,
+  resolveLedgerStageModels,
 } from '~/lib/ledger/ledger-task-options';
 import { getOrCreateSessionId } from '~/lib/session';
 import { extractClientInfo } from '~/lib/utils/request-info';
 
 /**
  * Creates a ledger extraction task from a single processed-document.json
- * upload. Unlike PDF tasks, ledger tasks take only the model for their
- * automatic run (`modelId`, default Claude Haiku 5.5); the same public-demo
+ * upload. Unlike PDF tasks, ledger tasks take only the model of each step of
+ * their automatic run (`models` as JSON, or `modelId` for every step; default
+ * Claude Haiku 5.5); the same public-demo
  * protections (Turnstile, OTP bypass, weekly lockout, rate limit, session
  * isolation) apply.
  */
@@ -34,17 +34,26 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const bypassCode = formData.get('bypassCode') as string | null;
     const turnstileToken = formData.get('turnstileToken') as string | null;
-    const modelId =
-      (formData.get('modelId') as string | null) ?? DEFAULT_LEDGER_MODEL;
+    const modelsField = formData.get('models') as string | null;
+    let requestedModels: unknown;
+    try {
+      requestedModels = modelsField ? JSON.parse(modelsField) : undefined;
+    } catch {
+      return NextResponse.json(
+        { error: 'models must be a JSON object' },
+        { status: 400 },
+      );
+    }
+    const resolved = resolveLedgerStageModels({
+      models: requestedModels,
+      modelId: formData.get('modelId') as string | null,
+    });
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
-    if (!isLedgerModel(modelId)) {
-      return NextResponse.json(
-        { error: `Unknown model: ${modelId}` },
-        { status: 400 },
-      );
+    if ('error' in resolved) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 });
     }
 
     // Step 1: file extension and MIME type (single JSON file only, no ZIP)
@@ -101,14 +110,18 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    // Step 6-7: create and enqueue the ledger task; it runs every ledger step with the chosen model
+    // Step 6-7: create and enqueue the ledger task; it runs every ledger step with its chosen model
     const task = await createLedgerTask({
       rawText,
       filename: file.name,
       sessionId,
       clientInfo,
       isOtpBypass,
-      options: { modelId, budget: LEDGER_RUN_BUDGET },
+      options: {
+        models: resolved.models,
+        budget: LEDGER_RUN_BUDGET,
+        ...(formData.get('batch') === 'false' ? { batch: false } : {}),
+      },
     });
 
     return NextResponse.json({

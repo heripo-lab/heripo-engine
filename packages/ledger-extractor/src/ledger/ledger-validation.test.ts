@@ -185,6 +185,7 @@ const cleanLedger = (sourceName = '수혈') =>
       ),
     ],
     mediaReferences: [],
+    mediaCandidates: [],
     links: [],
     pending: [],
     reviewItems: [],
@@ -279,6 +280,16 @@ const brokenLedger = () => {
         imageId: 'img-9',
       },
     ],
+    mediaCandidates: [
+      {
+        id: 'mc1',
+        ledgerId: 'ledger-2',
+        pdfPageNo: 3,
+        imageIds: ['img-1', 'img-8'],
+        recordIds: ['record-A', 'record-Y'],
+        basis: 'same_page',
+      },
+    ],
     links: [
       link('l1', 'A', 'B', [
         {
@@ -330,10 +341,10 @@ describe('validateArchaeologyLedger', () => {
     expect(report.version).toBe(LEDGER_VALIDATION_VERSION);
     expect(report.status).toBe('failed');
     expect(summary(report)).toEqual({
-      unique_ids: '1/27',
-      record_references: '3/32',
-      ledger_ids: '1/12',
-      image_references: '1/3',
+      unique_ids: '1/28',
+      record_references: '4/34',
+      ledger_ids: '2/13',
+      image_references: '2/5',
       no_self_parent: '1/5',
       no_cycle: '2/5',
       parent_evidence: '2/5',
@@ -363,7 +374,7 @@ describe('validateArchaeologyLedger', () => {
       group: 'structure',
       code: 'DUPLICATE_ID',
       severity: 'error',
-      total: 27,
+      total: 28,
       failed: 1,
     });
     const messages = report.issues.map(
