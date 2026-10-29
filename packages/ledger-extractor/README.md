@@ -13,7 +13,7 @@
 
 `@heripo/ledger-extractor` is the first vertical slice of the ledger extraction stage in the heripo data pipeline. It takes a `ProcessedDocument` (produced by `@heripo/document-processor`) and summarizes it into a `LedgerExtractionPreview` — aggregated counts plus a few representative samples — proving the data arrived at the ledger stage intact.
 
-> **Preview only**: this package does NOT implement actual ledger extraction yet. The preview and S0 APIs make no LLM calls. The separate candidate-discovery API uses a caller-selected model to propose source-backed objects for review; the final ledger domain schema, standardization and database storage remain follow-up work.
+> **Experimental format**: `buildArchaeologyLedger()` assembles an `archaeology-ledger.v1` ledger from a processed document using caller-selected models, but this format is experimental. Its fields, review items and prompts can change within 0.2.x releases without a migration path, so keep the source processed documents and rebuild ledgers after upgrading. The preview and S0 APIs make no LLM calls; standardization and database storage remain follow-up work.
 
 > **Limited validation**: the ledger stages were developed and measured on three reports only: 『태안 마도 해역 수중발굴조사』 (Taean Mado underwater excavation), 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』 (Buyeo Hwajisan) and 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』 (Geoje Sadeungseong). Expect gaps on other report types and layouts; the rules and prompts will be improved step by step as more reports accumulate.
 
