@@ -212,7 +212,7 @@ After processing completes:
 
 ### 5. Ledger Extraction
 
-The `Ledger Extraction` stage builds the archaeology ledger from a preprocessed document with `@heripo/ledger-extractor`, skipping PDF parsing and document preprocessing. It can be started in two ways:
+The `Ledger Extraction` stage builds the archaeology ledger from a preprocessed document with `@heripo/ledger-extractor`, skipping PDF parsing and document preprocessing. It can be started in two ways: Ledger extraction was developed and measured on three reports only: 『태안 마도 해역 수중발굴조사』 (Taean Mado underwater excavation), 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』 (Buyeo Hwajisan) and 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』 (Geoje Sadeungseong), so expect gaps on other report types and layouts; they will be improved step by step as more reports accumulate.
 
 - **On its own:** select **Ledger Extraction** in the pipeline stepper, attach a single `processed-document.json` (max 100MB; ZIP archives are not accepted), choose the model of each step — report profile, candidate discovery, duplicate review and content attachment (default Claude Haiku 5.5 for all four) — and click "Start Ledger Extraction". The file is validated (extension/MIME → size → JSON parse → `ProcessedDocument` runtime validation) before the task is queued.
 - **After preprocessing:** a completed Raw Data Extraction result page offers "이 결과로 원장 만들기" with the same per-step model choice. The ledger task takes that result's processed document as is and belongs to the same browser session; the card then links to that ledger instead of making a second one (a failed or cancelled run can be made again).
