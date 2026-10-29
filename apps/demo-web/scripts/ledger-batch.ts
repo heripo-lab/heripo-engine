@@ -79,7 +79,10 @@ interface BatchManifest {
 /** Workspace packages the demo imports from their built `dist`. */
 const BUILT_PACKAGES = ['ledger-extractor', 'shared', 'model', 'logger'];
 
+// pnpm forwards the `--` separator of `pnpm ledger:batch -- ...`; drop it so the options after it are parsed
+const argv = process.argv.slice(2);
 const { values, positionals } = parseArgs({
+  args: argv[0] === '--' ? argv.slice(1) : argv,
   allowPositionals: true,
   options: {
     name: { type: 'string' },
