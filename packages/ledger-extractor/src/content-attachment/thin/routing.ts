@@ -11,10 +11,6 @@ import { layerInChapters, localLayerHomes } from './compile-candidates';
 export const CONTENT_ATTACHMENT_THIN_OUTLIER_RATE = 0.25;
 /** ...and on at least this many segments. */
 export const CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT = 3;
-/** Unanimous segments confirming more targets than this (collective statements) go to review. */
-export const CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT = 50;
-/** Unanimous segments confirming more targets than this through collective handles go to review. */
-export const CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT = 10;
 /** Layer names or numbers shorter than this are too generic to suggest. */
 const LAYER_KEY_MIN_LENGTH = 3;
 /**
@@ -50,6 +46,7 @@ export interface ContentAttachmentThinRoutedSegment {
     | 'area'
     /** Saved routings only: a named layer not returned by every run (now `layerMentions` or contested). */
     | 'layer'
+    /** Saved routings only: unanimous collective attachments above a size limit (now accepted automatically). */
     | 'large_collective'
     | 'large_handle'
   >;
@@ -143,9 +140,8 @@ export function checkContentAttachmentThinOutliers(
 /**
  * Route each judged segment of a unit from its final runs. Targets returned by every run are confirmed,
  * others are contested with votes. A segment goes to review when targets are contested, uncertainty
- * groups differ, a run is invalid for it, an area is returned, or
- * more targets are confirmed than a collective statement may attach without review, or than a collective
- * handle may confirm without review. A layer named literally in the segment and returned by no run is listed in
+ * groups differ, a run is invalid for it or an area is returned. Targets every run returns are confirmed however
+ * many there are, including a whole collective through its handle. A layer named literally in the segment and returned by no run is listed in
  * `layerMentions` (a layer named only as removed overburden, "현대 퇴적층을 제거하자", is not listed); one returned by
  * some runs only is contested like any target. Under the plan's
  * `unanimous` area policy areas are voted on like other targets instead of always going to review.
@@ -161,9 +157,6 @@ export function routeContentAttachmentThinSegments(
 ): ContentAttachmentThinRoutedSegment[] {
   if (!runs.length) throw new Error('Expected at least one run');
   const kinds = new Map(plan.registry.map((r) => [r.ref, r.recordKind]));
-  const handleMembers = new Map(
-    compilation.codeMap.handles.map((h) => [h.ref, h.members]),
-  );
   const order = plan.registry.map((r) => r.ref);
   const layerKeys = plan.registry
     .filter((r) => r.recordKind === 'layer')
@@ -293,16 +286,6 @@ export function routeContentAttachmentThinSegments(
     if (contested.length) reasons.push('contested_targets');
     if (groupKeys.size > 1) reasons.push('uncertainty_differs');
     if (areaSuggestions.length) reasons.push('area');
-    if (confirmed.length > CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT)
-      reasons.push('large_collective');
-    // a confirmed target counts as handle-derived when any run reached it through a returned handle
-    const viaHandle = confirmed.filter((ref) =>
-      valid.some((d) =>
-        d.handles.some((h) => handleMembers.get(h)?.includes(ref)),
-      ),
-    );
-    if (viaHandle.length > CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT)
-      reasons.push('large_handle');
     const agreedGroups = groupKeys.size === 1 && valid.length === runs.length;
     return {
       segment,
@@ -327,7 +310,7 @@ export function routeContentAttachmentThinSegments(
  * Route a unit from r1, r2 and a tie-breaking r3. A segment r1 and r2 agree on keeps that routing. A segment in
  * review only because the two disagreed (or one was invalid) is decided by whichever of r1 or r2 agrees with r3,
  * marked `decidedBy: 'majority'`; when neither does, or the segment is in review for another reason (areas,
- * large collectives, a whole-unit review), it stays in review with all three runs.
+ * a whole-unit review), it stays in review with all three runs.
  */
 export function routeContentAttachmentThinTiebreak(
   plan: ContentAttachmentPlan,

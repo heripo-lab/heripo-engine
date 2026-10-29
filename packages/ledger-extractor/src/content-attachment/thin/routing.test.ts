@@ -12,8 +12,6 @@ import type {
 import { describe, expect, test } from 'vitest';
 
 import {
-  CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT,
-  CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT,
   checkContentAttachmentThinOutliers,
   routeContentAttachmentThinSegments,
 } from './routing';
@@ -334,16 +332,14 @@ describe('routeContentAttachmentThinSegments', () => {
     });
   });
 
-  test('reviews unanimous collective attachments above the target limit', () => {
+  test('confirms unanimous collective attachments of any size, through handles too', () => {
     const { plan, unit, compilation } = fixture();
-    const many = Array.from(
-      { length: CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT + 1 },
-      (_, i) => `R${100 + i}`,
-    );
+    const many = Array.from({ length: 60 }, (_, i) => `R${100 + i}`);
     plan.registry.push(...many.map((ref) => entry(ref, 'feature', '유구')));
+    compilation.codeMap.handles = [{ ref: 'H1', members: many }];
     const decisions = () => [
       attach('E1:S1', many),
-      attach('E2:S1', many.slice(1), [], []),
+      { ...attach('E2:S1', many), handles: ['H1'] },
       none('E3:S1'),
       none('E4:S1'),
     ];
@@ -351,54 +347,12 @@ describe('routeContentAttachmentThinSegments', () => {
     const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
       run(...decisions()),
       run(...decisions()),
-      run(...decisions()),
     ]);
 
-    expect(routed[0]).toMatchObject({
-      status: 'review',
-      reasons: ['large_collective'],
-      confirmed: many,
-    });
-    expect(routed[1].reasons).not.toContain('large_collective');
-  });
-
-  test('reviews unanimous targets confirmed through handles above the handle limit', () => {
-    const { plan, unit, compilation } = fixture();
-    const big = Array.from(
-      { length: CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT + 1 },
-      (_, i) => `R${100 + i}`,
-    );
-    const small = big.slice(1);
-    plan.registry.push(...big.map((ref) => entry(ref, 'artifact', '청자')));
-    compilation.codeMap.handles = [
-      { ref: 'H1', members: big },
-      { ref: 'H2', members: small },
-    ];
-    const viaHandle = (segment: string, handle: string, members: string[]) => ({
-      ...attach(segment, members),
-      handles: [handle],
-    });
-    const decisions = () => [
-      viaHandle('E1:S1', 'H1', big),
-      viaHandle('E2:S1', 'H2', small),
-      attach('E3:S1', big),
-      viaHandle('E4:S1', 'H9', small),
-    ];
-
-    const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
-      run(...decisions()),
-      run(...decisions()),
-      run(...decisions()),
+    expect(routed.slice(0, 2)).toMatchObject([
+      { status: 'auto', reasons: [], confirmed: many },
+      { status: 'auto', reasons: [], confirmed: many },
     ]);
-
-    expect(routed[0]).toMatchObject({
-      status: 'review',
-      reasons: ['large_handle'],
-      confirmed: big,
-    });
-    expect(routed.slice(1).map((s) => s.reasons)).not.toContainEqual(
-      expect.arrayContaining(['large_handle']),
-    );
   });
 
   test('sends every segment to review for a whole-unit review and requires a run', () => {

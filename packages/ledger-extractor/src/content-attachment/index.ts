@@ -194,8 +194,6 @@ export type {
   ContentAttachmentThinInspection,
 } from './thin/inspection';
 export {
-  CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT,
-  CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT,
   CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT,
   CONTENT_ATTACHMENT_THIN_OUTLIER_RATE,
   checkContentAttachmentThinOutliers,
