@@ -13,6 +13,7 @@ import {
   createPlaceAliasProposalRequest,
   createRelationParentRequests,
 } from '@heripo/ledger-extractor';
+import ledgerExtractorPackage from '@heripo/ledger-extractor/package.json';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
@@ -27,7 +28,7 @@ import { readDiscoveryScope } from './discovery-scope';
 import { readPlaceAliases } from './place-aliases';
 
 /** Version of the extractor package the demo bundles; recorded on the ledger. */
-const EXTRACTOR_VERSION = '0.2.0';
+const EXTRACTOR_VERSION = ledgerExtractorPackage.version;
 
 /** Whether a saved place alias table was applied to the ledger. */
 export type PlaceAliasesState = PlaceAliasOutcome;
