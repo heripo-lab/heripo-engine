@@ -2,6 +2,8 @@
 
 import type { LedgerStageModels } from '../constants/ledger-run';
 
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
+
 import {
   Select,
   SelectContent,
@@ -13,10 +15,12 @@ import {
 } from '~/components/ui/select';
 import { LLM_MODELS } from '~/features/upload/constants/llm-models';
 
-import {
-  LEDGER_MODEL_STAGES,
-  LEDGER_RUN_BUDGET,
-} from '../constants/ledger-run';
+import { LEDGER_MODEL_STAGES } from '../constants/ledger-run';
+
+const text = {
+  ko: { title: '원장 추출 모델', placeholder: '모델 선택' },
+  en: { title: 'Ledger extraction models', placeholder: 'Choose a model' },
+} as const;
 
 /** The model of each step of an automatic ledger run, each grouped by provider. */
 export function LedgerModelSelect({
@@ -28,15 +32,17 @@ export function LedgerModelSelect({
   onChange: (models: LedgerStageModels) => void;
   disabled?: boolean;
 }) {
+  const lang = useBrowserLanguage();
+  const t = text[lang];
   const providers = [...new Set(LLM_MODELS.map((m) => m.provider))];
   return (
     <div className="space-y-2">
-      <p className="text-sm font-medium">원장 추출 모델</p>
+      <p className="text-sm font-medium">{t.title}</p>
       <div className="grid gap-3 sm:grid-cols-2">
         {LEDGER_MODEL_STAGES.map((stage) => (
           <div key={stage.id} className="space-y-1">
             <label className="text-muted-foreground text-xs">
-              {stage.label}
+              {stage.label[lang]}
             </label>
             <Select
               value={value[stage.id]}
@@ -45,8 +51,8 @@ export function LedgerModelSelect({
               }
               disabled={disabled}
             >
-              <SelectTrigger aria-label={`${stage.label} 모델`}>
-                <SelectValue placeholder="모델 선택" />
+              <SelectTrigger aria-label={stage.label[lang]}>
+                <SelectValue placeholder={t.placeholder} />
               </SelectTrigger>
               <SelectContent>
                 {providers.map((provider) => (
@@ -66,15 +72,6 @@ export function LedgerModelSelect({
           </div>
         ))}
       </div>
-      <p className="text-muted-foreground text-xs">
-        네 구간을 차례로 실행하며, 구간마다 고른 모델을 씁니다. 기본값은 모두
-        Claude Haiku 5.5입니다. 모델 호출 비용이 발생하며, 한 번 실행에 최대{' '}
-        {LEDGER_RUN_BUDGET.maxCalls}회·
-        {LEDGER_RUN_BUDGET.maxTotalTokens.toLocaleString()}토큰을 넘지 않습니다.
-        후보 판단·중복 검토·원문 배정은 그 모델이 Anthropic 모델이면 일괄 처리로
-        보내 요금이 절반이 되며, 결과가 오기까지 단계마다 최대 24시간 걸릴 수
-        있습니다.
-      </p>
     </div>
   );
 }

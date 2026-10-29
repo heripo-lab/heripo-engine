@@ -2,10 +2,13 @@
 export const DEFAULT_LEDGER_MODEL = 'anthropic/claude-haiku-5-5';
 /** The model steps of an automatic ledger run, in run order, each with its own model. */
 export const LEDGER_MODEL_STAGES = [
-  { id: 'router', label: '보고서 유형 분류' },
-  { id: 'discovery', label: '객체 후보 탐색' },
-  { id: 'deduplication', label: '후보 중복 검토' },
-  { id: 'attachment', label: '원문 배정' },
+  { id: 'router', label: { ko: '보고서 유형 분류', en: 'Report type' } },
+  { id: 'discovery', label: { ko: '객체 후보 탐색', en: 'Record discovery' } },
+  {
+    id: 'deduplication',
+    label: { ko: '후보 중복 검토', en: 'Duplicate review' },
+  },
+  { id: 'attachment', label: { ko: '원문 배정', en: 'Source assignment' } },
 ] as const;
 export type LedgerModelStage = (typeof LEDGER_MODEL_STAGES)[number]['id'];
 export type LedgerStageModels = Record<LedgerModelStage, string>;
@@ -20,10 +23,13 @@ export const DEFAULT_LEDGER_MODELS: LedgerStageModels = {
   attachment: DEFAULT_LEDGER_MODEL,
 };
 /**
- * Hard caps for one automatic ledger run over all model steps (report router, candidate discovery and
- * duplicate review, thin content attachment). A step that would exceed what is left is not started.
+ * Default hard caps per report of the command-line batch runner (`scripts/ledger-batch.ts`). A demo task runs
+ * without caps.
  */
-export const LEDGER_RUN_BUDGET = { maxCalls: 600, maxTotalTokens: 13_000_000 };
+export const LEDGER_BATCH_REPORT_BUDGET = {
+  maxCalls: 600,
+  maxTotalTokens: 13_000_000,
+};
 /**
  * Characters per body unit of candidate discovery. Local models (LM Studio, Ollama) stop early on long inputs, so
  * their body units are smaller; this changes only how the text is split, not the prompt.

@@ -23,6 +23,7 @@ import { useState } from 'react';
 import type { Task, TaskStatus } from '~/lib/api/tasks';
 import { publicModeConfig, sampleTaskConfig } from '~/lib/config/public-mode';
 import { calculateCost } from '~/lib/cost/model-pricing';
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -111,6 +112,7 @@ function getStatusBadge(status: TaskStatus) {
 }
 
 export function TaskListTable() {
+  const lang = useBrowserLanguage();
   const router = useRouter();
   const [page, setPage] = useState(0);
 
@@ -223,7 +225,7 @@ export function TaskListTable() {
                   <span className="truncate">{task.originalFilename}</span>
                   {task.kind === 'ledger' && (
                     <Badge variant="outline" className="shrink-0">
-                      원장
+                      {lang === 'ko' ? '원장' : 'Ledger'}
                     </Badge>
                   )}
                   {task.isSample && (

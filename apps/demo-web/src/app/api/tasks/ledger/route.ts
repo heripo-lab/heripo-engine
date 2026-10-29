@@ -11,10 +11,7 @@ import {
   parseLedgerInputText,
 } from '~/lib/ledger/ledger-input';
 import { createLedgerTask } from '~/lib/ledger/ledger-task';
-import {
-  LEDGER_RUN_BUDGET,
-  resolveLedgerStageModels,
-} from '~/lib/ledger/ledger-task-options';
+import { resolveLedgerStageModels } from '~/lib/ledger/ledger-task-options';
 import { getOrCreateSessionId } from '~/lib/session';
 import { extractClientInfo } from '~/lib/utils/request-info';
 
@@ -119,7 +116,6 @@ export async function POST(request: NextRequest) {
       isOtpBypass,
       options: {
         models: resolved.models,
-        budget: LEDGER_RUN_BUDGET,
         ...(formData.get('batch') === 'false' ? { batch: false } : {}),
       },
     });

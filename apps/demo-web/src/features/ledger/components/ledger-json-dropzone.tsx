@@ -5,6 +5,7 @@ import type { ChangeEvent, DragEvent, MouseEvent } from 'react';
 import { FileJson, FileUp, Upload, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 import { cn } from '~/lib/utils';
 
 // Keep in sync with LEDGER_INPUT_MAX_SIZE_BYTES on the server
@@ -25,15 +26,35 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function validateFile(file: File): string | null {
+const text = {
+  ko: {
+    wrongType: 'processed-document.json 파일 하나만 올릴 수 있습니다.',
+    tooLarge: '파일이 100MB를 넘습니다.',
+    remove: '파일 빼기',
+    drop: 'processed-document.json을 여기에 놓거나 눌러서 고르세요',
+    note: '원시 데이터 추출 단계에서 내보낸 ProcessedDocument JSON 파일 하나(최대 100MB)를 올립니다. ZIP 파일은 받지 않습니다.',
+    select: '파일 선택',
+  },
+  en: {
+    wrongType: 'Only a single processed-document.json file is supported.',
+    tooLarge: 'File size exceeds 100MB limit.',
+    remove: 'Remove File',
+    drop: 'Drop your processed-document.json here, or click to browse',
+    note: 'Upload a single ProcessedDocument JSON file exported from the raw data extraction stage (max 100MB). ZIP archives are not supported.',
+    select: 'Select File',
+  },
+} as const;
+type Text = (typeof text)[keyof typeof text];
+
+function validateFile(file: File, t: Text): string | null {
   if (
     !file.name.toLowerCase().endsWith('.json') ||
     !ALLOWED_MIME_TYPES.has(file.type.toLowerCase())
   ) {
-    return 'Only a single processed-document.json file is supported.';
+    return t.wrongType;
   }
   if (file.size > MAX_FILE_SIZE) {
-    return 'File size exceeds 100MB limit.';
+    return t.tooLarge;
   }
   return null;
 }
@@ -49,13 +70,14 @@ export function LedgerJsonDropzone({
   onFileChange,
   disabled = false,
 }: LedgerJsonDropzoneProps) {
+  const t = text[useBrowserLanguage()];
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleFile = (candidate: File) => {
     setError(null);
-    const validationError = validateFile(candidate);
+    const validationError = validateFile(candidate, t);
     if (validationError) {
       setError(validationError);
       return;
@@ -126,7 +148,7 @@ export function LedgerJsonDropzone({
             className="bg-destructive/10 text-destructive hover:bg-destructive/20 flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors"
           >
             <X className="h-4 w-4" />
-            Remove File
+            {t.remove}
           </button>
         </div>
       </div>
@@ -160,18 +182,13 @@ export function LedgerJsonDropzone({
           <FileUp className="text-primary h-10 w-10" />
         </div>
         <div className="space-y-2">
-          <p className="text-lg font-medium">
-            Drop your processed-document.json here, or click to browse
-          </p>
-          <p className="text-muted-foreground text-sm">
-            Upload a single ProcessedDocument JSON file exported from the raw
-            data extraction stage (max 100MB). ZIP archives are not supported.
-          </p>
+          <p className="text-lg font-medium">{t.drop}</p>
+          <p className="text-muted-foreground text-sm">{t.note}</p>
           {error && <p className="text-destructive text-sm">{error}</p>}
         </div>
         <div className="bg-primary text-primary-foreground flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium">
           <Upload className="h-4 w-4" />
-          Select File
+          {t.select}
         </div>
       </div>
     </div>

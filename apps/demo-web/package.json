@@ -11,15 +11,16 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "generate:otp-secret": "node scripts/generate-otp-secret.js",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "ledger:batch": "tsx --env-file-if-exists=.env scripts/ledger-batch.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:",
-    "@anthropic-ai/sdk": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/openai": "catalog:",
     "@ai-sdk/openai-compatible": "catalog:",
     "@ai-sdk/togetherai": "catalog:",
+    "@anthropic-ai/sdk": "catalog:",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -59,6 +60,7 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.6.1",
     "postcss": "^8.5.30",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "tsx": "catalog:"
   }
 }

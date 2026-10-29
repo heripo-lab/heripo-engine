@@ -11,10 +11,7 @@ import { LLM_MODELS } from '~/features/upload/constants/llm-models';
 import { readDatabase } from '../db';
 import { paths } from '../paths';
 
-export {
-  DEFAULT_LEDGER_MODELS,
-  LEDGER_RUN_BUDGET,
-} from '~/features/ledger/constants/ledger-run';
+export { DEFAULT_LEDGER_MODELS } from '~/features/ledger/constants/ledger-run';
 
 /** Options of a ledger task: the model of each step of its automatic run and, when made from a PDF result, that task. */
 export interface LedgerTaskOptions {
@@ -25,7 +22,8 @@ export interface LedgerTaskOptions {
    * direct calls.
    */
   batch?: boolean;
-  budget: { maxCalls: number; maxTotalTokens: number };
+  /** Hard caps on model calls and tokens over the whole run; absent: no caps (demo tasks). */
+  budget?: { maxCalls: number; maxTotalTokens: number };
   /** The completed PDF processing task whose processed document this ledger was made from. */
   sourceTaskId?: string;
 }

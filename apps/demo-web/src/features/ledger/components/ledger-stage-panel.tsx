@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 
 import type { ApiResponseError } from '~/lib/api/tasks';
 import { publicModeConfig } from '~/lib/config/public-mode';
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 
 import { Button } from '~/components/ui/button';
 import { Card, CardContent } from '~/components/ui/card';
@@ -21,6 +22,23 @@ import { useCreateLedgerTask } from '../hooks/use-create-ledger-task';
 import { LedgerJsonDropzone } from './ledger-json-dropzone';
 import { LedgerModelSelect } from './ledger-model-select';
 
+const text = {
+  ko: {
+    title: '원장 추출',
+    note: '전처리 단계가 만든 processed-document.json으로 고고학 데이터 원장을 만듭니다.',
+    failed: '원장 작업을 만들지 못했습니다',
+    uploading: '올리고 확인하는 중…',
+    start: '원장 추출 시작',
+  },
+  en: {
+    title: 'Ledger Extraction',
+    note: 'Builds the archaeological data ledger from the processed-document.json made by preprocessing.',
+    failed: 'Failed to create ledger task',
+    uploading: 'Uploading & Validating...',
+    start: 'Start Ledger Extraction',
+  },
+} as const;
+
 /**
  * Upload panel for the Ledger Extraction stage.
  *
@@ -30,6 +48,7 @@ import { LedgerModelSelect } from './ledger-model-select';
  * (consent + Turnstile, OTP bypass, rate limits enforced server-side).
  */
 export function LedgerStagePanel() {
+  const t = text[useBrowserLanguage()];
   const [file, setFile] = useState<File | null>(null);
   const [models, setModels] = useState(DEFAULT_LEDGER_MODELS);
   const [consentDialogOpen, setConsentDialogOpen] = useState(false);
@@ -93,7 +112,7 @@ export function LedgerStagePanel() {
             return;
           }
 
-          setSubmitError(apiError.message || 'Failed to create ledger task');
+          setSubmitError(apiError.message || t.failed);
         },
       },
     );
@@ -131,14 +150,8 @@ export function LedgerStagePanel() {
         <CardContent className="flex items-start gap-3 py-4">
           <Info className="text-primary mt-0.5 h-5 w-5 flex-shrink-0" />
           <div className="text-muted-foreground text-sm">
-            <p className="text-foreground font-medium">원장 추출</p>
-            <p className="mt-1">
-              전처리 단계가 만든 <code>processed-document.json</code>을 받아
-              문서를 검증한 뒤, 구간마다 고른 모델로 보고서 유형 분류 → 객체
-              후보 탐색 → 후보 중복 검토 → 원문 배정을 차례로 실행하고 원장을
-              조립합니다. PDF 파싱과 전처리는 다시 하지 않습니다. 이미지 경로는
-              공개 CDN URL을 그대로 쓰며 추출 중에 내려받지 않습니다.
-            </p>
+            <p className="text-foreground font-medium">{t.title}</p>
+            <p className="mt-1">{t.note}</p>
           </div>
         </CardContent>
       </Card>
@@ -189,11 +202,11 @@ export function LedgerStagePanel() {
           {isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Uploading & Validating...
+              {t.uploading}
             </>
           ) : (
             <>
-              Start Ledger Extraction
+              {t.start}
               <ArrowRight className="ml-2 h-4 w-4" />
             </>
           )}

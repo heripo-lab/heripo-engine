@@ -112,8 +112,9 @@ function discoveryUsage(taskId: string): Usage {
  * candidate discovery with duplicate review, the content attachment plan, thin attachment of every unit, a
  * two-run place alias proposal when no person's table is saved, a three-run judgment of the parent questions code leaves open (with the attachment model), and the ledger build
  * with validation. Each step runs through the same functions as the manual panels, so its
- * artifacts appear there. A step starts only when the calls and tokens left in `options.budget` cover its
- * reserved worst case; the run stops with an error otherwise or when a step fails.
+ * artifacts appear there. With `options.budget`, a step starts only when the calls and tokens left cover its
+ * reserved worst case and the run stops with an error otherwise; without it the run has no caps. The run also
+ * stops when a step fails.
  */
 export async function runLedgerPipeline(
   taskId: string,
@@ -124,7 +125,12 @@ export async function runLedgerPipeline(
     abortSignal?: AbortSignal;
   },
 ) {
-  const { models, budget } = options;
+  const { models } = options;
+  // a task without caps behaves as one whose caps are never reached
+  const budget = options.budget ?? {
+    maxCalls: Number.MAX_SAFE_INTEGER,
+    maxTotalTokens: Number.MAX_SAFE_INTEGER,
+  };
   const { onStep, log, abortSignal } = hooks;
   const used: Usage = { calls: 0, totalTokens: 0 };
   const left = () => ({
@@ -243,7 +249,7 @@ export async function runLedgerPipeline(
   };
   require('Content attachment', 4, inFlight + 1);
   log(
-    `Attaching source text to ${plan.registryCount} records in ${plan.totalUnits} units with ${models.attachment}${batch ? ' through the Message Batches API' : ''} (budget ${thinBudget.maxCalls} calls, ${thinBudget.maxTotalTokens} tokens)...`,
+    `Attaching source text to ${plan.registryCount} records in ${plan.totalUnits} units with ${models.attachment}${batch ? ' through the Message Batches API' : ''}${options.budget ? ` (budget ${thinBudget.maxCalls} calls, ${thinBudget.maxTotalTokens} tokens)` : ''}...`,
   );
   startContentAttachmentThin(taskId, thinBudget, models.attachment, { batch });
   try {
@@ -357,7 +363,7 @@ export async function runLedgerPipeline(
     `Ledger: ${ledger.records.length} records, ${ledger.attributes.length} attributes, ${ledger.mediaReferences.length} media links, ${ledger.mediaCandidates.length} same-page image candidates, ${ledger.layerMentions.length} layer mentions, ${ledger.links.length} links, ${ledger.reviewItems.length} review items; validation ${ledger.ledger.validationStatus}`,
   );
   log(
-    `Model usage: ${used.calls} calls, ${used.totalTokens} tokens of ${budget.maxCalls} calls and ${budget.maxTotalTokens} tokens`,
+    `Model usage: ${used.calls} calls, ${used.totalTokens} tokens${options.budget ? ` of ${budget.maxCalls} calls and ${budget.maxTotalTokens} tokens` : ''}`,
   );
   return { used };
 }
