@@ -17,6 +17,13 @@ export const CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT = 50;
 export const CONTENT_ATTACHMENT_THIN_LARGE_HANDLE_LIMIT = 10;
 /** Layer names or numbers shorter than this are too generic to suggest. */
 const LAYER_KEY_MIN_LENGTH = 3;
+/**
+ * What follows a layer name inside an overburden removal phrase, on whitespace-free text: the rest of a noun
+ * list joined by 과, 와, 및, a comma or a middle dot, an optional object particle with a short adverb, then 제거
+ * ("표토층과 현대 퇴적층, 조선시대 퇴적층을 1차적으로 제거하자").
+ */
+const REMOVAL_TAIL =
+  /^[^.,을를은는]{0,12}?(?:(?:과|와|및|,|·)[^.,을를은는]{1,24}?)*(?:[을를][^.,을를]{0,8}?)?제거/;
 
 export interface ContentAttachmentThinLoneRate {
   rate: number;
@@ -41,6 +48,7 @@ export interface ContentAttachmentThinRoutedSegment {
     | 'contested_targets'
     | 'uncertainty_differs'
     | 'area'
+    /** Saved routings only: a named layer not returned by every run (now `layerMentions` or contested). */
     | 'layer'
     | 'large_collective'
     | 'large_handle'
@@ -53,6 +61,11 @@ export interface ContentAttachmentThinRoutedSegment {
   areaSuggestions: ContentAttachmentThinVote[];
   /** Layer candidates named literally in the segment but not returned by every run. */
   layerSuggestions: string[];
+  /**
+   * The layer suggestions no run returned: kept as layer mentions for the later relation stage, not as a
+   * review reason, since the prompt leaves relation counterparts such as a findspot or base layer out.
+   */
+  layerMentions: string[];
   /** Uncertainty groups when every run returned the same groups. */
   recipientIdentityAlternatives: string[][];
   relationshipSubjectAlternatives: string[][];
@@ -85,6 +98,15 @@ const decisionKey = (d: ContentAttachmentThinDecision | undefined) =>
           groups(d.relationshipSubjectAlternatives),
           groups(d.recipientIdentityAlternatives),
         ]);
+/**
+ * Whether a layer key occurs in the text other than as the object of an overburden removal phrase: a layer
+ * removed to expose a feature is not described by that sentence.
+ */
+const namedOutsideRemoval = (text: string, key: string) => {
+  for (let at = text.indexOf(key); at >= 0; at = text.indexOf(key, at + 1))
+    if (!REMOVAL_TAIL.test(text.slice(at + key.length))) return true;
+  return false;
+};
 const byIndex = (runs: ContentAttachmentThinInspection[]) =>
   runs.map((r) => new Map(r.decisions.map((d) => [d.segment, d])));
 
@@ -121,9 +143,11 @@ export function checkContentAttachmentThinOutliers(
 /**
  * Route each judged segment of a unit from its final runs. Targets returned by every run are confirmed,
  * others are contested with votes. A segment goes to review when targets are contested, uncertainty
- * groups differ, a run is invalid for it, an area is returned, a literally named layer is not confirmed, or
+ * groups differ, a run is invalid for it, an area is returned, or
  * more targets are confirmed than a collective statement may attach without review, or than a collective
- * handle may confirm without review. Under the plan's
+ * handle may confirm without review. A layer named literally in the segment and returned by no run is listed in
+ * `layerMentions` (a layer named only as removed overburden, "현대 퇴적층을 제거하자", is not listed); one returned by
+ * some runs only is contested like any target. Under the plan's
  * `unanimous` area policy areas are voted on like other targets instead of always going to review.
  * Under the plan's `local` layer policy a layer name shared by several layers suggests only the nearest local one, and a
  * single-unit layer from a neighbouring unit is suggested only to a segment in its chapter.
@@ -240,7 +264,9 @@ export function routeContentAttachmentThinSegments(
     const confirmed = returned.filter((r) => unanimous(r) && !isArea(r));
     const contested = returned.filter((r) => !unanimous(r) && !isArea(r));
     const areaSuggestions = returned.filter(isArea).map(vote);
-    const named = layerKeys.filter((l) => l.keys.some((k) => text.includes(k)));
+    const named = layerKeys.filter((l) =>
+      l.keys.some((k) => namedOutsideRemoval(text, k)),
+    );
     const layerSuggestions = (
       local
         ? narrowLocal(
@@ -267,7 +293,6 @@ export function routeContentAttachmentThinSegments(
     if (contested.length) reasons.push('contested_targets');
     if (groupKeys.size > 1) reasons.push('uncertainty_differs');
     if (areaSuggestions.length) reasons.push('area');
-    if (layerSuggestions.length) reasons.push('layer');
     if (confirmed.length > CONTENT_ATTACHMENT_THIN_LARGE_COLLECTIVE_LIMIT)
       reasons.push('large_collective');
     // a confirmed target counts as handle-derived when any run reached it through a returned handle
@@ -287,6 +312,7 @@ export function routeContentAttachmentThinSegments(
       contested: contested.map(vote),
       areaSuggestions,
       layerSuggestions,
+      layerMentions: layerSuggestions.filter((ref) => !votes.has(ref)),
       recipientIdentityAlternatives: agreedGroups
         ? valid[0].recipientIdentityAlternatives
         : [],
@@ -300,7 +326,7 @@ export function routeContentAttachmentThinSegments(
 /**
  * Route a unit from r1, r2 and a tie-breaking r3. A segment r1 and r2 agree on keeps that routing. A segment in
  * review only because the two disagreed (or one was invalid) is decided by whichever of r1 or r2 agrees with r3,
- * marked `decidedBy: 'majority'`; when neither does, or the segment is in review for another reason (areas, layers,
+ * marked `decidedBy: 'majority'`; when neither does, or the segment is in review for another reason (areas,
  * large collectives, a whole-unit review), it stays in review with all three runs.
  */
 export function routeContentAttachmentThinTiebreak(

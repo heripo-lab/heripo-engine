@@ -69,8 +69,8 @@ const texts = [
   'Ⅳ층군 아래',
   '표토',
 ];
-function fixture() {
-  const sources = texts.map((text, i) => ({
+function fixture(lines = texts) {
+  const sources = lines.map((text, i) => ({
     sourceId: `s${i}`,
     resource: {
       key: `/chapters/0/textBlocks/${i}`,
@@ -110,7 +110,7 @@ function fixture() {
         seg,
         key: `/chapters/0/textBlocks/${i}`,
         charStart: 0,
-        charEnd: texts[i].length,
+        charEnd: lines[i].length,
         llm: true,
       })),
       handles: [],
@@ -201,14 +201,16 @@ describe('routeContentAttachmentThinSegments', () => {
       contested: [],
       areaSuggestions: [],
       layerSuggestions: [],
+      layerMentions: [],
       recipientIdentityAlternatives: [['R2', 'R3']],
       relationshipSubjectAlternatives: [],
     });
     expect(routed[1]).toMatchObject({
       segment: 'E2:S1',
-      status: 'review',
-      reasons: ['layer'],
+      status: 'auto',
+      reasons: [],
       layerSuggestions: ['R4'],
+      layerMentions: ['R4'],
     });
     expect(routed[2]).toMatchObject({
       status: 'auto',
@@ -216,6 +218,34 @@ describe('routeContentAttachmentThinSegments', () => {
       layerSuggestions: [],
     });
     expect(routed[3]).toMatchObject({ status: 'auto', layerSuggestions: [] });
+  });
+
+  test('does not suggest a layer named only as removed overburden', () => {
+    const { plan, unit, compilation } = fixture([
+      '표토층과 현대층, 자연 퇴적층을 1차적으로 제거하자 수혈 1호가 드러났다.',
+      '우물 상부 폐기층을 제거한 뒤, 자연 퇴적층에서 확인되었다.',
+      '자연 퇴적층 제거 후 우물 상부 폐기층을 조사하였다.',
+      '자연 퇴적층을 제거하자, 다시 자연 퇴적층이 드러났다.',
+    ]);
+    const decisions = () => [
+      none('E1:S1'),
+      none('E2:S1'),
+      none('E3:S1'),
+      none('E4:S1'),
+    ];
+
+    const routed = routeContentAttachmentThinSegments(plan, unit, compilation, [
+      run(...decisions()),
+      run(...decisions()),
+    ]);
+
+    expect(routed.map((s) => s.layerSuggestions)).toEqual([
+      [],
+      ['R5'],
+      ['R4'],
+      ['R5'],
+    ]);
+    expect(routed[0]).toMatchObject({ status: 'auto', reasons: [] });
   });
 
   test('reviews contested targets, areas, differing groups and invalid runs', () => {
@@ -249,9 +279,10 @@ describe('routeContentAttachmentThinSegments', () => {
       areaSuggestions: [{ ref: 'R1', votes: 3 }],
     });
     expect(routed[1]).toMatchObject({
-      reasons: ['contested_targets', 'uncertainty_differs', 'layer'],
+      reasons: ['contested_targets', 'uncertainty_differs'],
       contested: [{ ref: 'R4', votes: 2 }],
       layerSuggestions: ['R4'],
+      layerMentions: [],
       relationshipSubjectAlternatives: [],
     });
     expect(routed[3]).toMatchObject({
@@ -295,9 +326,10 @@ describe('routeContentAttachmentThinSegments', () => {
     });
     expect(routed[1]).toMatchObject({
       status: 'review',
-      reasons: ['contested_targets', 'layer'],
+      reasons: ['contested_targets'],
       confirmed: [],
       contested: [{ ref: 'R7', votes: 1 }],
+      layerMentions: ['R4'],
       areaSuggestions: [],
     });
   });

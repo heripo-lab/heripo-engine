@@ -23,6 +23,7 @@ const byKeys =
  * - attributes by record order, the document position of their cell or source, key, ID;
  * - sources by record order, PDF page (unknown last), locator, ID;
  * - media references by record order, ordinal, image ID;
+ * - layer mentions by document position, layer record order, ID, each with its records in record order;
  * - links by the order of their from and to records, label, ID.
  *
  * Document order is the storage traversal order of the processed document's resources. Review items and
@@ -88,6 +89,12 @@ export function sortArchaeologyLedger(
     mediaCandidates: [...result.mediaCandidates].sort(
       byKeys((m) => [m.pdfPageNo, m.id]),
     ),
+    layerMentions: [...result.layerMentions]
+      .map((m) => ({
+        ...m,
+        recordIds: [...m.recordIds].sort(byKeys((id) => [rank(id), id])),
+      }))
+      .sort(byKeys((m) => [...at(m.locator), rank(m.layerRecordId), m.id])),
     links: [...result.links].sort(
       byKeys((l) => [
         rank(l.fromRecordId),

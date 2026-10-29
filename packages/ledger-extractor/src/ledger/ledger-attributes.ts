@@ -10,9 +10,10 @@ import type {
 /**
  * Put source attributes into an assembled ledger (A4), deterministically and without model calls. Table
  * attributes come first, then text attributes, each kept as written with where it is; values found in
- * several places are all kept. An owner question (a sentence that also names another record of the same
- * kind) becomes an `attribute` review item (`attribute_owner_ambiguous`) with its value and the other
- * records, and flags the record. Owned table cells left without a header are reported in `issues` per table.
+ * several places are all kept. Owner questions (a sentence that also names another record of the same kind)
+ * become `attribute` review items (`attribute_owner_ambiguous`): one per sentence and value, listing every
+ * record asked about that value and the other named records, so a value written once is reviewed once; each
+ * record asked about is flagged. Owned table cells left without a header are reported in `issues` per table.
  * `attributes` leaves `pending`.
  */
 export function applyLedgerAttributes(
@@ -52,17 +53,37 @@ export function applyLedgerAttributes(
   }));
 
   const questions = sources.text?.ownerQuestions ?? [];
-  const added: Array<Omit<LedgerReviewItem, 'id'>> = questions.map((q) => ({
-    kind: 'attribute',
-    recordIds: [q.recordId],
-    confirmedRecordIds: [],
-    reasons: ['attribute_owner_ambiguous'],
-    candidateRecordIds: q.otherRecordIds,
-    text: q.attribute.sourceText,
-    locator: q.attribute.metadata.locator,
-    pdfPageNo: q.attribute.metadata.pdfPageNo,
-    detail: `${q.attribute.keyText}: ${q.attribute.valueText}`,
-  }));
+  // one item per sentence and value: the records asked about it in order, the other named records after them
+  const grouped = new Map<string, typeof questions>();
+  for (const q of questions) {
+    const { locator } = q.attribute.metadata;
+    const key = JSON.stringify([
+      locator,
+      q.attribute.sourceText,
+      q.attribute.keyText,
+      q.attribute.valueText,
+    ]);
+    grouped.set(key, [...(grouped.get(key) ?? []), q]);
+  }
+  const added: Array<Omit<LedgerReviewItem, 'id'>> = [...grouped.values()].map(
+    (group) => {
+      const recordIds = [...new Set(group.map((q) => q.recordId))];
+      const { attribute } = group[0];
+      return {
+        kind: 'attribute',
+        recordIds,
+        confirmedRecordIds: [],
+        reasons: ['attribute_owner_ambiguous'],
+        candidateRecordIds: [
+          ...new Set(group.flatMap((q) => q.otherRecordIds)),
+        ].filter((id) => !recordIds.includes(id)),
+        text: attribute.sourceText,
+        locator: attribute.metadata.locator,
+        pdfPageNo: attribute.metadata.pdfPageNo,
+        detail: `${attribute.keyText}: ${attribute.valueText}`,
+      };
+    },
+  );
   const headerless = new Map<string, number>();
   for (const c of sources.table?.cellsWithoutHeader ?? []) {
     const table = c.cellKey.replace(/\/grid\/.*$/, '');

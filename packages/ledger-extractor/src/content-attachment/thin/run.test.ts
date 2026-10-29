@@ -368,6 +368,7 @@ describe('attachContentThinUnit', () => {
       contested: [],
       areaSuggestions: [],
       layerSuggestions: [],
+      layerMentions: [],
       recipientIdentityAlternatives: [],
       relationshipSubjectAlternatives: [],
     };

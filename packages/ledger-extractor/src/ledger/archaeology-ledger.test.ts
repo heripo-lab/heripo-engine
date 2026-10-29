@@ -180,6 +180,49 @@ const options = {
 };
 
 describe('assembleArchaeologyLedger', () => {
+  test('keeps layers named in segments as layer mentions with the segment records', () => {
+    const { plan, attachments } = fixture();
+
+    const result = assembleArchaeologyLedger(
+      plan,
+      {
+        ...attachments,
+        layerMentions: [
+          {
+            unitId: 'page-3',
+            segment: 'E1:S2',
+            resourceKey: '/chapters/0/textBlocks/0',
+            charStart: 13,
+            charEnd: 25,
+            layers: ['R3', 'R2'],
+            confirmed: ['R1'],
+          },
+        ],
+      },
+      options,
+    );
+
+    expect(result.layerMentions).toEqual([
+      {
+        id: 'layer-mention-1',
+        ledgerId: 'ledger-1',
+        layerRecordId: 'record-gR3',
+        recordIds: ['record-gR1'],
+        text: '1호 수혈은 원형이다.',
+        locator: '/chapters/0/textBlocks/0#13-25',
+        pdfPageNo: 3,
+        basis: 'named_in_segment',
+      },
+      expect.objectContaining({
+        id: 'layer-mention-2',
+        layerRecordId: 'record-gR2',
+      }),
+    ]);
+    expect(
+      assembleArchaeologyLedger(plan, attachments, options).layerMentions,
+    ).toEqual([]);
+  });
+
   test('builds records with unchanged excerpts, their sources and review items without flagging collective members', () => {
     const { plan, attachments } = fixture();
 

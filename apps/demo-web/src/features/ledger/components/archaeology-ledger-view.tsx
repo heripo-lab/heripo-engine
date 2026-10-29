@@ -400,6 +400,9 @@ function RecordDetail({
   const links = view.ledger.links.filter(
     (l) => l.fromRecordId === record.id || l.toRecordId === record.id,
   );
+  const layerMentions = view.ledger.layerMentions.filter(
+    (m) => m.layerRecordId === record.id || m.recordIds.includes(record.id),
+  );
   const collective = itemsOf.filter((i) => i.collective).length;
   const media = view.ledger.mediaReferences.filter(
     (m) => m.recordId === record.id,
@@ -480,6 +483,52 @@ function RecordDetail({
                 </li>
               );
             })}
+          </ul>
+        </div>
+      )}
+      {layerMentions.length > 0 && (
+        <div>
+          <div className="mb-2 text-sm font-medium">
+            층위 언급 후보 {layerMentions.length}개
+          </div>
+          <p className="text-muted-foreground mb-2 text-xs">
+            문장에 층위 이름이 나오지만 어느 실행도 그 층위에 붙이지 않은
+            경우입니다. 출토 위치나 기반 층처럼 관계일 수 있어 관계 단계를 위한
+            후보로만 남겼습니다.
+          </p>
+          <ul className="space-y-2">
+            {layerMentions.map((m) => (
+              <li key={m.id} className="rounded border p-2 text-sm">
+                <span className="block">{m.text}</span>
+                <span className="text-muted-foreground block text-xs">
+                  {m.pdfPageNo ? `PDF ${m.pdfPageNo}쪽 · ` : ''}층위{' '}
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => onSelect(m.layerRecordId)}
+                  >
+                    {nameOf(m.layerRecordId)}
+                  </button>
+                  {m.recordIds.length > 0 && (
+                    <>
+                      {' · 문장의 객체 '}
+                      {m.recordIds.map((id, i) => (
+                        <span key={id}>
+                          {i > 0 && ', '}
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => onSelect(id)}
+                          >
+                            {nameOf(id)}
+                          </button>
+                        </span>
+                      ))}
+                    </>
+                  )}
+                </span>
+              </li>
+            ))}
           </ul>
         </div>
       )}
@@ -573,8 +622,10 @@ function RecordDetail({
                     <>
                       {item.pdfPageNo ? `PDF ${item.pdfPageNo}쪽 · ` : ''}
                       함께 언급된 객체{' '}
-                      {item.candidateRecordIds?.map(nameOf).join(', ')} · 이
-                      객체의 값인지 정해지지 않아 속성에 넣지 않았습니다.
+                      {[...item.recordIds, ...(item.candidateRecordIds ?? [])]
+                        .map(nameOf)
+                        .join(', ')}{' '}
+                      · 어느 객체의 값인지 정해지지 않아 속성에 넣지 않았습니다.
                     </>
                   ) : (
                     <>
@@ -950,11 +1001,14 @@ function ReviewList({
         <ul className="space-y-1">
           {attributeItems.map((i) => (
             <li key={i.id}>
-              {nameOf(i.recordIds[0])} · {i.detail}
+              {i.recordIds.map(nameOf).join(', ')} · {i.detail}
               <span className="text-muted-foreground text-xs">
                 {' '}
-                — {i.pdfPageNo ? `PDF ${i.pdfPageNo}쪽 · ` : ''}함께 언급{' '}
-                {i.candidateRecordIds?.map(nameOf).join(', ')} · {i.text}
+                — {i.pdfPageNo ? `PDF ${i.pdfPageNo}쪽 · ` : ''}
+                {i.candidateRecordIds?.length
+                  ? `함께 언급 ${i.candidateRecordIds.map(nameOf).join(', ')} · `
+                  : ''}
+                {i.text}
               </span>
             </li>
           ))}
@@ -1219,6 +1273,11 @@ export function ArchaeologyLedgerView({ taskId }: { taskId: string }) {
               <Badge variant="outline">
                 속성 {ledger.attributes.length}개 ·{' '}
                 {new Set(ledger.attributes.map((a) => a.recordId)).size}개 객체
+              </Badge>
+            )}
+            {ledger.layerMentions.length > 0 && (
+              <Badge variant="outline">
+                층위 언급 후보 {ledger.layerMentions.length}개
               </Badge>
             )}
             {view.discoveryScope && (

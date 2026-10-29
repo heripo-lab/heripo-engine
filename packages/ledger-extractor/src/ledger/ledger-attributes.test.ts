@@ -85,6 +85,46 @@ const text: TextAttributes = {
 };
 
 describe('applyLedgerAttributes', () => {
+  test('asks once about a value one sentence gives for several named records', () => {
+    const result = applyLedgerAttributes(ledger(), {
+      text: {
+        version: 'text-attributes.v2',
+        attributes: [],
+        ownerQuestions: [
+          {
+            recordId: 'r2',
+            otherRecordIds: ['r3', 'r1'],
+            attribute: textAttribute('r2', '깊이 20cm', 'cm'),
+          },
+          {
+            recordId: 'r3',
+            otherRecordIds: ['r2'],
+            attribute: textAttribute('r3', '깊이 20cm', 'cm'),
+          },
+          {
+            recordId: 'r3',
+            otherRecordIds: ['r2'],
+            attribute: textAttribute('r3', '깊이 9cm', 'cm'),
+          },
+        ],
+      },
+    });
+
+    expect(
+      result.reviewItems
+        .slice(1)
+        .map((i) => [i.recordIds, i.candidateRecordIds, i.detail]),
+    ).toEqual([
+      [['r2', 'r3'], ['r1'], '깊이: 깊이 20cm'],
+      [['r3'], ['r2'], '깊이: 깊이 9cm'],
+    ]);
+    expect(result.records.map((r) => r.needsReview)).toEqual([
+      false,
+      true,
+      true,
+    ]);
+  });
+
   test('keeps table then text attributes, asks about shared sentences and reports headerless cells', () => {
     const result = applyLedgerAttributes(ledger(), { table, text });
 

@@ -11,6 +11,8 @@ import {
   CONTENT_ATTACHMENT_THIN_ARRAY_VERSION,
   CONTENT_ATTACHMENT_THIN_CATALOG_VERSION,
   CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION,
+  CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION,
+  CONTENT_ATTACHMENT_THIN_LAYER_VERSION,
   CONTENT_ATTACHMENT_THIN_LINKED_VERSION,
   CONTENT_ATTACHMENT_THIN_VERSION,
   contentAttachmentThinRestoredRules,
@@ -208,6 +210,26 @@ describe('createContentAttachmentThinRequest', () => {
     expect(v14.providerOutputSchema).toEqual(v11.providerOutputSchema);
   });
 
+  test('adds the layer-context rule after the collective-summary rule in v15 and v16', () => {
+    const c = compilation();
+    const build = (version: ContentAttachmentThinRequestVersion) =>
+      createContentAttachmentThinRequest(c, { version });
+
+    const v13 = build(CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION);
+    const v14 = build(CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION);
+    const v15 = build(CONTENT_ATTACHMENT_THIN_LAYER_VERSION);
+    const v16 = build(CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION);
+
+    expect(v15.systemPrompt.startsWith(v13.systemPrompt)).toBe(true);
+    expect(v15.systemPrompt).toContain('\n\nLAYER CONTEXTS:');
+    expect(v15.systemPrompt).not.toContain('CATALOG ENTRIES:');
+    expect(v16.systemPrompt.startsWith(v14.systemPrompt)).toBe(true);
+    expect(v16.systemPrompt).toContain('LAYER CONTEXTS:');
+    expect(v14.systemPrompt).not.toContain('LAYER CONTEXTS:');
+    expect(v16.version).toBe(CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION);
+    expect(v16.providerOutputSchema).toEqual(v13.providerOutputSchema);
+  });
+
   test('defaults to v13: the array format with one schema for every unit and the heading and collective-summary rules', () => {
     const c = compilation();
 
@@ -228,6 +250,7 @@ describe('createContentAttachmentThinRequest', () => {
       'HEADINGS AND DISCUSSION STATEMENTS',
     );
     expect(request.systemPrompt).toContain('COUNTS AND COLLECTIVE SUMMARIES');
+    expect(request.systemPrompt).not.toContain('LAYER CONTEXTS:');
     expect(v10.version).toBe(CONTENT_ATTACHMENT_THIN_ARRAY_VERSION);
     expect(v10.systemPrompt).not.toContain('HEADINGS AND DISCUSSION');
     expect(request.systemPrompt.startsWith(v10.systemPrompt)).toBe(true);

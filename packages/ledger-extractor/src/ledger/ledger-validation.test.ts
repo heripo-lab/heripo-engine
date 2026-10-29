@@ -186,6 +186,7 @@ const cleanLedger = (sourceName = '수혈') =>
     ],
     mediaReferences: [],
     mediaCandidates: [],
+    layerMentions: [],
     links: [],
     pending: [],
     reviewItems: [],
@@ -290,6 +291,15 @@ const brokenLedger = () => {
         basis: 'same_page',
       },
     ],
+    layerMentions: [
+      {
+        id: 'lm1',
+        ledgerId: 'ledger-2',
+        layerRecordId: 'record-A',
+        recordIds: ['record-X'],
+        basis: 'named_in_segment',
+      },
+    ],
     links: [
       link('l1', 'A', 'B', [
         {
@@ -341,9 +351,9 @@ describe('validateArchaeologyLedger', () => {
     expect(report.version).toBe(LEDGER_VALIDATION_VERSION);
     expect(report.status).toBe('failed');
     expect(summary(report)).toEqual({
-      unique_ids: '1/28',
-      record_references: '4/34',
-      ledger_ids: '2/13',
+      unique_ids: '1/29',
+      record_references: '5/36',
+      ledger_ids: '3/14',
       image_references: '2/5',
       no_self_parent: '1/5',
       no_cycle: '2/5',
@@ -374,7 +384,7 @@ describe('validateArchaeologyLedger', () => {
       group: 'structure',
       code: 'DUPLICATE_ID',
       severity: 'error',
-      total: 28,
+      total: 29,
       failed: 1,
     });
     const messages = report.issues.map(
@@ -384,6 +394,8 @@ describe('validateArchaeologyLedger', () => {
       expect.arrayContaining([
         'error DUPLICATE_ID ID review-1 is used more than once',
         'error INVALID_RESOURCE_REFERENCE media m2 names missing record record-Z',
+        'error INVALID_RESOURCE_REFERENCE layer mention lm1 names missing record record-X',
+        'error INVALID_RESOURCE_REFERENCE lm1 belongs to ledger ledger-2',
         'error INVALID_RESOURCE_REFERENCE record-D belongs to ledger ledger-other',
         'error INVALID_RESOURCE_REFERENCE image img-9 is missing',
         'error PARENT_CYCLE record-D is its own parent',

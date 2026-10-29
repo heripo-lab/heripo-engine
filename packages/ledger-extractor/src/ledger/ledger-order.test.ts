@@ -138,6 +138,21 @@ const ledger = {
     { id: 'mc-c', pdfPageNo: 2 },
     { id: 'mc-a', pdfPageNo: 9 },
   ],
+  layerMentions: [
+    {
+      id: 'lm-b',
+      layerRecordId: 'child',
+      recordIds: ['child', 'root'],
+      locator: '/chapters/0/textBlocks/0#5-9',
+    },
+    {
+      id: 'lm-a',
+      layerRecordId: 'root',
+      recordIds: [],
+      locator: '/chapters/0/textBlocks/0#5-9',
+    },
+    { id: 'lm-c', layerRecordId: 'root', recordIds: [], locator: undefined },
+  ],
   links: [
     {
       id: 'l3',
@@ -208,6 +223,8 @@ describe('sortArchaeologyLedger', () => {
     ]);
     expect(ids(result.mediaReferences)).toEqual(['m0', 'm1', 'm2', 'm3']);
     expect(ids(result.mediaCandidates)).toEqual(['mc-c', 'mc-a', 'mc-b']);
+    expect(ids(result.layerMentions)).toEqual(['lm-a', 'lm-b', 'lm-c']);
+    expect(result.layerMentions[1].recordIds).toEqual(['root', 'child']);
     expect(ids(result.links)).toEqual(['l1', 'l0', 'l2', 'l3']);
     expect(result.reviewItems).toBe(ledger.reviewItems);
   });

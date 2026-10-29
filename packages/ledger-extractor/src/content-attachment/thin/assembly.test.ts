@@ -373,6 +373,39 @@ describe('assembleContentAttachmentThin', () => {
     ]);
   });
 
+  test('lists layer mentions of auto and review segments and reads routings saved without them', () => {
+    const { plan, unitA } = fixture();
+    const a = routedResult(plan, unitA, [
+      { d: { 'E1:S1': attach(['R2'], []), 'E2:S1': { k: 'n' } } },
+      { d: { 'E1:S1': attach(['R2'], []), 'E2:S1': attach(['R2'], []) } },
+    ]);
+    const [first, second] = a.segments;
+    const saved = { ...second } as Partial<typeof second>;
+    delete saved.layerMentions;
+
+    const view = assembleContentAttachmentThin(plan, [
+      {
+        ...a,
+        segments: [{ ...first, layerMentions: ['R4'] }, saved as typeof second],
+      },
+    ]);
+    const reviewed = assembleContentAttachmentThin(plan, [
+      { ...a, segments: [first, { ...second, layerMentions: ['R4'] }] },
+    ]);
+
+    expect(view.layerMentions).toEqual([
+      expect.objectContaining({
+        unitId: unitA.unitId,
+        segment: 'E1:S1',
+        layers: ['R4'],
+        confirmed: ['R2'],
+      }),
+    ]);
+    expect(reviewed.layerMentions).toEqual([
+      expect.objectContaining({ segment: 'E2:S1', confirmed: [] }),
+    ]);
+  });
+
   test('keeps review segments with every final run and leaves them unattached', () => {
     const { plan, unitA } = fixture();
     const a = routedResult(plan, unitA, [

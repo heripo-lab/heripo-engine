@@ -168,6 +168,21 @@ export interface LedgerMediaCandidate {
   recordIds: string[];
   basis: 'same_page';
 }
+/**
+ * A layer named in a segment that no attachment run attached: a candidate relation between the layer and the
+ * segment's records (such as a findspot or base layer), kept for the later relation stage, not reviewed.
+ */
+export interface LedgerLayerMention {
+  id: string;
+  ledgerId: string;
+  layerRecordId: string;
+  /** The records the segment was attached to, in ledger order; empty when it was attached to none. */
+  recordIds: string[];
+  text: string;
+  locator: string;
+  pdfPageNo: number | null;
+  basis: 'named_in_segment';
+}
 /** Where an excerpt of a record occurs in the processed document. */
 export interface LedgerRecordSource {
   id: string;
@@ -269,6 +284,8 @@ export interface ArchaeologyLedgerResult {
   mediaReferences: LedgerMediaReference[];
   /** Page-level image candidates; empty until `applyLedgerMedia` runs. */
   mediaCandidates: LedgerMediaCandidate[];
+  /** Layers named in segments without being attached; candidates for the relation stage. */
+  layerMentions: LedgerLayerMention[];
   /** Relations kept beside a chosen parent; full relation extraction is still pending. */
   links: LedgerRecordLink[];
   pending: ArchaeologyLedgerPendingPart[];
@@ -411,6 +428,21 @@ export function assembleArchaeologyLedger(
         : {}),
     });
   }
+  const layerMentions: LedgerLayerMention[] = (attachments.layerMentions ?? [])
+    .flatMap((m) => m.layers.map((layer) => ({ m, layer })))
+    .map(({ m, layer }, i) => {
+      const location = locate(m.resourceKey, m.charStart, m.charEnd);
+      return {
+        id: `layer-mention-${i + 1}`,
+        ledgerId: options.ledgerId,
+        layerRecordId: recordIdOf.get(layer)!,
+        recordIds: toRecords(m.confirmed),
+        text: location.excerpt,
+        locator: location.locator,
+        pdfPageNo: location.pdfPageNo,
+        basis: 'named_in_segment' as const,
+      };
+    });
   const refOfCandidate = new Map(
     plan.registry.flatMap((r) => r.mentions.map((m) => [m.candidateId, r.ref])),
   );
@@ -508,6 +540,7 @@ export function assembleArchaeologyLedger(
     attributes: [],
     mediaReferences: [],
     mediaCandidates: [],
+    layerMentions,
     links: [],
     pending: [...ARCHAEOLOGY_LEDGER_PENDING_PARTS],
     reviewItems,

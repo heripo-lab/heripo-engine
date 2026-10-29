@@ -30,6 +30,15 @@ export const CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION =
 /** v12 plus the rule for counts and collective summaries (`catalog: 'fields'`). */
 export const CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION =
   'content-attachment-thin.v14' as const;
+/**
+ * v13 plus the rule that a layer an object was found in or cut into, and a layer's own account, describe that layer.
+ * Opt-in: on three reports it split the runs on findspot and base layers instead of settling them.
+ */
+export const CONTENT_ATTACHMENT_THIN_LAYER_VERSION =
+  'content-attachment-thin.v15' as const;
+/** v14 plus the layer-context rule of v15 (`catalog: 'fields'`). */
+export const CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION =
+  'content-attachment-thin.v16' as const;
 export type ContentAttachmentThinRequestVersion =
   | typeof CONTENT_ATTACHMENT_THIN_VERSION
   | typeof CONTENT_ATTACHMENT_THIN_LINKED_VERSION
@@ -37,7 +46,9 @@ export type ContentAttachmentThinRequestVersion =
   | typeof CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION
   | typeof CONTENT_ATTACHMENT_THIN_CATALOG_VERSION
   | typeof CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION
-  | typeof CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION;
+  | typeof CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_LAYER_VERSION
+  | typeof CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION;
 /** `object`: v8/v9 decisions keyed by segment; `array`: v10 decision items. */
 export type ContentAttachmentThinResponseFormat = 'object' | 'array';
 
@@ -128,6 +139,8 @@ const THIN_CATALOG_RULE = `CATALOG ENTRIES: In a catalog that describes register
 
 const THIN_AGGREGATE_RULE = `COUNTS AND COLLECTIVE SUMMARIES: A sentence that describes or counts a collective the report defines for the current investigation, such as the features or finds under a chapter or heading or an enumerated set like "수혈 204기", describes every registered member of that collective, including qualified follow-ups about most or some of its members; use a handle only when it covers exactly that collective. A count of one class within it, such as one material, describes every registered member of that class. A sentence about one type within a collective, such as one ware, form or period, describes only the registered members of that type: list them in r and do not use the collective's handle; decide n when the type cannot be told from the candidates' names. When a stated count clearly exceeds the registered members because it includes finds the report does not register individually, such as discarded, buried or unpublished items, the sentence describes no candidate: decide n.`;
 
+const THIN_LAYER_RULE = `LAYER CONTEXTS: For a registered current layer, this rule replaces RELATION COUNTERPARTS. A segment stating that an identified artifact or feature was found in, recovered from, cut into, founded on or built on that layer describes both: put the object and the layer in r. A segment about a layer's own formation, composition, sequence, depth or extent describes that layer, even when it also names other objects. A layer named only as overburden removed to expose an object, as in "표토층과 현대 퇴적층을 제거하자 유구가 드러났다", is not described: do not attach it. A common layer name such as topsoil (표토) alone does not identify one registered layer; when the source may mean one of several layers, use ia instead of guessing. Relations between other objects still follow RELATION COUNTERPARTS.`;
+
 export function contentAttachmentThinSystemPrompt(
   options: {
     linked?: boolean;
@@ -138,6 +151,8 @@ export function contentAttachmentThinSystemPrompt(
     catalog?: boolean;
     /** v13/v14: add the counts and collective summaries rule. */
     aggregate?: boolean;
+    /** v15/v16: add the layer-context rule. */
+    layers?: boolean;
   } = {},
 ): string {
   const head =
@@ -153,6 +168,7 @@ export function contentAttachmentThinSystemPrompt(
     ...(options.headings ? [THIN_HEADINGS_RULE] : []),
     ...(options.catalog ? [THIN_CATALOG_RULE] : []),
     ...(options.aggregate ? [THIN_AGGREGATE_RULE] : []),
+    ...(options.layers ? [THIN_LAYER_RULE] : []),
   ].join('\n\n');
   return options.linked
     ? `${withHeadings}\n\n${THIN_LINKED_RULE}`
@@ -261,8 +277,8 @@ export interface ContentAttachmentThinRequest {
 
 /**
  * Model request for one compiled unit; the user prompt is the compact input JSON. New requests use v13 (array
- * format with the heading and collective-summary rules), or v14 with the catalog-entry rule when the caller
- * passes that version. `version` rebuilds a saved request's version; `format: 'object'` builds the v8/v9
+ * format with the heading and collective-summary rules), or v14 with the catalog-entry rule, v15 or v16 with the
+ * layer-context rule, when the caller passes that version. `version` rebuilds a saved request's version; `format: 'object'` builds the v8/v9
  * request, v9 for linked compilations.
  */
 export function createContentAttachmentThinRequest(
@@ -279,10 +295,15 @@ export function createContentAttachmentThinRequest(
       : CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION);
   const format: ContentAttachmentThinResponseFormat =
     isContentAttachmentThinArrayVersion(version) ? 'array' : 'object';
+  const layers =
+    version === CONTENT_ATTACHMENT_THIN_LAYER_VERSION ||
+    version === CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION;
   const catalog =
     version === CONTENT_ATTACHMENT_THIN_CATALOG_VERSION ||
-    version === CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION;
+    version === CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION ||
+    version === CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION;
   const aggregate =
+    layers ||
     version === CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION ||
     version === CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION;
   const headings =
@@ -304,6 +325,7 @@ export function createContentAttachmentThinRequest(
       headings,
       catalog,
       aggregate,
+      layers,
     }),
     userPrompt: JSON.stringify(compilation.input),
     providerOutputSchema:

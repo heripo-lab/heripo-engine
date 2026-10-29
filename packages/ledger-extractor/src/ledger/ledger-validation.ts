@@ -102,6 +102,7 @@ export function validateArchaeologyLedger(
     ...result.attributes,
     ...result.mediaReferences,
     ...result.mediaCandidates,
+    ...result.layerMentions,
     ...result.links,
     ...result.reviewItems,
   ].map((x) => x.id);
@@ -128,6 +129,12 @@ export function validateArchaeologyLedger(
     ]),
     ...result.mediaCandidates.flatMap((m) =>
       m.recordIds.map((id): [string, string] => [`media ${m.id}`, id]),
+    ),
+    ...result.layerMentions.flatMap((m) =>
+      [m.layerRecordId, ...m.recordIds].map((id): [string, string] => [
+        `layer mention ${m.id}`,
+        id,
+      ]),
     ),
     ...result.links.flatMap((l): Array<[string, string]> => [
       [`link ${l.id}`, l.fromRecordId],
@@ -159,6 +166,7 @@ export function validateArchaeologyLedger(
     ...result.records,
     ...result.mediaReferences,
     ...result.mediaCandidates,
+    ...result.layerMentions,
     ...result.links,
   ];
   check(

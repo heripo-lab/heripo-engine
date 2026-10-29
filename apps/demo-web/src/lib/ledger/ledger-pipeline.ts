@@ -354,7 +354,7 @@ export async function runLedgerPipeline(
   if (!view) throw new Error('The ledger could not be assembled');
   const { ledger } = view;
   log(
-    `Ledger: ${ledger.records.length} records, ${ledger.attributes.length} attributes, ${ledger.mediaReferences.length} media links, ${ledger.mediaCandidates.length} same-page image candidates, ${ledger.links.length} links, ${ledger.reviewItems.length} review items; validation ${ledger.ledger.validationStatus}`,
+    `Ledger: ${ledger.records.length} records, ${ledger.attributes.length} attributes, ${ledger.mediaReferences.length} media links, ${ledger.mediaCandidates.length} same-page image candidates, ${ledger.layerMentions.length} layer mentions, ${ledger.links.length} links, ${ledger.reviewItems.length} review items; validation ${ledger.ledger.validationStatus}`,
   );
   log(
     `Model usage: ${used.calls} calls, ${used.totalTokens} tokens of ${budget.maxCalls} calls and ${budget.maxTotalTokens} tokens`,

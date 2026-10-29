@@ -94,6 +94,19 @@ export interface ContentAttachmentThinResult {
     relationshipSubjectAlternatives: string[][];
   }>;
   reviewItems: ContentAttachmentThinReviewItem[];
+  /**
+   * Layers named literally in a segment that no final run attached (`layerMentions` of the routing), with the
+   * segment's confirmed targets, kept for the later relation stage. Absent in views assembled before v2 added it.
+   */
+  layerMentions?: Array<{
+    unitId: string;
+    segment: string;
+    resourceKey: string;
+    charStart: number;
+    charEnd: number;
+    layers: string[];
+    confirmed: string[];
+  }>;
   /** What this stage deliberately does not decide. */
   scope: { relationCounterparts: 'deferred_to_link_extraction' };
   issues: Array<{ unitId: string; reason: string }>;
@@ -113,7 +126,8 @@ const mergeEvidence = (lists: ContentAttachmentThinEvidence[][]) => {
  * Assemble per-unit thin attachment results into the ledger attachment view. Only automatically accepted
  * segments and code-assigned table cells become attachments; review segments are kept as review items with
  * every final run's decision. Original source strings are referenced by key and span, never copied or
- * repaired. Relation counterparts are not attached at this stage.
+ * repaired. Relation counterparts are not attached at this stage; a layer named in a segment and attached by no
+ * run is listed in `layerMentions`.
  */
 export function assembleContentAttachmentThin(
   plan: ContentAttachmentPlan,
@@ -144,6 +158,7 @@ export function assembleContentAttachmentThin(
     segmentEvidence: [],
     uncertainties: [],
     reviewItems: [],
+    layerMentions: [],
     scope: { relationCounterparts: 'deferred_to_link_extraction' },
     issues: [],
   };
@@ -216,6 +231,15 @@ export function assembleContentAttachmentThin(
       );
       const evidence = mergeEvidence(decisions.map((d) => d?.evidence ?? []));
       const location = span(routed.segment);
+      // routings saved before layer mentions have none
+      if (routed.layerMentions?.length)
+        output.layerMentions!.push({
+          unitId: result.unitId,
+          segment: routed.segment,
+          ...location,
+          layers: routed.layerMentions,
+          confirmed: routed.confirmed,
+        });
       if (routed.status === 'review') {
         const { status: _status, ...rest } = routed;
         const proposed = [
