@@ -37,9 +37,11 @@ export * from './media';
 export * from './attributes';
 export * from './links';
 export {
+  SPEND_GUARD_ATTEMPT_OVERHEAD_TOKENS,
   SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS,
   SpendLimitError,
   createSpendGuard,
+  spendInputTokenBound,
   type SpendAmount,
   type SpendGuard,
   type SpendLimits,

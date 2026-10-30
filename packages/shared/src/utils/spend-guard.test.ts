@@ -4,9 +4,11 @@ import { z } from 'zod';
 
 import { LLMCaller } from './llm-caller';
 import {
+  SPEND_GUARD_ATTEMPT_OVERHEAD_TOKENS,
   SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS,
   SpendLimitError,
   createSpendGuard,
+  spendInputTokenBound,
 } from './spend-guard';
 
 const usage = {
@@ -137,14 +139,101 @@ describe('createSpendGuard', () => {
         throw new Error('provider down');
       },
     });
-    const model = guard.wrap(base, { inputTokensPerChar: 0 });
+    const model = guard.wrap(base);
+    const prompt = [
+      {
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: 'x' }],
+      },
+    ];
     await expect(
-      model.doGenerate({
-        prompt: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
-        maxOutputTokens: 77,
-      }),
+      model.doGenerate({ prompt, maxOutputTokens: 77 }),
     ).rejects.toThrow('provider down');
-    expect(guard.used()).toEqual({ calls: 1, totalTokens: 77 });
+    expect(guard.used()).toEqual({
+      calls: 1,
+      totalTokens:
+        spendInputTokenBound(JSON.stringify([prompt, null, null])) + 77,
+    });
+  });
+
+  test('bounds input by UTF-8 bytes plus the attempt overhead', () => {
+    expect(spendInputTokenBound('a한')).toBe(
+      4 + SPEND_GUARD_ATTEMPT_OVERHEAD_TOKENS,
+    );
+  });
+
+  test('refuses every later reservation once usage passes its reservation', () => {
+    const guard = createSpendGuard({ maxCalls: 10, maxTotalTokens: 1_000 });
+    guard.reserve('small', { calls: 1, totalTokens: 10 }).settle({
+      calls: 1,
+      totalTokens: 20,
+    });
+    expect(guard.used()).toEqual({ calls: 1, totalTokens: 20 });
+    expect(guard.refused()?.message).toBe(
+      'small was refused: small used 1 calls and 20 tokens of a 1-call, 10-token reservation',
+    );
+    expect(() => guard.reserve('next', { calls: 1, totalTokens: 1 })).toThrow(
+      'next was refused: small used',
+    );
+    expect(guard.refused()?.label).toBe('next');
+  });
+
+  test('refuses a file given by URL or reference under caps', async () => {
+    const guard = createSpendGuard({ maxCalls: 1, maxTotalTokens: 1_000_000 });
+    const base = new MockLanguageModelV4({
+      provider: 'openai.responses',
+      doGenerate: result(),
+    });
+    const model = guard.wrap(base);
+    const send = (data: unknown) =>
+      model.doGenerate({
+        prompt: [
+          { role: 'system', content: 'system' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'x' },
+              { type: 'file', data: data as never, mediaType: 'image/png' },
+            ],
+          },
+        ],
+      });
+    await expect(
+      send({ type: 'url', url: new URL('https://example.com/a.png') }),
+    ).rejects.toThrow(
+      'a file given by URL or reference has no size to reserve',
+    );
+    await expect(
+      send({ type: 'reference', reference: { openai: 'file-1' } }),
+    ).rejects.toThrow(SpendLimitError);
+    expect(base.doGenerateCalls).toHaveLength(0);
+    expect(guard.refused()?.label).toBe('mock-model-id');
+    await send({ type: 'data', data: 'aGk=' });
+    expect(guard.used()).toEqual({ calls: 1, totalTokens: 50 });
+  });
+
+  test('only counts without caps and leaves output limits to each call', async () => {
+    const guard = createSpendGuard();
+    expect(guard.limits).toEqual({
+      maxCalls: Number.MAX_SAFE_INTEGER,
+      maxTotalTokens: Number.MAX_SAFE_INTEGER,
+    });
+    const base = new MockLanguageModelV4({
+      provider: 'openai.responses',
+      doGenerate: result(),
+    });
+    const long = new MockLanguageModelV4({
+      provider: 'openai.responses',
+      doGenerate: result(undefined, {
+        ...usage,
+        outputTokens: { total: 5_000, text: 5_000, reasoning: 0 },
+      }),
+    });
+    await call(guard.wrap(long));
+    await call(guard.wrap(base, { defaultMaxOutputTokens: 100 }));
+    expect(base.doGenerateCalls[0].maxOutputTokens).toBeUndefined();
+    expect(guard.used()).toEqual({ calls: 2, totalTokens: 5_090 });
+    expect(guard.refused()).toBeNull();
   });
 
   test('requires a model instance', () => {
