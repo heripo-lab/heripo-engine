@@ -6,7 +6,7 @@ import type { DocumentResource } from '../../resources/document-resource-index';
 import type { AttachmentUnit, ContentAttachmentPlan } from '../types';
 
 import { createAuditedModel } from '@heripo/shared';
-import { generateText } from 'ai';
+import { NoObjectGeneratedError, generateText } from 'ai';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../../resources/document-resource-index';
@@ -477,6 +477,23 @@ describe('attachContentThinUnit', () => {
       calls: [{ run: 'r1', status: 'failed', error: 'provider down' }],
     });
 
+    vi.mocked(generateText).mockRejectedValueOnce(
+      new NoObjectGeneratedError({
+        message: 'No object generated: response was cut off.',
+        text: '{"decisions":[',
+        response: {} as never,
+        usage: { totalTokens: 32_500 } as never,
+        finishReason: 'length',
+      }),
+    );
+    const cutOff = await attachContentThinUnit(plan, unit, { model });
+
+    expect(cutOff.calls[0]).toMatchObject({
+      status: 'failed',
+      usage: { totalTokens: 32_500 },
+      finishReason: 'length',
+    });
+
     respond(agreed(), new Error('timeout'), agreed());
     const r2Failed = await attachContentThinUnit(plan, unit, {
       model,
@@ -528,6 +545,17 @@ describe('attachContentThinUnit', () => {
       request,
       error: 'batch item expired',
     });
+    const truncated = recordContentAttachmentThinCall(plan, unit, {
+      run: 'r2',
+      request,
+      usage: {
+        inputTokens: 900,
+        outputTokens: 32_000,
+        totalTokens: 32_900,
+      } as never,
+      finishReason: 'length',
+      error: 'batch item stopped: max_tokens',
+    });
 
     expect(request).toEqual(
       createContentAttachmentThinRequest(
@@ -552,6 +580,12 @@ describe('attachContentThinUnit', () => {
       error: 'batch item expired',
       callAttempts: [],
     });
+    expect(truncated).toMatchObject({
+      status: 'failed',
+      usage: { totalTokens: 32_900 },
+      finishReason: 'length',
+    });
+    expect(truncated).not.toHaveProperty('inspection');
     const routed = routeContentAttachmentThinTwoRuns(plan, unit, [r1, r2]);
     expect(routed).toMatchObject({
       status: 'routed',

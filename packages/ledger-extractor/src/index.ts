@@ -36,3 +36,12 @@ export * from './relations';
 export * from './media';
 export * from './attributes';
 export * from './links';
+export {
+  SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS,
+  SpendLimitError,
+  createSpendGuard,
+  type SpendAmount,
+  type SpendGuard,
+  type SpendLimits,
+  type SpendReservation,
+} from '@heripo/shared';

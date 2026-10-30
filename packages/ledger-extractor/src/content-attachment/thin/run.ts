@@ -10,7 +10,7 @@ import type {
 } from './routing';
 
 import { createAuditedModel } from '@heripo/shared';
-import { Output, generateText, jsonSchema } from 'ai';
+import { NoObjectGeneratedError, Output, generateText, jsonSchema } from 'ai';
 
 import { createContentAttachmentThinInput } from './compile';
 import { inspectContentAttachmentThinResponse } from './inspection';
@@ -135,12 +135,20 @@ export function recordContentAttachmentThinCall(
   const sent = input.providerOptions
     ? { providerOptions: input.providerOptions }
     : {};
+  // a failed call can still have been charged, such as an answer cut off by its output limit
+  const charged = {
+    ...(input.usage ? { usage: input.usage } : {}),
+    ...(input.finishReason !== undefined
+      ? { finishReason: input.finishReason }
+      : {}),
+  };
   if (input.error !== undefined)
     return {
       run: input.run,
       status: 'failed',
       request: input.request,
       error: input.error,
+      ...charged,
       callAttempts,
       ...sent,
     };
@@ -150,10 +158,7 @@ export function recordContentAttachmentThinCall(
     request: input.request,
     rawResponse: input.rawResponse,
     ...sent,
-    ...(input.usage ? { usage: input.usage } : {}),
-    ...(input.finishReason !== undefined
-      ? { finishReason: input.finishReason }
-      : {}),
+    ...charged,
     callAttempts,
     inspection: inspectContentAttachmentThinResponse(plan, unit, {
       request: input.request,
@@ -335,10 +340,15 @@ export async function attachContentThinUnit(
         providerOptions,
       });
     } catch (error) {
+      // an answer that is not a valid object was still generated and charged
+      const unparsed = NoObjectGeneratedError.isInstance(error)
+        ? { usage: error.usage, finishReason: error.finishReason }
+        : {};
       result = recordContentAttachmentThinCall(plan, unit, {
         run,
         request,
         error: error instanceof Error ? error.message : String(error),
+        ...unparsed,
         callAttempts: audited.attempts,
         providerOptions,
       });
