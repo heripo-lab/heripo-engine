@@ -18,7 +18,7 @@ Each stage:
    - DoclingDocument: Text, tables, and image information extracted from PDF
    - ProcessedDocument: Document refined into TOC/chapter/page structure
    - Extracts only document structure without archaeological interpretation
-2. **Archaeological Data Ledger**: **Immutable ledger** structured using a universal model covering global archaeology
+2. **Archaeological Data Ledger**: Ledger structured using a universal model covering global archaeology
    - Universal archaeological concept model regardless of region/period/domain
    - Transforms document data into archaeological concepts (features, artifacts, strata, etc.)
    - Designed for normalization although pre-standardization
@@ -32,9 +32,9 @@ Each stage:
 5. **DB Storage**: Independent storage and utilization possible for each pipeline stage
    - Data at each stage is managed separately with its own purpose of use
 
-## Current Status (0.2.0)
+## Current Status (v0.2.x)
 
-The raw data extraction stage (v0.1.x) is complete. Release 0.2.0 adds the first implementation of the immutable ledger stage (v0.2.x) in the new published package `@heripo/ledger-extractor`. The ledger format `archaeology-ledger.v1` is experimental.
+The raw data extraction stage (v0.1.x) is complete. The 0.2.x releases add the first implementation of the archaeological data ledger stage in the new published package `@heripo/ledger-extractor`. The ledger format `archaeology-ledger.v1` is experimental.
 
 ### ℹ️ Current Notes
 
@@ -80,7 +80,7 @@ The raw data extraction stage (v0.1.x) is complete. Release 0.2.0 adds the first
 - Fallback retry mechanism
 - Token usage tracking
 
-#### 0.2.0 - Immutable Ledger (first implementation, `@heripo/ledger-extractor`)
+#### v0.2.x - Archaeological Data Ledger (first implementation, `@heripo/ledger-extractor`)
 
 **Input and Source Lookup**
 
@@ -121,14 +121,14 @@ The raw data extraction stage (v0.1.x) is complete. Release 0.2.0 adds the first
 
 ### v0.2.x - Data Ledger
 
-**Goal**: Generate **immutable ledger** structured using a universal model covering global archaeology
+**Goal**: Generate a ledger structured using a universal model covering global archaeology
 
-**Status**: 🚧 In progress — first implementation released in 0.2.0 (`@heripo/ledger-extractor`, experimental `archaeology-ledger.v1`)
+**Status**: 🚧 In progress — first implementation released in 0.2.x (`@heripo/ledger-extractor`, experimental `archaeology-ledger.v1`)
 
 **Design Philosophy:**
 
 - **Universality**: Model that can accommodate archaeological data worldwide regardless of region/period/domain
-- **Immutability**: Once recorded, ledger data is not modified and faithfully reflects source document content
+- **Source Fidelity**: Ledger content quotes the source document unchanged, and model output is checked but never repaired
 - **Normalization-Ready**: Designed with a structure that enables normalization as foundation data for standardization
 
 **Key Tasks:**
@@ -361,13 +361,13 @@ Extend the system in various languages:
 
 ## Milestones
 
-| Version | Goal                       | Key Features                                       | Status                                             |
-| ------- | -------------------------- | -------------------------------------------------- | -------------------------------------------------- |
-| v0.1.x  | Raw Data Extraction        | PDF parsing, document structure extraction         | ✅ Complete                                        |
-| v0.2.x  | Immutable Ledger           | Universal archaeological model, concept extraction | 🚧 In progress (first release 0.2.0, experimental) |
-| v0.3.x  | Extensible Standardization | Hierarchical standard model, normalization         | 🔜 Planned                                         |
-| v0.4.x  | Ontology                   | Semantic model, knowledge graph                    | 🔜 Planned                                         |
-| v1.0.x  | Production                 | Performance, stability, documentation              | 🔜 Planned                                         |
+| Version | Goal                       | Key Features                                       | Status                                                |
+| ------- | -------------------------- | -------------------------------------------------- | ----------------------------------------------------- |
+| v0.1.x  | Raw Data Extraction        | PDF parsing, document structure extraction         | ✅ Complete                                           |
+| v0.2.x  | Archaeological Data Ledger | Universal archaeological model, concept extraction | 🚧 In progress (first release in 0.2.x, experimental) |
+| v0.3.x  | Extensible Standardization | Hierarchical standard model, normalization         | 🔜 Planned                                            |
+| v0.4.x  | Ontology                   | Semantic model, knowledge graph                    | 🔜 Planned                                            |
+| v1.0.x  | Production                 | Performance, stability, documentation              | 🔜 Planned                                            |
 
 ## Feedback and Suggestions
 

@@ -58,7 +58,7 @@ flowchart TB
         C1 --> C2 --> C3
     end
 
-    subgraph Ledger[Archaeological Data Ledger Extraction - 0.2.0, Experimental]
+    subgraph Ledger[Archaeological Data Ledger Extraction - 0.2.x, Experimental]
         direction TB
         L1[Report Profile - Rules+LLM]
         L2[Object Candidate Discovery + Duplicate Review - LLM]
@@ -131,7 +131,7 @@ This system enables:
 - **Accuracy Guarantee**: Frontier models validate results for quality assurance
 - **Automatic Correction**: Frontier model reprocesses on validation failure
 
-The ledger extraction stage (0.2.0) follows a different rule: model output is inspected by code but never repaired. Instead of a correcting model, it relies on repeated runs and agreement (decisions every run returns are accepted), and every unresolved decision becomes a review item for a person.
+The ledger extraction stage (0.2.x) follows a different rule: model output is inspected by code but never repaired. Instead of a correcting model, it relies on repeated runs and agreement (decisions every run returns are accepted), and every unresolved decision becomes a review item for a person.
 
 ---
 
@@ -344,15 +344,15 @@ This stage classifies report types in detail to facilitate ledger extraction.
 
 The output format for report classification is not yet finalized. It is planned to be included as metadata for the archaeological data ledger.
 
-> The ledger stage (0.2.0) already includes a narrower **report profile**: trait judgments and the investigation scope used to route ledger extraction (see below). It is not the book/survey/period classification described here.
+> The ledger stage (0.2.x) already includes a narrower **report profile**: trait judgments and the investigation scope used to route ledger extraction (see below). It is not the book/survey/period classification described here.
 
 ---
 
 ### Archaeological Data Ledger Extraction (`@heripo/ledger-extractor`)
 
-> **First Release (0.2.0), Experimental** 🧪
+> **First Release (0.2.x), Experimental** 🧪
 
-Extracts investigation objects (sites, areas, trenches, layers, features, artifacts, etc.) from a `ProcessedDocument` and assembles an **immutable ledger** in the experimental `archaeology-ledger.v1` format. The format, review items and prompts may change within 0.2.x releases without a migration path, so keep the source processed documents and rebuild ledgers after upgrading. The stage was developed and measured on three reports only (『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』); expect gaps on other report types and layouts.
+Extracts investigation objects (sites, areas, trenches, layers, features, artifacts, etc.) from a `ProcessedDocument` and assembles a **ledger** in the experimental `archaeology-ledger.v1` format. The format, review items and prompts may change within 0.2.x releases without a migration path, so keep the source processed documents and rebuild ledgers after upgrading. The stage was developed and measured on three reports only (『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』); expect gaps on other report types and layouts.
 
 #### Design Principles
 
@@ -561,7 +561,7 @@ heripo-engine/
 ├── packages/
 │   ├── pdf-parser/           # Preprocessing 1: Technical preprocessing
 │   ├── document-processor/   # Preprocessing 2: Archaeological data preprocessing
-│   ├── ledger-extractor/     # Archaeological data ledger extraction (0.2.0, experimental)
+│   ├── ledger-extractor/     # Archaeological data ledger extraction (0.2.x, experimental)
 │   ├── model/                # Data model definitions
 │   ├── logger/               # Logger interface and adapter
 │   └── shared/               # Shared utilities (LLM caller, spend guard, etc.)
@@ -600,7 +600,7 @@ A Next.js 16-based web application for visualizing and testing the PDF processin
 | **Raw Data Extraction (Preprocessing 1)**  | Deep Learning (Apple Vision)           | **Free**                                 | Local processing, only machine costs                                                                |
 | **Raw Data Extraction (Preprocessing 2)**  | LLM (GPT, Claude, etc.)                | **$0.10-0.50**                           | Under $0.10 for thin reports, under $0.50 for thick                                                 |
 | **Preprocessing 3: Report Classification** | LLM (expected)                         | **TBD**                                  | Coming Soon                                                                                         |
-| **Archaeological Data Ledger Extraction**  | LLM (default Claude Haiku 5.5) + Rules | **About $0.33** (measured on one report) | 0.2.0, experimental; Taean Mado report, about 15 review items; not yet measured across report types |
+| **Archaeological Data Ledger Extraction**  | LLM (default Claude Haiku 5.5) + Rules | **About $0.33** (measured on one report) | 0.2.x, experimental; Taean Mado report, about 15 review items; not yet measured across report types |
 | **Archaeological Data Standardization**    | Rule-Based (expected)                  | **Free** (expected)                      | Coming Soon                                                                                         |
 | **Domain Ontology**                        | LLM/Rules hybrid (expected)            | **TBD**                                  | Coming Soon                                                                                         |
 
@@ -622,6 +622,6 @@ A Next.js 16-based web application for visualizing and testing the PDF processin
 | Raw Data Extraction (Preprocessing 1)  | DoclingDocument                      | ✅ Complete              | PDF → Structured document                                                                   |
 | Raw Data Extraction (Preprocessing 2)  | ProcessedDocument                    | ✅ Complete              | DoclingDocument → Chapter structure                                                         |
 | Preprocessing 3: Report Classification | (Format TBD)                         | 🔒 Coming Soon           | Report/survey type classification                                                           |
-| Archaeological Data Ledger Extraction  | archaeology-ledger.v1 (experimental) | 🚧 First release (0.2.0) | ProcessedDocument → source-backed ledger with review items; validated on three reports only |
+| Archaeological Data Ledger Extraction  | archaeology-ledger.v1 (experimental) | 🚧 First release (0.2.x) | ProcessedDocument → source-backed ledger with review items; validated on three reports only |
 | Archaeological Data Standardization    | Standard Data (Planned)              | 🔒 Coming Soon           | Standard schema conversion                                                                  |
 | Domain Ontology                        | Domain Ontology (Planned)            | 🔒 Coming Soon           | Domain ontology application                                                                 |

@@ -14,7 +14,7 @@
 > ⚠️ **macOS Only**: The PDF parser and the demo that uses it require macOS (Apple Silicon or Intel). The other library packages have no OS installation restriction.
 > See [@heripo/pdf-parser README](./packages/pdf-parser/README.md#prerequisites) for detailed system requirements.
 
-> ℹ️ **Notes (v0.2.0)**:
+> ℹ️ **Notes (v0.2.x)**:
 >
 > - **Experimental Ledger**: The `archaeology-ledger.v1` format can change within 0.2.x releases. The ledger stages were developed and measured on three reports only, so expect gaps on other report types and layouts.
 > - **Mandatory Correction**: Fixed ocrmac OCR is followed by VLM text correction regardless of language. Structural review is enabled by default in the library and disabled by default in the demo.
@@ -99,14 +99,14 @@ Raw Data Extraction → Archaeological Data Ledger → Archaeological Data Stand
 | Stage                   | Description                                                                                                   |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------- |
 | **Raw Data Extraction** | Document data structurally extracted in the original format of PDF reports (no archaeological interpretation) |
-| **Data Ledger**         | Immutable ledger structured using a universal model covering global archaeology                               |
+| **Data Ledger**         | Ledger structured using a universal model covering global archaeology                                         |
 | **Data Standard**       | Extensible standard model (base standard → country-specific → domain-specific extensions)                     |
 | **Ontology**            | Domain-specific semantic models and knowledge graphs                                                          |
 | **DB Storage**          | Independent storage and utilization for each pipeline stage                                                   |
 
 Physical PDF pages start at 1. Logical pages count continuously relative to body page 1, with negative values and zero for preceding pages.
 
-**Current Implementation (v0.2.0):**
+**Current Implementation (v0.2.x):**
 
 - ✅ PDF parsing and OCR (Docling SDK)
 - ✅ Document structure extraction (TOC, chapters/sections, page mapping)
@@ -385,7 +385,7 @@ For detailed usage, see [apps/demo-web/README.md](./apps/demo-web/README.md).
 
 ## Roadmap
 
-Current version: **v0.2.0** (Immutable Ledger, experimental)
+Current version: **v0.2.x** (Archaeological Data Ledger, experimental)
 
 ### v0.1.x - Raw Data Extraction (Done)
 
@@ -395,7 +395,7 @@ Current version: **v0.2.0** (Immutable Ledger, experimental)
 - ✅ Page mapping
 - ✅ Caption parsing
 
-### v0.2.x - Immutable Ledger (Current)
+### v0.2.x - Archaeological Data Ledger (Current)
 
 `@heripo/ledger-extractor` builds an experimental `archaeology-ledger.v1` ledger from a processed document, and the demo runs the whole ledger pipeline from a processing result or an uploaded `processed-document.json`. The ledger stages were developed and measured on three reports only: 『태안 마도 해역 수중발굴조사』 (Taean Mado underwater excavation), 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』 (Buyeo Hwajisan) and 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』 (Geoje Sadeungseong), so expect gaps on other report types and layouts; they will be improved step by step as more reports accumulate. The ledger format is experimental and can change within 0.2.x releases.
 
