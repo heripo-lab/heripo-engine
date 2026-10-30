@@ -106,11 +106,19 @@ export async function runLedgerPipeline(
       totalTokens: now.totalTokens - from.totalTokens,
     };
   };
+  // steps turn a failed call into a result (a review item, an unsaved profile), so a call the guard refused
+  // would leave a smaller ledger behind; the run stops at the first step that met a cap instead
+  const stopAtCap = () => {
+    const refusal = guard.refused();
+    if (refusal)
+      throw new Error(`The run stopped at its cap: ${refusal.message}`);
+  };
 
   // 1. report profile: one router call
   onStep('report-profile');
   log(`Classifying the report with ${models.router}...`);
   const router = await runReportRouter(taskId, models.router, { guard });
+  stopAtCap();
   const stored = await getReportProfile(taskId);
   log(
     `Report profile ${router.profileSaved ? 'saved' : 'not saved'} (${router.usage.totalTokens} tokens)`,
@@ -179,6 +187,7 @@ export async function runLedgerPipeline(
   }
   const discovery = getCandidateDiscoveryRun(taskId)!;
   const discoveryUsed = since(beforeDiscovery);
+  stopAtCap();
   if (discovery.status !== 'completed')
     throw new Error(
       `Candidate discovery ${discovery.status}: ${discovery.error ?? ''}`,
@@ -238,6 +247,7 @@ export async function runLedgerPipeline(
     totalTokens: thin.usage.totalTokens - thinBefore.totalTokens,
   });
   const thinUsed = since(beforeThin);
+  stopAtCap();
   if (thin.status !== 'completed')
     throw new Error(
       `Content attachment ${thin.status}: ${thin.stoppedBy ?? 'unknown'}`,
@@ -266,6 +276,7 @@ export async function runLedgerPipeline(
         abortSignal,
       });
       const aliasUsed = since(beforeAlias);
+      stopAtCap();
       writeFileSync(
         join(paths.task(taskId).outputRoot, 'place-alias-proposal.json'),
         JSON.stringify(result, null, 2),
@@ -306,8 +317,9 @@ export async function runLedgerPipeline(
       });
       judgments.push(...result.judgments);
     }
-    saveParentJudgments(taskId, judgments);
     const parentUsed = since(beforeParents);
+    stopAtCap();
+    saveParentJudgments(taskId, judgments);
     log(
       `Judged ${judgments.filter((j) => j.status !== 'review').length} of ${questions} parent questions (${parentUsed.calls} calls, ${parentUsed.totalTokens} tokens)`,
     );

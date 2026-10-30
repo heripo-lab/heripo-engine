@@ -671,6 +671,8 @@ export function startContentAttachmentThin(
             inFlight++;
             const u = unitDir(root, unit.unitId);
             mkdirSync(u, { recursive: true });
+            // a call the guard refused was never sent: it is not saved or counted, and the unit stays open
+            let refused = false;
             const result: ContentAttachmentThinUnitResult =
               await attachContentThinUnit(plan, unit, {
                 model,
@@ -678,14 +680,24 @@ export function startContentAttachmentThin(
                 onAttempt: (attempt) => {
                   if (attempt.error?.statusCode === 429)
                     state.stoppedBy = 'HTTP 429';
+                  if (attempt.error?.name === 'SpendLimitError') {
+                    refused = true;
+                    state.stoppedBy = 'spend cap';
+                  }
                 },
                 onCall: (call: ContentAttachmentThinCall) => {
+                  if (refused) return;
                   write(join(u, `${call.run}.json`), call);
                   recordUsage(state, call);
                   persist();
                 },
               });
             inFlight--;
+            if (refused) {
+              queue.unshift(unit);
+              persist();
+              continue;
+            }
             write(join(u, 'result.json'), result);
             state.units[unit.unitId] =
               result.status === 'failed' ? 'failed' : 'completed';
