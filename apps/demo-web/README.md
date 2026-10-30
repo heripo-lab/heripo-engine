@@ -3,7 +3,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 
-> Next.js web application for visualizing heripo engine's PDF processing capabilities
+> Next.js web application for visualizing heripo engine's PDF processing and archaeology ledger extraction
 
 **English** | [한국어](./README.ko.md)
 
@@ -11,7 +11,7 @@
 
 ## Overview
 
-Demo Web is a full-stack Next.js application that allows you to monitor and visualize heripo engine's PDF parsing and document processing capabilities in real-time.
+Demo Web is a full-stack Next.js application that allows you to monitor and visualize heripo engine's PDF parsing, document processing and archaeology ledger extraction in real-time.
 
 The home page also introduces [heripo basecamp](https://heripo.app), a separate research service that uses heripo engine to build its own report dataset and is currently in a private alpha. The showcase supports Korean and English based on browser language and notes that basecamp is in private alpha. It also introduces basecamp’s direction: starting with reports from Korea and expanding across national borders. Reports uploaded to the demo and their processing results are not added to basecamp.
 
@@ -212,7 +212,9 @@ After processing completes:
 
 ### 5. Ledger Extraction
 
-The `Ledger Extraction` stage builds the archaeology ledger from a preprocessed document with `@heripo/ledger-extractor`, skipping PDF parsing and document preprocessing. It can be started in two ways: Ledger extraction was developed and measured on three reports only: 『태안 마도 해역 수중발굴조사』 (Taean Mado underwater excavation), 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』 (Buyeo Hwajisan) and 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』 (Geoje Sadeungseong), so expect gaps on other report types and layouts; they will be improved step by step as more reports accumulate.
+The `Ledger Extraction` stage builds the archaeology ledger from a preprocessed document with `@heripo/ledger-extractor`, skipping PDF parsing and document preprocessing. Ledger extraction was developed and measured on three reports only: 『태안 마도 해역 수중발굴조사』 (Taean Mado underwater excavation), 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』 (Buyeo Hwajisan) and 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』 (Geoje Sadeungseong), so expect gaps on other report types and layouts; they will be improved step by step as more reports accumulate. The ledger format is experimental and can change within 0.2.x releases.
+
+It can be started in two ways:
 
 - **On its own:** select **Ledger Extraction** in the pipeline stepper, attach a single `processed-document.json` (max 100MB; ZIP archives are not accepted), choose the model of each step — report profile, candidate discovery, duplicate review and content attachment (default Claude Haiku 5.5 for all four) — and click "Start Ledger Extraction". The file is validated (extension/MIME → size → JSON parse → `ProcessedDocument` runtime validation) before the task is queued.
 - **After preprocessing:** a completed Raw Data Extraction result page offers "이 결과로 원장 만들기" with the same per-step model choice. The ledger task takes that result's processed document as is and belongs to the same browser session; the card then links to that ledger instead of making a second one (a failed or cancelled run can be made again).
@@ -254,21 +256,29 @@ Official demo mode (`NEXT_PUBLIC_HERIPO_OFFICIAL_DEMO=true`) cleans expired task
 
 Task APIs scope access by browser session. Deletion cancels queued/running tasks before removing their records and files.
 
-| Method          | Route                                   | Purpose                                             |
-| --------------- | --------------------------------------- | --------------------------------------------------- |
-| `GET`, `POST`   | `/api/tasks`                            | List tasks / direct upload and creation below 5 MiB |
-| `GET`, `DELETE` | `/api/tasks/[taskId]`                   | Task details / cancellation and deletion            |
-| `GET`           | `/api/tasks/[taskId]/stream`            | SSE status, logs and usage                          |
-| `GET`           | `/api/tasks/[taskId]/result`            | Processed document                                  |
-| `GET`           | `/api/tasks/[taskId]/download`          | Result ZIP                                          |
-| `GET`           | `/api/tasks/[taskId]/images/[imageId]`  | Image                                               |
-| `GET`           | `/api/tasks/[taskId]/pages/[pageIndex]` | Rendered page                                       |
-| `POST`          | `/api/upload/session`                   | Create chunked-upload session                       |
-| `POST`          | `/api/upload/chunks`                    | Upload chunk                                        |
-| `POST`          | `/api/upload/complete`                  | Merge upload and create task                        |
-| `DELETE`        | `/api/upload/session/[uploadSessionId]` | Cancel upload                                       |
-| `GET`           | `/api/rate-limit/check`                 | Public-mode limits                                  |
-| `GET`           | `/api/system/status`                    | System status                                       |
+| Method                  | Route                                    | Purpose                                             |
+| ----------------------- | ---------------------------------------- | --------------------------------------------------- |
+| `GET`, `POST`           | `/api/tasks`                             | List tasks / direct upload and creation below 5 MiB |
+| `GET`, `DELETE`         | `/api/tasks/[taskId]`                    | Task details / cancellation and deletion            |
+| `GET`                   | `/api/tasks/[taskId]/stream`             | SSE status, logs and usage                          |
+| `GET`                   | `/api/tasks/[taskId]/result`             | Processed document                                  |
+| `GET`                   | `/api/tasks/[taskId]/download`           | Result ZIP                                          |
+| `GET`                   | `/api/tasks/[taskId]/images/[imageId]`   | Image                                               |
+| `GET`                   | `/api/tasks/[taskId]/pages/[pageIndex]`  | Rendered page                                       |
+| `POST`                  | `/api/upload/session`                    | Create chunked-upload session                       |
+| `POST`                  | `/api/upload/chunks`                     | Upload chunk                                        |
+| `POST`                  | `/api/upload/complete`                   | Merge upload and create task                        |
+| `DELETE`                | `/api/upload/session/[uploadSessionId]`  | Cancel upload                                       |
+| `GET`                   | `/api/rate-limit/check`                  | Public-mode limits                                  |
+| `GET`                   | `/api/system/status`                     | System status                                       |
+| `POST`                  | `/api/tasks/ledger`                      | Create a ledger task from `processed-document.json` |
+| `GET`, `POST`           | `/api/tasks/[taskId]/ledger-task`        | Ledger task of a preprocessing result / create it   |
+| `GET`                   | `/api/tasks/[taskId]/ledger`             | Archaeology ledger                                  |
+| `GET`                   | `/api/tasks/[taskId]/resource-index`     | S0 resource index                                   |
+| `GET`, `POST`, `PUT`    | `/api/tasks/[taskId]/report-profile`     | Report profile                                      |
+| `GET`, `POST`, `DELETE` | `/api/tasks/[taskId]/candidates`         | Candidate discovery and duplicate review            |
+| `GET`, `POST`           | `/api/tasks/[taskId]/content-attachment` | Content attachment plan and thin runs               |
+| `GET`, `PUT`, `DELETE`  | `/api/tasks/[taskId]/place-aliases`      | Place abbreviation table                            |
 
 The current ZIP includes only processed JSON, corrected Docling JSON, the handoff manifest, `images/` and `pages/`. OCR snapshots, review reports and checkpoints remain separately in the server artifact directory.
 
@@ -284,6 +294,7 @@ src/
 │   │   ├── upload/           # Chunked upload session/chunk/complete APIs
 │   │   ├── rate-limit/       # Public-mode rate limit check
 │   │   └── system/           # System status API
+│   ├── ledger/validation/[taskId]/ # Archaeology ledger page
 │   ├── legal/                # Terms and privacy pages
 │   ├── tasks/                # Task list page
 │   ├── process/[taskId]/     # Real-time processing page
@@ -293,6 +304,7 @@ src/
 │   ├── providers/            # React Query Provider
 │   └── ui/                   # shadcn/ui components
 ├── features/                 # Feature modules
+│   ├── ledger/               # Ledger extraction and ledger view
 │   ├── upload/               # PDF upload & settings
 │   ├── process/              # Real-time processing
 │   ├── result/               # Result display
@@ -304,6 +316,7 @@ src/
     ├── config/               # Public mode, webhook, cleanup config
     ├── cost/                 # Token pricing and cost calculation
     ├── db/                   # JSON file DB
+    ├── ledger/               # Ledger pipeline, Message Batches, batch runner support
     ├── processing/           # LLM model factory
     ├── queue/                # Job queue
     ├── session/              # Browser session management

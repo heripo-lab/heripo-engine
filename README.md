@@ -14,8 +14,9 @@
 > ⚠️ **macOS Only**: The PDF parser and the demo that uses it require macOS (Apple Silicon or Intel). The other library packages have no OS installation restriction.
 > See [@heripo/pdf-parser README](./packages/pdf-parser/README.md#prerequisites) for detailed system requirements.
 
-> ℹ️ **Notes (v0.1.x)**:
+> ℹ️ **Notes (v0.2.0)**:
 >
+> - **Experimental Ledger**: The `archaeology-ledger.v1` format can change within 0.2.x releases. The ledger stages were developed and measured on three reports only, so expect gaps on other report types and layouts.
 > - **Mandatory Correction**: Fixed ocrmac OCR is followed by VLM text correction regardless of language. Structural review is enabled by default in the library and disabled by default in the demo.
 > - **TOC Dependency**: Failed automatic TOC extraction stops processing. Supply reviewed `tocEntries` and `pageRangeMap` to bypass automatic extraction.
 > - **Vertical Text**: Old vertical-text documents with Chinese numeral page numbers are a long-term goal, not currently scheduled
@@ -105,15 +106,16 @@ Raw Data Extraction → Archaeological Data Ledger → Archaeological Data Stand
 
 Physical PDF pages start at 1. Logical pages count continuously relative to body page 1, with negative values and zero for preceding pages.
 
-**Current Implementation (v0.1.x):**
+**Current Implementation (v0.2.0):**
 
 - ✅ PDF parsing and OCR (Docling SDK)
 - ✅ Document structure extraction (TOC, chapters/sections, page mapping)
 - ✅ Image/table extraction and caption parsing
+- ✅ Archaeology ledger (experimental): investigation objects, source excerpts, parents, media, attributes, links and review items
 
 **Planned Stages:**
 
-- 🔜 Immutable Ledger (universal archaeological model, concept extraction)
+- 🔜 Ledger validation on more report types and format stabilization
 - 🔜 Extensible Standardization (hierarchical standard model, normalization)
 - 🔜 Ontology (semantic model, knowledge graph)
 - 🔜 Production Ready (performance optimization, API stability)
@@ -153,6 +155,15 @@ The [engine demo](https://engine-demo.heripo.org) lets you try PDF processing. [
 - **Table Grid Normalization**: Preserves row/column spans and removes merged-cell shadow entries
 - **LLM Flexibility**: Support for various LLMs including OpenAI, Anthropic, Google
 
+### Ledger Extraction (`@heripo/ledger-extractor`)
+
+- **Archaeology Ledger**: Builds an experimental `archaeology-ledger.v1` ledger from a `ProcessedDocument` with caller-selected models
+- **Report Profile**: Deterministic report signals and one router call; a person can inject the profile and investigation scope as JSON
+- **Candidate Discovery**: Proposes sites, areas, trenches, layers, features, artifacts and shipwrecks with exact source quotes, followed by duplicate review
+- **Content Attachment**: Attaches body sentences and table items to the frozen registry; only targets every run agrees on are confirmed, the rest go to review
+- **Source Preservation**: Every excerpt keeps its original text and source location; model output is checked but never repaired
+- **Hard Caps**: A spend guard reserves every provider attempt against call and token caps
+
 ### Data Models (`@heripo/model`)
 
 - **ProcessedDocument**: Intermediate data model optimized for LLM analysis
@@ -169,6 +180,7 @@ heripo-engine/
 ├── packages/              # Core libraries
 │   ├── pdf-parser/        # PDF → DoclingDocument
 │   ├── document-processor/ # DoclingDocument → ProcessedDocument
+│   ├── ledger-extractor/  # ProcessedDocument → archaeology ledger
 │   ├── model/             # Data models and type definitions
 │   ├── logger/            # Logging adapter package
 │   └── shared/            # Internal utilities (not published)
@@ -219,23 +231,25 @@ For detailed installation guide, see [@heripo/pdf-parser README](./packages/pdf-
 # Install individual packages
 pnpm add @heripo/pdf-parser
 pnpm add @heripo/document-processor
+pnpm add @heripo/ledger-extractor
 pnpm add @heripo/model
 pnpm add @heripo/logger
 
 # Or install all at once
-pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/logger
+pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/ledger-extractor @heripo/model @heripo/logger
 ```
 
 ## Packages
 
 | Package                                                               | Version | Description                                    |
 | --------------------------------------------------------------------- | ------- | ---------------------------------------------- |
-| [@heripo/pdf-parser](./packages/pdf-parser/README.md)                 | 0.1.x   | PDF parsing and OCR                            |
-| [@heripo/document-processor](./packages/document-processor/README.md) | 0.1.x   | Document structure analysis and LLM processing |
-| [@heripo/model](./packages/model/README.md)                           | 0.1.x   | Data models and type definitions               |
-| [@heripo/logger](./packages/logger/README.md)                         | 0.1.x   | Logger interface and adapter                   |
+| [@heripo/pdf-parser](./packages/pdf-parser/README.md)                 | 0.2.x   | PDF parsing and OCR                            |
+| [@heripo/document-processor](./packages/document-processor/README.md) | 0.2.x   | Document structure analysis and LLM processing |
+| [@heripo/ledger-extractor](./packages/ledger-extractor/README.md)     | 0.2.x   | Archaeology ledger extraction (experimental)   |
+| [@heripo/model](./packages/model/README.md)                           | 0.2.x   | Data models and type definitions               |
+| [@heripo/logger](./packages/logger/README.md)                         | 0.2.x   | Logger interface and adapter                   |
 
-The parser and document processor ship as ESM; `model` and `logger` provide both ESM and CommonJS. Workspace development and builds require Node.js `^24.11.0 || >=26.0.0` for tsup 9 and pnpm 12. Published libraries retain their Node.js >= 24 runtime requirement. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
+The parser, document processor and ledger extractor ship as ESM; `model` and `logger` provide both ESM and CommonJS. Workspace development and builds require Node.js `^24.11.0 || >=26.0.0` for tsup 9 and pnpm 12. Published libraries retain their Node.js >= 24 runtime requirement. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
 
 ```bash
 pnpm add @ai-sdk/openai
@@ -316,7 +330,7 @@ try {
 
 `parse()` returns `TokenUsageReport | null`, not a document. Read the corrected Docling document from `artifactDir/result.json` in the callback. With `cleanupAfterCallback: true`, copy required JSON, images and pages elsewhere inside the callback before the directory is removed. The processor returns `{ document, usage }` and does not save files automatically.
 
-See [document-processor](./packages/document-processor/README.md) for manual TOC/page mapping and provenance, and [pdf-parser](./packages/pdf-parser/README.md) for per-stage models, fallbacks and correction options.
+See [document-processor](./packages/document-processor/README.md) for manual TOC/page mapping and provenance, and [pdf-parser](./packages/pdf-parser/README.md) for per-stage models, fallbacks and correction options. To build an archaeology ledger from the processed document, see [ledger-extractor](./packages/ledger-extractor/README.md).
 
 ## Demo Application
 
@@ -348,6 +362,7 @@ Access http://localhost:3000 in your browser
 - PDF upload and processing option configuration
 - Real-time processing status monitoring (SSE)
 - Processing result visualization (TOC, images, tables)
+- Archaeology ledger extraction from a processing result or an uploaded `processed-document.json`, with a command-line batch runner
 - Job queue management
 
 For detailed usage, see [apps/demo-web/README.md](./apps/demo-web/README.md).
@@ -364,14 +379,15 @@ For detailed usage, see [apps/demo-web/README.md](./apps/demo-web/README.md).
 
 - [@heripo/pdf-parser](./packages/pdf-parser/README.md)
 - [@heripo/document-processor](./packages/document-processor/README.md)
+- [@heripo/ledger-extractor](./packages/ledger-extractor/README.md)
 - [@heripo/model](./packages/model/README.md)
 - [@heripo/logger](./packages/logger/README.md)
 
 ## Roadmap
 
-Current version: **v0.1.x** (Initial Release)
+Current version: **v0.2.0** (Immutable Ledger, experimental)
 
-### v0.1.x - Raw Data Extraction (Current)
+### v0.1.x - Raw Data Extraction (Done)
 
 - ✅ PDF parsing with OCR
 - ✅ Document structure extraction (TOC, chapters/sections)
@@ -379,13 +395,17 @@ Current version: **v0.1.x** (Initial Release)
 - ✅ Page mapping
 - ✅ Caption parsing
 
-### v0.2.x - Immutable Ledger
+### v0.2.x - Immutable Ledger (Current)
 
-S0 source inspection and bounded investigation-object candidate proposals are available in `@heripo/ledger-extractor` and the demo. Inspect source-backed proposals before registering final ledger records. Thin per-unit content attachment attaches body sentences and table items to the fixed candidate registry; segments the repeated calls do not agree on, areas and large collective statements go to human review. Relation links, human review and validation on other reports are next. The ledger stages were developed and measured on three reports only: 『태안 마도 해역 수중발굴조사』 (Taean Mado underwater excavation), 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』 (Buyeo Hwajisan) and 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』 (Geoje Sadeungseong), so expect gaps on other report types and layouts; they will be improved step by step as more reports accumulate. The ledger format is experimental and can change within 0.2.x releases.
+`@heripo/ledger-extractor` builds an experimental `archaeology-ledger.v1` ledger from a processed document, and the demo runs the whole ledger pipeline from a processing result or an uploaded `processed-document.json`. The ledger stages were developed and measured on three reports only: 『태안 마도 해역 수중발굴조사』 (Taean Mado underwater excavation), 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』 (Buyeo Hwajisan) and 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』 (Geoje Sadeungseong), so expect gaps on other report types and layouts; they will be improved step by step as more reports accumulate. The ledger format is experimental and can change within 0.2.x releases.
 
-- Universal data model design covering global archaeology
-- Archaeological concept extraction (features, artifacts, strata, excavation units)
-- LLM-based information extraction pipeline
+- ✅ Report profile and investigation scope (router call, or injected by a person as JSON)
+- ✅ Investigation-object candidate discovery and duplicate review
+- ✅ Thin per-unit content attachment of body sentences and table items, with review items for disagreements
+- ✅ Parent hierarchy, figure/photo references, table attributes, record links and ledger validation
+- ✅ Hard call/token caps, Anthropic Message Batches and a command-line batch runner in the demo
+- 🔜 Validation on more report types and layouts
+- 🔜 Ledger format stabilization
 
 ### v0.3.x - Extensible Standardization
 
@@ -521,23 +541,3 @@ This project uses the following open-source projects:
 ---
 
 **heripo lab** | [GitHub](https://github.com/heripo-lab) | [heripo engine](https://github.com/heripo-lab/heripo-engine)
-
-Investigation candidate discovery now includes a separate whole-pool LLM duplicate review. Proposed groups preserve every original candidate and source occurrence for human inspection.
-
-Failed investigation-discovery units can be retried selectively while preserving successful original responses, followed by a new whole-pool duplicate review.
-
-Candidate discovery preserves merged table headers and chapter continuation sources, checks table identifiers against their explicitly selected original cells, and supports retrying explicitly reviewed omissions alongside validation failures while retaining all other audits.
-
-Whole-pool layer deduplication can connect unnumbered local occurrences to report-defined layers through the supplied overall definition, location, material and stratigraphic context, preserving original candidate wording and identifiers.
-
-Ledger content attachment now prepares a fixed registry and a physical-page sweep plan. The local demo exposes the exact first-unit input and runs only that unit, preserving literal body/table passages, every source occurrence and unresolved decisions for review.
-
-Content attachment v2 keeps the complete candidate pool in compact rows with shared chapter contexts. Storage IDs, source locations and snapshot hashes stay in a code-only map; the local demo reports the first call’s actual token usage.
-
-Content-attachment prompt v3 requests one body sentence per decision and shared assignment to every clearly identified object/context candidate, retaining historical prompt audits and unchanged source text.
-
-Content-attachment prompt v4 distinguishes source containers from sentence excerpts, keeping only a leading boundary fragment incomplete and separating the following sentences without changing source text or stored responses.
-
-Content-attachment prompt v5 preserves numbered/name headings of already registered objects as literal excerpts while excluding generic category titles; boundary sentence splitting and shared-context rules remain in effect.
-
-Thin per-unit content attachment (`content-attachment-thin.v8`) compiles each unit offline with prefiltered candidates, chapter handles and Q/L word windows, assigns table registration rows in code and calls the model three times per unit without retries. Only targets every run agrees on are confirmed; contested segments, areas, literally named layers and attachments to more than 50 targets go to review. The local demo can run every unit with call and token budgets and resumes without resending completed units.

@@ -32,24 +32,30 @@ Each stage:
 5. **DB Storage**: Independent storage and utilization possible for each pipeline stage
    - Data at each stage is managed separately with its own purpose of use
 
-## Current Status (v0.1.x)
+## Current Status (0.2.0)
 
-### ✅ Implemented
+The raw data extraction stage (v0.1.x) is complete. Release 0.2.0 adds the first implementation of the immutable ledger stage (v0.2.x) in the new published package `@heripo/ledger-extractor`. The ledger format `archaeology-ledger.v1` is experimental.
 
 ### ℹ️ Current Notes
 
-| Item                  | Description                                                                                                      | Status         |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------- |
-| **Korean Report OCR** | Korean reports are automatically detected and corrected via VLM                                                  | ✅ Resolved    |
-| **TOC Dependency**    | Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention | 📋 As designed |
-| **Vertical Text**     | Old documents with vertical text and Chinese numeral page numbers (long-term goal, not currently scheduled)      | 📅 Long-term   |
+| Item                  | Description                                                                                                                | Status          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| **OCR Correction**    | OCR is fixed to ocrmac; VLM text/table-cell correction runs on every page after Docling conversion, regardless of language | ✅ Resolved     |
+| **TOC Dependency**    | Reports without a TOC will fail (intentional). Rare extraction failures will be addressed via human intervention           | 📋 As designed  |
+| **Vertical Text**     | Old documents with vertical text and Chinese numeral page numbers (long-term goal, not currently scheduled)                | 📅 Long-term    |
+| **Ledger Validation** | Ledger stages were developed and measured on three reports only (Taean Mado, Buyeo Hwajisan, Geoje Sadeungseong)           | ⚠️ Limited      |
+| **Ledger Format**     | `archaeology-ledger.v1` is experimental; fields, review items and prompts may change within 0.2.x without a migration path | 🧪 Experimental |
+
+### ✅ Implemented
+
+#### v0.1.x - Raw Data Extraction
 
 **PDF Parsing and OCR**
 
 - PDF parsing using Docling SDK
-- Apple Silicon GPU-accelerated OCR (ocrmac / Apple Vision Framework)
+- Apple Silicon OCR fixed to ocrmac (Apple Vision Framework)
 - High-quality Korean document recognition
-- Korean report detection and VLM correction — ocrmac is excellent for large-scale processing (free, GPU-accelerated, high quality), while Korean archaeological reports receive full-page VLM text correction for Hanja restoration and script-aware OCR fixes
+- Mandatory VLM correction — ocrmac is excellent for large-scale processing (free, GPU-accelerated, high quality), and every page with text or table content then receives VLM text and table-cell correction (Hanja restoration, script-aware OCR fixes); optional page-gated structural review and table correction
 - Automatic image extraction
 
 **Document Structure Extraction**
@@ -70,15 +76,54 @@ Each stage:
 **LLM Integration**
 
 - Vercel AI SDK integration
-- Multi-LLM provider support (OpenAI, Anthropic, Google, Together)
+- Multi-LLM provider support (OpenAI, Anthropic, Google, Together AI, Ollama, LM Studio)
 - Fallback retry mechanism
 - Token usage tracking
+
+#### 0.2.0 - Immutable Ledger (first implementation, `@heripo/ledger-extractor`)
+
+**Input and Source Lookup**
+
+- Runtime validation of a `ProcessedDocument` and a bounded extraction preview
+- Whole-document resource index (chapters, text blocks, images, tables, grid cells, footnotes) without LLM calls
+
+**Report Profile**
+
+- Deterministic report signals plus one LLM router call that judges report traits and proposes the investigation scope
+- Code completion of the proposed scope; a person can inject a profile and scope as JSON instead
+
+**Investigation Object Registry**
+
+- Per-chapter-unit candidate discovery (site, area, trench, layer, feature, artifact, shipwreck, unknown) with exact source quotes
+- Duplicate review: code-decided merges first, then LLM review of the remaining candidates; uncertain identities become review items
+- Frozen candidate registry: every ledger record comes from one registry entry
+
+**Content and Relations**
+
+- Thin per-unit content attachment: two runs per unit, targets returned by every run are confirmed automatically, disagreements and area targets go to review, and a tie-break run is added where the runs disagree
+- Parent hierarchy: code-decided parents from find-spot phrases and table rows, a three-run LLM judgment for the remaining questions (set only when all runs agree), and place-alias tables a person can inject or a two-run LLM proposal can supply
+- Figure and photo references, table and text attributes, rule-based record links, and layer mentions kept as relation candidates
+
+**Ledger Assembly and Validation**
+
+- `archaeology-ledger.v1`: records, sources, attributes, media references, links, review items and issues, assembled deterministically from saved model results
+- Ledger validation against the source document (structure, hierarchy, source spans, value fidelity)
+- Every record keeps original source text and source references; model output is inspected but never repaired, and unresolved decisions become review items for a person
+- Spend guard (`createSpendGuard`, from `@heripo/shared`) holding hard caps on calls and tokens
+
+**Demo**
+
+- The demo web app runs the whole ledger pipeline with a model per step (default Claude Haiku 5.5; local models via LM Studio are possible) and shows the resulting ledger
+- CLI batch runner (`pnpm --filter @heripo/demo-web ledger:batch`) for many processed documents with per-report and per-batch caps, using the Anthropic Message Batches API for Anthropic models by default
+- Measured on one report (Taean Mado, Claude Haiku 5.5): about US$0.33 per run with about 15 review items
 
 ## Planned Features
 
 ### v0.2.x - Data Ledger
 
 **Goal**: Generate **immutable ledger** structured using a universal model covering global archaeology
+
+**Status**: 🚧 In progress — first implementation released in 0.2.0 (`@heripo/ledger-extractor`, experimental `archaeology-ledger.v1`)
 
 **Design Philosophy:**
 
@@ -88,52 +133,56 @@ Each stage:
 
 **Key Tasks:**
 
-1. **Universal Schema Design**
-   - Define universal data model covering global archaeology
-   - Abstract core archaeological concepts (features, artifacts, strata, excavation units, etc.)
-   - Design extensible metadata structure
-   - _Detailed schema to be finalized_
+1. **Universal Schema Design** — 🚧 Partial
+   - ✅ Experimental `archaeology-ledger.v1`: records of eight kinds (site, area, trench, layer, feature, artifact, shipwreck, unknown) with sources, attributes, media references, links and review items
+   - ✅ Report profile with an open trait list (`x-` prefixed traits for new report kinds)
+   - 📋 Finalize the universal schema and a stable format across 0.2.x releases
 
-2. **Archaeological Concept Extraction Pipeline**
-   - Feature extraction
-   - Artifact extraction
-   - Stratum extraction
-   - Excavation unit (Trench/Unit) extraction
-   - _Detailed extraction items to be finalized_
+2. **Archaeological Concept Extraction Pipeline** — ✅ First implementation
+   - ✅ Feature, artifact, layer (stratum), area and trench extraction as source-backed candidates with duplicate review
+   - ✅ Parent hierarchy (code-decided, LLM judgment, injectable place aliases)
+   - 📋 Validation on more reports and report types beyond the three development reports
 
-3. **Enhanced Table Parsing**
-   - Automatic summary table parsing
-   - Relationship table parsing
-   - Support for various report formats
+3. **Enhanced Table Parsing** — 🚧 Partial
+   - ✅ Table attributes from record-owned rows and key–value tables (logical grid, merged headers)
+   - ✅ Relation columns turned into record links
+   - 📋 Support for more report formats
 
-4. **LLM-Based Information Extraction**
-   - Archaeological concept extraction from text
-   - Information extraction from diagrams and photo descriptions
-   - Relationship identification between concepts
+4. **LLM-Based Information Extraction** — 🚧 Partial
+   - ✅ Archaeological object discovery and content attachment from text and tables
+   - ✅ Figure and photo references from captions and text
+   - ✅ Rule-based record links (overlap, cutting, adjacency, distance) and layer mentions as relation candidates
+   - 📋 Fuller relation extraction (including relations from layer mentions)
 
-5. **Data Model Implementation**
-   - `ArchaeologyLedger` universal model
-   - Extensible entity type definitions
-   - Validation logic
+5. **Data Model Implementation** — 🚧 Partial
+   - ✅ `ArchaeologyLedgerResult` (`archaeology-ledger.v1`) and extensible record kinds
+   - ✅ Ledger validation and review items
+   - 📋 Human review UI for review items (the demo currently only shows review flags)
 
-**Expected Output (Reference Example, Detailed Structure TBD):**
+**Current Output (experimental `archaeology-ledger.v1`, may change within 0.2.x):**
 
 ```typescript
-// The following is a conceptual example and may change in actual implementation
-interface ArchaeologyLedger {
-  reportId: string;
-  features: Feature[]; // Features
-  artifacts: Artifact[]; // Artifacts
-  strata: Stratum[]; // Strata
-  units: Unit[]; // Excavation units
-  metadata: ReportMetadata;
-  // Detailed fields to be finalized
+// Simplified; see @heripo/ledger-extractor for the full types
+interface ArchaeologyLedgerResult {
+  ledger: ArchaeologyLedger; // Header: versions, profile, validation/review status
+  records: LedgerRecord[]; // Investigation objects with original content excerpts
+  sources: LedgerRecordSource[]; // Where each excerpt occurs (page, chapter, span, sourceRef)
+  attributes: LedgerRecordAttribute[]; // Values from tables and text, kept as written
+  mediaReferences: LedgerMediaReference[]; // Figures and photos linked to records
+  mediaCandidates: LedgerMediaCandidate[];
+  layerMentions: LedgerLayerMention[]; // Relation candidates
+  links: LedgerRecordLink[]; // Relations between records
+  pending: ArchaeologyLedgerPendingPart[];
+  reviewItems: LedgerReviewItem[]; // Decisions left to a person
+  issues: LedgerExtractionIssue[];
 }
 ```
 
 ### v0.3.x - Standardization
 
 **Goal**: Normalize ledger data into extensible standard models
+
+**First step**: Standard-model extraction from ledger data (starting with 0.3.0)
 
 **Design Philosophy:**
 
@@ -312,13 +361,13 @@ Extend the system in various languages:
 
 ## Milestones
 
-| Version | Goal                       | Key Features                                       | Status      |
-| ------- | -------------------------- | -------------------------------------------------- | ----------- |
-| v0.1.x  | Raw Data Extraction        | PDF parsing, document structure extraction         | ✅ Complete |
-| v0.2.x  | Immutable Ledger           | Universal archaeological model, concept extraction | 🔜 Planned  |
-| v0.3.x  | Extensible Standardization | Hierarchical standard model, normalization         | 🔜 Planned  |
-| v0.4.x  | Ontology                   | Semantic model, knowledge graph                    | 🔜 Planned  |
-| v1.0.x  | Production                 | Performance, stability, documentation              | 🔜 Planned  |
+| Version | Goal                       | Key Features                                       | Status                                             |
+| ------- | -------------------------- | -------------------------------------------------- | -------------------------------------------------- |
+| v0.1.x  | Raw Data Extraction        | PDF parsing, document structure extraction         | ✅ Complete                                        |
+| v0.2.x  | Immutable Ledger           | Universal archaeological model, concept extraction | 🚧 In progress (first release 0.2.0, experimental) |
+| v0.3.x  | Extensible Standardization | Hierarchical standard model, normalization         | 🔜 Planned                                         |
+| v0.4.x  | Ontology                   | Semantic model, knowledge graph                    | 🔜 Planned                                         |
+| v1.0.x  | Production                 | Performance, stability, documentation              | 🔜 Planned                                         |
 
 ## Feedback and Suggestions
 
