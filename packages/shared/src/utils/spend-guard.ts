@@ -43,6 +43,11 @@ export interface SpendGuard {
   /** Hold a worst case synchronously, or throw `SpendLimitError` when it does not fit. */
   reserve(label: string, amount: SpendAmount): SpendReservation;
   /**
+   * The latest refusal, or null. Callers that turn a failed call into a result can check it after a step, so a run
+   * that reached a cap stops instead of continuing with what it could not ask.
+   */
+  refused(): SpendLimitError | null;
+  /**
    * A model whose every provider attempt is reserved before it is sent and settled with the reported usage, so
    * schema retries and concurrent callers are counted too. The worst case of an attempt is its prompt length in
    * tokens (`inputTokensPerChar` per character of the serialized prompt, schema and tools) plus its output limit;
@@ -80,6 +85,7 @@ function usageTotal(usage: {
 export function createSpendGuard(limits: SpendLimits): SpendGuard {
   const used: SpendAmount = { calls: 0, totalTokens: 0 };
   const held: SpendAmount = { calls: 0, totalTokens: 0 };
+  let refusal: SpendLimitError | null = null;
   const left = () => ({
     calls: limits.maxCalls - used.calls - held.calls,
     totalTokens: limits.maxTotalTokens - used.totalTokens - held.totalTokens,
@@ -87,7 +93,7 @@ export function createSpendGuard(limits: SpendLimits): SpendGuard {
   const reserve = (label: string, amount: SpendAmount): SpendReservation => {
     const l = left();
     if (amount.calls > l.calls || amount.totalTokens > l.totalTokens)
-      throw new SpendLimitError(label, amount, l);
+      throw (refusal = new SpendLimitError(label, amount, l));
     held.calls += amount.calls;
     held.totalTokens += amount.totalTokens;
     let open = true;
@@ -107,6 +113,7 @@ export function createSpendGuard(limits: SpendLimits): SpendGuard {
     used: () => ({ ...used }),
     left,
     reserve,
+    refused: () => refusal,
     wrap(model, options = {}) {
       if (typeof model === 'string')
         throw new Error('Guarded calls require a model instance');

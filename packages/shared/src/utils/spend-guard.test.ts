@@ -35,6 +35,7 @@ const call = (model: unknown) =>
 describe('createSpendGuard', () => {
   test('reserves, settles once and refuses what does not fit', () => {
     const guard = createSpendGuard({ maxCalls: 3, maxTotalTokens: 100 });
+    expect(guard.refused()).toBeNull();
     const first = guard.reserve('first', { calls: 2, totalTokens: 80 });
     expect(guard.left()).toEqual({ calls: 1, totalTokens: 20 });
     expect(() =>
@@ -43,6 +44,7 @@ describe('createSpendGuard', () => {
     expect(() => guard.reserve('third', { calls: 2, totalTokens: 1 })).toThrow(
       'third needs up to 2 calls and 1 tokens, but 1 calls and 20 tokens are left',
     );
+    expect(guard.refused()?.label).toBe('third');
     first.settle({ calls: 1, totalTokens: 30 });
     first.settle({ calls: 5, totalTokens: 500 });
     expect(guard.used()).toEqual({ calls: 1, totalTokens: 30 });

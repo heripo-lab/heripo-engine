@@ -64,4 +64,4 @@ pnpm --filter @heripo/shared test:coverage
 
 ## 지출 가드
 
-`createSpendGuard({ maxCalls, maxTotalTokens })`는 실행 전체의 절대 상한을 지킵니다. `reserve(label, amount)`는 최악 사용량을 동기적으로 예약하고, 남은 예산을 넘으면 아무것도 호출하지 않고 `SpendLimitError`를 던집니다. `settle(actual)`은 예약을 실제 사용량으로 바꿉니다. `wrap(model)`이 돌려주는 모델은 스키마 재시도와 동시 호출을 포함한 모든 공급자 `doGenerate` 시도마다, 보내기 전에 직렬화한 프롬프트 길이만큼의 토큰(기본 글자당 1개)과 출력 상한을 예약하고 보고된 사용량으로 정산합니다. 출력 상한이 없는 시도에는 `SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS`(32,000)를 주고, 실패한 시도는 예약 전체를 사용량으로 남깁니다. 입력 추정은 직렬화한 요청 한 글자가 토큰 1개를 넘지 않는다고 가정합니다.
+`createSpendGuard({ maxCalls, maxTotalTokens })`는 실행 전체의 절대 상한을 지킵니다. `reserve(label, amount)`는 최악 사용량을 동기적으로 예약하고, 남은 예산을 넘으면 아무것도 호출하지 않고 `SpendLimitError`를 던집니다. `settle(actual)`은 예약을 실제 사용량으로 바꾸고, `refused()`는 가장 최근의 거절을 돌려주므로 실패한 호출을 결과로 바꾸는 호출자도 상한에서 멈출 수 있습니다. `wrap(model)`이 돌려주는 모델은 스키마 재시도와 동시 호출을 포함한 모든 공급자 `doGenerate` 시도마다, 보내기 전에 직렬화한 프롬프트 길이만큼의 토큰(기본 글자당 1개)과 출력 상한을 예약하고 보고된 사용량으로 정산합니다. 출력 상한이 없는 시도에는 `SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS`(32,000)를 주고, 실패한 시도는 예약 전체를 사용량으로 남깁니다. 입력 추정은 직렬화한 요청 한 글자가 토큰 1개를 넘지 않는다고 가정합니다.
