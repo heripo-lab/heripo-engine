@@ -91,13 +91,10 @@ export async function runLedgerPipeline(
   },
 ) {
   const { models } = options;
-  // a task without caps behaves as one whose caps are never reached
-  const budget = options.budget ?? {
-    maxCalls: Number.MAX_SAFE_INTEGER,
-    maxTotalTokens: Number.MAX_SAFE_INTEGER,
-  };
   const { onStep, log, abortSignal } = hooks;
-  const guard = createSpendGuard(budget);
+  // a task without caps gets a guard that only counts and leaves output limits to each call
+  const guard = createSpendGuard(options.budget);
+  const budget = guard.limits;
   // what the guard settled since `from`, for the step logs
   const since = (from: SpendAmount) => {
     const now = guard.used();

@@ -16,6 +16,7 @@ import {
   createSpendGuard,
   recordContentAttachmentThinCall,
   routeContentAttachmentThinTwoRuns,
+  spendInputTokenBound,
 } from '@heripo/ledger-extractor';
 import { createHash } from 'crypto';
 import {
@@ -51,8 +52,6 @@ const MAX_CONSECUTIVE_FAILURES = 5;
  * largest saved thin answer was about 18,300 tokens. A longer answer fails the call.
  */
 const BATCH_MAX_OUTPUT_TOKENS = 32_000;
-/** Input tokens reserved per prompt character; saved thin calls used at most 0.64. */
-const BATCH_INPUT_TOKENS_PER_CHAR = 1;
 const BATCH_POLL_MS = 60_000;
 const MAX_TOTAL_FAILURES = 10;
 
@@ -279,15 +278,6 @@ async function submitBatch(ctx: ThinContext, modelId: string) {
       state.units[unit.unitId] = 'completed';
       continue;
     }
-    const reserve =
-      Math.ceil(
-        (request.systemPrompt.length + request.userPrompt.length) *
-          BATCH_INPUT_TOKENS_PER_CHAR,
-      ) + BATCH_MAX_OUTPUT_TOKENS;
-    if (calls + 2 > ctx.budget.maxCalls) limitedBy ??= 'call budget';
-    else if (tokens + 2 * reserve > ctx.budget.maxTotalTokens)
-      limitedBy ??= 'token budget';
-    if (limitedBy) continue;
     const params = {
       ...(await anthropicMessageParams(
         modelId,
@@ -296,6 +286,13 @@ async function submitBatch(ctx: ThinContext, modelId: string) {
       )),
       max_tokens: BATCH_MAX_OUTPUT_TOKENS,
     };
+    // the whole request body, schema included, bounds the input
+    const reserve =
+      spendInputTokenBound(JSON.stringify(params)) + BATCH_MAX_OUTPUT_TOKENS;
+    if (calls + 2 > ctx.budget.maxCalls) limitedBy ??= 'call budget';
+    else if (tokens + 2 * reserve > ctx.budget.maxTotalTokens)
+      limitedBy ??= 'token budget';
+    if (limitedBy) continue;
     const index = plan.units.indexOf(unit);
     for (const r of ['r1', 'r2'])
       items.push({ custom_id: `u${index}-${r}`, params });
@@ -348,26 +345,21 @@ async function submitTiebreak(ctx: ThinContext, modelId: string) {
     const next = contentAttachmentThinNextRun(plan, unit, savedCalls(u));
     if (!next) continue;
     const request = createContentAttachmentThinUnitRequest(plan, unit)!;
+    const params = {
+      ...(await anthropicMessageParams(
+        modelId,
+        request,
+        CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+      )),
+      max_tokens: BATCH_MAX_OUTPUT_TOKENS,
+    };
     const reserve =
-      Math.ceil(
-        (request.systemPrompt.length + request.userPrompt.length) *
-          BATCH_INPUT_TOKENS_PER_CHAR,
-      ) + BATCH_MAX_OUTPUT_TOKENS;
+      spendInputTokenBound(JSON.stringify(params)) + BATCH_MAX_OUTPUT_TOKENS;
     if (calls + 1 > ctx.budget.maxCalls) limitedBy ??= 'call budget';
     else if (tokens + reserve > ctx.budget.maxTotalTokens)
       limitedBy ??= 'token budget';
     if (limitedBy) continue;
-    items.push({
-      custom_id: `u${plan.units.indexOf(unit)}-${next}`,
-      params: {
-        ...(await anthropicMessageParams(
-          modelId,
-          request,
-          CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
-        )),
-        max_tokens: BATCH_MAX_OUTPUT_TOKENS,
-      },
-    });
+    items.push({ custom_id: `u${plan.units.indexOf(unit)}-${next}`, params });
     unitIds.push(unit.unitId);
     calls++;
     tokens += reserve;

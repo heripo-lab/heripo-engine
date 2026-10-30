@@ -14,6 +14,7 @@ import type { z } from 'zod';
 
 import { createAnthropic } from '@ai-sdk/anthropic';
 import Anthropic from '@anthropic-ai/sdk';
+import { spendInputTokenBound } from '@heripo/ledger-extractor';
 import { Output, generateText, jsonSchema } from 'ai';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 
@@ -200,8 +201,8 @@ const sleep = (ms: number, signal?: AbortSignal) =>
  * send with the system prompt marked for the prompt cache, with a fixed output limit. The batch ID is saved in
  * `batchFile` before waiting; a call with the same file and the same custom IDs waits for that batch instead of
  * submitting another while it is uncollected. On abort the batch is cancelled. Every answer is checked against its
- * schema; nothing is repaired. With `guard`, every item's worst case (its request body length in tokens plus the
- * output limit) is reserved before the batch is sent or waited for, and settled with the usage the items
+ * schema; nothing is repaired. With `guard`, every item's worst case (`spendInputTokenBound` of its request body plus
+ * the output limit) is reserved before the batch is sent or waited for, and settled with the usage the items
  * report, failed ones included; a batch that stops before its results are read keeps the whole reservation.
  */
 export async function runStructuredBatch(input: {
@@ -244,7 +245,9 @@ export async function runStructuredBatch(input: {
     calls: items.length,
     totalTokens: items.reduce(
       (n, item) =>
-        n + JSON.stringify(item.params).length + input.maxOutputTokens,
+        n +
+        spendInputTokenBound(JSON.stringify(item.params)) +
+        input.maxOutputTokens,
       0,
     ),
   };
