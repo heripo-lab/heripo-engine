@@ -13,6 +13,7 @@ Internal ESM utilities used by the PDF parser and document processor. This packa
 | `LLMCaller`               | `call` and `callVision` perform model calls with schema validation, retries and fallback                  |
 | `LLMTokenUsageAggregator` | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset` aggregate usage            |
 | `detectProvider`          | Detect a provider from the model's `provider` value, returning `unknown` when unrecognized                |
+| `createSpendGuard`        | Hard caps on calls and tokens: reserve a worst case before a call, settle it with reported usage          |
 | `spawnAsync`              | Run a child process and return `{ stdout, stderr, code }`                                                 |
 
 The [export list](./src/index.ts) also includes call configuration/results, token usage and process option types.
@@ -60,3 +61,7 @@ pnpm --filter @heripo/shared test:coverage
 `createAuditedModel(model, onAttempt?)` returns `{ model, attempts }`. Pass that model to `LLMCaller` to capture each non-streaming provider `doGenerate` invocation before structured-output parsing. Schema retries and SDK transport retries remain separate attempt records. Records retain the SDK's original request body, complete provider response body, content, usage, unified/raw finish reason, API status, incomplete details and response ID when available. Provider exceptions retain their original response body and error metadata before rethrowing. No prompt, output, limit, temperature or retry policy is changed.
 
 Bodies are preserved as returned by the provider SDK, without reconstructing HTTP bytes; unavailable metadata is null. Authorization and response headers are not copied. `onAttempt` can persist records immediately, including when all structured attempts eventually fail. Callback persistence errors propagate. This opt-in helper requires a model instance and observes generation calls, not streaming. Existing `LLMCaller` result and final-attempt usage contracts are unchanged; per-attempt usage is available for separate audit/accounting.
+
+## Spend Guards
+
+`createSpendGuard({ maxCalls, maxTotalTokens })` holds hard caps for a whole run. `reserve(label, amount)` holds a worst case synchronously or throws `SpendLimitError` without calling anything; `settle(actual)` replaces it with what was used. `wrap(model)` returns a model whose every provider `doGenerate` attempt, schema retries and concurrent callers included, reserves its serialized prompt length in tokens (one per character by default) plus its output limit before it is sent, and settles with the reported usage. An attempt without an output limit gets `SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS` (32,000); a failed attempt keeps its whole reservation. The input estimate assumes at most one token per character of the serialized request.

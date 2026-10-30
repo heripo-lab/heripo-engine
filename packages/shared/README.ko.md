@@ -13,6 +13,7 @@ PDF 파서와 문서 프로세서가 사용하는 내부 ESM 유틸리티 패키
 | `LLMCaller`               | `call`과 `callVision`으로 스키마 검증, 재시도, fallback을 포함한 모델 호출                           |
 | `LLMTokenUsageAggregator` | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset`으로 사용량 집계       |
 | `detectProvider`          | 모델의 `provider` 값으로 provider 구분; 미인식 값은 `unknown`                                        |
+| `createSpendGuard`        | 호출 전 최악 사용량을 예약하고 보고된 사용량으로 정산하는 호출 수·토큰 절대 상한                     |
 | `spawnAsync`              | 자식 프로세스를 실행하고 `{ stdout, stderr, code }` 반환                                             |
 
 [전체 export](./src/index.ts)에는 호출 설정·결과·토큰 사용량·프로세스 실행 옵션 타입도 포함됩니다.
@@ -60,3 +61,7 @@ pnpm --filter @heripo/shared test:coverage
 `createAuditedModel(model, onAttempt?)`는 `{ model, attempts }`를 반환한다. 이 모델을 `LLMCaller`에 넘기면 구조화 파싱 이전의 비스트리밍 공급자 `doGenerate` 호출마다 기록한다. 스키마 재시도와 SDK 전송 재시도도 각각 별도 시도로 남는다. SDK가 반환한 원래 요청 본문·공급자 응답 전체·콘텐츠·사용량, 통합/원래 종료 사유·API 상태·미완료 상세·응답 ID를 가능한 범위에서 보존한다. 공급자 오류는 원래 응답 본문·오류 정보를 기록한 후 같은 오류를 다시 던진다. 프롬프트·출력·상한·온도·재시도 정책은 변경하지 않는다.
 
 본문은 공급자 SDK가 반환한 형태 그대로 보존하며 HTTP 바이트를 재구성하지 않는다. 없는 메타데이터는 null이다. 인증·응답 헤더는 복사하지 않는다. `onAttempt`로 즉시 저장하면 구조화 시도가 최종 실패해도 기록이 남는다. 저장 콜백 오류는 전파된다. 명시적 모델 인스턴스가 필요한 선택적 도구이며 스트리밍은 관측하지 않는다. 기존 `LLMCaller` 반환값과 최종 시도 사용량 계약은 유지하고, 시도별 사용량은 별도 감사·집계 자료로 제공한다.
+
+## 지출 가드
+
+`createSpendGuard({ maxCalls, maxTotalTokens })`는 실행 전체의 절대 상한을 지킵니다. `reserve(label, amount)`는 최악 사용량을 동기적으로 예약하고, 남은 예산을 넘으면 아무것도 호출하지 않고 `SpendLimitError`를 던집니다. `settle(actual)`은 예약을 실제 사용량으로 바꿉니다. `wrap(model)`이 돌려주는 모델은 스키마 재시도와 동시 호출을 포함한 모든 공급자 `doGenerate` 시도마다, 보내기 전에 직렬화한 프롬프트 길이만큼의 토큰(기본 글자당 1개)과 출력 상한을 예약하고 보고된 사용량으로 정산합니다. 출력 상한이 없는 시도에는 `SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS`(32,000)를 주고, 실패한 시도는 예약 전체를 사용량으로 남깁니다. 입력 추정은 직렬화한 요청 한 글자가 토큰 1개를 넘지 않는다고 가정합니다.
