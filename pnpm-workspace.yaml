@@ -43,6 +43,7 @@ allowBuilds:
   sharp: false
 
 minimumReleaseAgeExclude:
+  - solid-js@1.9.18
   - esbuild@0.28.1
   - brace-expansion@5.0.12
   - sharp@0.35.0
