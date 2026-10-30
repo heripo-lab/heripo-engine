@@ -100,7 +100,7 @@ The raw data extraction stage (v0.1.x) is complete. The 0.2.x releases add the f
 
 **Content and Relations**
 
-- Thin per-unit content attachment: two runs per unit, targets returned by every run are confirmed automatically, disagreements and area targets go to review, and a tie-break run is added where the runs disagree
+- Thin per-unit content attachment: two runs per unit, targets both runs return are confirmed automatically, and where the runs disagree a tie-break run confirms two-of-three majorities and sends the rest to review; area targets are confirmed when both runs agree under a report profile and always go to review without one
 - Parent hierarchy: code-decided parents from find-spot phrases and table rows, a three-run LLM judgment for the remaining questions (set only when all runs agree), and place-alias tables a person can inject or a two-run LLM proposal can supply
 - Figure and photo references, table and text attributes, rule-based record links, and layer mentions kept as relation candidates
 

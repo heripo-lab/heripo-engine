@@ -160,7 +160,7 @@ The [engine demo](https://engine-demo.heripo.org) lets you try PDF processing. [
 - **Archaeology Ledger**: Builds an experimental `archaeology-ledger.v1` ledger from a `ProcessedDocument` with caller-selected models
 - **Report Profile**: Deterministic report signals and one router call; a person can inject the profile and investigation scope as JSON
 - **Candidate Discovery**: Proposes sites, areas, trenches, layers, features, artifacts and shipwrecks with exact source quotes, followed by duplicate review
-- **Content Attachment**: Attaches body sentences and table items to the frozen registry; only targets every run agrees on are confirmed, the rest go to review
+- **Content Attachment**: Attaches body sentences and table items to the frozen registry; targets both runs agree on are confirmed, a tie-break run settles disagreements by two-of-three majority, and the rest go to review
 - **Source Preservation**: Every excerpt keeps its original text and source location; model output is checked but never repaired
 - **Hard Caps**: A spend guard reserves every provider attempt against call and token caps
 

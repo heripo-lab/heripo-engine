@@ -46,7 +46,7 @@
 - **보고서 프로필**: 결정론적인 보고서 신호와 분류 호출 한 번(`prepareReportProfile`), 또는 사람이 확인해 주입한 `ReportProfile`. 무인 실행에서는 `completeReportScope`가 제안된 범위를 조사 장으로 보완
 - **후보 탐색**: 선택한 장에서 원문 ID로 근거를 제한한 8개 종류의 후보 제안. 코드 검사, 필요한 것만 묻는 후속 호출 한 번, 문제 묶음만 재추출
 - **중복 검토**: 코드가 확정하는 병합과, 애매한 블록만 모델에 묻는 검토(`deduplicateCandidateBlocks`). 불확실한 동일성은 합치지 않고 검수로 남김
-- **묶음 단위 얇은 원문 배정**: 묶음마다 짧은 호출 하나를 기본 두 번 보내고, 모든 실행이 돌려준 대상만 확정하며 나머지는 검수로 보냄
+- **묶음 단위 얇은 원문 배정**: 묶음마다 짧은 호출 하나를 기본 두 번 보내고, 두 실행이 함께 돌려준 대상, 또는 동점 해소 실행 뒤 세 실행 중 둘이 돌려준 대상(`model_majority`)을 확정하며 나머지는 검수로 보냄
 - **상위 계층과 장소 약칭**: 출토 위치 표현과 소속 열로 코드가 정하는 부모, 나머지에 대한 모델 3회 판단, 사람이 정하거나 모델이 제안한 장소 약칭 표(`place-aliases.v1`)
 - **도면·사진, 속성, 관계**: 도면·사진 참조, 원문 그대로의 표·본문 속성, 관계 문장과 관계 열에서 찾은 객체 간 관계. 모두 모델 호출 없음
 - **검증**: `validateArchaeologyLedger`가 구조·계층·출처·원문 충실도를 전처리 문서와 대조
@@ -59,13 +59,16 @@
 
 ```bash
 pnpm add @heripo/ledger-extractor
+# 아래 예제에서 쓰는 AI SDK 제공자
+pnpm add @ai-sdk/anthropic
 ```
 
 ## 사용법
 
-모델 단계를 차례로 실행하고 그 결과는 호출자가 저장하며, 원장은 마지막에 오프라인으로 조립합니다. 아래의 `baseModel`은 구조화 출력을 지원하는 AI SDK `LanguageModel`이면 됩니다.
+모델 단계를 차례로 실행하고 그 결과는 호출자가 저장하며, 원장은 마지막에 오프라인으로 조립합니다. 아래의 `baseModel`은 구조화 출력을 지원하는 AI SDK `LanguageModel`이면 됩니다. 예제는 `@ai-sdk/anthropic`으로 Claude Haiku 5.5를 씁니다.
 
 ```typescript
+import { anthropic } from '@ai-sdk/anthropic';
 import {
   assembleCandidateDeduplication,
   assembleCandidateDiscovery,
@@ -94,6 +97,7 @@ const raw = readFileSync('processed-document.json');
 const document = parseProcessedDocument(JSON.parse(raw.toString('utf8')));
 const inputSha256 = createHash('sha256').update(raw).digest('hex');
 const index = buildDocumentResourceIndex(document);
+const baseModel = anthropic('claude-haiku-5-5'); // ANTHROPIC_API_KEY를 읽음
 
 // One budget for every model call of the run
 const guard = createSpendGuard({ maxCalls: 2000, maxTotalTokens: 30_000_000 });

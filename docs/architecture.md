@@ -131,7 +131,7 @@ This system enables:
 - **Accuracy Guarantee**: Frontier models validate results for quality assurance
 - **Automatic Correction**: Frontier model reprocesses on validation failure
 
-The ledger extraction stage (0.2.x) follows a different rule: model output is inspected by code but never repaired. Instead of a correcting model, it relies on repeated runs and agreement (decisions every run returns are accepted), and every unresolved decision becomes a review item for a person.
+The ledger extraction stage (0.2.x) follows a different rule: model output is inspected by code but never repaired. Instead of a correcting model, it relies on repeated runs and agreement (content attachment accepts what both runs return or, after a tie-break run, what two of three runs return; parent judgment accepts only what all three runs return), and every unresolved decision becomes a review item for a person.
 
 ---
 
@@ -358,7 +358,7 @@ Extracts investigation objects (sites, areas, trenches, layers, features, artifa
 
 - **Source fidelity**: Records keep original source text (sentences, table phrases, names) and source references (resource key, character span, PDF page, chapter, `sourceRef`). Nothing is normalized or converted.
 - **No repair of model output**: Code inspects every model response against the input; invalid answers become issues, never silently fixed values.
-- **Agreement over correction**: Content attachment and parent judgment run the model several times and accept only what every run returns; disagreements go to review.
+- **Agreement over correction**: Content attachment sends each unit twice and confirms the targets both runs return; where they disagree, a third run decides by two-of-three majority (`model_majority`) and what it cannot settle goes to review. Parent judgment runs three times and sets a parent only when all runs agree.
 - **People decide what is unresolved**: Uncertain identities, contested attachments, open parents, ambiguous media and attribute owners become review items. A person can also inject a report profile/scope or a place-alias table as JSON.
 - **Deterministic assembly**: Model steps save their results; `buildArchaeologyLedger` assembles and validates the ledger from those results without model calls, so the same inputs always give the same ledger.
 - **Hard spend caps**: When caps are given, `createSpendGuard` (from `@heripo/shared`, re-exported) reserves each call's worst case before sending and stops a run before it can pass its call or token cap. The demo's CLI batch runner sets per-report caps by default (600 calls, 13M tokens); a demo web task runs uncapped.
@@ -387,8 +387,8 @@ flowchart TB
 
         subgraph Attach[3. Content Attachment - LLM]
             A1[Two Runs per Unit]
-            A2[Unanimous Targets Auto-Confirmed]
-            A3[Tie-Break Run / Review Items]
+            A2[Targets Both Runs Agree On Confirmed]
+            A3[Tie-Break Run: 2-of-3 Majority / Review Items]
         end
 
         subgraph Relate[4. Hierarchy and References - Rules+LLM]
@@ -423,7 +423,7 @@ The package exposes each step as functions; the demo web app (`apps/demo-web/src
 | Candidate Discovery     | `prepareCandidateDiscovery`, `discoverCandidateUnit`         | ✅ Unit planning                                    | ✅ Per chapter unit                                 | Inspected, never repaired; selective retry                     |
 | Duplicate Review        | `planCandidateDeduplication`, `deduplicateCandidateBlocks`   | ✅ Same identifier/name merges                      | ✅ Remaining candidates in blocks                   | Uncertain identities → review items                            |
 | Registry Freeze         | `prepareContentAttachment`                                   | ✅ Frozen registry and attachment plan              | -                                                   | -                                                              |
-| Content Attachment      | `attachContentThinUnit`                                      | ✅ Row ownership, candidate prefilter, routing      | ✅ Two runs per unit, tie-break run                 | Unanimous targets confirmed; disagreements/areas → review      |
+| Content Attachment      | `attachContentThinUnit`                                      | ✅ Row ownership, candidate prefilter, routing      | ✅ Two runs per unit, tie-break run                 | Agreed or 2-of-3 majority targets confirmed; rest → review     |
 | Parent Hierarchy        | `resolveRelationParents`, `judgeRelationParentBatch`         | ✅ Find-spot phrases, membership columns            | ✅ Three-run judgment                               | Set only when every run agrees; otherwise → review             |
 | Place Aliases           | `validatePlaceAliases`, `proposePlaceAliases`                | ✅ Validation of person or model tables             | ✅ Two-run proposal (only without a person's table) | Only rules both runs give alike and that pass checks           |
 | Media References        | `indexMediaCaptions`, `applyLedgerMedia`                     | ✅ Caption labels, text and caption references      | -                                                   | -                                                              |
@@ -597,7 +597,7 @@ A Next.js 16-based web application for visualizing and testing the PDF processin
 
 | Pipeline Stage                             | AI Type                                | Cost                                     | Notes                                                                                               |
 | ------------------------------------------ | -------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| **Raw Data Extraction (Preprocessing 1)**  | Deep Learning (Apple Vision)           | **Free**                                 | Local processing, only machine costs                                                                |
+| **Raw Data Extraction (Preprocessing 1)**  | Deep Learning (Apple Vision)           | **Free** (OCR) + VLM correction          | Apple Vision OCR is local; the mandatory VLM correction costs depend on the model and page count    |
 | **Raw Data Extraction (Preprocessing 2)**  | LLM (GPT, Claude, etc.)                | **$0.10-0.50**                           | Under $0.10 for thin reports, under $0.50 for thick                                                 |
 | **Preprocessing 3: Report Classification** | LLM (expected)                         | **TBD**                                  | Coming Soon                                                                                         |
 | **Archaeological Data Ledger Extraction**  | LLM (default Claude Haiku 5.5) + Rules | **About $0.33** (measured on one report) | 0.2.x, experimental; Taean Mado report, about 15 review items; not yet measured across report types |

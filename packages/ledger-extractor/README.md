@@ -46,7 +46,7 @@ Model calls happen in separate steps that each return their prompts, raw respons
 - **Report profile**: deterministic report signals and one router call (`prepareReportProfile`), or an injected person-confirmed `ReportProfile`; `completeReportScope` completes a proposed scope with the investigation chapters for unattended runs
 - **Candidate discovery**: source-ID-constrained proposals of eight record kinds from the chosen chapters, checked by code, with one targeted follow-up call and selective retries
 - **Duplicate review**: code-decided merges plus a model review of only the ambiguous blocks (`deduplicateCandidateBlocks`); uncertain identities stay separate for review
-- **Thin per-unit content attachment**: one compact call per unit, sent twice by default; a target is confirmed only when every run returns it, and everything else goes to review
+- **Thin per-unit content attachment**: one compact call per unit, sent twice by default; a target is confirmed when both runs return it or, after a tie-break run, when two of three runs do (`model_majority`); everything else goes to review
 - **Parents and place aliases**: parents decided by code from find-spot phrases and membership columns, a three-run model judgment for the rest, and person- or model-proposed place alias tables (`place-aliases.v1`)
 - **Media, attributes and links**: figure and photo references, table and text attributes kept as written, and record links from relation sentences and relation columns, all without model calls
 - **Validation**: `validateArchaeologyLedger` checks structure, hierarchy, sources and fidelity against the processed document
@@ -59,13 +59,16 @@ Model calls happen in separate steps that each return their prompts, raw respons
 
 ```bash
 pnpm add @heripo/ledger-extractor
+# AI SDK provider used in the example below
+pnpm add @ai-sdk/anthropic
 ```
 
 ## Usage
 
-The model steps run in order and their results are saved by the caller; the ledger is then built offline. `baseModel` below is any AI SDK `LanguageModel` that supports structured output.
+The model steps run in order and their results are saved by the caller; the ledger is then built offline. `baseModel` below can be any AI SDK `LanguageModel` that supports structured output; the example uses Claude Haiku 5.5 through `@ai-sdk/anthropic`.
 
 ```typescript
+import { anthropic } from '@ai-sdk/anthropic';
 import {
   assembleCandidateDeduplication,
   assembleCandidateDiscovery,
@@ -94,6 +97,7 @@ const raw = readFileSync('processed-document.json');
 const document = parseProcessedDocument(JSON.parse(raw.toString('utf8')));
 const inputSha256 = createHash('sha256').update(raw).digest('hex');
 const index = buildDocumentResourceIndex(document);
+const baseModel = anthropic('claude-haiku-5-5'); // reads ANTHROPIC_API_KEY
 
 // One budget for every model call of the run
 const guard = createSpendGuard({ maxCalls: 2000, maxTotalTokens: 30_000_000 });
