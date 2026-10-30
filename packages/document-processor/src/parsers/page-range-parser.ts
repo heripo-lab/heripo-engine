@@ -51,6 +51,9 @@ interface SampleResult {
   endPageNo: number | null;
 }
 
+/** Internal extraction failures are separate from valid signed logical pages. */
+type ExtractedPageRangeMap = Record<number, PageRange | null>;
+
 /**
  * PageRangeParser
  *
@@ -64,7 +67,7 @@ interface SampleResult {
  * 2. For each group:
  *    - If ≤3 pages: send all to LLM at once
  *    - If >3 pages: random sample 3 pages, detect pattern, apply to all
- * 3. Post-process: handle drops, normalize negatives, backfill failed pages
+ * 3. Post-process: handle drops and infer missing logical pages, including zero and negatives
  */
 export class PageRangeParser extends VisionLLMComponent {
   // Configuration constants
@@ -126,7 +129,7 @@ export class PageRangeParser extends VisionLLMComponent {
     );
 
     // Step 2: Process each size group
-    const pageRangeMap: Record<number, PageRange> = {};
+    const extractedPageRanges: ExtractedPageRangeMap = {};
     const usageList: ExtendedTokenUsage[] = [];
 
     for (let i = 0; i < sizeGroups.length; i++) {
@@ -137,7 +140,7 @@ export class PageRangeParser extends VisionLLMComponent {
       );
 
       const groupResult = await this.processGroup(pages, group, this.model);
-      Object.assign(pageRangeMap, groupResult.pageRangeMap);
+      Object.assign(extractedPageRanges, groupResult.pageRangeMap);
       usageList.push(...groupResult.usage);
     }
 
@@ -145,7 +148,17 @@ export class PageRangeParser extends VisionLLMComponent {
     usageList.forEach((usage) => this.trackUsage(usage));
 
     // Step 4: Post-processing
-    this.postProcess(pageRangeMap);
+    this.postProcess(extractedPageRanges);
+
+    const pageRangeMap: Record<number, PageRange> = {};
+    for (const [pdfPage, range] of Object.entries(extractedPageRanges)) {
+      if (range === null) {
+        throw new PageRangeParseError(
+          `Could not determine a logical page number for PDF page ${pdfPage}`,
+        );
+      }
+      pageRangeMap[Number(pdfPage)] = range;
+    }
 
     this.log(
       'info',
@@ -207,7 +220,7 @@ export class PageRangeParser extends VisionLLMComponent {
     group: PageSizeGroup,
     model: LanguageModel,
   ): Promise<{
-    pageRangeMap: Record<number, PageRange>;
+    pageRangeMap: ExtractedPageRangeMap;
     usage: ExtendedTokenUsage[];
   }> {
     const { pageNos } = group;
@@ -313,13 +326,13 @@ export class PageRangeParser extends VisionLLMComponent {
       }
     }
 
-    // All retries exhausted or early termination - return fallback map with 0,0
+    // Keep unresolved pages separate from valid logical page zero.
     this.log(
       'warn',
       `Could not detect page pattern after ${consecutiveAllNullAttempts >= MAX_ALL_NULL_ATTEMPTS ? consecutiveAllNullAttempts : this.MAX_PATTERN_RETRIES + 1} attempts for group with ${pageNos.length} pages, marking as failed`,
     );
-    const fallbackMap: Record<number, PageRange> = Object.fromEntries(
-      pageNos.map((pageNo) => [pageNo, { startPageNo: 0, endPageNo: 0 }]),
+    const fallbackMap: ExtractedPageRangeMap = Object.fromEntries(
+      pageNos.map((pageNo) => [pageNo, null]),
     );
     return { pageRangeMap: fallbackMap, usage: usageList };
   }
@@ -394,10 +407,12 @@ export class PageRangeParser extends VisionLLMComponent {
               .describe('0-based index of the image in the request'),
             startPageNo: z
               .number()
+              .int()
               .nullable()
               .describe('Start page number (null if not found)'),
             endPageNo: z
               .number()
+              .int()
               .nullable()
               .describe(
                 'End page number for double-sided scans (null for single page)',
@@ -521,8 +536,8 @@ export class PageRangeParser extends VisionLLMComponent {
   private applyPattern(
     pageNos: number[],
     pattern: PatternAnalysis,
-  ): Record<number, PageRange> {
-    const result: Record<number, PageRange> = {};
+  ): ExtractedPageRangeMap {
+    const result: ExtractedPageRangeMap = {};
 
     pageNos.forEach((pdfPageNo) => {
       switch (pattern.pattern) {
@@ -546,7 +561,7 @@ export class PageRangeParser extends VisionLLMComponent {
         }
 
         default:
-          result[pdfPageNo] = { startPageNo: 0, endPageNo: 0 };
+          result[pdfPageNo] = null;
       }
     });
 
@@ -556,7 +571,7 @@ export class PageRangeParser extends VisionLLMComponent {
   /**
    * Convert sample results to page range map (for small groups)
    */
-  private samplesToMap(samples: SampleResult[]): Record<number, PageRange> {
+  private samplesToMap(samples: SampleResult[]): ExtractedPageRangeMap {
     return Object.fromEntries(
       samples.map((sample) => [
         sample.pdfPageNo,
@@ -565,7 +580,7 @@ export class PageRangeParser extends VisionLLMComponent {
               startPageNo: sample.startPageNo,
               endPageNo: sample.endPageNo ?? sample.startPageNo,
             }
-          : { startPageNo: 0, endPageNo: 0 },
+          : null,
       ]),
     );
   }
@@ -573,15 +588,13 @@ export class PageRangeParser extends VisionLLMComponent {
   /**
    * Post-process the page range map
    */
-  private postProcess(pageRangeMap: Record<number, PageRange>): void {
+  private postProcess(pageRangeMap: ExtractedPageRangeMap): void {
     // Order matters:
     // 1. Detect outliers (abnormally high values at beginning)
     // 2. Handle drops
-    // 3. Normalize negatives
-    // 4. Backfill failed pages
+    // 3. Backfill missing pages without changing valid zero or negative values
     this.detectAndHandleOutliers(pageRangeMap);
     this.detectAndHandleDrops(pageRangeMap);
-    this.normalizeNegatives(pageRangeMap);
     this.backfillFailedPages(pageRangeMap);
   }
 
@@ -595,9 +608,7 @@ export class PageRangeParser extends VisionLLMComponent {
    * Detection: If page numbers at the beginning are significantly higher
    * than subsequent pages (which follow a normal pattern), mark them as failed.
    */
-  private detectAndHandleOutliers(
-    pageRangeMap: Record<number, PageRange>,
-  ): void {
+  private detectAndHandleOutliers(pageRangeMap: ExtractedPageRangeMap): void {
     const pdfPages = Object.keys(pageRangeMap)
       .map(Number)
       .sort((a, b) => a - b);
@@ -613,23 +624,23 @@ export class PageRangeParser extends VisionLLMComponent {
     if (normalSequenceStart === null || normalSequenceStart <= 0) return;
 
     const normalStartPdfPage = pdfPages[normalSequenceStart];
-    const normalStartPageNo = pageRangeMap[normalStartPdfPage].startPageNo;
+    const normalStartPageNo = pageRangeMap[normalStartPdfPage]!.startPageNo;
 
     // Check if pages before the normal sequence are outliers
     // (their page numbers are much higher than what they should be)
     let hasOutliers = false;
     for (let i = 0; i < normalSequenceStart; i++) {
       const pdfPage = pdfPages[i];
-      const pageNo = pageRangeMap[pdfPage].startPageNo;
-
-      if (pageNo === 0) continue;
+      const range = pageRangeMap[pdfPage];
+      if (range === null) continue;
+      const pageNo = range.startPageNo;
 
       // Calculate expected page number based on the normal sequence
       const pdfDiff = normalStartPdfPage - pdfPage;
 
       // For double-sided: each PDF page = 2 actual pages
       const isDoubleSided = this.isDoubleSidedRange(
-        pageRangeMap[normalStartPdfPage],
+        pageRangeMap[normalStartPdfPage]!,
       );
       const expectedPageNo = isDoubleSided
         ? normalStartPageNo - pdfDiff * 2
@@ -642,7 +653,7 @@ export class PageRangeParser extends VisionLLMComponent {
           'info',
           `Outlier detected: PDF ${pdfPage}=${pageNo} (expected ~${expectedPageNo})`,
         );
-        pageRangeMap[pdfPage] = { startPageNo: 0, endPageNo: 0 };
+        pageRangeMap[pdfPage] = null;
         hasOutliers = true;
       }
     }
@@ -662,7 +673,7 @@ export class PageRangeParser extends VisionLLMComponent {
    * Returns the index in pdfPages array, or null if not found.
    */
   private findNormalSequenceStart(
-    pageRangeMap: Record<number, PageRange>,
+    pageRangeMap: ExtractedPageRangeMap,
     pdfPages: number[],
   ): number | null {
     const MIN_SEQUENCE_LENGTH = 3;
@@ -682,7 +693,7 @@ export class PageRangeParser extends VisionLLMComponent {
         const nextRange = pageRangeMap[nextPdfPage];
 
         // Skip if either has failed extraction
-        if (currRange.startPageNo === 0 || nextRange.startPageNo === 0) {
+        if (currRange === null || nextRange === null) {
           isValidSequence = false;
           break;
         }
@@ -732,7 +743,7 @@ export class PageRangeParser extends VisionLLMComponent {
    * When page numbers suddenly decrease (e.g., 8,9 -> 3,4),
    * recalculate previous pages based on the drop point.
    */
-  private detectAndHandleDrops(pageRangeMap: Record<number, PageRange>): void {
+  private detectAndHandleDrops(pageRangeMap: ExtractedPageRangeMap): void {
     const pdfPages = Object.keys(pageRangeMap)
       .map(Number)
       .sort((a, b) => a - b);
@@ -742,27 +753,21 @@ export class PageRangeParser extends VisionLLMComponent {
     for (let i = 1; i < pdfPages.length; i++) {
       const prevPdfPage = pdfPages[i - 1];
       const currPdfPage = pdfPages[i];
-      const prevPageNo = pageRangeMap[prevPdfPage].startPageNo;
-      const currPageNo = pageRangeMap[currPdfPage].startPageNo;
-
-      // Skip if either is 0 (extraction failed)
-      if (prevPageNo === 0 || currPageNo === 0) continue;
+      const prevRange = pageRangeMap[prevPdfPage];
+      const currRange = pageRangeMap[currPdfPage];
+      if (prevRange === null || currRange === null) continue;
+      const prevPageNo = prevRange.startPageNo;
+      const currPageNo = currRange.startPageNo;
 
       // Detect significant drop (more than 1)
-      if (
-        currPageNo > 0 &&
-        prevPageNo > currPageNo &&
-        prevPageNo - currPageNo > 1
-      ) {
+      if (prevPageNo > currPageNo && prevPageNo - currPageNo > 1) {
         this.log(
           'info',
           `Page drop detected: PDF ${prevPdfPage}=${prevPageNo} -> PDF ${currPdfPage}=${currPageNo}`,
         );
 
         // Determine if the reference page is double-sided
-        const isDoubleSided = this.isDoubleSidedRange(
-          pageRangeMap[currPdfPage],
-        );
+        const isDoubleSided = this.isDoubleSidedRange(currRange);
 
         // Recalculate all previous pages based on drop point
         for (let j = i - 1; j >= 0; j--) {
@@ -773,30 +778,20 @@ export class PageRangeParser extends VisionLLMComponent {
             // Double-sided: each PDF page = 2 actual pages
             const expectedStartPageNo = currPageNo - distance * 2;
 
-            if (expectedStartPageNo < 1) {
-              pageRangeMap[pdfPage] = { startPageNo: 0, endPageNo: 0 };
-            } else {
-              pageRangeMap[pdfPage] = {
-                startPageNo: expectedStartPageNo,
-                endPageNo: expectedStartPageNo + 1,
-              };
-            }
+            pageRangeMap[pdfPage] = {
+              startPageNo: expectedStartPageNo,
+              endPageNo: expectedStartPageNo + 1,
+            };
           } else {
-            // Single-page pattern
             const expectedPageNo = currPageNo - distance;
-
-            if (expectedPageNo < 1) {
-              pageRangeMap[pdfPage] = { startPageNo: 0, endPageNo: 0 };
-            } else {
-              pageRangeMap[pdfPage] = {
-                startPageNo: expectedPageNo,
-                endPageNo: expectedPageNo,
-              };
-            }
+            pageRangeMap[pdfPage] = {
+              startPageNo: expectedPageNo,
+              endPageNo: expectedPageNo,
+            };
           }
           this.log(
             'info',
-            `Recalculated PDF ${pdfPage} -> ${pageRangeMap[pdfPage].startPageNo}`,
+            `Recalculated PDF ${pdfPage} -> ${pageRangeMap[pdfPage]!.startPageNo}`,
           );
         }
       }
@@ -804,42 +799,28 @@ export class PageRangeParser extends VisionLLMComponent {
   }
 
   /**
-   * Normalize negative page numbers to 0
+   * Infer unresolved pages from the logical numbering pattern
    */
-  private normalizeNegatives(pageRangeMap: Record<number, PageRange>): void {
-    for (const [pdfPageStr, range] of Object.entries(pageRangeMap)) {
-      if (range.startPageNo < 0 || range.endPageNo < 0) {
-        this.log('info', `Normalizing negative: PDF ${pdfPageStr} -> 0`);
-        pageRangeMap[Number(pdfPageStr)] = { startPageNo: 0, endPageNo: 0 };
-      }
-    }
-  }
-
-  /**
-   * Backfill pages marked with 0 using detected pattern
-   */
-  private backfillFailedPages(pageRangeMap: Record<number, PageRange>): void {
+  private backfillFailedPages(pageRangeMap: ExtractedPageRangeMap): void {
     const pdfPages = Object.keys(pageRangeMap)
       .map(Number)
       .sort((a, b) => a - b);
 
-    // Find pages with startPageNo === 0 (extraction failed)
-    const failedPages = pdfPages.filter(
-      (p) => pageRangeMap[p].startPageNo === 0,
-    );
+    // Zero and negative logical pages are successful extraction results.
+    const failedPages = pdfPages.filter((p) => pageRangeMap[p] === null);
     if (failedPages.length === 0) return;
 
     // Find successful pages to detect pattern
     const successfulPages = pdfPages
-      .filter((p) => pageRangeMap[p].startPageNo > 0)
+      .filter((p) => pageRangeMap[p] !== null)
       .map((p) => ({
         pdfPage: p,
-        pageNo: pageRangeMap[p].startPageNo,
-        isDoubleSided: this.isDoubleSidedRange(pageRangeMap[p]),
+        pageNo: pageRangeMap[p]!.startPageNo,
+        isDoubleSided: this.isDoubleSidedRange(pageRangeMap[p]!),
       }));
 
-    if (successfulPages.length < 2) {
-      this.log('warn', 'Not enough successful pages for backfill');
+    if (successfulPages.length === 0) {
+      this.log('warn', 'No known logical pages for backfill');
       return;
     }
 
@@ -864,18 +845,9 @@ export class PageRangeParser extends VisionLLMComponent {
       for (const pdfPage of failedPages) {
         const expectedStartPageNo = pdfPage * 2 + avgOffset;
 
-        if (expectedStartPageNo < 1) {
-          this.log(
-            'info',
-            `Backfill skipped for PDF ${pdfPage} (would be ${expectedStartPageNo})`,
-          );
-          // Mark as cover/intro page with 0
-          continue;
-        }
-
         this.log(
           'info',
-          `Backfill PDF ${pdfPage}: 0 -> ${expectedStartPageNo}-${expectedStartPageNo + 1}`,
+          `Backfill PDF ${pdfPage}: unknown -> ${expectedStartPageNo}-${expectedStartPageNo + 1}`,
         );
         pageRangeMap[pdfPage] = {
           startPageNo: expectedStartPageNo,
@@ -897,15 +869,10 @@ export class PageRangeParser extends VisionLLMComponent {
       for (const pdfPage of failedPages) {
         const expectedPageNo = pdfPage + avgOffset;
 
-        if (expectedPageNo < 1) {
-          this.log(
-            'info',
-            `Backfill skipped for PDF ${pdfPage} (would be ${expectedPageNo})`,
-          );
-          continue;
-        }
-
-        this.log('info', `Backfill PDF ${pdfPage}: 0 -> ${expectedPageNo}`);
+        this.log(
+          'info',
+          `Backfill PDF ${pdfPage}: unknown -> ${expectedPageNo}`,
+        );
         pageRangeMap[pdfPage] = {
           startPageNo: expectedPageNo,
           endPageNo: expectedPageNo,

@@ -7,6 +7,7 @@ import { Button } from '~/components/ui/button';
 
 interface ProcessHeaderProps {
   status: TaskStatus;
+  kind?: 'raw-data' | 'ledger';
   filename: string;
   isSample?: boolean;
   onCancel: () => void;
@@ -28,6 +29,7 @@ function getStatusMessage(status: TaskStatus, filename: string): string {
 
 export function ProcessHeader({
   status,
+  kind = 'raw-data',
   filename,
   isSample = false,
   onCancel,
@@ -40,7 +42,7 @@ export function ProcessHeader({
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <h1 className="text-3xl font-bold tracking-tight">
-            Raw Data Extraction
+            {kind === 'ledger' ? 'Ledger Extraction' : 'Raw Data Extraction'}
           </h1>
           {isSample && <Badge variant="sample">Sample</Badge>}
         </div>

@@ -23,6 +23,7 @@ import { useState } from 'react';
 import type { Task, TaskStatus } from '~/lib/api/tasks';
 import { publicModeConfig, sampleTaskConfig } from '~/lib/config/public-mode';
 import { calculateCost } from '~/lib/cost/model-pricing';
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 
 import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
@@ -111,6 +112,7 @@ function getStatusBadge(status: TaskStatus) {
 }
 
 export function TaskListTable() {
+  const lang = useBrowserLanguage();
   const router = useRouter();
   const [page, setPage] = useState(0);
 
@@ -123,7 +125,12 @@ export function TaskListTable() {
 
   const handleRowClick = (task: Task) => {
     if (task.status === 'completed') {
-      router.push(`/result/${task.id}`);
+      // a finished ledger task opens the archaeology ledger itself
+      router.push(
+        task.kind === 'ledger'
+          ? `/ledger/validation/${task.id}`
+          : `/result/${task.id}`,
+      );
     } else if (
       task.status === 'running' ||
       task.status === 'queued' ||
@@ -216,6 +223,11 @@ export function TaskListTable() {
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 shrink-0" />
                   <span className="truncate">{task.originalFilename}</span>
+                  {task.kind === 'ledger' && (
+                    <Badge variant="outline" className="shrink-0">
+                      {lang === 'ko' ? '원장' : 'Ledger'}
+                    </Badge>
+                  )}
                   {task.isSample && (
                     <Badge variant="sample" className="shrink-0">
                       Sample

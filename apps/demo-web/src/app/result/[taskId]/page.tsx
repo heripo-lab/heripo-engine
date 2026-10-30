@@ -1,6 +1,9 @@
 'use client';
 
-import { Suspense, use } from 'react';
+import { useRouter } from 'next/navigation';
+import { Suspense, use, useEffect } from 'react';
+
+import type { RawDataTaskResultResponse } from '~/lib/api/tasks';
 
 import { AutoCorrectionDemoNoticeBanner } from '~/components/layout/auto-correction-demo-notice-banner';
 import { MobileWarningBanner } from '~/components/layout/mobile-warning-banner';
@@ -36,37 +39,60 @@ interface PageProps {
   params: Promise<{ taskId: string }>;
 }
 
+function LedgerRedirect({ taskId }: { taskId: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace(`/ledger/validation/${taskId}`);
+  }, [router, taskId]);
+  return <ResultLoading />;
+}
+
 function ResultContent({ taskId }: { taskId: string }) {
   const { data, isLoading, error } = useTaskResult(taskId, {
     retryOnNotCompleted: true,
   });
 
+  if (isLoading) return <ResultLoading />;
+  if (error) return <ResultError message={error.message} />;
+  if (!data) return null;
+
+  // a ledger task's result is the archaeology ledger page
+  if (data.resultKind === 'ledger-preview') {
+    return <LedgerRedirect taskId={taskId} />;
+  }
+
+  return <RawDataResultContent taskId={taskId} data={data} />;
+}
+
+function RawDataResultContent({
+  taskId,
+  data,
+}: {
+  taskId: string;
+  data: RawDataTaskResultResponse;
+}) {
   const { selectedChapterId, setSelectedChapterId } = useSelectedChapter({
-    chapters: data?.result.chapters,
+    chapters: data.result.chapters,
   });
 
   const { exportJson } = useExportJson({
-    data: data?.result ?? null,
-    filename: data?.task.originalFilename ?? 'document.pdf',
+    data: data.result ?? null,
+    filename: data.task.originalFilename ?? 'document.pdf',
   });
 
   const { downloadAll, isDownloading } = useDownloadAll({
     taskId,
-    filename: data?.task.originalFilename ?? 'document.pdf',
+    filename: data.task.originalFilename ?? 'document.pdf',
   });
 
   // Page navigation hook
   const pageNav = usePageNavigation({
-    chapters: data?.result.chapters ?? [],
-    images: data?.result.images ?? [],
-    tables: data?.result.tables ?? [],
-    footnotes: data?.result.footnotes ?? [],
-    totalPdfPages: data?.task.totalPages ?? 0,
+    chapters: data.result.chapters ?? [],
+    images: data.result.images ?? [],
+    tables: data.result.tables ?? [],
+    footnotes: data.result.footnotes ?? [],
+    totalPdfPages: data.task.totalPages ?? 0,
   });
-
-  if (isLoading) return <ResultLoading />;
-  if (error) return <ResultError message={error.message} />;
-  if (!data) return null;
 
   const { task, result } = data;
 
@@ -135,7 +161,7 @@ function ResultContent({ taskId }: { taskId: string }) {
             tokenUsage={task.tokenUsage}
             tokenCostUSD={task.tokenCostUSD}
           />
-          <NextStageBanner />
+          <NextStageBanner taskId={taskId} />
         </div>
       </div>
       <ContentViewerModal />

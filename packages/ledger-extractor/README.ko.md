@@ -1,0 +1,1116 @@
+# @heripo/ledger-extractor
+
+> 고고학 보고서 데이터 원장 추출 미리보기 라이브러리
+
+[![npm version](https://img.shields.io/npm/v/@heripo/ledger-extractor.svg)](https://www.npmjs.com/package/@heripo/ledger-extractor)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
+
+[English](./README.md) | **한국어**
+
+> **참고**: 프로젝트 개요, 설치 방법, 로드맵은 [루트 README](../../README.ko.md)를 먼저 확인해 주세요.
+
+`@heripo/ledger-extractor`는 heripo 데이터 파이프라인의 원장(Ledger) 추출 단계의 첫 번째 수직 슬라이스입니다. `@heripo/document-processor`가 생성한 `ProcessedDocument`를 입력받아 집계 카운트와 대표 샘플로 구성된 `LedgerExtractionPreview`를 만들어, 데이터가 원장 단계까지 온전히 전달되었음을 확인합니다.
+
+> **실험적 형식**: `buildArchaeologyLedger()`는 호출자가 지정한 모델로 전처리 문서에서 `archaeology-ledger.v1` 원장을 만들지만, 이 형식은 아직 실험적입니다. 필드와 검수 항목, 지시문은 0.2.x 릴리스 안에서도 이전 형식 변환 없이 바뀔 수 있으므로, 원본 전처리 문서를 보관해 두고 업그레이드 뒤에는 원장을 다시 만드세요. 미리보기·S0 API는 LLM을 호출하지 않으며, 표준화와 DB 저장은 후속 작업입니다.
+
+> **검증 범위 한계**: 원장 단계는 보고서 3종(『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』)만 대상으로 개발하고 측정했습니다. 다른 유형과 형식의 보고서에서는 부족한 점이 많을 수 있으며, 데이터를 차차 쌓아 가면서 규칙과 지시문을 개선해 나갈 예정입니다.
+
+## 주요 기능
+
+- **런타임 검증**: `parseProcessedDocument()`가 업로드된 JSON 등 unknown 입력을 zod로 검증
+- **재귀 집계**: `chapters`/`children` 트리 전체에서 챕터와 텍스트 블록 집계
+- **테이블 셀 집계**: 모든 테이블의 `grid` 셀 개수 집계
+- **샘플 제한**: 챕터 제목, 텍스트 블록, 이미지 URL, 테이블 샘플을 설정 가능한 개수(기본 5개)로 제한하고 긴 텍스트는 잘라냄
+- **주입식 로깅**: `console.log`를 직접 사용하지 않고 주입된 logger로 출력
+
+## 설치
+
+```bash
+pnpm add @heripo/ledger-extractor
+```
+
+## 사용법
+
+```typescript
+import {
+  LedgerExtractor,
+  parseProcessedDocument,
+} from '@heripo/ledger-extractor';
+import { readFileSync } from 'fs';
+
+const raw = JSON.parse(readFileSync('processed-document.json', 'utf8'));
+const document = parseProcessedDocument(raw);
+
+const extractor = new LedgerExtractor({ logger: console, sampleLimit: 5 });
+const preview = await extractor.extract(document);
+```
+
+## 입력 계약
+
+`pageRangeMap`의 키와 `pdfPageNo`는 1 이상의 정수입니다. 논리 페이지인 `startPageNo`, `endPageNo`, `Chapter.pageNo`는 본문 1쪽 기준의 음수·0·양의 정수를 허용하며 소수는 거부합니다.
+
+- 입력은 단일 `ProcessedDocument` JSON입니다(`packages/model/src/types/processed-document.ts` 참고). ZIP, manifest, 이미지 파일 묶음은 받지 않습니다.
+- `ProcessedImage.path`에는 로컬 파일 경로나 B2 object key가 아니라 `heripo-web` export 스크립트가 생성한 **완전한 public CDN URL**이 들어와야 합니다. 이 URL은 그대로 소비되며, fetch·서명·변환하지 않습니다.
+- 입력 문서를 변경(mutate)하지 않습니다.
+
+## S0: 전체 문서 자원 색인
+
+`buildDocumentResourceIndex(document)`는 LLM 호출과 I/O 없이 장·텍스트·이미지·표·실제 grid 셀·각주 전체를 색인합니다. `queryDocumentResources(index, query)`는 종류, 직접 소속 장, 정확한 자원 ID, 정확한 sourceRef, PDF 페이지, 음수·0을 포함한 논리 페이지, 문자 그대로의 부분 문자열 필터를 AND로 조합합니다.
+
+```typescript
+import {
+  buildDocumentResourceIndex,
+  queryDocumentResources,
+} from '@heripo/ledger-extractor';
+
+const index = buildDocumentResourceIndex(document);
+const matches = queryDocumentResources(index, { text: '우물' });
+const page = queryDocumentResources(index, { pdfPageNo: 122 });
+const source = queryDocumentResources(index, { sourceRef: '#/texts/5616' });
+```
+
+원문과 직접 장 소속을 그대로 보존하며, 소속 없는 매체와 복수 소속도 유지합니다. 캡션 참조는 해당 이미지·표로 조회됩니다. 셀은 부모 표의 참조와 실제 grid 배열의 0부터 시작하는 좌표를 사용하며 병합 생략 칸을 복원하지 않습니다. ID·출처·페이지 매핑이 없으면 없는 상태를 유지하고 장의 논리 시작 페이지에서 PDF 페이지를 추정하지 않습니다. 목록은 PDF 읽기 순서를 복원한 결과가 아닌 입력 저장 순서입니다. `key`는 해당 입력 스냅샷 내부 위치를 가리키는 JSON pointer이며 버전 간 원장 ID가 아닙니다. 색인을 내보낼 때 입력 파일 해시를 함께 보관하세요.
+
+S0는 출처 조회 단계입니다. 조사 범위 판정과 고고학 객체 등록은 후속 단계이며 `LedgerExtractor.extract()`의 기존 제한된 미리보기 응답은 유지합니다.
+
+## 조사내용의 객체 후보 제안
+
+다음 단계는 명시적으로 선택한 장과 하위 장에서 후보를 제안합니다. 기존 미리보기·S0 API와 분리되어 있습니다.
+
+```typescript
+import {
+  assembleCandidateDiscovery,
+  discoverCandidateUnit,
+  prepareCandidateDiscovery,
+} from '@heripo/ledger-extractor';
+
+const plan = prepareCandidateDiscovery(index, {
+  scopeChapterId: 'investigation-chapter-id',
+  inputSha256: 'sha256-of-original-input-file',
+  maxTextChars: 8000,
+  tableRowsPerUnit: 12,
+});
+const audits = [];
+for (const unit of plan.units) {
+  audits.push(await discoverCandidateUnit(unit, { model, maxRetries: 0 }));
+}
+const result = await assembleCandidateDiscovery(plan, audits);
+```
+
+코드가 하위 장 범위, 본문 블록 묶음, 실제 표 셀 묶음과 읽기 전용 인접 문맥을 정합니다. 하나의 긴 본문 블록은 `maxTextChars`를 넘을 수 있습니다. 본문 묶음이 짧은 블록(`CANDIDATE_DISCOVERY_SHORT_BLOCK_CHARS`, 120자 미만)의 연속으로 끝나고 같은 장의 다음 블록이 길면, 그 연속은 다음 묶음 앞으로 옮겨집니다. 그래서 객체의 표제·번호·필드 줄이 설명과 같은 묶음에 남습니다. `CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS`(10개)보다 긴 연속과 짧은 블록만으로 된 묶음은 경계를 그대로 둡니다. 저장된 계획과 실행은 기록된 묶음으로 재현됩니다. 각 호출은 `LLMCaller`와 구조화 응답 검증을 사용하며 호출자가 재시도·취소 설정을 제공합니다. 프롬프트 전체·버전·응답·토큰 사용량을 반환하여 호출자가 체크포인트를 보관하고 재생할 수 있습니다. 프롬프트 v3부터 원문 텍스트마다 선택 가능한 `sourceId`를 붙이고 모델 응답 스키마에서 근거·제외 대상의 선택 범위를 그 ID들로 제한합니다. 고유 입력 ID에는 `id:` 접두사를, ID가 없거나 중복되면 정확한 입력 위치에 `path:` 접두사를 붙입니다. 인접 읽기 전용 문맥에는 선택 ID를 부여하지 않습니다. 코드는 선택된 ID의 원래 자원만 조회하여 인용을 검사하며, 다른 블록으로 옮겨 연결하거나 모델 원응답을 고치지 않습니다. 객체 번호가 별도 제목에 있으면 모델이 그 제목 블록과 번호가 포함된 원문 인용도 추가 근거로 선택해야 합니다. 데모는 순차 호출하며 이 단계에서 자율 탐색이나 보고서 전체 보강을 실행하지 않습니다.
+
+`discoverCandidateUnit`은 묶음마다 같은 시스템 프롬프트를 제공자의 프롬프트 캐시 지점으로 표시하고, 추론 강도는 기본값을 유지합니다. Anthropic 추론 강도 `low`에서 Haiku 5.5는 표본 17개 묶음에서 후보 104개를 찾았고, 기본 추론 두 번은 135개와 140개를 찾았습니다. `low` 후보 중 기본 실행과 같은 것은 51~62%로, 기본 실행끼리의 69%보다 낮았습니다. 일괄 처리 API처럼 호출을 직접 보내는 호출자는 `createCandidateDiscoveryUnitCall(unit)`(첫 호출의 시스템 프롬프트·사용자 프롬프트·스키마), `createCandidateDiscoveryFollowUpCall(unit, firstResponse)`(응답이 요구하는 후속 호출, 없으면 `null`), `recordCandidateDiscoveryUnit(unit, first, second?)`를 씁니다. 마지막 함수는 같은 감사를 만들며, 필요한 후속 호출이 없거나 필요 없는 후속 호출이 오면 예외를 던집니다.
+
+후보 종류는 유적·조사구역·트렌치·층위·유구·유물·침몰선·미상의 8개입니다. 유구·유물은 독립 본문 또는 실질적인 표의 개별 항목이 필요하며 모델 지침에서 이전 조사·단순 언급·매체만 있는 대상을 제외합니다. 이 독립 본문·표 조건은 층위에 적용하지 않습니다. 유물의 출토·퇴적 맥락으로 명시된 층위는 별도 제목·문단·표 행이 없어도 층위 후보로 제안하며, 유물 묶음을 제외해도 그 문장에 명시된 층위는 별도로 판단합니다. 프롬프트 지시는 영어로 작성하고 원문과 지정된 출력 언어는 유지합니다. 코드는 근거 인용의 원문 일치, 명칭·번호, 입력 범위와 기본 근거 유형을 검사하지만 모델의 고고학적 판단이나 누락 없음을 보장하지는 않습니다. 모든 결과는 `proposed`로 남깁니다. 부적합 제안·동일 기준 위치의 중복은 문제 목록에 남기며 모델 원응답도 별도로 보존합니다. 같은 기준 위치의 중복은 이중 집계하지 않지만 다른 위치의 동명·동번호는 임의로 병합하지 않습니다. 후보 ID는 입력 해시·종류·첫 인용 위치로 만들어 해당 스냅샷 내 제안을 식별하며 버전 간 최종 원장 ID가 아닙니다.
+
+한 조사의 객체가 여러 장에 나뉘어 기술되면(예: 조사구역은 조사 방법 장, 유물은 출토 유물 장) `scopeChapterId`에 장 ID 배열을 넘깁니다. 장들은 서로 겹치거나 포함 관계이면 안 됩니다. 코드는 문서 순서대로 계획하며, 앞 장에서 이어진 문단을 옮기는 처리는 같은 장 범위 안의 형제 장 사이에서만 합니다. 계획과 조립 결과는 첫 장을 `scopeChapterId`로, 모든 장을 `scopeChapterIds`로 남기고, `scopeTitle`에 제목을 이어 붙입니다. 여러 장의 후보 전체는 중복 검토 한 번으로 검토하며, 재시도는 같은 장 구성을 유지해야 합니다. 장 ID 하나, 또는 ID 하나짜리 배열은 기존 단일 범위 계획과 똑같은 결과를 만듭니다. `isSameCandidateDiscoveryScope(a, b)`로 두 계획·결과가 같은 장 구성인지 확인할 수 있습니다.
+
+저장한 응답은 `assembleCandidateDiscovery()`로 모델 재호출 없이 다시 검증·조립할 수 있습니다. 부모·속성·매체 연결과 최종 원장 등록은 이 단계에 포함하지 않습니다.
+
+## 라이선스
+
+Apache-2.0 — [LICENSE](../../LICENSE) 참고.
+
+### 전체 후보 중복 검토
+
+모든 탐색 묶음이 끝난 뒤 `deduplicateCandidates(plan, discovery, options)`가 검증된 전체 후보를 하나의 구조화된 LLM 호출로 검토합니다. 장 경로, 원문 본문, 관련 표 행·머리글과 인접 문맥을 함께 제공합니다. `createCandidateDeduplicationRequest`로 실행 전 입력을 확인할 수 있습니다. `assembleCandidateDeduplication`은 저장된 감사 기록이 전체 입력과 일치하고 모든 후보가 정확히 하나의 묶음에 속하는지 검사합니다. 알 수 없는 후보, 누락, 중복 배정, 서로 다른 종류의 통합이 있으면 묶음 전체를 적용하지 않습니다. 중복 검토 프롬프트 v6은 한 그룹이 한 종류 안에서만 만들어진다고 알려주고, 후보 풀에 있는 종류마다 목록 하나씩을 담은 `groupsByKind`로 답하게 했습니다. 각 목록의 스키마는 그 종류의 후보만 허용하므로, 이름이 같은 유적과 면적을 한 그룹으로 묶을 수 없습니다. 현재 프롬프트 v7은 이 종류 규칙을 유지하되 병합만 요청합니다. `mergesByKind`는 한 종류 안에서 둘 이상을 묶는 그룹만 담고, 어느 병합에도 없는 후보는 각자 단독 기록으로 남습니다. 조립은 그런 후보를 코드 사유 `CANDIDATE_DEDUPLICATION_UNMERGED_REASON`을 단 단독 그룹으로 더하고, 모든 그룹을 첫 구성원의 후보 풀 순서로 정렬합니다. 중복되거나 알 수 없는 후보, 종류 섞임, 풀에 없는 종류의 목록, 같은 그룹 안의 불확실 일치는 계속 거절합니다. 그래서 모델이 후보 하나를 빠뜨려도 결과 전체가 무효가 되지 않고 그 후보만 병합되지 않은 채 남습니다. 저장된 v3~v5 감사 기록은 평평한 `groups`로, v6은 `groupsByKind`로 그대로 재현하며 둘 다 완전한 분할을 요구합니다. 불확실한 동일성은 합치지 않고 검토 사항으로 남깁니다.
+
+`deduplicateCandidateBlocks(plan, discovery, { model, maxRetries, abortSignal, completed, onBlock })`는 데모가 쓰는 나눠서 하는 중복 검토입니다. 먼저 `planCandidateDeduplication(plan, discovery)`가 모델 없이 결정론적으로 정합니다. 종류·번호·이름이 같은 쌍은 묶고(`same_number`), 이름이 같고 한쪽 번호가 다른 쪽의 근거 블록이나 표 행에 다른 꼴의 번호로 나오는 쌍은 그 대응이 일대일이면 묶습니다(`number_correspondence`, "마도23-3 마도발굴23-28" 같은 대응표). 같은 꼴의 번호가 나란히 있는 경우("33호 … 5호")는 중복 같은 관계 표기로 보고, 한 후보를 여러 후보와 잇는 번호는 모델에 넘깁니다. 모델은 중복일 수 있는 쌍만 판정합니다. 맥락으로 구별하는 종류(`CANDIDATE_DEDUPLICATION_CONTEXT_KINDS`: 유적·구역·트렌치·층위·난파선·미상)의 모든 쌍, 번호는 같고 이름이 다른 쌍, 번호 없이 이름이 같은 쌍, 번호 있는 후보가 하나뿐인 이름의 번호 없는 언급, 일대일이 아닌 대응, 그리고 (분할 `candidate-deduplication-split.v2`) 한 이름이 다른 이름을 품는 두 후보를 다른 꼴의 번호가 잇는 쌍("마도23-26 마도시굴23-12" 제목 아래의 `마도23-26 청자양각연판문병(호)`와 표 행의 `마도시굴23-12 청자양각연판문 병(호)저부편`)이 여기에 듭니다. 분할 v1은 이런 쌍을 묻지 않고 따로 두었고, 저장된 감사는 자기 분할 판으로 다시 계획합니다. 이런 쌍이 이어진 무리마다 블록이 되고, `createCandidateDeduplicationBlockRequest`는 블록을 프롬프트 `candidate-deduplication.v8`(v7 병합 프롬프트에 블록 규칙 하나를 더함)로, 그 후보의 근거가 있는 묶음만 붙여 보냅니다. 블록마다 같은 시스템 프롬프트는 제공자의 프롬프트 캐시 지점으로 표시하고, Anthropic 추론 강도는 `low`(`CANDIDATE_DEDUPLICATION_BLOCK_PROVIDER_OPTIONS`)로 보냅니다. 저장된 블록 32개에서 `low`는 전체 요청 병합 134쌍 중 132쌍을 지켰고(기본 추론 131쌍), 출력 토큰은 27% 적었습니다. `completed`는 저장된 블록 감사를 다시 쓰고, `onBlock`은 새 블록 감사를 하나씩 받습니다. `createCandidateDeduplicationBlockSchema(discovery, block)`는 일괄 처리 API처럼 블록 요청을 직접 보내는 호출자를 위해 블록의 응답 스키마를 돌려줍니다. `assembleCandidateDeduplication`은 이 나눈 감사도 받습니다(직접 쓰려면 `assembleCandidateDeduplicationSplit`). 나누기와 블록 요청을 모두 다시 계산하고, 규칙 병합과 모델 병합을 이어 같은 `ledger-candidate-groups.v1` 그룹을 만들며, 나누기가 달라졌거나 블록이 없거나 요청이 다르거나 응답이 잘못되면 고치지 않고 문제로 남깁니다. 세 보고서의 저장된 실행에서 규칙은 화지산(후보 517개)의 Haiku 병합 93쌍 중 81쌍, 마도 두 실행의 25쌍 중 12쌍과 11쌍 중 10쌍을 같게 묶었고, Haiku가 따로 둔 쌍을 묶은 경우는 대응표와 본문이 어긋난 마도 1행뿐이었습니다. 나머지 Haiku 병합은 모두 한 블록 안에 들었습니다. 가장 큰 블록 요청은 약 81,000자로, 전체 후보 요청 773,000자 대신 Haiku 5.5의 10만 토큰 장문 요금 아래에 머뭅니다.
+
+`CandidateDeduplicationResult`의 묶음은 원래 후보 ID를 참조합니다. `getCandidateGroupMembers`로 각 후보의 원래 이름·발췌·문자 위치·출처를 그대로 확인합니다. 최초 추출 결과와 모델 감사 기록을 보존하며, 통합은 원문 수정이나 최종 등록·속성·부모 추출을 수행하지 않습니다. 동일 대상 판단은 사람 검토가 필요합니다.
+
+통합 프롬프트는 고고학적 중복·선후·절단 관계와 동일 대상의 반복 기록을 구별합니다. 서로 중복된다는 비고나 번호·규모가 각각 있는 유구를 같은 대상으로 취급하지 않습니다.
+
+### 문제 묶음만 재추출
+
+추출 프롬프트 v5는 번호 없는 원문 명칭 `sourceName`과 원문 식별자 `sourceIdentifier`를 분리합니다. 문맥 명칭과 번호를 합성하거나 접미사를 추가하거나 블록·페이지 경계에서 잘린 단어를 복원하지 않습니다. 불완전한 조각도 각 출처의 정확한 부분 문자열로 따로 인용합니다. 기존 검사 기준을 유지하며 응답을 사후 보정하지 않습니다.
+
+`prepareCandidateDiscoveryRetry(plan, audits)`는 완전히 재현 가능한 추출본에서 검사 문제가 기록된 묶음만 골라 `retryUnitIds`, 변경하지 않은 `retainedAudits`, 부분 `result`를 반환합니다. 선택 묶음만 다시 호출한 뒤 재사용·신규 응답을 함께 조립하고 전체 중복 통합을 수행합니다. 기존 v4와 신규 v5 응답은 각 버전의 정확한 프롬프트와 원래 묶음 입력으로 검증하며, 지원하지 않거나 변조된 감사 기록은 문제로 남깁니다.
+
+추출 v6는 `headerRows`에 원래 헤더 셀의 `text`·`rowSpan`·`colSpan`·`isHeader`를 보존합니다. 번호가 있는 표 후보는 `identifierSourceId`로 번호 셀을 선택하며, 식별자와 첫 인용이 해당 셀의 원문 전체와 같아야 합니다. 명시된 숫자 셀을 인용하면서 식별자를 비운 경우도 검사 문제로 남깁니다. 응답값을 코드로 대체하지 않습니다. 추출 프롬프트 v7부터는 어느 행이든 `table_item`으로 제안된 표 묶음이면, 나머지 비어 있지 않은 데이터 행도 모두 후보나 제외로 다뤄야 합니다. 헤더 셀이 있는 행과, 요청이 모델에게 `headerRows`로 주는 앞쪽 행은 데이터 행으로 세지 않습니다(OCR에서 머리글 표시가 빠질 수 있음). 다루지 않은 행은 묶음별 검사 문제 하나(`Table rows neither proposed nor excluded: …`)로 남아 그 묶음을 다시 실행할 수 있습니다. 이전 프롬프트 버전은 이 검사 없이 재현합니다. 현재 프롬프트인 추출 v8은 같은 규칙을 모델에도 알려줍니다. 한 행이라도 표 항목이면 나머지 데이터 행도 후보나 제외로 답합니다. 저장된 v7 감사 기록은 당시 프롬프트로 재현합니다. 현재 프롬프트인 추출 v9는 응답 첫머리에 `tableRole`을 답하게 합니다. 표 묶음은 `item_table` 또는 `non_item_table`, 본문 묶음은 `none`입니다. 제외에는 `category` 하나(`previous_or_external`, `passing_mention`, `summary_row`, `header_row`, `non_item_table`)를 고르게 하며, 이번 조사의 객체에 맞는 분류는 일부러 두지 않았습니다. 표 항목은 이름이 든 칸을 `nameSourceId`로 고릅니다. v9 감사에서 항목 표의 데이터 행은 후보로 다루거나 행 단위 분류로 제외해야만 답한 것으로 셉니다(지나가는 언급은 행을 답하지 않음). 검사 문제 문구는 `Table rows neither proposed nor excluded with a row-level category: …`입니다. 다음도 검사 문제입니다: `non_item_table`로 답한 묶음의 표 항목, 머리글 칸 이름을 쓴 표 항목, 표 항목이 고른 이름 칸이 본문 칸이 아니거나, 이름이 그 칸에도 캡션·장 제목·맥락에도 없는 경우, 도면·도판·사진 번호가 붙은 식별자. 첫 응답이 항목 표의 행을 남기면 `discoverCandidateUnit`은 그 행만 같은 프롬프트로 한 번 더 묻습니다. 이 호출은 감사 기록의 `followUp`(`rowIndexes`, `userPrompt`, `response`, `usage`)에 남고, 최상위 `usage`와 `structuredAttempts`는 두 호출을 합친 값입니다. 조립은 후속 호출이 첫 응답이 남긴 행을 정확히 물었을 때만 두 응답을 합칩니다. 저장된 v8 감사 기록은 당시 프롬프트와 검사로 재현합니다. 현재 프롬프트인 추출 v10은 본문 원문마다 제목 구간(`section`, `sectionHeading`)을 표시합니다. 세 자리 이하 번호나 `(2)`, `21.`, `①`, `가.` 같은 기호로 시작하는 짧은 블록(`isSectionHeading`)이 구간을 열고, 뒤따르는 블록이 그 구간에 속합니다. 설명 블록을 거느린 제목이 객체를 가리키면 그 구간이 객체의 독립 본문입니다. v10에서 독립 본문 근거의 유구·유물 후보는 근거 블록 중 하나의 앞 15자(공백 제외, `CANDIDATE_DISCOVERY_NAME_LEAD_CHARS`) 안에 이름이나 식별자가 있어야 합니다. 후속 호출은 수정도 맡습니다. 첫 응답에서 검사에 걸리거나 앞선 근거를 반복한 후보를 묶음 전체, 문제, 수정 지침과 함께 한 번 돌려보내고, 답 없는 행이 있으면 함께 묻습니다. 감사 기록의 `followUp.corrections`에 남고, 조립은 그 후보를 후속 응답의 후보로 대신합니다. 저장된 v9 감사 기록은 당시 프롬프트와 검사로 재현합니다. 추출 v11은 v10 입력을 그대로 두고 후속 호출 규칙 세 가지를 더합니다. 설명 블록이 이어지는 구간 제목을 제외했는데 그 제목이 번호 붙은 객체를 가리키면(앞 번호·기호와 괄호 속 참조를 뺀 제목에 `1트렌치`, `1호 건물지`처럼 숫자가 낱말에 붙어 있으면) 과거·외부 조사로 제외한 경우가 아닌 한 `reconsiderExclusions`로 한 번 되묻습니다. 감사 기록은 `followUp.reconsiderations`를 남기고, 후속 응답이 그 제외를 대신하며, 그 제목 구간에서는 제목 블록 자체를 첫 근거로 둔 후보만 받습니다. 첫 머리글 행을 `colSpan`만큼 펼쳤을 때 같은 이름 순서가 반복되는 좌우 나란한 표(`columnBlocks`)는 행 블록 단위로 답을 확인합니다. 블록은 후보의 식별자 칸이나 첫 근거, 또는 행 단위 제외로만 답한 것으로 보고, 답 없는 블록은 그 칸만 남긴 묶음에 `table.columnBlocks`를 붙여 한 번 더 묻습니다(`followUp.rowBlocks`). 끝내 빠진 블록은 `Table row blocks neither proposed nor excluded with a row-level category: 행:블록, …` 문제가 됩니다. 후속 응답 후보가 남아 있는 1차 후보와 종류·근거 위치까지 같으면 중복 문제로 남기지 않고 버립니다. 저장된 v10 감사 기록은 당시 프롬프트와 검사로 재현합니다. 추출 v11은 제목 재검토와 좌우 나란한 표 규칙을 시스템 프롬프트에도 적었는데, 로컬 모델에서 이 문장이 관련 없는 입력의 1차 응답까지 바꿨습니다. 그래서 추출 v12는 v10 시스템 프롬프트를 보내고 입력·검사·후속 호출은 v11과 같게 두며, 두 규칙은 필요한 후속 입력에만 `followUpRules`로 붙입니다(`reconsiderExclusions`에는 `RECONSIDERED_EXCLUSIONS_RULE`, `table.columnBlocks`에는 `SIDE_BY_SIDE_TABLES_RULE`). 저장된 v11 감사 기록은 당시 프롬프트와 후속 호출로 재현합니다. 추출 v13은 v12 첫 호출을 그대로 두고 후속 호출 하나를 더합니다. 모델이 번호가 이어지는 개별 설명을 중간까지만 답하고 나머지를 제외 사유 없이 빠뜨릴 수 있기 때문입니다. 본문 묶음에서 앞머리 기호를 뺀 블록이 응답이 제안한 식별자와 같은 꼴의 번호로 시작하고(숫자열만 일반화하므로 `마도23-5`는 `마도<n>-<n>`, `3호`는 `<n>호`이며, 숫자와 문자를 함께 갖지 않은 식별자는 꼴을 만들지 않음), 어떤 후보나 제외도 그 블록을 인용하지 않고, 그 번호를 쓰는 후보도 없으면 `unansweredNumberedBlocks`로 한 번 더 묻고 `followUpRules`에 `UNANSWERED_NUMBERED_BLOCKS_RULE`을 붙입니다. 감사 기록은 `followUp.numberedBlocks`를 남기며, 후속 호출 뒤에도 답이 없는 블록은 `Numbered body blocks neither proposed nor excluded: …` 문제가 되어 그 묶음을 다시 실행할 수 있습니다. 저장된 v12 감사 기록은 당시 프롬프트와 후속 호출로 재현합니다. `createCandidateDiscoveryRequest(unit, promptVersion?)`는 저장된 어느 버전이든 시스템·사용자 프롬프트를 그대로 다시 만듭니다(기본은 현재 버전). 새 추출 감사 기록에는 `finishReason`과 `structuredAttempts`(스키마 불일치 재시도를 포함한 구조화 출력 시도 수, 앞선 시도의 토큰은 `usage`에 들어가지 않음)가 남고, provider가 사고 토큰을 보고하면 `usage.reasoningTokens`도 남습니다. 다음 형제 챕터의 실제 제목 앞에 놓인 연속 본문은 앞 챕터의 추출 입력에 함께 배치하되, 원래 경로·ID·페이지·색인의 챕터 소속을 유지합니다. 제목을 찾지 못한 경계는 바꾸지 않습니다. v15(현재 프롬프트, `CANDIDATE_DISCOVERY_PROMPT_VERSION`)는 v14의 호출을 그대로 두고, 이미 받은 후보와 똑같은 제안(같은 근거 위치·이름·번호)은 중복 근거 문제로 남기지 않고 같은 후보로 받으며, 답이 없는 번호 블록에 번호 붙은 조사 구역·트렌치·그리드 표기로 시작하는 본문 블록(`23-1구역`, `23-A-2구역`, `3트렌치`)도 넣으며, 후속 질문에는 `UNANSWERED_NUMBERED_BLOCKS_RULE_V15`를 씁니다. `출수위치 발굴 6구역`처럼 앞에 항목 이름이 붙은 줄은 넣지 않습니다. 실행 간 차이가 가장 컸던 곳이 이런 블록입니다. 마도 네 실행 중 하나는 구역별 서술 16개를 모두 등록했고, 셋은 그중 10개를 후보도 제외도 없이 넘겼습니다. 이런 블록에 답한 저장 실행은 모두 구역이나 트렌치로 등록했습니다. 저장된 실행에서 v15는 정확히 그 10개 블록과 다른 보고서의 `8트렌치` 블록 하나만 묻습니다. v14는 v13의 호출을 그대로 두고 수정 사유 하나를 더합니다. 번호가 없는(sourceIdentifier가 null인) 본문 유물 후보의 첫 근거 블록이 도록 번호와 그 이름으로 시작하면(`13. 삼족기`) 잘못된 후보로 보고, 후속 질문이 그 번호를 묻습니다. 저장된 모든 후보 탐색 실행에서 이런 유물 762개는 모두 번호가 있었고, 표본 재실행 한 번이 도록 묶음 하나에서 번호를 빠뜨렸습니다. `2) 우물` 같은 장절 번호와 번호 뒤에 다른 이름이 오는 블록은 묻지 않습니다. v13 이전으로 저장된 감사는 각자의 검사로 다시 조립됩니다.
+
+`prepareCandidateDiscoveryRetry(plan, audits, { unitIds, updatedPlan })`는 제외 판단 등 사람이 검토한 묶음과 갱신된 입력도 받아 교체된 `plan`을 반환합니다. 선택하지 않은 묶음의 입력과 응답은 그대로 보존합니다. 기존 v4/v5 감사 기록은 당시 프롬프트로 재현하며 v6 검사를 소급 적용하지 않습니다.
+
+중복 통합 프롬프트 v3는 번호가 없는 층위도 전처리 입력의 전체 층위 정의·국지적 위치·지층 성격·층위 역할이 같은 대상을 가리키면 통합하도록 합니다. 판단 이유에 그 연결 근거를 명시하며, 일반적인 원지반·토질 명칭만 같은 경우나 별개 하위층은 구분합니다. PDF의 누락 문장을 복원하지 않고 전처리 입력만 사용하며, 원래 후보의 번호 유무와 발췌·출처는 그대로 보존합니다.
+
+## 보고서 프로필
+
+보고서마다 성격이 다르므로(육상 발굴, 트렌치 위주 시굴, 수중 도록형 등), 이후 단계는 모든 보고서에 같은 규칙을 쓰지 않고 사람이 확인한 `ReportProfile`(`report-profile.v1`)을 읽습니다. 프로필에는 원본 입력 해시, `REPORT_TRAIT_IDS` 특성별 판정(`yes`·`no`·`unclear`), 이번 조사 객체가 있는 장 목록(서로 겹치거나 포함하지 않음), 출처(`router`·`manual`), 확인 시각을 담습니다. 특성 목록은 열려 있어서, 새로운 유형의 보고서에서 나온 특성은 분기에 쓰이기 전까지 `x-` 접두 특성으로 기록합니다.
+
+`collectReportSignals(document, index, { inputSha256 })`는 보고서 라우터가 특성을 판정하기 전에 읽는 결정론적 코드 신호 `report-signals.v1`을 돌려주며 모델을 호출하지 않습니다. 목차(깊이, 본문 길이, 표·이미지·캡션 수, 부록류·조사류 제목)와 범용 패턴으로 센 값이 들어 있습니다. 트렌치 제목, 격자 크기·번호 구역, 유구·유물 없음 문장, 이전 조사 언급, 문장 중간에서 끝나는 본문 블록 비율, 캡션 없는 이미지가 많은 장, 줄 머리 번호 접두와 변이, 도록 계측값·라틴 문자 전용 블록, 일지형 표, 등록표(첫 열 고유 비율, 부록 위치), 번호 층 단위와 반복되는 일반 층 이름입니다. 값마다 원문 표본(장, PDF 쪽, `id:`/`path:` 원문 ID)을 최대 3개 남깁니다. 신호에는 문턱이 없으며 특성 판정은 라우터와 프로필을 확인하는 사람의 몫입니다.
+
+`createReportRouterRequest(index, signals)`는 모델을 호출하지 않고 라우터 요청 `report-router.v2`(`REPORT_ROUTER_VERSION`)를 만듭니다. 영어 지시문, 특성 목록과 정의(`REPORT_TRAIT_DEFINITIONS`), 목차, 압축 신호, 코드가 고른 인용 가능한 발췌(신호 표본, 도록형 항목 앞의 두 개와 뒤따르는 블록, 조사 장 안의 이전 조사 언급, 가장 넓게 반복되는 층 이름 두 개, 조사·부록류 장의 첫 블록, 등록표·일지 표의 머리글)가 들어갑니다. 모델은 특성마다 `yes`/`no`/`unclear`와 확신도, 한국어 이유, 원문 그대로의 인용이나 신호 이름을 답하고, 겹치지 않는 최소 범위 장을 고르며, 새 특성을 제안할 수 있습니다. 입력은 v1 시범 요청과 같고 v2는 스키마만 바꿉니다(`createReportRouterSchema()`). 특성 ID·값·확신도·신호 이름은 작은 고정 목록으로 두고, 원문·장 참조는 코드가 확인하는 일반 문자열로 둡니다. 엄격한 구조화 출력을 쓰는 provider가 큰 열거형을 거부하기 때문입니다. `inspectReportRouterResponse(request, rawResponse)`는 응답을 고치지 않고 그 요청에 비춰 검사해 `report-profile-proposal.v1`을 돌려줍니다. 특성마다 자기 문제(모르는 원문, 발췌의 정확한 부분 문자열이 아닌 인용, 근거·신호 없는 `yes`/`no`, 모르는 신호, 측정 신호로 뒷받침할 수 없는 `yes` — 트렌치·일지 표·등록표·번호 변이·도록 신호가 모두 없음)를 남기고, 범위 문제(장 없음, 모르는·반복·중첩된 장, 범위 밖 장의 이유), 누락·반복·모르는 특성, 새 특성 인용 문제도 남깁니다. 라우터 형식이 아닌 응답은 제안을 만들지 않습니다. 저장된 v1 시범 요청도 같은 방식으로 검사됩니다.
+
+`routeReport(index, signals, { model, maxRetries = 0, abortSignal, onAttempt })`는 그 요청을 한 번 보내고, 요청 원본·신호·받은 그대로의 출력·사용량·시도 기록·검사 결과를 담은 호출을 돌려줍니다. 실패는 예외 대신 실패한 호출로 돌려줍니다. `createReportProfileFromProposal(proposal, { inputSha256, confirmedAt, routerRunId?, scopeChapterIds? })`은 제안을 `source: 'router'` 프로필로 바꿉니다. 한 번만, 문제 없이, 확신도 high로 판정된 특성만 값을 유지하고, 나머지는 `unclear`가 되어 얇은 배정 정책에서 그 특성이 정하는 분기에 결정 필요 표시가 붙습니다. 세 보고서에 Haiku 5.5로 잰 결과 high 판정은 모두 사람 프로필과 일치했고 오답은 medium이었습니다. 라우터의 범위 오류가 체계적이어서 제안 범위는 제안으로만 남기며(`scopeStatus: 'proposed'`), 후보 탐색은 이 범위로 시작하지 않아야 합니다. 주입한 범위는 제안 범위를 대신하고 결정된 범위로 봅니다. 어떤 특성을 왜 unclear로 바꿨는지와 범위 출처는 메모에 남습니다. `CONTENT_ATTACHMENT_THIN_POLICY_TRAITS`는 지금 얇은 배정 분기를 정하는 특성(`local_stratigraphy`, `catalog_artifacts`) 목록입니다. `prepareReportProfile(document, index, { inputSha256, profile?, scopeChapterIds?, model?, ... })`은 `DocumentProcessor`가 쪽 범위와 목차를 정하는 방식으로 프로필을 정합니다. 프로필을 주입하면 라우터를 건너뛰고, 아니면 라우터 1회 호출로 제안합니다. 주입한 범위는 어느 쪽이든 프로필 범위를 대신합니다. 프로필(호출이 실패하거나 출력 형식이 맞지 않으면 `null`), 출처(`injected`/`router`), 호출, 라우터 검사·프로필 검증 문제를 돌려주며 아무것도 고치지 않습니다. 프로필을 주입하지 않으면 모델이 필요합니다.
+
+`completeReportScope(index, signals, proposedChapterIds)`는 사람 없이 도는 실행에서 제안 범위를 보완합니다. 결정론적이며 모델을 호출하지 않습니다. 신호가 조사 장(조사 범위·방법·내용·시굴·발굴 제목)으로 표시한 장을 모두 더하고, 문서 순서대로 가장 바깥 장만 남깁니다. 결과 `report-scope-completion.v1`에는 범위, 받은 그대로의 제안, 더한 장, 더 넓은 장 안으로 들어간 제안 장이 담깁니다. 상위 제목에 장비가 함께 적혀 있으면 라우터가 이번 조사의 구역을 정의하는 장을 뺄 수 있습니다. 태안 보고서의 라우터는 `III. 조사장비 및 내용 > 2. 조사내용`을 빼 23-1~6, 23-A-1~10 구역을 잃었습니다. 배경·고찰 장은 더하지 않습니다. 결과를 `buildArchaeologyLedger`의 `discoveryScope`로 넘기면 원장 머리(`ledger.discoveryScope`)에 기록됩니다.
+
+`validateReportProfile(index, inputSha256, profile)`은 프로필을 고치지 않고 찾은 문제를 모두 돌려줍니다(다른 입력, 모르는 특성·값, 없거나 반복되거나 겹치는 범위 장, 모르는 범위 상태, 모르는 출처, 잘못된 시각). 빈 목록이면 쓸 수 있는 프로필입니다. `scopeChapterIds`는 그대로 `prepareCandidateDiscovery`에 넘길 수 있으며, `scopeSource: { kind: 'profile', profileSha256 }`도 함께 넘기면 범위가 그 프로필에서 왔다는 사실이 계획에 남습니다. `reportProfileSha256(profile)`은 키를 정렬해 해시하므로 같은 판정이면 같은 해시가 나옵니다. `contentAttachmentThinPolicyFromProfile(profile)`은 특성을 얇은 배정 규칙으로 바꿉니다. 층서가 국지적이지 않다고 확인된 경우(`local_stratigraphy: 'no'`)와 프로필이 없는 경우만 `layers: 'all'`이고, 나머지는 `layers: 'local'`입니다. 프로필이 있으면 `areas: 'unanimous'`도 넣고, `catalog_artifacts` 특성이 `'yes'`이면 `catalog: 'fields'`도 넣으며, 프로필이 없으면 면적은 항상 검수로 갑니다. 프로필은 `trivial: 'code'`도 설정합니다. 이때 컴파일은 겉보기로 어떤 후보도 서술하지 않는 구간을 모델의 구간 목록에서 빼고 `codeMap.codeNone`에 남기므로, 그 구간은 배정되지 않고 출력 비용도 들지 않습니다. 판정은 `isContentAttachmentThinTrivialText(text)`가 합니다. 숫자·구분 기호·단위 없는 계측값만 있는 구간(쪽 번호, 표의 개수), "6월 7일" 같은 날짜(조사 일지 표처럼 요일이나 소요 시간이 뒤에 붙은 "2023년8월19일(토)", "14:30~15:30(60분)"도 포함), 번호가 붙은 그림·사진·도판·표 이름표 중 문장처럼 끝나지 않고 `CONTENT_ATTACHMENT_THIN_TRIVIAL_LABEL_MAX_LENGTH`(120)자 이하인 것입니다. 그 낱말은 읽기 맥락으로 창에 남습니다. 세 보고서의 저장된 Haiku 5.5 실행에 적용하면 6,534구간 중 1,260구간이 해당했고, 3회 실행 기준은 그중 어느 것에도 배정하지 않았으며 32구간을 검수로 보냈습니다. `resolveContentAttachmentThinPolicy(profile, { traitOverrides, policyOverrides })`는 자동 프로필 밖에서 분기를 정하려는 호출자를 위해 `{ policy, decisions }`를 돌려줍니다. `DocumentProcessor`가 검토된 `pageRangeMap`·`tocEntries`를 받는 방식과 같습니다. 우선순위는 분기 직접 지정(`policyOverrides`: `layers` `all|local`, `continuity` `linked|none`, `areas` `unanimous|review`, `catalog` `fields|none`, `trivial` `code|model`), 호출자 특성 지정(`traitOverrides`, 목록에 있는 특성 ID와 `yes|no|unclear`), 프로필 특성, 기본값 순이며, 모르는 ID나 값은 예외를 던집니다. 결정마다 분기·값·출처(`policy_override`, `trait_override`, `trait`, `profile`, `default`)와 해당 특성·특성 값을 남깁니다. 특성이 unclear이거나 없어 기본값으로 정해진 분기에는 `needsDecision`이 붙어 외부 검수자가 정할 수 있습니다. `contentAttachmentThinPolicyFromProfile(profile)`은 지정 없이 같은 방식으로 정한 정책입니다. 결정 목록은 `prepareContentAttachment`에 `thinPolicyDecisions`로 넘기면 계획에 남습니다. 정책은 `prepareContentAttachment`에 `thinPolicy`로(프로필의 해시와 출처는 `profile`로) 넘기며, 계획에 그대로 남아 컴파일·검사·분류·조립이 모두 계획에서 정책을 읽습니다. `layers: 'local'`에서 분류는 여러 층위가 함께 쓰는 층 이름에 대해 근거가 그 묶음에 있는 층위만, 그중에서도 구간 앞쪽에 가장 가까운 근거가 있는 층위만 검수 제안으로 남깁니다. 한 층위만 쓰는 이름은 영향을 받지 않습니다. 같은 정책에서 컴파일(`content-attachment-thin-compile.v3`, `CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION`)은 근거가 한 묶음에만 있는 층위를 그 묶음에 제시하고, 바로 앞뒤 묶음에는 층위의 근거 장(그 장 또는 상위 장)이 같을 때만 제시합니다. 근거가 여러 묶음에 있거나 없는 층위는 계속 모든 묶음에 제시합니다. 분류도 그 묶음에 제시된 층위만 검수 제안으로 올리며, 앞뒤 묶음에서 온 한 묶음 층위는 같은 장의 구간에만 제안합니다. 확인된 프로필은 `continuity: 'linked'`도 설정합니다. 이때 묶음 첫 본문 블록 바로 앞의 읽기 전용 블록은 원본 문서가 쪽 경계에서 새 장을 시작해도 첫 블록과 같은 읽기 순서에 남고, 그 블록을 등록 근거로 삼은 제시 후보를 `evidenceOf`로 표시합니다. 이 컴파일은 `content-attachment-thin-compile.v4`(`CONTENT_ATTACHMENT_THIN_LINKED_COMPILE_VERSION`, 층위 all) 또는 `.v5`(`CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION`, 층위 local)이고, 요청은 쪽 경계 규칙 하나를 더한 프롬프트 `content-attachment-thin.v9`(`CONTENT_ATTACHMENT_THIN_LINKED_VERSION`)를 씁니다. 이 필드가 없는 계획은 이전과 바이트 단위로 같게 컴파일됩니다. 정책이 없으면 컴파일은 `content-attachment-thin-compile.v1`이고 이전과 바이트 단위로 같습니다.
+
+## 묶음 단위 얇은 원문 배정
+
+얇은 경로는 고정된 후보 목록에 본문 문장과 표 항목을 배정하는 현재 방식입니다. 아래 `prepareContentAttachment` 계획을 그대로 쓰고, 구간마다 부르던 수신 대상 호출 대신 묶음마다 짧은 호출 하나를 기본 두 번 보냅니다. 호출자의 모델을 부르는 `attachContentThinUnit`을 빼면 모두 결정론적이고 오프라인으로 동작합니다.
+
+- **컴파일** — `createContentAttachmentThinInput(plan, unit)`은 `{ version, input, codeMap }`(`content-attachment-thin-compile.v1`)을 돌려줍니다. 코드가 원문을 문장 구간으로 나누고, 모델은 최대 16단어짜리 Q 창(`CONTENT_ATTACHMENT_THIN_WINDOW_WORDS`)으로 원문 단어를 가리킵니다. 모델에 보일 후보도 코드가 먼저 거릅니다. 면적·트렌치·층위는 항상 넣고, 이름과 번호가 원문에 그대로 나오는 후보, 같은 장의 번호, 제목 핵심어가 묶음에 나오는 장의 후보(장 구성원 30개 이하, `CONTENT_ATTACHMENT_THIN_CHAPTER_MEMBER_LIMIT`)를 넣습니다. 장×유형 핸들(`H` 참조)은 그룹 전체를 가리킵니다. 원문 순서, 캡션, 표 위치를 유지합니다. 등록 행, 셀에서 등록된 후보, 유형명이 유일하게 맞는 표 행(`createContentAttachmentThinRowOwners`)은 코드가 배정하고 모델에 보내지 않습니다.
+- **요청** — `createContentAttachmentThinRequest(compilation)`은 `content-attachment-thin.v8` 지시문과, 모든 구간 키를 요구하는 공급자 스키마를 만듭니다. 각 판정은 `k: a|n`이며 대상, 핸들, 제외 참조, 대상 정체 대안, 관계 주체 대안, Q/L 근거를 담습니다. `contentAttachmentThinRestoredRules()`는 `segment-recipients.v26` 지시문에서 그대로 가져온 배정 규칙을 돌려줍니다.
+- **요청 형식** — `createContentAttachmentThinRequest(compilation)`은 프롬프트 `content-attachment-thin.v13`(`CONTENT_ATTACHMENT_THIN_AGGREGATE_VERSION`)을 기본으로 씁니다. v11(`CONTENT_ATTACHMENT_THIN_HEADINGS_VERSION`)은 v10에 규칙 하나를 더합니다. 등록된 후보를 지목하는 제목은 도면·사진 번호가 붙어도 그 후보를 서술하고, 후보를 지목하지 않는 주제 제목은 `n`이며, 글이 이름을 밝힌 후보를 다룬다는 문장은 그 후보를 서술합니다. 프롬프트 v12(`CONTENT_ATTACHMENT_THIN_CATALOG_VERSION`)는 v11에 도록 항목 규칙을 더합니다. 유물을 항목마다 하나씩 싣는 도록에서 번호·이름·외국어 이름·출수위치·출수일·계측값 줄을 포함한 항목의 모든 줄은, 다음 항목의 번호 줄이 나오기 전까지 그 항목의 유물을 서술합니다. 프롬프트 v13은 v11에, v14(`CONTENT_ATTACHMENT_THIN_AGGREGATE_CATALOG_VERSION`)는 v12에 수량·집합 요약 규칙을 더합니다. 이번 조사에서 보고서가 정의한 집합이나 그 안의 한 부류를 서술하거나 세는 문장은 그 집합·부류의 등록 구성원 모두를 서술하며, 일부·대부분에 대한 후속 설명도 포함합니다. 집합 안 한 종류만 말하는 문장은 그 종류의 등록 구성원만 서술하므로 집합 핸들 없이 개별로 적습니다. 등록되지 않은 유물까지 세어 등록 구성원보다 수량이 분명히 많으면 어떤 후보도 서술하지 않습니다. `attachContentThinUnit`은 계획의 `thinPolicy.catalog`가 `'fields'`이면 v14를, 아니면 v13을 보내며, 저장된 v11·v12·v15·v16 요청은 기록된 대로 재현됩니다. 프롬프트 v15는 v13에, v16(`CONTENT_ATTACHMENT_THIN_LAYER_CATALOG_VERSION`)은 v14에 층위 맥락 규칙을 더합니다. 등록된 현재 층위에 대해서는 관계 상대 규칙 대신 이 규칙을 따릅니다. 확인된 유물이나 유구가 어떤 층위에서 출토되었거나, 그 층위를 굴착했거나, 그 층위를 기반으로 조성되었다는 구간은 대상과 층위를 모두 설명하고, 층위 자체의 형성·구성·순서·깊이·범위를 말하는 구간은 그 층위를 설명합니다. 유구를 드러내려고 걷어 낸 층으로만 나온 층위는 붙이지 않으며, 표토 같은 일반 이름만으로는 한 층위로 정하지 않습니다. v15·v16은 `{ version }`으로 골라 쓰는 선택 버전입니다. 세 보고서에서 다시 실행했을 때 출토 위치·기반 층위를 두 실행 중 한 번만 붙여 그 구간이 검수에 남았고, 전체 검수도 줄지 않았습니다. `{ version }`을 넘기면 저장된 어느 버전이든 다시 만듭니다. 배열 형식은 프롬프트 v10(`CONTENT_ATTACHMENT_THIN_ARRAY_VERSION`)에서 도입됐습니다. `d`는 구간마다 항목 하나인 배열(`s`가 구간 참조)이고, 스키마(`createContentAttachmentThinArraySchema()`)는 모든 묶음에서 같으며 구간·후보·묶음·범위 참조의 형식만 확인합니다. 엄격한 구조화 출력을 쓰는 provider는 큰 묶음의 구간별 객체 스키마를 너무 복잡하다며 거부하지만, 배열 스키마는 작게 유지됩니다. `{ format: 'object' }`를 넘기면 구간·제시 후보·묶음·창을 열거하는 v8/v9 요청을 만듭니다.
+- **검사** — `inspectContentAttachmentThinResponse(plan, unit, { request, rawResponse })`는 저장된 요청의 버전(v10/v11은 배열, v8/v9는 객체)으로 요청을 다시 컴파일해 바뀐 요청을 거부하므로, 저장된 실행은 그대로 재현됩니다. 구간·후보·묶음·범위가 실제로 있는지는 여기서 확인하며, 배열 형식에서 구간 참조가 없는 항목은 검사 문제이고 같은 구간이 두 번 나오면 검사 문제로 남기고 그 구간은 제외합니다. 그 밖에 구조를 검사한 뒤 핸들과 근거를 원문 단어와 UTF-16 위치로 풉니다. 원응답은 고치지 않고 `{ issues, findings, decisions }`를 돌려줍니다.
+- **분류** — `routeContentAttachmentThinSegments(plan, unit, compilation, runs, { wholeUnitReview })`는 모든 호출이 같이 고른 대상만 자동 확정합니다. 대상이 갈리거나, 불확실성 그룹이 다르거나, 무효인 호출이 있거나, 면적이 나오면 그 구간은 검수로 갑니다. 모든 실행이 고른 대상은 개수와 상관없이 확정하므로, 모든 실행이 묶음 전체에(직접 또는 장 핸들로) 붙인 집계·요약 문장은 검수 없이 붙습니다. 이전 버전은 확정 대상이 50개를 넘거나(`large_collective`) 핸들로 들어온 대상이 10개를 넘으면(`large_handle`) 검수로 보냈습니다. 그 사유가 있는 저장된 배정도 그대로 읽히며, 크기 상수는 더 이상 내보내지 않습니다. 기본값에서는 면적이 항상 검수로 갑니다. 계획의 `thinPolicy.areas`가 `'unanimous'`이면 모든 호출이 같이 고른 면적은 다른 대상처럼 확정되고, 일부 호출만 고른 면적은 다툼 대상이 됩니다. `contentAttachmentThinPolicyFromProfile`은 프로필이 있으면 이 선택값을 넣습니다. 선택값은 계획마다 고정되므로, 이전에 준비한 계획의 분류 결과는 그대로입니다. `checkContentAttachmentThinOutliers(segments, runs)`는 혼자 다른 답을 낸 비율이 25%를 넘고 3구간 이상인 호출을 이상 호출로 표시합니다(`CONTENT_ATTACHMENT_THIN_OUTLIER_RATE`, `CONTENT_ATTACHMENT_THIN_OUTLIER_MIN_COUNT`). 구간에 이름이 그대로 나왔지만 어느 실행도 고르지 않은 층위는 검수로 보내지 않고 `layerMentions`에 남깁니다. 지시문이 출토 위치나 기반 층 같은 관계 상대를 이후 단계로 넘기므로, 그 구간은 다른 대상을 그대로 붙이고 층위는 관계 후보가 됩니다. "표토층과 현대 퇴적층을 제거하자"처럼 걷어 낸 층으로만 나온 층위는 남기지 않고, 일부 실행만 고른 층위는 다른 대상처럼 갈린 대상으로 다룹니다. `assembleContentAttachmentThin`은 이를 `layerMentions`(구간, 위치, 층위, 그 구간의 확정 대상)로 모읍니다. 예전 `layer` 사유가 있는 저장된 배정도 그대로 읽힙니다. 저장된 화지산 실행을 다시 배정하면 층위 검수 27개가 층위 언급 후보 15개로 바뀌고 검수 항목은 70개에서 48개로 줄었습니다.
+- **실행** — `attachContentThinUnit(plan, unit, { model, runs = 2, providerOptions, maxRetries = 0, abortSignal, onAttempt, onCall })`은 `providerOptions`를 주지 않으면 모든 호출을 `CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS`(Anthropic 추론 강도 `low`, 다른 제공자는 무시)로 보내고(`{}`이면 제공자 기본값), 호출마다 그 옵션을 기록합니다. 세 보고서의 저장된 묶음 24개에서 Haiku 5.5의 `low`는 저장된 기본 추론 실행과 구간의 5.2%가 달랐고, 저장된 실행끼리는 6.0%가 달랐으며, 출력 토큰은 38% 적었습니다. 추론을 끄면 검사 문제가 284건 나왔고 11.7%가 달랐습니다. 이 함수는 r1을 보낸 뒤 r2를 보냅니다(`CONTENT_ATTACHMENT_THIN_DEFAULT_RUNS`). r2가 제공자의 프롬프트 캐시를 다시 쓸 수 있게 하기 위해서입니다. 모든 구간은 두 호출로 라우팅하며, 두 호출이 모두 고른 대상만 확정됩니다. 실패한 호출은 다시 보내지 않고 묶음이 실패합니다. 2회 실행에는 이상 호출 검사가 없으므로 `outliers`에는 `finalRuns`(`r1`, `r2`)와 `wholeUnitReview: false`만 남습니다. 세 보고서의 저장된 Haiku 5.5 실행을 `trivial: 'code'`에서 이 방식으로 다시 판정하면 구간의 89.8%, 95.1%, 96.3%가 자동으로 정해졌습니다. 저장된 3회 라우팅은 89.1%, 94.1%, 94.7%였고, 호출은 758회에서 512회로, 출력 토큰은 약 3분의 1 줄었습니다. 저장된 실행을 돌려 가며 빠진 한 실행과 비교하면, 두 실행이 일치한 자동 구간은 0.8~1.3%, 한 실행만 쓴 자동 구간은 1.6~3.0%가 달랐습니다. `runs: 3`이면 r1을 보낸 뒤 r2와 r3을 함께 보냅니다. 이상 호출이 정확히 하나면 대체 호출(r4)을 한 번 보냅니다. 대체 호출도 이상 호출이면 호출들이 두 가지 읽기로 갈린 것으로 보고, 네 호출 모두로 구간별 라우팅합니다(`finalRuns`가 r1~r4). 네 호출이 모두 고른 대상만 확정되고, 하나라도 다르면 검수로 갑니다. 대체 호출이 실패하면 묶음 전체가 검수로 갑니다. 저장된 결과는 기록된 라우팅을 그대로 유지합니다. 각 호출은 요청, 원응답, 사용량, 검사 결과와 함께 `onCall`로 전달됩니다. 결과 상태는 `routed`, `failed`, `no_llm_segments` 중 하나입니다.
+- **외부에서 한 호출** — `createContentAttachmentThinUnitRequest(plan, unit)`은 `attachContentThinUnit`이 보내는 고정 요청(`catalog: 'fields'`이면 프롬프트 v14, 아니면 v13)을 돌려주고, 모델이 판정할 구간이 없는 묶음이면 `null`을 돌려줍니다. 호출자는 이 요청을 제공자의 일괄 처리 API 같은 다른 경로로 보낼 수 있습니다. `recordContentAttachmentThinCall(plan, unit, { run, request, rawResponse, usage?, finishReason?, error?, callAttempts? })`은 각 응답을 같은 호출 기록으로 바꾸며, 검사를 거치고 고치지 않습니다. `error`가 있으면 실패한 호출로 기록합니다. `routeContentAttachmentThinTwoRuns(plan, unit, calls)`는 기본 2회 경로를 r1과 r2로 라우팅해 같은 묶음 결과를 돌려줍니다. 둘 중 하나가 없거나 실패하면 `failed`, 호출이 필요 없으면 `no_llm_segments`이고, 호출의 요청이 묶음의 현재 요청과 다르면 예외를 던집니다. `attachContentThinUnit`도 이 세 함수를 씁니다.
+- **셋째 실행** — 2회 실행에서 `attachContentThinUnit`은 `contentAttachmentThinNextRun`이 요구하는 대로 r3, 그다음 r4를 더 보냅니다. 망가진 실행(`isContentAttachmentThinDegenerate`: 완료됐지만 구간 절반 이상의 판정이 빠진 응답, 추론 강도 `low`의 Haiku 5.5가 가끔 돌려줌)을 대체하거나, 쓸 수 있는 두 실행이 서로 달라서만 검수로 보낸 구간(대상 다툼, 미결 묶음 차이, 한쪽 응답 무효, `isContentAttachmentThinTiebreakable`)이 있을 때입니다. 실패한 호출 뒤에는 더 보내지 않고, 끄려면 `tiebreak: false`를 씁니다. `routeContentAttachmentThinTiebreak`는 r1과 r2가 같은 구간은 그대로 두고, 나머지는 r3과 같은 쪽으로 정하며(`decidedBy: 'majority'`), 그래도 정해지지 않으면 세 실행 모두로 검수에 남깁니다. 면적이나 단위 전체 검수 때문에 검수로 간 구간은 이렇게 정하지 않습니다. `routeContentAttachmentThinTwoRuns`는 쓸 수 있는 앞의 두 실행으로 라우팅하고, 셋째로 쓸 수 있는 실행이 있으면 그것으로 다수결합니다. 쓸 수 있는 실행이 둘보다 적으면 r1과 r2를 그대로 씁니다. 저장된 마도 3회 실행에서 r1·r2가 검수로 보낸 127구간 중 125구간은 r3이 한쪽과 같았고, 해당 묶음은 111개 중 24개였습니다. 이런 다수결이 얼마나 맞는지는 넷째 실행 없이 잴 수 없습니다.
+- **조립** — `assembleContentAttachmentThin(plan, results)`은 `ledger-content-attachments.v2`를 돌려줍니다. 배정 내용은 원문 구간을 자원 키와 위치로 가리키며, 근거 종류는 `model_unanimous`, `model_majority`(셋째 실행으로 정함), `code_row_owner`, `code_typed_row`, `code_cell_registration` 중 하나입니다. 검수 항목에는 최종 호출 각각의 판정이 남습니다. 검수 항목의 확정·다툼 대상이 구성원 5개 이상(`CONTENT_ATTACHMENT_THIN_COLLECTIVE_REVIEW_MIN_MEMBERS`)인 장 집합 하나의 구성원과 정확히 같으면 `collectiveHandle`(핸들 참조, 장 경로, 종류, 구성원 수, 가장 깊은 장 우선)이 붙습니다. 검수자는 같은 집합의 항목을 한 번에 결정할 수 있으며, 이 표시만으로 자동 확정되지는 않습니다. 결과는 `not_reviewed`로 시작합니다. 관계 상대(예: "3호 수혈에 의해 파괴"의 3호 수혈)는 이 단계에서 배정하지 않으며, `scope.relationCounterparts`는 `deferred_to_link_extraction`입니다.
+
+## 고고학 데이터 원장
+
+`assembleArchaeologyLedger(plan, attachments, { ledgerId, processedDocumentId, extractorVersion, extractedAt, createdAt })`는 엔진이 지금 추출하는 결과로 `archaeology-ledger.v1`을 조립합니다. 결정론적이며 모델을 호출하지 않습니다.
+
+- **원장** — 원장 머리 정보입니다. 가공 문서, 추출기·배정 프롬프트 버전, `validationStatus`(`applyLedgerValidation`이 정하기 전까지 `not_run`), `reviewStatus: 'not_reviewed'`, 후보 스냅숏, 계획에 있으면 보고서 프로필과 얇은 배정 규칙·규칙 결정을 담습니다.
+- **기록** — 고정된 후보 목록 항목마다 기록 하나(`record-<groupId>`)를 만들고, 종류·원문 식별자·이름과 `content`를 담습니다. `content`는 가공 문서에서 바꾸지 않고 잘라 낸 원문 문장이나 표 항목이며, 같은 원문은 출처를 모두 가진 발췌 하나로 합칩니다.
+- **출처** — 각 발췌가 나온 곳입니다. 자원 키와 글자 위치(`locator`), PDF 쪽, 장, 본문 블록이나 표 칸, 가공 문서 참조, `basis`(후보 자체 근거는 `registration`, 그 밖에는 배정 근거 종류)를 담습니다. 계획 밖 자원의 등록 근거는 저장된 인용문으로 대신합니다.
+- **검수 항목** — 사람이 결정할 것이며 엔진은 결정하지 않습니다. `segment` 항목은 배정 검수(제안 기록과 이미 확정된 기록, 이유, 구간 원문, 제안이 장 집합과 같으면 `collective`)에서, `identity` 항목은 불확실한 후보 병합에서, `profile_decision` 항목은 `needsDecision`인 얇은 배정 규칙 결정에서 나옵니다. 집합 항목이 아닌 검수 항목에서 모든 호출이 동의하지 않은 채 제안되었거나 동일성이 불확실한 기록은 `needsReview`입니다. 집합 항목은 집합 전체를 한 번에 결정하므로 구성원마다 표시하지 않습니다.
+- **미추출 부분** — 상위 계층은 아래 `applyLedgerParents`가, 도면·사진 참조는 `applyLedgerMedia`가, 속성은 `applyLedgerAttributes`가, 관계는 `applyLedgerLinks`가 넣습니다. `attributes`, `mediaReferences`, `mediaCandidates`는 이들을 실행하기 전까지 비어 있고, `layerMentions`에는 첨부 결과의 층위 언급(`named_in_segment`: 층위 기록, 그 구간의 기록, 문장, 위치, 쪽)이 검수 없이 관계 후보로 들어가며, `links`에는 `applyLedgerLinks` 전까지 부모 옆에 남긴 관계만 있습니다. `pending`(`ARCHAEOLOGY_LEDGER_PENDING_PARTS`)에 빠진 부분을 적어 사용하는 쪽이 빈 결과가 아니라 미추출로 표시하게 합니다.
+
+## 포함 계층 신호와 코드 확정 부모
+
+아래 함수들은 부모 후보를 모으고, 코드가 정할 수 있는 부모를 정한 뒤, 남은 질문을 세 번 호출하는 모델 판단으로 넘기고, 그 결과를 원장에 넣습니다. `judgeRelationParentBatch`를 빼면 모두 결정론적이며 모델을 호출하지 않습니다.
+
+- **신호** — `collectRelationSignals(plan, ledger)`는 `relation-signals.v1`을 돌려줍니다. 기록마다 부모 후보와 그 원문을 담습니다.
+  - `phrase`: 기록 자신의 발췌 속 출토 위치 표현(`X에서 출토된`, `출수위치 X`)입니다. 확인 동사(`확인`, `검출`, `발견`)이면 `finding`이 false입니다.
+  - `table_row`: 기록 자신의 표 행에 나온 다른 기록입니다. `header`는 그 열의 첫 행 칸이고, `finding`은 출토 위치나 소속 열(`출토`, `출수`, `수습`, `위치`, `소속`)일 때만 true입니다. 트렌치의 유구 목록처럼 행의 다른 칸은 후보만 제시합니다.
+  - `heading_scope`: 읽기 순서에서 기록의 첫 원문이 속한 기록 제목입니다. 기록을 가리키지 않는 번호 제목에서 범위가 끝납니다.
+  - `chapter_title`: 기록 자신의 장 제목이 가리키는 기록입니다.
+
+  이름은 식별자와 이름을 함께 보고 가장 긴 이름을 먼저 씁니다. 정확한 형태와 숫자 뒤 `호`를 뺀 형태로 모두 맞추므로 `98호 수혈`은 식별자 `98`, 이름 `수혈`로 등록된 기록과도 만납니다. 한 장소에 여러 기록이 맞으면(시대마다 번호를 새로 매겨 `29호 수혈`과 `29 수혈`이 다른 장에 등록된 경우) 말한 기록과 장 경로가 가장 가까운 기록을 남기고, 그래도 같으면 정확한 형태를 고릅니다. 끝까지 같으면 모호한 대상으로 남깁니다. 기록 자신을 가리키는 장소는 출토 위치가 아닙니다. 아래 관계 문장 이름 찾기도 같은 방식으로 고릅니다. 번호가 붙은 장소(`98호 수혈`)는 번호 없는 이름만 가진 기록과 맞추지 않습니다. 표 행·제목·장 제목에서 같은 종류의 기록은 형제나 분류 제목이므로 건너뜁니다. 종류별 계층은 가정하지 않습니다. 어떤 기록과도 맞지 않는 출토 위치 표현은 대상 없이 남깁니다.
+
+- **코드 확정 부모** — `resolveRelationParents(signals, ledger)`는 `relation-parents.v1`을 돌려줍니다.
+  - 출토 표현과 출토 위치·소속 열의 표 행이 정확히 한 기록을 가리킬 때만 부모로 정합니다. 유구 하나와 다른 종류의 기록을 함께 가리키면 유구를 부모로 하고, 나머지는 관계 후보로 남깁니다.
+  - 제목 범위와 장 제목 신호로는 부모를 정하지 않고 질문으로 넘깁니다. 확인 표현, 그 밖의 표 행(`row_only`), 맞는 기록이 없는 장소, 모호하거나 충돌하는 대상, 순환을 만드는 부모도 질문이 됩니다.
+  - 질문은 후보와 신호를 담아, 이후 판단이나 사람이 결정하게 합니다.
+- **부모 판단** — 코드가 정하지 못한 질문은 모델이 부모를 판단합니다. 호출자의 모델을 부르는 것은 `judgeRelationParentBatch`뿐입니다.
+  - `createRelationParentRequests(plan, ledger, parents, { batchSize = 12, maxCandidates = 15 })`는 모델 호출 없이 `relation-parent-judgment.v2` 요청을 만듭니다. 질문은 원장 순서대로 묶음으로 나눕니다.
+  - 질문마다 신호가 가리킨 후보를 제시합니다. 장소가 어떤 기록과도 맞지 않은 출토 표현에는 다른 종류이면서 이름 단어를 공유하고, 장소에 번호가 있으면 번호도 공유하는 기록을 더합니다. 예를 들어 `발굴 1구역`에는 `23-1 구역`을 제시합니다.
+  - 맞는 기록이 없는 장소에는 답으로 고를 수 없는 참고 기록을 최대 3개 함께 보여 줍니다. 참고 기록은 제시된 후보와 같은 종류이면서, 어떤 후보에도 없는 장소 단어를 이름에 가진 기록입니다. 번호 코드가 든 발췌를 함께 보여 줍니다. 예를 들어 `발굴 1구역`에는 조사구역 `정밀발굴조사`와 그 "23-1~6구역" 서술이 붙어, 원문이 범위를 밝힐 때만 모델이 이 약칭을 `23-1 구역`과 연결할 수 있습니다.
+  - 근거는 신호 원문과, 기록의 첫 발췌를 둘러싼 최대 300자 블록 원문입니다. 모델은 질문마다 후보 ID나 `none`, 근거 ID, 짧은 이유로 답합니다. 지시문은 원문에 적힌 포함 관계만 인정하고, 종류 순서·근접성·추정한 표기 대응은 인정하지 않습니다.
+  - `inspectRelationParentResponse(request, rawResponse)`는 응답을 고치지 않고 답마다 해당 질문 기준으로 검사합니다.
+  - `judgeRelationParentBatch(request, { model, maxRetries = 0, abortSignal, onAttempt, onCall })`는 r1을 보낸 뒤 r2와 r3을 함께 보냅니다. 실패한 호출은 다시 보내지 않고, 그 묶음은 모두 검수로 넘깁니다.
+  - `decideRelationParents(request, inspections)`는 모든 호출이 유효하게 일치할 때만 부모나 `none`으로 정하고, 나머지는 검수로 남깁니다.
+- **원장 반영** — `applyLedgerParents(ledger, parents, judgments = [])`는 부모가 정해진 기록에 `parentRecordId`, `parentBasis`(`code` 또는 `judgment`), `parentEvidence`를 넣은 원장을 돌려줍니다.
+  - 나머지 질문은 이유 `unresolved_parent`, 후보, 호출별 답을 담은 `parent` 검수 항목이 되고, 해당 기록에 검수 표시가 붙습니다. 판단하지 않은 질문, 호출끼리 갈린 판단, 그리고 장소가 적혀 있지만 맞는 기록이 없는데 모두 `none`으로 답한 경우가 여기에 해당합니다. 이 마지막 경우는 장소가 적혀 있으나 등록되지 않은 것입니다.
+  - 그 밖의 질문에 모두 `none`으로 답하면 부모 없이 두고 검수로 보내지 않습니다.
+  - 순환을 만드는 부모는 되돌려 검수로 넘깁니다. 부모 옆의 관계 후보는 `links`가 되고, `parent_hierarchy`는 `pending`에서 빠집니다.
+- **장소 약칭 대응** — 보고서의 장소 약칭이 등록된 이름과 어떻게 대응하는지(예: `발굴 {n}구역` → `23-{n} 구역`) 사람이 한 번 정해 `place-aliases.v1`(`PlaceAliasTable`)로 주입할 수 있습니다. 보고서 프로필 주입과 같은 방식입니다.
+  - **표:** 입력 해시, `source`(사람이 정한 표는 `'manual'`, 남긴 제안은 `'model'`), 확인 시각을 담습니다. 규칙마다 `id`, 원문 표기 `written`, 등록 이름 `registered`, 자리표시자 `{n}`의 숫자 범위 `numbers`(선택), 대상 종류 `recordKind`(선택), 그리고 대응을 밝히는 원문 인용 `basis.quote`(필수)를 둡니다.
+  - **`validatePlaceAliases(plan, ledger, table)`**는 표를 고치지 않고 `{ errors, warnings }`를 돌려줍니다.
+    - 오류가 있으면 쓸 수 없습니다: 버전·입력·출처·시각 문제, 규칙 없음, ID 누락·중복, 빈 표기, `{n}`을 모든 곳에 한 번씩 쓰지 않거나 아예 쓰지 않은 경우가 아닌 것, 잘못된 범위, 모르는 종류, 문서에서 찾을 수 없는 근거 인용, 한 표기를 두 이름으로 보내는 규칙.
+    - 경고는 오류 없는 표에만 냅니다: 기록과 맞지 않거나 여러 기록과 맞는 등록 이름, 문서에 한 번도 나오지 않는 규칙, 약칭 그대로 등록된 기록(동일성 검수 대상).
+  - `PlaceAliasValidationError`는 잘못된 표를 거부하는 호출자를 위해 오류 목록을 담습니다.
+  - **적용:** 표는 `collectRelationSignals(plan, ledger, { placeAliases, placeAliasesSha256 })`로 넘깁니다. `placeAliasesSha256(table)`은 키를 정렬해 표의 해시를 만들고, 오류가 있는 표는 예외를 던집니다.
+    - 어떤 기록 이름과도 맞지 않은 출토 위치 표현과 출토·소속 열의 표 칸은 규칙으로 다시 맞춥니다. 장소가 원문 표기로 끝나야 하고(끝의 문장부호는 무시), 숫자는 범위 안이어야 합니다. 규칙 종류의 등록 이름이 기록 하나와 맞으면 그 기록이 대상이 되고, 신호에 규칙이 `alias`로 남습니다. 맞지 않으면 장소는 미결로 남습니다(`alias_unresolved`).
+    - 규칙만으로 정해진 부모의 결정 근거는 `alias`입니다. 원장에서는 `parentBasis: 'alias'`가 되고, 원문 표현이나 칸과 함께 규칙·`<원문 표기> → <등록 이름>`·근거 인용을 담은 `alias_rule` 근거가 붙습니다.
+    - 약칭 그대로 등록된 기록(`23-2 구역` 옆의 `발굴 2구역`)은 규칙으로 부모를 정하지 않습니다. 등록 기록과 함께 `identity` 검수 항목(`alias_duplicate`)이 되며, 합치지 않고 부모 질문도 만들지 않습니다.
+    - 원장 머리 정보에 적용한 표(`placeAliases`: 규칙 ID, 출처, 확인 시각, 입력 해시, 주어지면 표 해시)를 기록합니다. `buildArchaeologyLedger`도 적용한 표의 `source`를 알려 줍니다.
+  - **제안(`place-alias-proposal.v1`):** 사람이 정한 표가 없으면 코드가 남긴 부모 질문을 바탕으로 모델이 표를 제안할 수 있습니다.
+    - `createPlaceAliasProposalRequest(plan, ledger, parents)`는 모델 호출 없이 요청을 만들거나 null을 돌려줍니다. 어떤 기록 이름과도 맞지 않은 원문 장소, 그 장소가 가리킬 수 있는 등록 이름(부모 판단에 제시하는 후보와 같되, `발굴 2구역`처럼 원문 장소 모양으로 등록된 기록은 뺌), 그리고 근거 문장을 담습니다. 근거 문장은 계획의 400자 이하 텍스트 블록 가운데 번호 코드(23-1, 23-A), 등록 이름에 없는 장소 낱말, 등록 이름의 낱말을 모두 담은 것입니다(예: `1) 정밀발굴조사(23-1~ 6구역)`). 기록이 아니라 보고서 원문에서 고릅니다.
+    - `proposePlaceAliases(plan, ledger, request, { model })`는 두 번의 실행을 함께 보냅니다. 한 호출이라도 실패하면 표를 제안하지 않습니다.
+    - `assemblePlaceAliasProposal`은 두 실행이 똑같이(원문 표기·등록 이름·숫자 범위) 낸 규칙 가운데 코드 검사를 통과한 것만 고치지 않고 남기며, 뺀 규칙은 이유와 함께 모두 적습니다. 검사: 두 실행 모두 근거를 문장 ID로 인용, 번호 규칙의 숫자 범위, 등록 이름에 없는 원문 낱말(맨 `{n}구역`은 대응하지 않음), 그 낱말과 등록 코드(`23-A-{n} 구역`의 `23-A`)를 담은 근거, `validatePlaceAliases`, 그리고 원문 장소 하나 이상을 기록 하나에 맞추는지. 남긴 규칙은 근거 문장 전체를 인용으로 담은 `source: 'model'` 표가 됩니다.
+
+## 도면·사진 참조
+
+아래 함수들은 기록과 이미지를 연결하고 그 결과를 원장에 넣습니다. 결정론적이며 모델을 호출하지 않습니다.
+
+- **캡션 색인** — `indexMediaCaptions(index)`는 `media-caption-index.v1`을 돌려줍니다.
+  - 캡션이 있는 이미지마다 캡션 번호로 표기를 만듭니다(`도면 1`, `사진 45`, `원색도판 3`, `도 12-1`; 유형은 `MEDIA_LABEL_TYPES`). 캡션 원문은 바꾸지 않습니다.
+  - 여러 이미지가 같은 표기를 가지면 `byLabel`에서 보입니다. 캡션이 없거나 번호가 이런 표기가 아닌 이미지는 따로 모읍니다.
+- **본문 참조** — `collectMediaReferences(captions, ledger)`는 `media-references.v1`을 돌려줍니다.
+  - 기록 자신의 발췌가 인용한 표기를 찾습니다(예: 유물 제목의 `(도면 31, 사진 143)`). 범위(`사진 45~49`, 최대 60개)와 나열(`도판 10· 11`, `사진 45, 46`)은 펼칩니다. 한글 바로 뒤의 표기는 참조로 보지 않으므로 `마도23-1`을 `도 23-1`로 읽지 않습니다.
+  - 표기가 이미지 하나와 맞으면 그 이미지와 연결하고(`text_reference`), 인용한 발췌를 함께 남깁니다. 맞는 이미지가 없으면 `missing`, 여러 이미지와 맞으면 `ambiguous`입니다.
+- **캡션 참조** — `collectCaptionReferences(captions, plan, ledger, textReferences)`는 `caption-references.v1`을 돌려줍니다.
+  - 캡션이 유물이 아닌 번호 붙은 기록 하나만 가리키면(`도면 41 … 1호 수혈 평면도`) 연결합니다(`caption_name`). `지점`처럼 번호 없는 이름은 기록만큼 종류도 자주 가리키므로 쓰지 않습니다.
+  - 번호 범위(`11~20호 수혈`, `1~4호 건물지와 주변…`)는 그 이름의 번호 붙은 기록마다 연결합니다(`caption_range`).
+  - 번호는 절마다 다시 시작할 수 있습니다. 그래서 캡션에서 이름 앞에 나온 장 제목 단어(예: `조선시대`)가 기록의 장 제목에 없고 같은 종류의 다른 기록에는 있으면, 그 기록을 제외합니다. 그 종류의 기록 이름에 쓰이는 단어(`수혈`)는 세지 않습니다. 남은 기록 중에서는 정확한 이름 형태, 그다음 이미지의 장이 결정하고, 그래도 정해지지 않으면 미결로 보고합니다.
+  - 괄호 안 유물 번호(`출토유물(24~28)`)는 연결을 만들지 않습니다. 같은 이미지에 본문 참조로 연결된 유물을 확인하는 데만 씁니다(`artifactNumberChecks`: 일치·불일치).
+- **같은 쪽 후보** — `collectSamePageCandidates(index, ledger)`는 캡션 없는 이미지를 같은 PDF 쪽에 발췌가 있는 기록과 묶습니다(예: 유물 2개와 사진 6장이 있는 도록 쪽). 캡션도 위치 정보도 없으면 어느 이미지가 어느 기록인지 코드로 알 수 없으므로 연결하지 않고, 쪽마다 검수 질문이 아닌 쪽 단위 후보 하나로 둡니다.
+- **원장 반영** — `applyLedgerMedia(ledger, { captions, text, caption, samePage })`는 `mediaReferences`와 `mediaCandidates`를 채웁니다.
+  - 본문 참조를 먼저, 그다음 캡션 이름과 번호 범위를 넣습니다. 기록–이미지 짝은 한 번만 두고, 연결한 발췌와 캡션 모두, 원문 그대로의 캡션과 그 표기 단어(`mediaType`, `sequenceNo`), 기록 안에서의 순서 `ordinal`을 담습니다.
+  - 같은 쪽 묶음은 `mediaCandidates`(`same_page`: 쪽, 이미지 ID, 원장 순서의 그 쪽 기록)가 됩니다. 이미지를 기록 하나에 잇지 않고 검수 항목도 만들지 않습니다.
+  - `media` 검수 항목을 더합니다. 인용한 표기가 여러 이미지와 맞는 경우(`media_ambiguous`, 기록에 검수 표시)와 캡션이 여러 기록을 가리키는 경우(`media_caption_several`, 이미지에 관한 질문이라 기록에 표시하지 않음)입니다.
+  - 맞는 이미지가 없는 인용 표기와 맞지 않는 유물 번호는 `REFERENCE_LABEL_MISMATCH` 경고로, 정해지지 않은 캡션 번호는 `MEDIA_MATCH_AMBIGUOUS` 경고로 `issues`에 남기고, `media_references`는 `pending`에서 빠집니다.
+
+## 표 속성
+
+`collectTableAttributes(index, plan)`는 속성의 첫 출처인 `table-attributes.v2`를 돌려주며, 결정론적이고 모델을 호출하지 않습니다.
+
+- 기록은 원래 식별자 칸부터 오른쪽까지의 표 행 구간을 소유합니다. 원문 배정의 행 소유 규칙과 같습니다. 그래서 트렌치 행의 `도로유구 1기` 칸은 트렌치의 속성으로 남습니다.
+- `logicalTableCells(tableKey, table)`은 저장된 칸을 논리 격자에 놓습니다. 전처리 격자는 병합으로 가려진 칸을 빼고 저장하므로, 저장된 열 번호가 실제 열과 다를 수 있습니다.
+- 열 키는 첫 소유 행보다 위의 행들을 논리 격자에서 위에서 아래로 읽어 만듭니다(`규모(cm) / 길이`). 입력의 머리글 표시는 믿지 않습니다. 숫자만 있는 행은 머리글이 아닙니다. 머리글 조각은 한글이나 두 글자 이상의 영문 단어가 있을 때만 셉니다. 그래서 옆에 붙어 들어온 다른 표의 숫자는 키가 되지 않고, 그런 칸은 `cellsWithoutHeader`에 모읍니다. 전처리에서 가로 병합이 사라진 머리글(한 칸 뒤에 빈 칸이 이어지고 그 아래에 이름 있는 하위 머리글이 있는 경우, `길이/높이 · 입지름/너비 · …` 위의 `크기(cm)`)은 그 빈 칸들로 이어 주므로, 모든 열이 `크기(cm) / …` 키와 단위를 유지합니다.
+- 소유 행이 없는 두 열짜리 문자 라벨 표는 키·값 표입니다. 그 표에 등록된 기록이 정확히 하나면, 나머지 행마다 그 행의 라벨을 키로 하는 속성을 그 기록에 줍니다.
+- 각 속성은 칸 원문을 `valueText`와 `sourceText`로, 키 괄호 안의 단위를 `unitText`(`(cm)`)로 담고, `extractionMethod: 'table_mapping'`과 표·행·논리 열·쪽을 남깁니다. 기록 자신의 등록 칸과 빈 칸은 속성으로 만들지 않으며, 값을 환산하거나 표준화하지 않습니다.
+
+`collectTextAttributes(plan, ledger)`는 두 번째 출처인 `text-attributes.v2`를 기록 자신의 발췌에서 돌려주며, 역시 모델을 호출하지 않습니다.
+
+- 한 문장 안에서 쉼표나 `와·과·및`로 이어진 치수들은 쪼개지 않고 원문 그대로 값 하나로 둡니다(`길이 4.9m, 너비 3.89m이상, 깊이 3.7m`, `높이 7.8cm 입지름(추정) 16.0cm 굽지름 6.6cm`, `238×28×32cm`). 치수 단어에는 앞 수식어(`잔존 너비`), 붙은 접두어(`굽지름`), 괄호 수식어(`높이(잔존)`)가 올 수 있고, 값 뒤에 부위 표시와 같은 치수의 다음 값이 이어질 수 있어(`굽높이 0.5cm(내) 0.5cm(외)`) 값을 빠뜨리지 않습니다. 문장은 공백·줄바꿈 앞의 마침표에서만 끊으므로 `4.9m`를 자르지 않습니다.
+- 키는 구절 바로 앞에 적힌 항목명입니다(`전체 규모는` → `전체 규모`, `조사면적은` → `조사면적`). 조사로 끝나는 수식어(`수혈의 규모는`)는 뺍니다. 항목명이 없으면 치수가 하나일 때 그 단어, 여럿일 때 `크기`를 키로 씁니다. 구절의 치수가 모두 같은 단위면 `unitText`를 두고, 환산은 하지 않습니다.
+- 번호 없는 묶음 기록의 이름 바로 뒤 수량(`수혈 5기`)은 `수량`이 됩니다.
+- 문장이 같은 종류의 다른 번호 기록도 언급하면 값을 배정하지 않고, 그 기록들과 함께 소유자 질문(`ownerQuestions`)으로 남깁니다.
+
+`applyLedgerAttributes(ledger, { table, text })`는 둘을 원장 `attributes`에 표 속성부터 `attribute-N`으로 넣습니다. 각 속성은 키·값·단위·원문·`extractionMethod`와 값의 위치(`tableId`·`cellKey` 또는 `sourceId`·`locator`, 그리고 쪽)를 가집니다. 여러 곳에서 나온 값은 합치지 않고 모두 남깁니다. 소유자 질문은 문장과 값마다 `attribute` 검수 항목(`attribute_owner_ambiguous`) 하나로 묶어, `recordIds`에 그 값을 두고 물은 기록 전부를, `candidateRecordIds`에 문장이 언급한 다른 기록을, `detail`에 `키: 값`을 담고 물은 기록마다 검수 표시를 합니다. "10 × 10m 크기의 그리드를 하나의 구역으로 설치하고 23-1구역부터 23-6구역까지 …" 같은 문장은 구역마다가 아니라 한 항목이 됩니다. 한 번 적힌 값은 합계일 수도 있어서 기록들에 나눠 주지는 않습니다. 머리글 없는 소유 칸은 표마다 개수로 `UNMAPPED_TABLE_CELL` 정보 문제로 `issues`에 남깁니다. `attributes`는 `pending`에서 빠집니다.
+
+## 객체 간 관계
+
+세 단계가 결정론적으로, 모델 호출 없이 기록 간 관계를 모으고 정해 원장에 넣습니다. 관계 이름은 원문의 짧은 낱말이며 온톨로지 술어가 아닙니다.
+
+- `collectRelationSentences(plan, ledger, tableAttributes?)`는 `relation-sentences.v1`을 돌려줍니다. 기록 자신의 발췌 문장이 다른 등록 기록을 언급하고, 기록 이름을 가린 뒤에도 어느 절에 관계 단서(중복·절단·인접·거리·연결·접합·둘러쌈)가 있으면 남깁니다. 번호 붙은 기록의 이름은 모두 씁니다. 무번호 이름은 3자 이상이고 한 기록에만 속하며 번호 기록들이 공유하는 종류 이름(`트렌치`, `구상유구`)이 아닐 때만 씁니다. 기록의 조상·자손 이름은 포함 관계라 뺍니다. 층 차례(`차례로`)는 단서가 아닙니다. 머리글이 관계를 말하는 열(`중복관계`, `선후관계`)의 소유 칸도 그 칸이 언급한 기록과 함께 남깁니다.
+- `resolveRecordLinks(sentences)`는 `record-links.v1`을 돌려줍니다. 쉼표로 나눈 한 절 안에서 이름 뒤에 조사와 서술어가 바로 이어질 때만 link를 만듭니다.
+  - `B와 중복`, `B와 인접`, `B와 접합`, `B와 연결될 가능성`은 대칭 link가 됩니다.
+  - `B를 파괴`, `B에 의해 파괴`는 방향 있는 link가 됩니다.
+  - 거리·방향(`B가 4.3m 떨어져`, `B와 8.5m 거리를 두고`, `동쪽으로 B가 위치`)은 `위치` link가 됩니다.
+  - 관계 열 칸이 기록 하나를 말하면 머리글을 이름으로 하는 link가 됩니다.
+- 나열된 이름(`72호 수혈 및 96호 수혈과 중복`)은 서술어를 함께 씁니다. 대칭 쌍은 양쪽 기록의 근거를 모두 담은 link 하나입니다.
+- 나머지는 다음으로 갑니다.
+  - **질문:** 둘러쌈(`B로 감싸여진`, `B 내부`, `B를 사이에 두고`)은 `link_enclosure`가 됩니다. 단서 절 안의 서술어 없는 이름이나 방향으로 놓인 나열 항목은 `link_several_targets` 또는 `link_unclear`가 됩니다.
+  - **미결 대상:** 여러 기록이 공유하는 이름과 등록되지 않은 `N호 …` 이름입니다.
+  - **건너뛰고 개수만 셈:** 기록이 들어 있는 장소(`B 내`, `B 중앙부`, `A는 B 북쪽 …`), 번호 범위 속 이름(`2~4호 건물지`), 단서 없는 절의 이름입니다.
+
+`applyLedgerLinks(ledger, recordLinks)`는 정한 관계를 `links`에 넣습니다. 각 link는 `basis`(`rule` 또는 `table_column`), `symmetric`, 관계를 말한 모든 문장(`excerpt` 근거)이나 칸(`table_cell` 근거)을 가집니다. 부모 옆에 남긴 link와 같은 이름·쌍이면 그 link에 근거를 더합니다. 질문은 이유·후보 기록·문장을 담은 `link` 검수 항목이 되고 말한 기록에 검수 표시를 합니다. 미결 대상은 `UNRESOLVED_LINK_TARGET` 경고로 `issues`에 남깁니다. `links`는 `pending`에서 빠집니다.
+
+## 원장 검증
+
+`validateArchaeologyLedger(ledger, { document, plan, attachments? })`는 `ledger-validation.v1`을 돌려줍니다. 조립한 원장을 원래 전처리 문서와 대조해 검사합니다(구현 명세 §22). 결정론적이며 모델을 호출하지 않습니다. 원장은 바꾸지 않고 `reviewStatus`도 건드리지 않습니다.
+
+- 검사마다 본 항목 수와 실패 수를 남겨, `0/0`과 실행하지 않은 검사를 구별합니다. 실패는 명세 코드, 심각도, 기록·속성·관계, 위치를 담은 문제가 됩니다.
+- **구조:** ID 중복이 없는지, 출처·속성·매체·관계·검수 항목·부모가 가리키는 기록이 있는지, ledgerId와 이미지 ID가 맞는지 봅니다.
+- **계층:** 자기 부모와 순환이 없는지, 부모마다 확정 방식과 근거가 있는지 봅니다.
+- **출처:**
+  - 기록마다 등록 출처가 있는지
+  - 발췌 출처가 있고, 그 기록의 것이며, 문장이 같은지
+  - 출처 자원이 있고 문자 범위가 문서 원문과 같은지
+  - sourceRef와 표 칸 좌표가 맞는지
+  - 속성마다 출처가 있는지
+  - `attachments`가 있으면 계획한 묶음마다 배정이 추적되는지
+- **원문 충실성:** 속성 값과 단위가 출처에 그대로 있는지, 관계 근거가 양쪽 기록 원문 중 하나에 있는지 봅니다.
+- **심각도:**
+  - 계약 위반은 모두 `error`입니다.
+  - 이름이나 식별자가 기록의 등록 발췌와 이름 근거, 등록 표 캡션, 장 제목, 후보 근거 어디에도 없으면 `warning`(`UNSUPPORTED_CONTENT_CLAIM`)입니다.
+
+`applyLedgerNameAnchors(ledger, plan, document)`는 그 근거에 기록 이름이 없을 때 이름이 적힌 위치를 더합니다. 도록은 `번호 / 이름(한자) / 영문명 / …`을 따로 된 블록으로 싣고 소제목은 범위 이름을 본문 한 블록 위에 적으므로, 등록 근거가 이름 줄을 놓칠 수 있습니다. 같은 장에서 등록 본문 블록의 앞뒤 `NAME_ANCHOR_DISTANCE`(3) 블록 안에서 공백을 무시하고 이름을 찾습니다. 짧은 제목형 블록, 가까운 블록, 앞 블록 순으로 고르고, 이름의 원문 구간을 `name_anchor` 출처로 더합니다. 이름·발췌·`content`는 바꾸지 않으며, 문서 자체가 잘못 읽은 이름(OCR)은 적힌 그대로 둡니다.
+
+- 공백만 다른 발췌와 같은 키의 서로 다른 값은 `info`(`DIFFERING_SOURCE_VALUES`)이며, 둘 다 원문 그대로 남깁니다.
+- 같은 종류의 기록이 이름을 공유하면(시대마다 번호를 새로 매긴 `29호 수혈`과 `29 수혈`) `info`(`AMBIGUOUS_RECORD_IDENTITY`)입니다. 서로 다른 기록으로 남기고 장으로 구별합니다.
+- `status`는 error가 있으면 `failed`, warning만 있으면 `warnings`, 그 밖에는 `passed`입니다.
+
+원장 `issues`는 모든 단계에서 같은 구조입니다: `{ code, severity, stage, recordId?, attributeId?, linkId?, imageId?, message, locator? }`이며 `stage`는 `assembly`, `media`, `attributes`, `links`, `validation` 중 하나입니다. 조립은 배정 문제를 `UNRESOLVED_EVIDENCE_ASSIGNMENT`로 남깁니다(빠진 묶음은 error). `apply*` 단계는 문제를 더하기만 하고 `validationStatus`를 정하지 않습니다. 원장은 `applyLedgerValidation(ledger, report)`가 검증 문제를 더하고, warning이 가리키는 기록에 `needsReview`를 표시하고, 모든 문제의 심각도로 `validationStatus`를 한 번 정할 때까지 `not_run`입니다.
+
+## 원장 한 번에 조립하기
+
+`buildArchaeologyLedger({ document, plan, attachments, meta, placeAliases?, parentJudgments?, discoveryScope?, droppedProposals? })`는 원장 단계를 모두 차례로 실행합니다. 결정론적이며 모델을 호출하지 않습니다. `droppedProposals`(탐색 `issues`: 검사를 통과하지 못해 기록이 되지 않은 제안)는 단계 `discovery`의 `DROPPED_CANDIDATE_PROPOSAL` 경고로 `issues`에 남아, 탐색이 무엇을 뺐는지 사용하는 쪽이 알 수 있습니다.
+
+1. 저장된 얇은 배정 결과로 조립
+2. 장소 약칭 표 적용(`validatePlaceAliases`에 오류가 없을 때만)
+3. 관계 신호, 코드 부모 확정, 저장된 부모 판단 반영
+4. 도면·사진
+5. 표·본문 속성
+6. 객체 간 관계
+7. 이름 근거 보강(`applyLedgerNameAnchors`)
+8. `validationStatus`를 정하는 전체 검증
+9. 명세 §23 정렬
+
+모델 단계(후보 탐색, 얇은 배정, 부모 판단)는 밖에서 실행하고 그 저장 결과를 입력으로 받으므로, 같은 입력이면 항상 같은 원장이 나옵니다. `meta`에는 원장 ID, 추출기 버전, 시각을 넣고, `processedDocumentId`는 기본값이 문서의 `reportId`입니다.
+
+결과는 `{ result, validation, placeAliases, stages }`입니다.
+
+- `placeAliases`는 표를 적용했는지 알려 줍니다: `none`, 규칙 ID·해시·경고를 담은 `applied`, 오류를 담은 `invalid`.
+- `stages`에는 측정과 디버깅을 위해 단계마다 만든 것(신호, 부모, 캡션 색인, 도면·사진 참조, 속성 원자료, 관계 문장, 관계 결정)이 담깁니다.
+
+`sortArchaeologyLedger(ledger, document)`는 ID나 값을 바꾸지 않고 정렬만 따로 적용합니다.
+
+- 기록: 부모 깊이, 부모, `ordinal`, ID 순
+- 발췌: 첫 출처의 문서 순서
+- 속성: 기록과 출처 위치 순
+- 출처: 기록, PDF 쪽, 위치 순
+- 도면·사진: 기록과 순번 순
+- 관계: 양쪽 기록과 이름 순
+
+화면에서는 읽기 순서를 위해 `ordinal`로 다시 정렬할 수 있습니다.
+
+## 본문·표 원문 배정 미리보기
+
+> 여기부터 끝까지는 얇은 경로와 같이 쓰는 계획 준비와, 이전의 묶음 단위·구간 단위 경로(`content-attachment.v74`까지의 지시문, `segment-recipients.v26`, 근거 창 계약)를 설명합니다. 저장된 감사 기록을 다시 재연할 수 있도록 이 API들은 계속 내보냅니다.
+
+`prepareContentAttachment(index, discoveryPlan, discovery, groups, { inputSha256, candidateSnapshotId, pdfPageNumbers, maxUnitChars })`는 검증된 후보 분할을 고정 등록부로 만들고 모델 호출 없이 PDF 페이지 순회 계획을 생성합니다. 본문·표가 없는 쪽도 포함하도록 전처리 문서의 전체 PDF 페이지를 전달합니다. 본문 블록과 원래 표의 한 행은 쪼개지 않으며 `maxUnitChars`는 원문 문자 수의 완화된 한도입니다. 전체 프롬프트나 토큰의 엄격한 제한이 아닙니다. 병합 셀 구조·논리 페이지·장 경로를 보존하고, 이름 필터 없이 전체 등록부와 기존 동일성 불확실성을 제공합니다.
+
+`createContentAttachmentRequest(plan, plan.units[0])`로 실제 입력을 확인한 후 `attachContentUnit(plan, plan.units[0], { model, maxRetries })`로 한 묶음만 처리합니다. 영어 프롬프트는 `assignments`, `unresolved`, `ignoredSources`와 v6부터 `ignoredPassages`를 요구합니다. 명확히 여러 후보를 설명하는 원문은 모두에 연결하고 모호한 동일성은 미결로 남깁니다. 출처 블록·셀을 명시적으로 선택하고 블록 경계의 원문 조각은 별도로 보존합니다. 이미지·독립 캡션·각주·속성·부모·관계는 이번 범위 밖입니다.
+
+`assembleContentAttachment(plan, audits)`는 저장된 프롬프트·등록부/출처 참조·정확하고 유일한 원문 인용·조각 순서·자원별 처리 여부를 검사하며 응답을 보정하지 않습니다. 같은 후보의 문자 그대로 같은 조각 배열은 하나로 모으되 모든 등장 출처를 유지합니다. 잘못된 판단은 검사 문제로 남기며 처리 완료가 사람 검수나 의미상 정확성을 뜻하지 않습니다. 결과는 `not_reviewed`로 시작하고 API는 다음 묶음을 자동 호출하거나 새 후보를 등록하지 않습니다.
+
+### 축약 판단 입력(v2)
+
+`createContentAttachmentInput(plan, unit)`는 `payload`와 `codeMap`을 분리해 반환합니다. 모델 요청에는 `payload`만 넣으며, 공통 장 제목 문맥·원래 후보 언급별 고정 열의 행·모든 원문 인용·기존 불확실성·선택 가능한 본문/셀·필요한 표 구조를 제공합니다. 같은 후보 참조의 여러 행으로 통합 그룹의 원래 이름과 언급을 모두 유지합니다. 표는 실제 grid 순서·병합 범위를 보존하고, 선택 가능한 셀 텍스트는 한 번만 보내며 표에서 참조합니다. 의미 요약·표기 정규화·후보 사전 필터는 하지 않습니다.
+
+짧은 후보·출처·표·문맥 참조는 `codeMap`에서 원래 ID·근거·위치에 결정론적으로 연결합니다. 저장 경로·PDF/논리 페이지·문자 위치·스냅샷 해시는 코드 전용 기록과 원래 계획에 남깁니다. v2 감사 기록은 원응답과 함께 매핑을 보존하고, 재현 시 일치 여부를 검사한 뒤 `S` 참조를 원래 출처로 연결합니다. 원문 일치 검사와 출력 구조는 유지합니다. 과거 `content-attachment.v1` 감사 기록은 당시 입력·프롬프트로 재현합니다. 축약 입력 형식은 유지하며 아래 v3 프롬프트에서 문장별 판단을 보강합니다. 이번 변경은 문장 분할을 새로 도입하지 않고 기존 본문 블록·표 행과 발췌 선택 방식을 유지합니다.
+
+### 문장별 공유 발췌(프롬프트 v3)
+
+본문의 배정·미결 항목 하나에는 원문 문장 하나만 담으며, 대상이 같은 연속 문장도 각각 반환합니다. 경계의 불완전한 조각은 그대로 남기고 여러 블록 조각은 한 문장을 구성하는 경우에만 한 항목에 둡니다. 적격 제목·치수 구절·표 항목을 본문 문단과 한 발췌로 묶지 않습니다. 같은 문장이 식별된 대상과 명시된 출토 유구·층위를 함께 설명하면 명확히 관련된 등록부 후보 모두를 한 판단에 연결하고, 뒤의 형태 설명은 해당 대상에만 연결합니다. 모호한 대안은 미결로 남깁니다.
+
+의미에 따른 구절 선택은 모델이 수행합니다. 코드는 응답을 받은 뒤 문장을 나누거나 원문·배정을 수정·추가하지 않으며, 자동 구조 검사로 문장별 완전성이나 의미 정확성을 보장하지 않습니다. v1·v2 감사 기록은 당시 프롬프트로 계속 재현합니다. v3는 축약 사용자 입력·응답 스키마·출처 매핑을 바꾸지 않고 지침만 보강합니다.
+
+### 출처 블록과 경계 조각(프롬프트 v4)
+
+출처 블록은 근거 위치를 식별하는 단위이며, 같은 출처 참조로 여러 독립 문장을 발췌할 수 있습니다. 페이지·작업 묶음 경계에서는 첫 불완전 문장 조각만 별도 항목으로 유지하고 뒤의 완결 문장은 각각 분리합니다. 끝의 불완전 조각도 별도 항목으로 둡니다. 여러 출처 조각은 선택 가능한 블록 사이에서 한 문장이 나뉜 경우에만 한 항목에 둡니다. 프롬프트는 원문 부분 문자열 보존과 블록 전체 복사를 명시적으로 구분하며 누락된 글자를 복원하지 않습니다.
+
+v4는 축약 입력·출처 매핑·응답 스키마·조립을 그대로 두고 지침을 명확히 합니다. v1·v2·v3 감사 기록은 당시의 정확한 프롬프트로 계속 재현합니다. 문장 단위 선택은 모델의 판단이며 자동 문장 수 검사나 응답 사후 재작성은 추가하지 않습니다.
+
+### 등록된 객체의 번호·명칭 제목(프롬프트 v5)
+
+일반 보고서·절·분류 제목은 제외하되, 본문이나 실질적인 표 항목으로 뒷받침되는 기존 등록부 객체를 번호·명칭으로 식별하는 선택 가능 제목은 보존합니다. 구두점과 도면·사진 참조 괄호까지 제목 전체를 별도 원문 구절로 남깁니다. 새 후보 생성이나 매체 연결 추론은 하지 않으며 동일성이 모호하면 미결로 둡니다. 문장·경계 조각 규칙과 명확한 공유 맥락 배정은 유지합니다. v1~v4 감사 기록도 당시 지침으로 계속 재현하며 v5는 모델 프롬프트의 제목 정책만 바꿉니다.
+
+### 원문 범위 누락 검사와 유구 조성 기반 공유(프롬프트 v6)
+
+방향·방위·해석 문장을 포함한 모든 문장과 경계 조각을 각각 반환합니다. 유구가 어떤 지층·원지반을 굴착하거나 기반으로 조성됐다는 문장은 해당 유구와 식별된 기반 층위에 공유합니다. 현 문장에 층위 번호가 없어도 원래 층위 정의·위치·재질·층위 역할로 동일성을 판단하며, 일반적인 토질 명칭만으로 연결하지 않습니다. 모호한 대안은 미결로 남기고 뒤의 축조 설명까지 기반 층위에 일괄 전파하지 않습니다.
+
+v6 응답은 부분 사용 출처 안에서 제외한 구절을 `ignoredPassages: [{ fragments: [{ sourceId, quote }], reason }]`로 명시하며, 부분 제외가 없으면 빈 배열을 반환합니다. 전체 출처 제외는 기존 `ignoredSources`를 사용합니다. 조립 시 제외 구절도 정확한 원문·출처를 검사하고 이미 처리한 구절과 겹치는 부분 제외는 거부합니다. 배정·미결·명시적 제외 범위의 합집합과 원문을 대조하여 남은 비공백 문자 범위를 원래 위치·문자열과 함께 문제로 보고하며, 누락이 있으면 묶음을 완료 처리하지 않습니다. 문장 자동 분할·원문 정규화·배정 합성·응답 보정은 하지 않습니다. 범위 검사는 문장 경계의 정확성이나 대상 식별·제외 판단의 타당성을 보장하지 않으며 사람 검수와 분리합니다.
+
+기존 v1~v5 감사 기록은 당시의 정확한 프롬프트와 검사 기준으로 계속 재현합니다. 강화된 스키마·범위 검사는 v6에만 적용하며 과거 응답을 수정하거나 소급 무효화하지 않습니다. 축약 사용자 입력·후보 등록부·작업 묶음·출처 매핑은 그대로 유지하고 한 묶음 호출이 다음 호출을 자동 실행하지 않습니다.
+
+### 흔한 층위명과 일부 대상의 동일성 미결(프롬프트 v7)
+
+표토·매립토·사질토 같은 흔한 이름만으로 기존 층위와 동일하다고 확정하지 않습니다. 원래 식별자·전체 층위 정의·위치·재질·층위 역할·명시적 연속성으로 동일성 근거를 확인합니다. 별개 후보들이 이름만 일치하고 제공된 근거로 구별할 수 없다면, 임의로 하나를 선택하거나 모두 확정 공유하지 않고 가능한 층위 후보 참조를 이유와 함께 `unresolved`로 반환합니다. 같은 참조의 여러 행은 한 후보의 여러 언급으로 유지하며 경쟁 후보로 취급하지 않습니다.
+
+하나의 문장에서 유구·다른 층위는 명확하지만 특정 층위의 동일성만 모호한 경우, 명확한 대상의 배정은 유지하고 같은 원문 전체를 해당 층위 후보들만 포함한 미결 항목에도 남깁니다. 현 문장에 번호가 없어도 근거로 식별되는 조성 기반 층위의 공유는 유지합니다. 이 정책은 모델의 판단 지침이며 이름 기반 자동 재배정 규칙을 추가하지 않습니다. 입력·응답 스키마·출처 매핑·조립은 유지하며 v6의 정확한 프롬프트와 엄격한 범위 검사도 재현합니다. v1~v5는 당시 검사 기준을 유지합니다.
+
+### 층위명 안의 소속 유구 이름(프롬프트 v8)
+
+층위명 안에서만 소속을 표시하는 유구 이름은 그 소속 관계만으로 원문 배정 대상이 되지 않습니다. 특정 유구의 상부 매립층에서 유물이 출토됐다는 문장은 식별된 유물·층위에 연결하고, 일반적인 출토 요약은 개별 유물을 추측하지 않고 층위에 연결합니다. 소속 유구 이름까지 원문 인용 전체에 그대로 보존합니다. 유구 자체가 직접 출토 장소이거나 그 역할·상태·조성 기반과의 관계가 별도로 서술된 경우에는 해당 근거에 따라 공유합니다. 소속 유구를 배정 대상에서 제외했다는 이유만으로 동일성 미결을 만들지 않습니다.
+
+이 정책은 영어 모델 지침으로 표현하며 이름 기반 필터나 응답 사후 재배정은 추가하지 않습니다. 축약 입력·등록부·출처 매핑·응답 스키마·엄격한 범위 검사는 유지합니다. 기존 v7의 정확한 프롬프트와 v6/v7의 엄격한 감사 검사를 계속 재현하며 v1~v5의 당시 기준도 유지합니다. 문장 분리·제목 보존·실제 동일성 미결·유물과 직접 출토 층위 공유 규칙은 유지합니다.
+
+### 고정된 문장·구절 ID 선택(프롬프트 v9)
+
+v9에서 `createContentAttachmentSelectionInput(plan, unit)`을 도입했으며 `attachContentUnit()`은 `ContentAttachmentSelectionAudit`를 반환합니다. 전체 후보·원래 작업 묶음·읽기 전용 문맥은 유지합니다. 코드가 본문 문장 범위와 나누지 않은 표 셀 구절에 E 참조를 부여하고, 모델은 `assignments`, `unresolved`, `ignored`에 `excerptRef`·필요한 후보 참조·판단 이유만 반환합니다. 엄격한 응답 스키마는 quote·출처 ID·문자 위치 등 허용되지 않은 필드를 거부합니다. 같은 E 참조에 확정 대상과 모호한 층위 대안의 미결을 함께 남길 수 있습니다.
+
+분할은 소수점을 구별하는 고정 영어 ICU 문장 분할기를 사용하며, 짝이 맞는 괄호 안의 경계는 보호하고 선두 숫자 번호는 뒤의 제목과 함께 유지합니다. 닫히지 않은 괄호 때문에 뒤 문장까지 묶지 않습니다. 원문은 정규화하거나 복원하지 않고 출처 경계 조각은 원래 블록 안에서 별도로 보존합니다. 코드 전용 매핑에 원래 범위·출처·분할 버전·ICU 정보를 저장하며, 분할·매핑이 달라지면 감사 일치 검사 문제로 남깁니다. 공백뿐인 출처에는 선택 ID를 만들지 않으며 묶음 전체가 공백이면 모델 호출 전에 거부합니다.
+
+조립은 ID를 고정된 원본 범위로 조회하고 동일 문장이 같은 블록에서 반복돼도 등장 위치를 모두 보존합니다. 알 수 없거나 중복된 참조·미처리 발췌·잘못된 후보·충돌하는 제외를 검사하며 비공백 원문 범위 검사도 유지합니다. E 참조 하나가 원문 단위 하나를 선택하므로 모델이 문장을 합치거나 다시 쓸 수 없습니다. 표 셀은 원래 grid 위치와 병합 범위를 유지하고 행·헤더 문맥을 함께 제공합니다. 자동 다음 묶음 실행이나 원문·응답 보정은 하지 않으며 대상 동일성·문장 경계의 의미적 정확성은 사람 검토 대상입니다.
+
+`createContentAttachmentInput`은 v1~v8의 기존 블록 입력을 재현하는 API로 유지합니다. 과거의 정확한 프롬프트·출처 매핑·버전별 검사도 그대로 지원하며 저장된 응답을 변환하거나 덮어쓰지 않습니다. 기존 감사와 신규 선택 감사를 함께 재현할 수 있습니다. 데모도 실제 v9 요청·ID 선택 원응답·매핑을 저장합니다.
+
+### 고정 ID를 유지한 공유 문맥 검토 복원(프롬프트 v10)
+
+v10은 v9의 입력·발췌 ID·출처 매핑·엄격한 선택 스키마·조립을 유지하고, 문장마다 전체 후보 확인, 조성 기반, 공통 층위 동일성, 부분 미결에 관한 v8의 구체 지침을 추가합니다. 특히 표토와 식별된 현대 퇴적층을 제거해 유구가 드러나면 유구·현대층 배정을 유지하면서 구별되지 않는 표토층 후보들을 같은 E 참조의 `unresolved`에 남깁니다. 제거된 층은 해당 문장 안의 독립 설명이 없어도 되지만 제공된 정의와 국지 근거로 동일성을 판단해야 합니다. 흔한 이름만 같다는 이유로 층위를 확정하지 않습니다.
+
+이는 보고서별 참조·자동 재배정·응답 보정 없이 영어 프롬프트만 변경합니다. 층위명의 소속 유구 자동 전파 제한도 유지합니다. 모든 ID가 처리됐다는 검사는 원문 범위 보존을 의미하며 의미상 모든 대상이나 미결을 골랐다는 보증은 아닙니다. v9의 정확한 과거 프롬프트를 보존하고 v1~v8과 함께 재현합니다.
+
+### 직접 설명과 고유 번호 없는 객체 제목(프롬프트 v11)
+
+v11은 고정 ID 입력과 선택 스키마를 유지합니다. 다른 객체에 관한 판단의 비교 대상·위치 기준·근거로만 등장한 후보는 그 문장이 해당 후보 자체도 설명하지 않는 한 추가 공유하지 않습니다. 명시적 출토 맥락·조성 기반·층 제거와 유구 노출의 직접 역할은 계속 공유하며 확정 대상과 층위 대안의 부분 미결도 유지합니다. 이미 식별된 근거 대상을 배정에서 제외했다는 이유로 동일성 미결을 만들지 않습니다.
+
+후보 번호가 null이어도 이름·장 문맥·본문/표 근거로 기존 객체를 식별하는 제목은 보존합니다. 절 번호는 유구 고유 번호와 다를 수 있으며 고유 번호가 없다는 이유만으로 제외하지 않습니다. 구두점·매체 참조까지 고정 제목 전체를 유지하고 일반 분류 제목만 제외합니다. 실제 동일성 불확실성은 미결로 남깁니다. 코드의 자동 재배정이나 원문/응답 보정 없이 영어 프롬프트로 명확히 하며 v10의 정확한 지침과 재현 기준도 보존합니다.
+
+### 번호·명칭이 일치하는 유물 제목 제외 검사(프롬프트 v12)
+
+v12 요청은 등록된 유물의 번호·명칭과 일치하는 제목을 일반 표제로 제외하지 않도록 명시합니다. 매체 참조까지 고정 ID 전체를 보존하고 실제 객체 동일성이 모호하면 `unresolved`에 남깁니다. 기존 공유·직접 설명 규칙은 유지하며 입력·문장 분할·출처 매핑·응답 스키마는 바꾸지 않습니다.
+
+v12 조립은 같은 말단 장의 등록 유물과 문자 그대로 일치하는 독립 본문 제목이 제외되면 검사 문제로 남깁니다. 보수적으로 `식별자 + 공백 + 명칭`과 선택적인 `공백 + 한 줄의 짝이 맞는 괄호 참조`를 인식하고, 발췌가 바깥 공백을 제외한 원래 블록 전체여야 합니다. 구두점 정규화·제목 경계 추정·표 셀/일반 본문 매칭·중복 후보 중 자동 선택은 하지 않습니다. 위반 원응답과 제외 근거는 그대로 보존하되 묶음 완료 처리를 막습니다. 자동 재배정·보정·추가 호출은 없으며 v1~v11은 해당 검사가 없던 당시의 정확한 프롬프트와 검사 기준으로 계속 재현합니다.
+
+### 언급별 비등록 결정 전달(프롬프트 v13)
+
+v13 요청은 `createContentAttachmentDecisionInput(plan, unit)`을 사용합니다. `prepareContentAttachment`와 데모 준비 함수에 선택적인 `registrationDecisions`를 전달하면 이전 계획을 수정하지 않고 새 계획에 복제합니다. `ContentRegistrationDecision`은 고유 ID, 전처리 입력 해시, 정확한 `CandidateEvidence` 언급 범위, `not_independent_record` 결정, `no_independent_body_or_table_item` 근거, `author_confirmed` 권한과 실제 확정 근거의 참조·원문을 보존합니다. 이번 전달은 저자가 확정한 결정을 지원하며 후보 부재에서 결정을 추측하거나 블록 단위 제외를 언급별 결정으로 바꾸지 않습니다.
+
+코드는 모델 호출 전에 해시·원래 출처 필드·문자 범위·원문 부분 문자열을 검증합니다. 현재 묶음의 한 발췌에 포함된 결정만 짧은 D 참조·E 참조·해당 언급·결정·근거·권한으로 전달합니다. 긴 결정 ID·정확한 오프셋·확정 근거는 전체 결정 스냅샷과 함께 코드 전용 매핑에 남깁니다. 같은 이름의 다른 언급에는 적용하지 않습니다. 발췌 경계를 넘거나 출처가 없거나 모호하거나 입력과 다른 결정은 명시적으로 실패합니다.
+
+영어 프롬프트는 등록 적격성과 기존 후보 사이의 동일성 미결을 구분합니다. 원문이 설명하는 기존 객체에 발췌를 보존하며 의도적으로 비등록된 언급의 후보 부재만으로 빈 후보 미결을 만들지 않습니다. 등록된 후보들 사이의 실제 미결과 확정 공유는 유지합니다. 결정은 문장을 제외하거나 배정 대상을 강제하지 않습니다. 전체 후보·고정 E 참조·원문과 응답 스키마는 유지하며 조립 과정에서 응답을 걸러내거나 배정을 보정하지 않습니다. 선택 필드 도입 전 감사를 포함해 v1~v12의 정확한 과거 요청·코드 매핑·검사 기준을 계속 재현합니다.
+
+### 명시적인 표 관계 비고 공유(프롬프트 v14)
+
+v14 요청은 v13의 입력·선택 매핑·스키마·검사를 유지하고 표의 관계 비고에 관한 영어 지침을 추가합니다. 한 셀이 식별된 행 주인과 명시된 상대 후보의 고고학적·공간적 관계를 직접 설명하면 같은 원문 E 참조를 두 기존 후보에 함께 배정합니다. 반대쪽 행의 상호 비고는 별도 출처로 유지합니다. 상대는 원래 식별자와 표·장·시기 문맥으로 식별하고 실제 동일성 미결은 확정 대상 배정과 함께 남깁니다.
+
+공유는 해당 관계 셀에만 적용합니다. 행 주인의 번호·형태·치수·재질과 다른 이웃 셀은 실제 설명하는 대상에만 남깁니다. 행 전체 전파·상호 비고 통합·문장 합성·새 관계 구조 추론을 하지 않습니다. 기존 직접 설명·출토/조성 기반 공유·층위 동일성·제목·언급별 등록 적격성 규칙도 유지합니다. 코드의 의미상 자동 재배정이나 응답 보정 없이 프롬프트로 명확히 하며 v1~v13의 정확한 과거 프롬프트·입력 매핑·검사 기준을 보존합니다.
+
+### 유형 요약과 개별 유물의 구별(프롬프트 v15)
+
+v15 요청은 입력·고정 E 참조·출처 매핑·응답 스키마·조립 검사를 바꾸지 않고 v14에 영어 적용 범위를 추가합니다. 본문이나 표의 일반 출토품 유형 요약은 식별된 소속 유구·층위에 보존합니다. 유형·장·시기·출토 장소가 일치하고 등록부에 유형별 후보가 하나씩 있어도 그 요약이 해당 개별 유물을 지칭한다는 근거는 되지 않습니다. 유물 식별자·직접 참조·명확한 개체 동일성 연결 등 원래 근거가 필요합니다. 번호를 항상 요구하는 것은 아니며, 자체 제목·본문 문맥으로 개별 유물이 식별되는 설명의 명시적 출토 맥락 공유는 유지합니다.
+
+일반 요약에 유형이 등장한다는 이유로 개별 유물을 추가하거나 미결을 만들지 않고 ‘등’을 다른 후보로 확대하지 않습니다. 식별된 두 객체의 명시적 관계 비고는 여전히 양쪽에 공유하며 이웃 형태·치수 셀은 행 주인에만 남깁니다. 응답 필터링·코드의 자동 재배정·원문 보정 없이 프롬프트로 명확히 하며 v1~v14의 정확한 과거 지침·매핑·검사 기준을 재현합니다.
+
+### 한정된 집합과 문장 안의 서술 대상 변화(프롬프트 v16)
+
+v16 요청은 v15의 입력·고정 E 참조·매핑·응답 스키마·검사를 유지합니다. 영어 지침은 ‘나머지’, ‘그중’, ‘다른’ 등의 지시를 직전 원문 문맥이 명확히 한정한 집합에서 해석하도록 합니다. 문단의 국지 범위·집합 축소·제외를 존중하고 앞의 표나 절에 더 많은 객체가 있다는 이유로 범위를 확대하지 않습니다. 문장의 모든 절에서 서술 대상이 바뀌는지 확인하며 같은 문장이 여러 식별된 후보를 직접 설명하면 같은 원문 E 참조에 모두 배정합니다.
+
+원문과 유보 표현을 통째로 보존하며 쪼개거나 재서술하지 않습니다. 문장 공유가 각 절의 속성을 모든 대상에 복사하거나 이웃 셀·문장까지 전파한다는 뜻은 아닙니다. 국지 집합이 실제로 불명확하면 확정 대상과 미결 대안을 구분합니다. 일반 유형 목록만으로 개별 유물을 특정하지 않는 기준도 유지합니다. 코드의 의미상 자동 재배정·응답 보정·새 관계/속성 추출은 도입하지 않으며 v1~v15의 정확한 과거 요청·매핑·검사를 재현합니다.
+
+### 생략된 주어와 전체 지시의 범위(프롬프트 v17)
+
+v17은 v16의 입력·고정 E 참조·매핑·응답 스키마·검사를 유지합니다. 생략된 주어와 ‘모두’, ‘전부’ 등의 지시는 직전 원문이 명시적으로 한정한 집합을 이어받습니다. 집합을 다시 설정하거나 축소·확장하려면 원문의 명시적 근거가 필요하며 시기·장·위치·유형·관련성이 같다는 이유로 대상을 추가하지 않습니다. 모든 절의 서술 대상을 확인하고, 뒤의 전체 지시가 더 작은 부분집합을 가리켜도 앞의 절이 직접 설명한 대상은 같은 문장 E 참조에 유지합니다.
+
+국지 집합의 ‘나머지’ 해석과 표 셀 소유·명시적 관계 공유 기준을 유지합니다. 원문·응답을 보정하거나 코드로 의미상 재배정하지 않습니다. v1~v16의 정확한 과거 요청·매핑·검사를 재현합니다.
+
+### 직전 한정 집합 우선과 표 일관성 검사(프롬프트 v18)
+
+v18은 직전 문장·절이 명시한 부분집합을 앞의 절·표 전체 집합보다 우선합니다. 한 문장의 각 절에서 직접 설명하는 대상은 같은 원문 E에 유지합니다. 식별된 행 주인의 데이터 셀은 번호·숫자·대시도 assignments에 보존하고 일반 열 제목은 ignored로 제외합니다. 이유에서 행 주인을 식별했다면 그 데이터 셀을 제외하는 근거가 될 수 없습니다. 명시적 관계 비고의 공유는 해당 셀에만 적용합니다.
+
+v18 이후 감사에 결정론적 일관성 검사를 적용합니다. 원래 번호 셀과 등록부 식별자가 문자 그대로 일치하고, 같은 언급에 해당 표 행의 출처 또는 표 제목에 포함된 원래 객체명이 있을 때 후보가 하나인 행만 검사합니다. 후보가 겹치는 행은 자동 확정하지 않습니다. 해당 행의 선택 가능한 모든 셀은 assignments에 행 주인을 포함해야 합니다. 유한한 한국어·영어 일반 열 제목 목록은 괄호 안 단위 표기를 허용하며, 원래 헤더로 표시됐거나 식별된 데이터 행 위 첫 행에 있을 때 ignored 여부를 확인합니다. 등록 객체 제목이나 인식하지 못한 열 이름을 자동으로 일반 헤더 취급하지 않습니다. 비교용 처리로 원문을 바꾸지 않습니다.
+
+문제가 있으면 작업 묶음 완료를 막고 원응답·배정·제외 결과를 검토용으로 유지합니다. 코드가 대상을 추가·제거하거나 응답을 보정하지 않습니다. 본문의 지시어 해소·모든 헤더 인식·의미상 정답을 보증하는 검사는 아닙니다. v1~v17 요청·매핑·과거 검사를 그대로 재현하며 모델 입력과 응답 스키마는 유지합니다.
+
+### 표 비고의 약칭 상대와 상태 설명 대상(프롬프트 v19)
+
+v19는 표 비고의 관계 상대가 약칭으로 나와도 제공된 본문·표·장/시기·위치·고고학적 역할을 함께 보고 식별합니다. 원래 문맥으로 동일성이 확인되면 셀에 등록부의 전체 명칭이나 번호가 반복될 필요는 없습니다. 행 주인과 식별된 상대 모두에 같은 원문 비고를 배정하고, 실제 동일성이 모호하면 확정 대상과 미결 대안을 구분합니다. 생략된 주어의 국지 집합 제한을 이유로 관계 비고에 직접 언급된 상대를 빼지 않습니다.
+
+원래 객체와 서술을 유지합니다. 구의 일부 파괴라는 비고를 건물지 행에 있다는 이유로 건물지 파괴로 바꿔 읽지 않습니다. 파괴 주체·인과 방향·선후관계를 새로 만들지 않습니다. 해당 비고만 공유하며 일반 셀 소유·헤더 제외 등 기존 경계를 유지합니다. 모델 입력·매핑·응답 스키마·v18 표 일관성 검사는 유지하고 v1~v18 당시 요청·검사를 그대로 재현합니다. 원문·응답 보정이나 코드의 의미상 대상 재배정은 하지 않습니다.
+
+### 일반 집합 제목과 명시적 예외 대상(프롬프트 v20)
+
+v20은 뒤의 본문·표가 모든 구성원을 식별해도 일반 유형·집합 절 제목을 각 개별 원장 객체의 제목으로 배정하지 않습니다. 절 순서나 집합 전체를 다룬다는 사실이 개체 제목의 근거는 아닙니다. 실제로 식별되는 등록 객체의 고유 제목은 별도로 보존하며 독립 등록된 묶음 레코드도 이 기준을 유지합니다.
+
+예외로 직접 명시된 대상에도 예외 상태를 설명하는 원문 문장 전체를 다른 직접 설명 대상과 함께 배정합니다. 원문을 보존하는 것과 문장의 긍정적 서술을 예외 대상에 적용하는 것은 구별합니다. 예외 대상의 정확한 위치를 추론하거나 다음 문장까지 전파하지 않습니다. 뒤의 ‘모두/나머지’는 계속 축소된 집합에서 해석합니다. 입력·매핑·스키마·표 검사·원문을 유지하고 v1~v19 당시 요청·검사를 재현합니다. 응답 보정이나 코드의 의미상 재배정은 하지 않습니다.
+
+### 본문 집합 표현과 구성원 식별(프롬프트 v21)
+
+v21은 집합에 대한 설명·관계가 직접 적혔는지와 그 개별 구성원이 식별됐는지를 구분합니다. 집합과의 공간 관계만으로 같은 유형의 등록 후보 전체에 문장을 나눠 배정하지 않습니다. 원래 구성원 열거·이미 확정된 집합의 명확한 재참조·구성 범위를 확정하는 위치/구획/배치 연결을 요구합니다. 시기·장·대략적 위치나 등록부 목록만 같아서는 충분하지 않습니다. 원래 근거 연결이 있으면 매번 전체 명칭이나 번호를 반복할 필요는 없습니다.
+
+원문은 확인된 행위·설명의 주 대상과 독립적으로 식별된 대상에 유지합니다. 유사 후보가 있다는 이유만으로 전원에 대한 미결이나 누락 집합 문제를 새로 만들지 않습니다. 실제 동일성 미결·명시적으로 한정된 집합·독립 등록된 집합·식별된 약칭 상대 공유는 유지합니다. 입력·매핑·스키마·표 검사를 바꾸지 않고 v1~v20 당시 요청·검사를 재현합니다. 원문·응답 보정이나 코드의 의미상 재배정은 하지 않습니다.
+
+### 개별 유물 제목 보존의 우선순위(프롬프트 v22)
+
+v22는 식별된 등록 개별 유물의 제목을 본문이 별도 발췌로 있거나 이미 배정됐어도 원문 전체로 보존합니다. 번호·명칭·장/본문 근거로 개체의 제목임을 확인하며, 그 제목 안에 유형명이 있다고 일반 분류 제목으로 취급하지 않습니다. 이 보존 기준은 일반 유형·집합 제목과 표 헤더 제외보다 우선합니다. 개별 제목임을 인식한 이유를 쓰면서 본문이 별도라는 이유로 제외하지 않고 배정해야 합니다. 실제 동일성 불확실성은 미결로 남기며 일반 분류 제목은 계속 제외합니다.
+
+입력·발췌 ID·출처 매핑·스키마·기존 제목/표 검사는 유지합니다. v1~v21의 요청과 검사를 그대로 재현하며 원문·원응답 보정이나 자동 재배정은 하지 않습니다.
+
+### 순수 표 안내문과 실질적인 객체 설명(프롬프트 v23)
+
+v23은 객체에 관한 실질적인 진술 없이 표로 안내하기만 하는 본문 발췌를 제외합니다. 참조한 표의 행이나 등록 구성원을 식별할 수 있어도 안내문을 그 대상들에게 배정하거나 미결 대상으로 만들지 않습니다. 이 자격 기준은 순수 안내문에 한해 전체 대상 확인·집합 공유보다 우선합니다.
+
+실제 객체 설명이 있는 발췌는 표 참조가 함께 있어도 고정된 원문 전체를 보존합니다. 참조를 지우거나 발췌를 나누거나 표 데이터로 대체하지 않습니다. 식별된 객체 제목은 동일성 근거로 보존하고 실질적인 표 셀·관계 공유·일반 헤더 제외 기준도 유지합니다. 입력·출처 매핑·스키마·조립 검사는 바꾸지 않으며 v1~v22 당시 요청과 검사를 재현합니다. 원문·원응답 보정이나 자동 재배정은 하지 않습니다.
+
+### 안내문 제외의 적용 범위(프롬프트 v24)
+
+v24는 순수 표 안내문 제외를 해당 안내문에만 적용합니다. 실제 조사 수량·분포 서술은 실질적인 설명으로 두고, 원래 조사 범위·개별 장의 기록·표가 구성원을 연결하는지 확인한 뒤 생략된 주어의 한정 집합을 이어받습니다. 그 근거 연결이 있으면 매번 번호를 반복할 필요는 없으며, 근거 없는 유형 요약을 모든 등록 후보로 확대하지 않습니다.
+
+내부·외곽·파괴 설명에서 식별되는 구획·도랑 상대도 원래 본문·장·위치·표 문맥으로 다시 확인하고 행 주인이나 건물지와 함께 같은 발췌를 보존합니다. 안내문 제외 때문에 관계 공유를 약화하거나 일반 속성 셀의 소유 대상을 바꾸거나 실제 동일성 미결을 확정하지 않습니다. 입력·매핑·스키마·검사는 유지하고 v1~v23을 재현하며 원문·응답 보정이나 자동 재배정은 하지 않습니다.
+
+### 축약 입력의 원래 표 행 문맥(프롬프트 v25)
+
+`createContentAttachmentTableAnchorInput(plan, unit)`은 v13~v24 결정 입력에 후보의 원래 표 근거를 추가합니다. 전체 후보 행은 그대로 제공합니다. 현재 선택된 표 셀에 원래 근거가 있는 후보는 `candidateTableAnchors`의 `[candidate, row, column, excerpt]`, 예를 들어 `["R12", "A1", 4, "E23"]`로 연결합니다. 공유 `candidateTableRows`는 `[ref, table, row, excerpts]`, 예를 들어 `["A1", "T1", 2, ["E19", "E20", "E21", "E22", "E23"]]`를 담습니다. 기존 표 그리드·병합 헤더·정확한 발췌 원문으로 트렌치와 행 문맥을 확인하므로 명칭을 재작성하거나 후보마다 같은 행을 반복하지 않습니다. 행 참조는 후보 순서와 무관하게 원래 표 순서로 정합니다.
+
+영어 프롬프트는 이 근거로 이름이 같은 후보를 구분하며 후보 참조 번호나 목록 순서를 동일성 근거로 쓰지 않도록 합니다. 현재 표 근거가 없는 후보도 다른 입력 근거로 배정할 수 있습니다. 이 참조는 원래 언급의 식별 근거이며 부모 관계나 자동 배정 규칙이 아닙니다. 의미에 따른 배정은 계속 모델이 판단합니다.
+
+긴 후보·리소스·표 ID와 문자 범위, 원래 별칭별 출처는 모두 `codeMap`에 보존하고 모델용 참조 튜플만 중복 제거합니다. 원래 문자 범위 일치를 검사한 뒤 연결하며 원문 위치를 옮기거나 고치지 않습니다. v25 감사 기록은 정확한 요청·원응답·새 매핑을 보존하고 재현 시 검증합니다. v1~v24는 당시 입력 생성기·프롬프트·검사로 계속 재현합니다. 원문 재작성·응답 보정·전체 순회 실행은 추가하지 않습니다.
+
+### 이미 확인된 집합의 한정된 후속 설명(프롬프트 v26)
+
+v26은 이미 구성원을 식별한 한정된 조사 집합의 분포·형태·상태·해석 설명에서 개별 번호가 반복되지 않아도 그 집합을 이어받습니다. 생략된 주어와 반복된 유형명을 가장 가까운 확정 집합에 연결하며, 근거 있는 후속 설명을 단순히 개별 미식별 요약으로 제외하지 않습니다. 원래 구성원 근거가 필요하며 실제 주어 변경이나 명시적으로 좁힌 부분집합의 범위를 유지합니다. 이름·장·시대·등록부 목록만으로 구성원을 새로 확정하는 규칙은 아닙니다.
+
+‘대부분’·‘대체로’ 같은 한정을 포함한 고정 발췌 전체를 보존합니다. 이 문맥을 식별된 구성원에게 연결해도 모든 개체가 그 긍정 속성을 가진다고 확정하거나 예외를 식별하거나 다른 개별 표 값을 대체하지 않습니다. 식별되지 않은 부분집합을 만들어 내지 않습니다. 기존 원문 선택·표 셀 소유·불확실성·유형별 요약의 경계를 유지합니다. 사용자 입력·코드 맵·스키마·검사는 그대로이며 v1~v25는 당시의 정확한 요청으로 계속 재현합니다. 원문/응답 보정이나 자동 재배정은 없습니다.
+
+### 번호 앵커와 표 행 근거의 완전한 보존(프롬프트 v27)
+
+v27은 후보의 번호 셀 앵커와 인용을 식별 근거로 다루며 보존할 발췌의 전체 목록으로 취급하지 않습니다. 주인을 식별한 뒤 그 객체의 원래 표 행 구간에 있는 모든 선택 가능한 비어 있지 않은 데이터 셀을 확인합니다. 직접 앵커가 없는 형태·치수·비고도 포함하며, 병렬 객체 묶음은 헤더·열 위치로 구분합니다. 같은 행 참조를 공유해도 다른 주인의 값을 전파하지 않습니다. 일반 헤더·빈 셀 및 식별된 관계 비고의 기존 처리 기준은 유지합니다.
+
+모델은 각 객체 행 구간과 전체 선택 ID를 assignments·unresolved·ignored 목록과 대조한 뒤 마칩니다. 번호만 선택해도 이웃 셀을 처리한 것으로 보지 않으며 각 셀을 독립된 원래 E로 선택합니다. v26의 집합 문맥·한정어와 개별 셀 근거를 함께 보존합니다. 코드는 누락을 채우거나 대상을 재배정하지 않고 기존 완전성 검사로 실패를 보고합니다. 입력·맵·스키마·검사는 그대로이며 v1~v26은 당시의 정확한 요청으로 재현합니다.
+
+### 추정된 집합의 개별 대상 식별 (프롬프트 v28)
+
+V28은 해석의 대상 유형을 식별하는 것과 그 집합의 개별 등록 대상을 식별하는 것을 구분한다. 중복된 흔적·구성 요소 추정·반복 조성 해석만으로 새로 추정된 집합을 주변 등록 객체와 동일시하지 않는다. 위치 기준이나 판단 근거로 언급된 번호 객체, 같은 문맥 및 등록 목록만으로는 구성원 관계가 성립하지 않는다. 각 대상에는 원문의 직접 식별 또는 명확한 동일 집합 연결이 필요하며, 유보 표현을 보존하고 집합 레코드나 미결 구성원을 임의로 만들지 않는다.
+
+이미 식별된 집합의 한정된 후속 설명과 원래 표 행 전체 배정은 유지한다. 입력·맵·스키마·자동 검사는 그대로이며, 의미상 대상은 LLM이 선택한다. 코드에서 과공유를 제거하거나 응답을 보정하지 않는다. V1~v27의 과거 요청은 정확히 재현한다.
+
+### 위치 기준으로만 언급된 대상 (프롬프트 v29)
+
+V29는 다른 대상의 위치를 설명하는 기준으로만 언급된 객체를 해당 발췌의 추가 배정 대상에서 제외한다. ‘건물지 K~M이 분포하는 곳’ 같은 위치 한정절도 수혈의 위치 기준일 뿐이면 건물지 자체의 독립 설명으로 보지 않는다. 명시 번호는 기준 대상의 식별 근거이며 직접 설명의 근거를 대신하지 않는다. 이 경계는 위치 기준에만 쓰인 언급에 대해 전체 대상 공유 및 자체 공간관계 예외보다 우선한다.
+
+식별된 주 대상 집합에는 위치 구절·한정 표현을 포함한 원문 전체를 보존한다. 별도의 상태·속성 설명과 명시적인 고고학적 관계, 출토 맥락·조성 기반·노출 관계의 공유는 유지한다. 기준 대상이 배정되지 않았다는 이유로 미결을 만들거나 일반 집합의 구성원을 추정하지 않는다. 입력·맵·스키마·자동 검사는 그대로이며 코드가 공유 대상을 제거하거나 응답을 보정하지 않는다. V1~v28의 과거 요청을 정확히 재현한다.
+
+### 공급자 종료 정보와 시도별 근거
+
+새 `attachContentUnit` 감사는 구조화 파싱 아래에서 `createAuditedModel`로 수집한 `callAttempts`를 포함한다. 공급자 호출마다 요청 본문·SDK 응답 전체·콘텐츠·사용량·응답 ID·API 상태·미완료 상세·통합/원래 종료 사유 또는 원래 공급자 오류를 보존한다. 선택적 `onAttempt` 콜백으로 최종 호출이 실패해도 시도별 기록을 저장할 수 있다. 없는 정보는 null이며, 이 필드가 없는 과거 감사도 그대로 재현한다. 선택 응답은 분리해 보존하고 보정하지 않는다.
+
+관측 정보만 추가한다. 프롬프트 v29·입력·스키마·맵·재시도 정책·완전성 검사는 그대로다. 객체 파싱 성공은 공급자의 정상 종료나 발췌 전체 처리를 증명하지 않으므로 종료 정보와 자동 검사를 구분한다. SDK 본문을 보존하며 HTTP 바이트 원본을 캡처했다고 주장하지 않는다. 인증 정보와 헤더는 제외한다.
+
+### 조사범위와 확인된 유구 집합 (프롬프트 v30)
+
+직접 설명된 사업범위에 배정해도 조사범위·본문의 표 참조·원래 표 행·후보 앵커로 구성원이 확인된 유구 집합의 배정을 대체하지 않는다. 유형·시대·집계 수량만 반복되어도 직접 설명된 구성원 모두에 같은 원문을 보존한다. 사업범위 배정은 별도 근거가 필요하며 트렌치 집합과 유구 집합을 서로 자동 승계하지 않는다.
+
+근거 없는 유형 요약·추정 집합·위치 기준 대상은 기존 제한을 유지한다. 집계 표현과 수량 차이는 그대로 보존하며 동일성 확정이나 모든 속성의 개별 전파로 바꾸지 않는다. 입력·맵·스키마·검사는 그대로이고 코드가 의미 대상을 채우지 않는다. v1~v29의 실제 요청 재현을 유지한다.
+
+### 앞뒤 본문과 다른 페이지 표의 원래 근거 (프롬프트 v31)
+
+v31은 표 셀로 시작하거나 끝나는 혼합 묶음에서도 실제 본문 리소스를 기준으로 앞뒤 문맥을 찾는다. 표만 있는 묶음도 물리 페이지 주변 본문을 찾는다. 앞뒤 최대 두 블록씩 원문 그대로 구분해 주어·한정·불완전한 대안을 보존한다. 기존 계획에서도 보존된 원래 리소스로 문맥을 구성하며 새 계획에도 저장한다.
+
+`current.readOnlyContext`에는 짧은 B 참조·장 문맥·원문을 전달한다. 현재 묶음과 원래 장 경로가 일치하는 후보의 다른 페이지 표 근거는 `supportingTables`·`supportingRows`·`supportingAnchors`의 Q/M 공유 참조로 전달한다. 원래 헤더·병합 구조와 후보 근거 셀만 남기고 관련 없는 행·불필요한 치수는 생략한다. 보존하는 헤더 행에서는 false를 포함한 원래 플래그를 유지한다. 긴 출처 ID·문자 범위·후보 연결은 감사 맵에 남긴다. 코드가 표 연속성이나 집합 구성원을 확정하지 않으며 LLM이 본문 정의·표 구조·번호·앵커를 함께 판단한다. 선택 가능한 것은 현재 E 참조뿐이며 문맥으로 발췌나 대상을 자동 보충하지 않는다. 과거 v1~v30은 저장된 계획으로 정확히 재현한다.
+
+### 문맥으로 쓰는 안내문과 조성층 대안성 (프롬프트 v32)
+
+v32는 표 안내문을 이웃 설명의 대상 식별에 참고하는 것과 안내문 자체를 원문으로 보존하는 것을 구분한다. 실질적인 객체 사실이 없는 순수 안내문은 정확한 구성원을 알아도 제외한다. 집합 공유와 보조 문맥 지침보다 이 제외 기준이 우선하며 실제 객체 설명에 표 참조가 포함된 문장은 보존한다.
+
+조성층이 대안적으로 제시되거나 개별 구성원의 조성 기반을 모른다는 이유만으로 후보 식별 미결을 만들지 않는다. 현재 조각과 원래 후보 근거로 명확히 식별되는 층위는 대상 유구 집합과 함께 보존하되 한정 표현을 유지하고 속성·관계를 확정하지 않는다. 읽기 전용 문맥에만 나온 다른 층위를 자동 추가하지 않는다. 일반 이름의 실제 모호성·정의 충돌은 기존 미결 처리를 유지한다. 입력·맵·스키마·자동 검사는 바꾸지 않고 코드가 의미 대상을 보정하지 않는다. v1~v31 요청 재현을 유지한다.
+
+### 원래 본문 블록과 비등록 대상의 주어 계승 (프롬프트 v33)
+
+`current.bodyBlocks`는 `bodyBlockColumns = [ref, excerpts]`에 따라 짧은 P 참조와 해당 원래 본문 블록의 선택 가능한 E 목록을 원문 순서로 전달한다. 원문·문장 범위·표 셀·E ID는 그대로 유지한다. 빈 본문 블록은 생략하고 표와 읽기 전용 B 문맥은 별도로 둔다. 같은 원문이어도 출처 블록이 다르면 구분한다. 긴 출처 ID와 리소스 키는 감사 맵에 남기며 선택 가능한 것은 E 참조뿐이다.
+
+모델은 원장에 등록하지 않은 이전 조사·비교·인용 대상도 원문의 주어로 추적한다. 그 대상의 후속 규모·사용 이력을 같은 이름의 현재 후보에 붙이지 않는다. 현재 대상과 직접 서술된 관계는 보존하고 범위 밖 대상만 설명하는 발췌는 제외한다. 블록 경계는 모든 문장의 주어를 하나로 확정하거나 계속되는 주어를 자동 초기화하는 기준이 아니다. 코드는 블록·출처 연결만 제공하며 주어·후보를 선택하거나 응답을 보정하지 않는다. v1~v32의 저장 요청과 감사 맵 재현을 유지한다.
+
+### 확인된 집합의 일부에 대한 후속 설명 (프롬프트 v34)
+
+이미 식별된 조사 집합을 이어받는 “일부는 주혈로 보인다” 같은 문장은 어느 번호가 해당하는지 몰라도 집합에 관한 원문 근거다. ‘일부’와 저자의 유보 표현을 포함한 전체 발췌를 확인된 집합의 구성원 기록에 보존하되 모든 개체가 해당 속성을 갖는다고 확정하거나 긍정 사례의 부분집합을 특정하지 않는다. 명시적으로 식별된 더 좁은 범위는 유지하며, 새로 추정된 집합에는 별도의 구성원 연결 근거가 필요하다. 가능한 건축물 부재를 등록 건물지와 연결하거나, 속성 적용 대상의 미상을 후보 동일성 미결로 바꾸거나, 불명확한 하위 집단 경계를 이유로 상위 집합의 한정된 설명 자체를 버리지 않는다. 입력·출처 맵·응답 스키마·자동 검사는 바꾸지 않는다. v1~v33의 저장 요청과 응답은 의미 보정 없이 그대로 재현한다.
+
+### 트렌치 유구 현황의 공동 배정과 번호 셀 검사 (프롬프트 v35)
+
+원래 트렌치 표의 유구 현황 셀은 해당 행의 트렌치와 명시적으로 식별된 등록 유구를 함께 설명한다. 원래 행·셀 앵커를 근거로 같은 E 참조를 양쪽에 보존하며, 이유에 트렌치를 언급하는 것으로 후보 선택을 대신하지 않는다. 트렌치 치수는 트렌치에만 남기고 본문 유구 집합 설명을 모든 트렌치로 자동 전파하지 않는다. 기존 집합·유형 요약·미결 경계는 유지한다.
+
+v35 감사의 자동 표 검사는 후보의 원래 근거가 해당 셀의 전체 식별자 원문·문자 범위와 정확히 일치할 때만 행 주인을 확인한다. 다른 치수 값과 번호가 같거나 캡션에 이름이 있다는 이유로 주인을 정하지 않는다. 식별자 앵커마다 행 구간을 나누어 좌우 객체군을 구분하고, 같은 앵커에 복수 후보가 경쟁하면 검사기가 주인을 추측하지 않는다. 헤더는 별도로 처리한다. 누락을 보고할 뿐 후보를 추가하거나 원응답을 보정하지 않는다. 입력·맵·스키마는 유지하고 v1~v34의 정확한 과거 프롬프트와 검사 재현도 보존한다.
+
+### 조사범위의 방안 설정과 식별된 트렌치 구획 (프롬프트 v36)
+
+원문이 이번 조사범위를 정의한 뒤 그 범위의 조사 그리드·방안 설정이나 트렌치 구획을 실질적으로 설명하면, 해당 사업범위와 명확히 식별된 트렌치 모두에 같은 발췌를 보존한다. 조사 대상이 계속됨이 명확하면 범위의 이름을 문장마다 반복할 필요는 없다. 트렌치 구성원은 원래 본문·표·후보 앵커로 확인한다. 범위 자체의 조사 구획 설명은 상위 객체로 자동 전파하거나 위치 기준만 언급된 대상을 추가하거나 유구 집합을 모든 트렌치에 공유하는 것과 구분한다.
+
+실제 조사범위 변경·이전 조사 주어는 유지한다. 관련 없는 일반 조사방법이나 개별 트렌치 치수를 사업범위로 복사하거나 포함 관계를 추론하거나 방안 크기를 모든 트렌치의 규모로 바꾸지 않는다. 입력·맵·스키마·원래 번호 셀 검사는 그대로이며 v1~v35의 정확한 과거 요청과 검사 재현도 유지한다. 의미 대상은 모델이 선택하고 원문·응답은 보정하지 않는다.
+
+### 비등록 대상의 주어 계승과 경계 조각의 후속 문맥 (프롬프트 v37)
+
+원문의 설명 주어와 관계 문장을 배정받는 후보를 구분한다. 이전 조사·비교 대상이 도입되면 반복된 일반 명사나 생략된 주어의 후속 설명은 원문에서 주어가 명시적으로 바뀔 때까지 그 대상을 이어받는다. 현재 객체가 관계 문장의 참여자라는 이유로 비교 대상의 이웃 규모·사용 이력을 현재 기록에 옮기지 않는다. 현재 객체의 관계 근거는 보존하되 비등록 대상만 설명하는 완결 문장은 제외한다.
+
+미완의 현재 발췌는 다음 읽기 전용 원래 블록까지 읽고 관계 참여자를 판단한다. 관계 술어가 선택 가능한 조각 뒤에 있어도 이어지는 문장이 현재 객체의 조건부 연결을 명시하면 현재 E 조각만 원문 그대로 보존한다. B를 선택하거나 합쳐 저장하거나 비교 대상의 치수를 현재 객체 속성으로 바꾸거나 조건부 관계를 확정하지 않는다. 입력·맵·스키마·자동 검사는 유지하며 v1~v36의 정확한 과거 재현과 원문·응답 비보정 원칙도 유지한다.
+
+### 확인된 집합과 뒤따르는 개별 대상 설명 (프롬프트 v38)
+
+고정된 한 문장의 모든 절을 검토한 뒤 대상을 선택한다. 앞절이 이미 식별된 조사 집합을 실질적으로 설명하면, 뒷절에서 구성원 하나를 특정해도 그 한정은 뒷절에만 적용한다. 원래 근거로 식별되고 직접 설명된 대상 모두에 같은 문장 전체를 보존한다. 한정·대비·예외를 그대로 유지하며 모든 구성원에 모든 절의 속성을 단정하거나 해당 개체가 불명확한 하위 집합을 만들어 내지 않는다.
+
+출토·수습 요약은 확인된 유구·층위 집합을 설명하면서도 개별 유물은 특정하지 않을 수 있다. 유형별 요약으로 개별 유물을 추측하지 않는 기준은 유물 동일성에 별도로 적용하며, 앞절이 설명한 기존 유구·층위 집합을 지우는 근거가 되지 않는다. 원래 구성원 근거는 계속 요구하고 실제로 좁혀진 선행 집합은 넓히지 않는다. 입력·맵·스키마·자동 검사는 그대로이며 v1~v37은 정확한 과거 재현을 유지한다. 코드가 의미 대상을 추가하거나 원문·응답을 보정하지 않는다.
+
+### 행 주인 필수 배정과 관계 상대 공유 (프롬프트 v39)
+
+원래 행 주인을 선택한 것만으로 관계 비고의 대상 검토가 끝나지 않는다. 각 관계 셀에서 명시된 상대를 원래 번호·명칭 셀과 표·장 문맥으로 별도 식별하고, 같은 원문 E에 식별된 참여자 모두를 배정한다. 역방향 비고도 독립된 근거로 각각 양쪽에 공유한다. 상대 동일성이 실제로 불명확하면 행 주인은 유지하고 상대 후보의 미결을 별도로 남기며, 추측하거나 상대를 조용히 누락하지 않는다.
+
+관계 셀 공유가 이웃 번호·형태·치수를 상대에게 전파하지는 않는다. 일반 속성 셀은 실제 행 주인에게만 남기고, 앞절의 확인된 집합 설명을 같은 문장 안에서 보존하는 기준도 유지한다. 입력·맵·스키마·자동 검사는 바꾸지 않으며 v1~v38의 정확한 요청·감사 재현과 의미 대상 자동 추가 금지, 원문·응답 비보정 원칙을 유지한다.
+
+### 후속 설명의 원문 집합 경계 (프롬프트 v40)
+
+생략된 주어와 집합의 분포 설명은 직전 원문에서 명시적으로 열거한 조사 집합과 그 근거가 확인된 구성원을 이어받는다. 포괄적인 후속 명칭만으로 등록부 전체를 다시 집합으로 삼지 않는다. 같은 시기·장·위치나 구성원과의 관계만으로 다른 객체를 추가할 수 없다. 추가 대상은 원문의 명시적 집합 확장·전환 또는 현재 발췌의 독립적인 직접 설명을 요구한다. 이전 모델 응답이 아닌 원래 근거로 구성원을 확인한다.
+
+모든 관련 대상과 앞절 집합 설명을 보존하는 기준은 근거 있는 참여자를 유지하는 것이며 구성원을 새로 만들어 내는 것이 아니다. 실제 범위 전환·한정된 집합·명시적 예외·식별된 관계 상대는 계속 보존하고, 표 비고 공유가 이웃 치수를 전파하지 않도록 한다. 입력·맵·스키마·자동 검사는 그대로이며 v1~v39 요청·감사의 정확한 재현과 원문·응답 비보정, 코드의 의미 대상 자동 수정 금지 원칙을 유지한다.
+
+### 개별 유물 제목의 독립 배정과 반환 전 전체 발췌 점검 (프롬프트 v41)
+
+V41은 등록된 개별 유물로 식별되는 제목을 독립된 E로 반드시 배정하도록 명시한다. 뒤의 본문을 모두 별도로 배정했더라도 제목의 배정을 대신할 수 없다. 번호·명칭과 장·본문 근거로 식별되는 제목을 단순 식별 앵커나 중복 정보로 취급해서는 안 된다. 이 기준은 일반 유형·집합 제목 및 표 헤더 제외보다 우선하며, 실제 제목 동일성이 불명확하면 명시적인 미결로 남긴다.
+
+반환 전 원래 순서의 모든 E를 실제 assignments·unresolved·ignored 배열과 대조하고, 블록 사이의 독립 제목을 포함해 빠진 판단을 기존 스키마 안에서 마친다. 개별 유물 제목의 필수 배정도 별도로 점검한다. 이 프롬프트 지시는 결정론적 누락 검사를 대체하거나 의미적 정확성을 보장하지 않는다. 입력·맵·스키마·문장 분리·자동 검사는 그대로이며 v1–v40의 요청과 감사 재현을 유지한다. 코드는 누락 대상을 채우거나 원문·응답을 보정하지 않는다.
+
+### E별 필수 응답 키 (프롬프트 v42)
+
+V42는 현재 모든 E를 엄격한 `decisions` 객체의 필수 속성으로 둔다. 각 값은 null이 아닌 배정·미결·제외 결정이다. 배정은 비어 있지 않은 `candidateRefs`와 이유, `unresolved` 필드를 요구한다. 추가 미결이 없으면 null, 부분 미결이 있으면 별도의 후보·이유 객체를 둔다. 미결만 있는 결정은 미등록 동일성을 위해 빈 후보 목록을 유지할 수 있다. 제외는 상태와 이유만 담는다. 알 수 없는 E 키와 누락 결정은 스키마 검증에 실패하며, 모델의 자체 점검 지시는 이를 보조한다.
+
+결정 형식과 후보 enum은 공통 스키마 정의를 참조해 E마다 등록부를 반복하지 않는다. [OpenAI 공식 구조화 출력 문서](https://developers.openai.com/api/docs/guides/structured-outputs)의 필수 객체 속성과 중첩 합집합 지원에 따른 방식이다. 완료·거부와 의미 검사는 별도로 필요하며, 결정 필수화가 대상 선택의 정확성을 보장하지는 않는다.
+
+새 감사는 키별 모델 원응답을 `rawResponse`에 그대로 보존한다. 기존 `response` 배열은 모든 대상·이유·부분 미결을 유지하는 결정론적 형식 변환이며 의미를 보정하지 않는다. 재현 시 필수 원응답 키와 변환 결과의 일치를 검사한 뒤 원래 출처 범위를 조립한다. 입력·맵·문장 분리·기존 의미 검사는 그대로이며 v1–v41의 과거 요청과 배열 응답 검증을 유지한다. 원문과 공급자 출력을 보정하거나 누락 결정을 채우지 않고 기존 스냅샷을 보존한다.
+
+### 이전 조사 설명의 경계 조각과 다음 문맥 (프롬프트 v43)
+
+V43은 미완결 명칭·유형 구절을 다음 읽기 전용 B 블록까지 보고 해석하며, 앞서 도입된 이전 조사·비교 대상의 주어를 유지한다. 페이지·블록 경계, 각주 표기, 같은 유형·시대 표현의 반복은 주어 전환이 아니다. 원문에서 범위가 이미 바뀌었다면 등록된 같은 유형이나 앞의 현 조사 수량만으로 현 조사 집합에 되돌아가지 않는다.
+
+원문이 현 조사로 명시적으로 돌아오거나 식별된 현 조사 대상·관계를 직접 설명하는 근거를 요구한다. 그렇지 않으면 현재 E를 범위 사유가 있는 제외 결정으로 보존한다. E 키 필수화는 배정이나 미등록 후보 미결을 강제하지 않는다. 실제 현 조사 복귀·관계 설명은 기존 기준을 유지한다. 입력·맵·필수 키 스키마·문장 분리·의미 검사는 그대로이며 v42의 원응답/형식 변환 검증을 포함해 v1–v42의 요청과 감사를 재현한다. 코드는 원문·응답을 고치거나 보충하지 않는다.
+
+### 문맥에 따른 명칭 식별과 가장 가까운 명시적 부분집합 (프롬프트 v44)
+
+V44는 짧은 등록명과 구체적인 서술명을 원래 장·시대·번호별 본문·조사 목록·실질적 표 근거로 식별한다. 다른 시대에 문자 그대로 같은 이름의 후보가 있다고 해서 올바른 시대의 후보가 없는 것은 아니다. 함께 설명된 대상을 각각 확인하고 일부 동일성만 실제로 불명확하면 확인된 대상은 유지한다. 일반 유형 제목·순수 표 안내문·근거 없는 집합 동일성의 제외 기준은 유지하며 원문과 등록명을 고쳐 맞추지 않는다.
+
+‘나머지’는 같은 P 블록의 직전 E를 포함해 가장 가까운 원문의 명시적 부분집합에서 해석한다. 더 앞의 전체 표·목록이나 예외 대상 배정은 명시적 확대·독립적 직접 설명 없이 뒤의 부분집합에서 빠진 구성원을 다시 포함하지 않는다. 별도로 함께 설명된 관계 참여자를 포함해 이전 응답의 대상 목록이 아닌 원문에서 집합을 읽는다. 입력·맵·필수 키 스키마·의미 검사는 그대로이며 v42/v43 원응답/형식 변환 검증을 포함해 v1–v43의 요청·감사를 재현한다. 코드는 원문이나 의미 판단을 보정하지 않는다.
+
+### 명시된 번호 범위의 양 끝과 모든 구성원 (프롬프트 v45)
+
+명시된 대상의 정수 번호 범위는 양 끝과 그 사이의 모든 구성원을 펼쳐 반환할 후보 목록과 대조한다. 예를 들어 `Trench 2 ~ Trench 5, Trench 8`은 2·3·4·5·8트렌치다. 같은 E의 원문은 그대로 두며 이유에 전체 범위를 적었다고 누락 대상을 선택한 것은 아니다. 현재 표에 원래 등록 앵커가 없어도 본문·작업내용·비고의 범위에 적용한다.
+
+v45는 대상명이 앞에 있는 명시적 음이 아닌 정수 범위(`~`, `～`, 하이픈, en/em dash)를 검사한다. 끝점의 대상명 반복, 한국어 번호 표식과 TR/trench/트렌치 약칭을 지원한다. 번호는 원래 후보 식별자에서 읽으며 R 번호나 등록부 순서를 계산하지 않는다. 이미 확정된 범위 구성원으로 원래 종류·장 문맥이 하나로 정해질 때만, 같은 문맥에서 각 번호의 기존 후보가 유일한지 확인하고 배정 누락을 보고한다. 같은 ref의 여러 언급은 중복 후보가 아니며, 서로 다른 후보가 같은 번호를 가지면 임의로 고르지 않는다. 없는 후보를 만들거나 제외·동일성 미결만 있는 E를 자동 배정하지 않는다. 대상명 없는 날짜·현장일수·치수 범위는 식별자 범위로 취급하지 않는다.
+
+누락은 검사 문제로 남고 자동 완료를 막으며, 원문·공급자 응답·배정을 변경하지 않는다. 입력·맵·모든 E 필수 출력 스키마는 유지한다. v44의 원응답/형식 변환 검증을 포함해 v1–v44 요청·감사는 당시 기준으로 재현한다. 모든 E 반환과 각 E의 모든 대상 선택은 별도 검사다.
+
+### 현재 절의 한정과 표 작업 대상의 문맥 계승 (프롬프트 v46)
+
+앞선 넓은 집합을 이어받기 전에 현재 절의 명시적 시대·조사·위치·유형 한정을 적용한다. 앞선 조사 집계에 두 시대의 수혈이 함께 있어도 특정 시대의 도로·수혈을 설명하는 문장에 다른 시대 수혈을 추가하지 않는다. 후보의 원래 명칭·발췌·문맥을 대조하며, 독립적으로 설명된 시대 간 관계와 실제 동일성 미결은 보존한다. 코드에서 기계적으로 시대 필터를 적용하지 않는다.
+
+실질적인 표 작업 셀은 개별 번호를 반복하지 않아도 같은 조사·같은 행위에 대한 본문의 확정된 대상을 이어받을 수 있다. 원래 본문의 작업·확정된 구성원·본문/표 연결·표 제목·행·날짜 문맥을 함께 읽는다. 본문에서 확인된 트렌치들의 복토를 명시했다면 그 조사 일지의 현장 복토도 해당 트렌치들의 설명으로 보존할 수 있다. 순수 표 안내문은 계속 제외하고 작업 셀 전체를 그대로 남기며, 함께 적힌 회의·날짜를 객체 속성으로 만들지 않는다. 관련 없는 인접 객체나 이전 조사 대상을 이어받지 않는다.
+
+v46은 일반화된 영어 지침만 추가한다. 입력·맵·모든 E 필수 스키마·문장 단위·v45 범위 검사는 그대로다. 원응답/형식 변환 검증과 v45의 범위 누락 검사를 포함해 v1–v45 요청·감사는 당시 기준으로 재현한다. 원문·모델 응답·의미상 배정을 코드에서 보정하지 않는다.
+
+### 확인된 유구 집합과 조사 단계별 동일성 (프롬프트 v47)
+
+v47은 원문으로 구성원이 확인된 유구 집합과 단순 유형 목록을 구별한다. 현재 시대·범위 한정은 확인된 집합을 좁히되, 개별 번호를 반복하지 않았다는 이유만으로 해당 구성원 레코드를 전부 제외하지 않는다. 원래 조사 집합과 구성원 연결 근거가 필요하며 수량·시대·장·유형의 일치만으로 집합을 확정하지 않는다. 유형별 출토 요약으로 개별 유물을 추측하지 않는 기준은 그대로다.
+
+확정 대상과 동일성 미결 후보 모두 현재 조사 단계와 연결되는 근거가 필요하다. 이름·시대·사업지가 같다는 이유만으로 발굴조사 대상을 시굴조사 대상의 동일성 대안에 추가하지 않는다. 원문의 교차 참조나 명확한 동일 객체 문맥이 있으면 조사 단계 간 동일성을 판단할 수 있으며, 단계가 다르다고 반드시 다른 실물이라고 단정하지 않는다. 다음 읽기 전용 절은 현재 주어를 되돌려 바꾸지 않는다. 실제 조사 단계 간 관계 참여자는 별도로 판단한다.
+
+일반화된 영어 지침만 추가한다. 입력·출처 맵·모든 E 필수 스키마·문장 단위·복토 문맥 계승·범위 검사는 그대로다. v1–v46 요청·감사와 원응답/형식 변환·과거 범위 검사를 재현한다. 보고서 식별자나 샘플 전용 배정 규칙을 넣거나 원문·의미상 응답을 보정하지 않는다. 현재 보고서 밖의 범용성은 다른 보고서로 별도 검증해야 한다.
+
+### 집합 원문 보존과 관계 주체 미결 (프롬프트 v48)
+
+하나의 발췌가 확인된 유구 집합을 설명하면서 뒤의 관계 절에서는 참여자를 특정하지 않을 수 있다. 원문을 확인된 집합 구성원에 보존하되, 그 배정을 후보 병합·개별 동일성 결정이나 모든 절의 서술이 모든 구성원에게 성립한다는 뜻으로 해석하지 않는다. 순수한 집합 현황은 개별 번호를 반복하지 않았다는 이유만으로 미결로 바꾸지 않는다.
+
+집합 설명과 관계 설명이 함께 있는 발췌는 기존 assigned 결정과 내부 unresolved 필드를 사용한다. 같은 후보가 양쪽에 나타날 수 있다. 집합 원문의 보존 대상은 확실하지만 관계 역할에서는 동일성 대안일 수 있기 때문이다. 기존 reason에서 두 근거를 구별하고, 후보가 이미 배정됐다는 이유로 관계 미결을 지우거나 서로 겹치지 않는 후보만 요구하지 않는다. 원문이 참여자를 명확히 식별하면 미결을 만들지 않으며, 미결은 원래 조사·주어 범위를 지키고 유보 표현을 그대로 남긴다. 관계를 생성하거나 확정하지 않는다.
+
+v48은 범용 영어 지침만 추가한다. 입력·E 문장 단위·필수 스키마·의미 보존 형식 변환·출처 조립·자동 검사는 그대로이고 v1–v47을 정확히 재현한다. 코드에서 배정이나 미결을 추론·보정하거나 샘플 레코드를 하드코딩하지 않는다. 다른 보고서의 범용성 검증은 아직 필요하다.
+
+### 수량의 적용 범위와 관계 참여자의 원문 연결 (프롬프트 v49)
+
+후보명·인용·원래 표 행의 수량은 그 관찰 대상과 범위에 속한다. 본문의 더 넓은 집합이나 다른 유형에 명시되지 않은 총수로 옮기지 않는다. 한 후보에만 수량이 적혀 있거나 명사가 단수라는 이유로 확인된 구성원을 제외하지 않는다. 실제 원문 총수는 명시된 범위에서 적용하며, 추정 표현을 보존하고 물리적 객체의 동일성을 임의로 결정하지 않는다.
+
+관계 양쪽의 원문 표현이 각각 어느 레코드인지 원래 근거로 식별한다. 이름·유형·시대·사업·보고서가 같거나 이유에서 관계 상대라고 부르는 것만으로 연결을 확정하지 않는다. 등록되지 않은 인용·비교 상대를 문맥에 유지하되 사용 가능한 다른 단계의 등록 객체로 대체하지 않는다. 상대를 선택해도 주체가 식별되는 것은 아니므로, 확인된 집합 원문과 함께 뒷받침되는 현 조사 주체의 대안을 부분 미결에 남긴다. 관계 성립의 가능성과 참여자 동일성의 불확실성은 별개다.
+
+v49는 보고서·샘플 식별자 없는 범용 영어 지침만 추가한다. 입력·E 단위·필수 스키마·형식 변환·조립·검사는 그대로다. v1–v48 요청·감사, 원응답/변환 검증, 집합 배정과 관계 미결의 후보 중복 보존, 과거 범위 검사를 재현한다. 코드가 원문·응답을 보정하거나 의미상 대상을 채우지 않는다. 다른 보고서로 범용성을 별도 검증해야 한다.
+
+### 집합 원문 공유와 일지 작업의 가까운 대상 범위 (프롬프트 v50)
+
+원문으로 확인된 집합은 개별 식별자를 반복하지 않아도 현황·후속 설명을 공유할 수 있다. 개별 정보가 없다는 이유만으로 객체 하나를 고르는 문제로 바꾸지 않는다. 확인된 구성원의 추정 표현을 유지하되 실물 동일성을 결정하거나 모든 절의 서술을 모든 구성원에 전파하지 않는다. 실제 구성원 연결의 불명확함과 별도의 관계 역할 미결은 구분해서 남긴다.
+
+날짜가 있는 작업 셀에서는 가장 가까운 명시 대상을 생략된 후속 작업의 주어로 우선한다. 일반적인 측량·기록 표현, 쉼표, 일반 조사방법 설명이나 전체 조사 집합이 있다는 것만으로 그날 작업을 전체로 확대하지 않는다. 넓은 작업 범위의 참여자와 해당 사건을 연결하는 원문 근거가 필요하다. 본문과 표에서 같은 전체 작업이 확인되면 그 계승은 유지하며, 각 절에서 독립적으로 확인된 대상들에게는 셀 전체를 그대로 보존한다.
+
+v50은 샘플 이름·수량·ID·배정 목록 없는 범용 영어 지침만 추가한다. 입력·E 단위·필수 스키마·형식 변환·조립·검사는 그대로다. v1–v49 요청·감사와 원응답/변환 검증, 집합 배정·관계 미결의 후보 중복 보존, 범위 검사를 재현한다. 코드에서 의미상 대상을 채우거나 원문·응답을 보정하지 않는다. 다른 보고서의 범용성은 아직 별도 검증이 필요하다.
+
+### 확대를 뒷받침하는 원문 근거와 가까운 작업 대상의 계승 (프롬프트 v51)
+
+가까운 작업 대상 뒤의 행동에서 한정 표현이나 반복 번호가 없다는 사실은 전체 범위의 근거가 아니다. 넓은 참여자를 명시한 원문이나 같은 전체 사건을 연결하는 근거가 없으면 가장 가까운 확인된 대상을 이어받는다. 기록 작업은 보통 전체라는 일반화, 일반명 표현이나 실제로 넓은 작업이 가능하다는 이유만으로 확대하지 않는다. 추가 참여자를 배정할 때는 그 확대를 뒷받침하는 원문 연결을 설명한다.
+
+이 기본값은 별도로 확인된 집합 설명, 가까운 국소 대상 없이 원문으로 연결된 전체 작업, 다른 절에서 독립적으로 식별된 참여자를 축소하지 않는다. 기존 집합 원문과 관계 역할의 부분 미결도 함께 유지할 수 있다. v51은 범용 영어 지침만 추가하며 입력·스키마·원문 단위와 v1–v50 요청·감사, 원응답/변환 검사, 집합 배정·관계 미결 공존, 범위 검사 재현은 그대로다. 코드에서 원문·응답을 보정하거나 의미상 대상을 걸러내지 않는다. 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 확인된 구성원 계승 후 현재 문장 한정 적용 (프롬프트 v52)
+
+원래 근거로 한정된 집합의 구성원이 확인되면 현재 문장에서 각 객체를 다시 식별하지 않아도 집합 설명을 보존한다. 반복 번호·수량이 없거나 원래 분류가 추정이라는 이유만으로 구성원 증거를 지우지 않는다. 실제 구성원 연결의 공백·현재 절의 제한과 개별 재언급의 부재를 구별하고, 관계 역할의 동일성도 따로 판단한다.
+
+후속 문장은 원래 선행 집합을 확인한 뒤 현재 절의 시대·조사·위치·유형 한정으로 좁히고 원문을 공유한다. 혼합 집합의 구성원이라는 사실만으로 더 좁은 설명을 모든 구성원에 배정하지 않는다. 후보의 원래 시대·이름·인용을 확인하며 이전 배정 목록을 복사하거나 ‘이 지역’·‘등’을 명시된 제한의 해제로 해석하지 않는다. 독립적으로 설명된 실제 교차시대 참여자는 허용한다.
+
+v52는 샘플 식별자·배정 목록 없는 범용 영어 지침만 추가한다. 입력·스키마·원문 단위, 확대 근거가 없을 때의 가까운 작업 대상 기본값, 관계 미결, 결정론적 조립과 검사는 그대로다. v1–v51 요청·감사·원응답/변환·범위 검사와 집합 배정·관계 미결의 후보 중복을 재현한다. 코드에서 의미상 필터링이나 원문·응답 보정을 하지 않는다. 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 따로 명시된 번호도 원래 후보 번호로 대조 (프롬프트 v53)
+
+범위뿐 아니라 각각 이름이 붙은 단일 번호도 후보의 원래 번호·이름·맥락과 대조한다. 선택 ID의 접미 숫자나 등록부 순서는 객체 번호가 아니다. 반환 전에 실제 번호 필드로 역대조하도록 지시하며, 독립적으로 설명된 대상과 집합 공유·현재 한정·관계 미결·가까운 작업 대상 규칙을 유지한다.
+
+v53 자동 검사는 기존 범위 검사에 별도로 명시된 정수 번호의 누락 검사를 추가한다. 범위와 단일 번호의 혼합 및 등록된 명칭 변형을 지원한다. 해당 명시 목록에서 이미 선택된 원래 참여자로 조사·종류 맥락이 하나로 확인되고 대상도 유일할 때 누락을 보고한다. 맥락·동일성이 모호하거나 후보가 없는 경우, 이름 없는 숫자·날짜·치수에서 배정을 추론하지 않는다. 응답 ID를 추가·교체하거나 원문·응답을 보정하지 않으며, 독립적으로 설명된 추가 대상을 금지하거나 모든 생략형 목록 문법을 검사하는 것은 아니다.
+
+입력·스키마·문장 단위·출처 조립은 그대로다. v1–v52의 요청·원응답/변환과 당시 범위 전용 검사를 재현하며, 단일 번호 확장은 v53 감사에만 적용한다. 특정 보고서의 매핑을 넣지 않은 범용 지침이며 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 번호 검사와 번호 없는 원문 공유·관계 동일성 분리 (프롬프트 v54)
+
+번호-ID 대조는 원문에 실제 객체 식별번호가 있는 경우에 적용한다. 집합 수량이나 모든 집합 설명을 번호 대조 대상으로 바꾸지 않는다. 후보 번호가 null이거나 개별 번호가 반복되지 않아도 원래 확인된 구성원을 제외하지 않는다. 한 관찰 지점의 수량을 전체 수량으로 바꾸거나 수량이 적힌 후보 하나만 고르지 않고 현재 절의 한정에 맞는 확인된 구성원을 유지한다.
+
+집합 원문 수신 대상과 관계 주체의 동일성은 따로 판단한다. 같은 E를 배정했다고 후반 관계에 참여하는 구성원이 특정되는 것은 아니다. 배정 후보와 겹치더라도 실제로 남은 주체 대안은 부분 미결로 보존하며, 비교 대상·비등록 상대를 제외했다고 현 조사 주체가 특정되는 것은 아니다. 미결을 null로 반환하기 전에는 집합 소속·수량·후보 존재와 구별되는 원래 동일성 근거가 필요하다. 원문이 관계 주체를 특정하면 불필요한 미결을 만들지 않는다.
+
+v54는 보고서 매핑 없는 범용 영어 적용 범위 지침만 추가한다. 입력·스키마·문장 단위·출처 조립과 v53 번호 범위/단일 번호 검사 알고리즘은 그대로다. v53의 단일 번호 경고와 이전 범위 전용 동작을 포함해 v1–v53 요청·감사·변환을 재현한다. 코드에서 원문·응답을 보정하거나 의미상 후보를 걸러내지 않으며 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 장 경계를 넘는 원래 등록 표 행의 축약 문맥 (프롬프트 v55)
+
+현재 입력은 등록부 전체에서 확인 가능한 원래 표 셀의 `originTables`·`originRows`·`originAnchors`를 추가한다. 현재 장·페이지 밖의 등록 근거도 포함하고 표와 행은 한 번만 전달한다. 짧은 U/O 참조로 후보를 원래 열에 연결하며, 헤더·셀 원문·인덱스·병합 범위로 트렌치 번호 같은 관찰 맥락을 보존한다. 긴 표·출처·후보 ID와 정확한 인용 범위는 감사 코드맵에 남긴다. 코드가 행 주인·수량·전체 총수·배정 대상·관계 동일성을 추론하지 않는다.
+
+`originQuantityScope: "cell_and_row"`는 등록 근거의 수량이 원래 셀과 행에 속한다는 뜻이다. 한 행의 수량을 조사·유형 전체 총수로 바꾸거나 다른 행의 관찰을 제외하지 않는다. 범용 프롬프트가 인코딩을 설명하며 현재 한정·추정 표현·근거 있는 집합 공유와 실제 관계 주체 미결을 유지하도록 한다. U/O 참조와 원래 등록 셀은 읽기 전용이므로 새 E 발췌로 선택할 수 없다.
+
+발췌 원문·후보·출력 스키마·검사 알고리즘·출처 조립은 그대로다. v55 요청·감사는 새 문맥을 사용하고 v1–v54의 입력·코드맵을 정확히 재현한다. 원래 셀 연결이 틀리면 다른 셀을 골라 고치지 않고 거부하며, 확인할 수 없는 원래 자원은 문맥에서 생략해도 후보는 유지한다. 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 등록 문맥과 현재 공유 대상·추정 구성원 구분 (프롬프트 v56)
+
+읽기 전용 등록 행은 원래 관찰 문맥을 식별하는 근거이며 본문 현황을 트렌치·구역·행 주인 전체에 자동 공유하는 근거가 아니다. 본문을 행 주인에게 공유하려면 현재 문장 자체의 실질적인 직접 설명이 필요하다. 실제 선택 가능한 표 유구현황 셀은 기존 규칙대로 행 주인과 명시된 유구를 함께 설명할 수 있지만, 읽기 전용 등록 셀의 공유 대상을 다른 본문 E로 옮기지 않는다.
+
+혼합된 조사 목록은 현재 조사·시대·위치·유형 한정을 먼저 적용한다. 그렇게 좁힌 원래 확인된 집합에서는 추정 분류 표기만으로 원문 공유나 근거 있는 관계 주체 대안에서 제외하지 않는다. 표기는 그대로 보존하고 분류를 확정하지 않는다. 주체 미결은 원문 수신 대상과 별도로 판단하며, 제외에는 실제 소속·현재 한정·모순 근거·역할 관련성의 이유가 필요하다.
+
+v56은 샘플 매핑 없는 범용 영어 지침만 추가한다. 입력·U/O 등록 문맥·스키마·문장 단위·검사·조립은 그대로다. v55 등록 행 입력을 포함해 v1–v55 요청·감사·코드맵을 정확히 재현한다. 원문·응답 보정이나 코드의 자동 의미 필터링은 없으며 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 확인된 집합에서 제외한 근거 보존 (프롬프트 v57)
+
+원래 확인된 집합이나 현재 한정을 적용한 후속 설명에서 구성원을 제외하면, 기존 reason에 해당 후보 참조와 제외를 뒷받침하는 짧은 원문 구절·문맥 참조를 남긴다. 선택한 목록을 반복하거나 그 후보들만 확인됐다고 선언하는 것, 추정 표기, 개별 번호가 다시 명시되지 않는 점은 제외 근거가 아니다. 관련된 한정 집합만 점검하고 현재 한정은 유지하며 실제 소속 미상은 기존 미결 방식으로 설명한다.
+
+추정 관찰은 집합 원문의 수신 대상과 실제 관계 주체 대안 양쪽에서 점검한다. 분류가 추정이라는 이유만으로 관찰을 빼고 그 목록으로 주체 대안을 제한하지 않는다. 원래 유보 표현을 그대로 유지한 집합 원문과 관계 주체 식별을 별도로 판단하며, 관계를 확정하거나 무관한 후보를 미결로 만들지 않는다.
+
+v57은 범용 영어 지침만 추가한다. 입력·원래 표 연결·응답 필드와 스키마·검사·출처 조립은 유지하고 v1–v56 요청·감사·코드맵을 정확히 재현한다. 제외 설명은 기존 reason 필드의 모델 판단이며 새로운 결정론적 의미 검사 보장은 아니다. 원문·응답 보정이나 자동 대상 채우기는 없고 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 인용 금지 범위와 현재 한정으로 제외한 후보 감사 (프롬프트 v58)
+
+현재 프롬프트의 포괄적인 인용 금지 두 문장을 직접 바꾼다. E 원문을 발췌 선택 결과로 재출력하거나 출처·오프셋 필드를 추가하지 않되, 기존 reason 안에는 짧은 원문 근거와 제공된 짧은 참조를 인용할 수 있다. E 원문·출처 연결을 바꾸지 않고 제외 근거 인용 지시와의 문구 충돌을 해소한다.
+
+현재 한정을 적용하기 전의 확인 집합을 제외 감사 기준으로 삼는다. 시대·조사·위치·유형 한정으로 빠진 후보도 같은 E의 reason에 후보 참조와 현재 한정 대 원래 후보·행 근거를 남긴다. 최종 적격 부분집합 밖이라는 이유로 설명에서 제외하지 않는다. 동일한 원문 근거가 적용되는 후보만 묶고 무관한 등록부 객체는 감사 대상에 넣지 않으며, 추정 관찰과 실제 주체 대안은 유지한다.
+
+입력·스키마·검사·조립은 유지하고 v1–v57 요청·감사는 당시 문구 그대로 재현한다. reason은 여전히 자유 문자열이므로 새 결정론적 의미 검사 보장은 없고 대상·원문·응답을 보정하지 않는다. 다른 보고서의 범용성은 아직 검증 전이다.
+
+### 구조화된 제외 근거와 원문 인용 ID (프롬프트 v59)
+
+후보 인용은 `[K 참조, 원문]` 쌍이 되고 E ID는 계속 고정 발췌를 선택한다. `inventoryMembers`는 행 주인을 포함한 원래 표의 등록 후보 목록이며 전부 배정 대상이라는 뜻은 아니다. 긴 출처·후보 연결은 기존 코드맵에 유지한다. 응답에는 `decisions`, `inventoryAudits`, `exclusions`가 필수다. 선택한 표 감사는 모든 등록 후보를 필수 키로 포함하며 각 후보를 포함 또는 제외로 기록한다. 제외에는 현재 문맥 E, 해당 후보 자신의 K 근거와 설명이 필수다. 표 감사 밖의 추가 제외도 같은 ID 근거 계약을 사용한다.
+
+코드는 포함·제외와 실제 대상 선택의 일치, K ID의 후보 소유 관계, 중복 감사·제외, 현재 E 문맥을 검사한다. 본문이 같은 원래 표의 여러 행에서 여러 후보를 선택하면 해당 표 감사가 필수다. 이는 원문 연결을 이용한 결정론적 검사이며 집합의 의미상 타당성을 결정하거나 선택되지 않은 모든 집합을 찾지는 않는다. 검토 누락·잘못된 근거는 문제로 남기고 대상이나 응답을 자동으로 채우지 않는다. 복원된 제외 근거에는 정확한 원문·문자 구간·출처 위치가 담긴다. 자유 reason은 설명이며 원문 인용으로 취급하지 않는다. 구조화된 원응답은 기존 배정 변환과 함께 보존한다.
+
+범용 혼합 작업 규칙은 하나의 셀에서 확인된 조사범위 자체의 경계·구획 작업과 별도로 명시된 트렌치 작업을 함께 보존한다. 뒤에 나온 개별 단위가 앞의 명시적 조사범위 주어를 흡수하지 않는다. 과거 v1–v58 입력·스키마·감사 재현은 유지한다. 다른 보고서의 범용성과 선택된 제외 근거의 의미상 충분성은 검수 대상이다.
+
+### 필수 원래 표 검토 (프롬프트 v60)
+
+같은 원문 붙이기 묶음에서 배정과 제외 근거 검토를 두 호출로 나눈다. 첫 호출은 모든 E가 필수인 `decisions`만 반환한다. 코드는 이 결정을 고정하고, 본문 E의 확정·미결 후보가 같은 원래 표의 여러 행에 걸치면 `createContentAttachmentInventoryReviewRequest(input, selection)`에서 각 `E:U`를 필수 객체 키로 만든다. 그 안의 원래 등록 후보도 모두 필수다. v59에서 검토 배열의 항목 형식만 강제하고 필요한 검토 자체는 생략할 수 있었던 빈틈을 닫는다.
+
+두 번째 호출에는 관련 표 후보·K 근거·본문 문맥·고정 결정을 전달한다. 각 후보의 포함·제외 상태는 기존 선택과 일치하도록 제한하고, 제외 후보마다 현재 E·자신의 K ID·설명을 요구한다. 검토가 배정을 추가·삭제·재작성할 수 없다. `inspectContentAttachmentInventoryReview`는 요청·필수 키·원문 근거를 재현하며 누락·불일치 시 조립을 차단한다. 결정론적 출처 추적에서 필요한 검토가 없으면 두 번째 호출을 하지 않는다. 첫 모델이 구성원을 전부 누락한 집합을 이 검사로 발견하는 것은 아니다.
+
+`rawResponse`·`callAttempts`는 첫 호출, `inventoryReview`는 두 번째 요청·원응답·사용량·시도 정보를 각각 보존한다. 시도 번호는 재시도를 포함해 두 호출에 걸쳐 이어진다. `usage`는 두 호출 합계이고 검토가 있으면 `selectionUsage`와 `inventoryReview.usage`에 개별 사용량도 남긴다. 검토 실패를 앞선 응답 보정으로 처리하지 않는다. v1–v59 요청·감사는 재현을 유지한다.
+
+집합 설명의 수신자와 관계 주체 미결은 독립적으로 판단한다. 조사범위 배정이나 관계 주체의 식별 부족이 확인된 유구 집합 공유를 대체하지 않으며 확정 배정과 역할 미결은 중첩될 수 있다. 특정 보고서 번호나 정답을 넣지 않는 범용 근거 규칙이다.
+
+### 독립적인 표 재판정과 불일치 (프롬프트 v61)
+
+`createContentAttachmentIndependentReviewRequest(input, selection)`는 필요한 E/표/후보를 모두 필수 키로 유지하되, 첫 배정은 검토 모델에게 보여주지 않는다. 모든 후보는 `attachment`(포함·제외·미결)와 `relationshipSubject`(주체 대안 여부)를 독립적으로 반환하며, 처분마다 현재 E·자신의 K 근거·설명을 남긴다. 앞선 결정과 관계없이 모든 처분을 스키마에서 허용한다. 집합 원문 공유와 관계 주체 미결은 함께 존재할 수 있다. 후보별 공유 스키마 정의로 같은 계약의 반복을 줄인다.
+
+첫 응답은 `rawResponse`, 두 번째 요청·원응답·사용량·시도는 `independentReview`에 각각 남긴다. `inspectContentAttachmentIndependentReview`는 필수 키·요청 재현·현재 문맥·자기 후보 근거·중복 ID를 검사하고 원문을 조회한 뒤 첫 확정/미결 목록과의 차이를 코드에서 계산한다. 기존 미결 필드는 원문 수신자 동일성과 관계 역할을 구분하지 않으므로, 비교할 때 새 원문 미결/주체 대안의 합집합을 사용하되 두 재판정 차원도 그대로 보존한다.
+
+조립 결과의 기존 배정·미결은 유지한다. `independentReviewFindings`에는 모든 근거 있는 재판정, `reviewDisagreements`에는 배정·미결이 달라진 판단과 양쪽 결정·정확한 출처를 남긴다. 의미상 불일치는 별도 검토 결과이며 응답 형식 오류나 자동 채택된 수정이 아니다. 사람 검수는 미완료로 유지하고, 근거 형식이 잘못되면 조립을 차단한다. 검토 범위는 여전히 첫 판단의 여러 원래 행 연결에서 정하므로 완전히 누락된 집합까지 찾지는 못한다. v1–v60 요청·원응답 재현과 특정 보고서 정답을 넣지 않는 범용 기준을 유지한다.
+
+### 본문 문맥 검토와 직접 작업 대상 (프롬프트 v62)
+
+본문 근거 후보는 별도 `B` 검토 풀로 다룬다. 코드는 원래 텍스트 근거와 장 문맥을 색인하며 첫 배정 입력·기존 코드맵은 바꾸지 않는다. 현재 본문 장 문맥 또는 필수 표 검토의 원래 장 문맥에 있는 본문 후보 중, 해당 표 풀에서 이미 다루는 후보를 제외해 구성한다. 첫 모델이 후보를 누락하거나 E를 제외해도 현재 본문 E마다 관련 본문 풀의 모든 후보를 검토한다. 표의 여러 행을 선택하지 않은 본문 전용 묶음에서도 검토 호출이 필요할 수 있다.
+
+`createContentAttachmentIndependentReviewRequest(input, selection, { includeBodyContext: true })`는 검토 범위만 확장한다. 독립 입력은 원래 표 풀을 유지하고 `bodyReviewPools`와 후보 K 근거를 추가하며 첫 결정은 계속 숨긴다. B 참조는 문맥 검토 범위이고 표 구성원이라는 뜻이 아니다. 판정의 `reviewBasis`로 표/본문 문맥을 구분하며 기존 `inventoryRef` 필드는 U 또는 B 풀 참조를 담는다. 필요한 E/풀/후보 키·자기 후보 근거 검사는 유지한다. 기본 모드는 v61 요청을 그대로 재현한다.
+
+첫 배정과 재판정에 같은 범용 기준을 적용한다. 직접 설명된 조사범위와 유구 집합을 함께 보존하고, 추정 분류와 원래 조사 집합 소속을 구분한다. 작업 대상과 일반적인 보존·보호·안전 목적도 구분한다. 목적만으로 수혜 대상 유구 전체에 공유하지 않으며 별도의 직접 설명이나 해당 작업의 대상이라는 근거를 요구한다. 장 문맥 일치는 검토 범위의 근거이며 배정 근거를 자동 확정하지 않는다. 원문·유보 표현·역할 미결·두 원응답·미채택 불일치와 v1–v61 감사 재현은 유지한다.
+
+### 시대 한정 후 집합 원문 공유와 관계 동일성 구분 (프롬프트 v63)
+
+첫 배정과 독립 검토에 같은 판단 순서를 적용합니다. 원래 조사 집합을 확인하고 현재 절의 시대·조사 단계·위치·유형으로 좁힌 뒤, 해당 집합 구성원에게 원문을 공유하고 개별 관계 주체를 따로 판단합니다. 원문상 시대가 맞지 않는 후보는 자기 근거와 함께 제외하며 동일성 미결로 남기지 않습니다. 추정 분류는 별도의 원문상 범위 제외 근거가 없는 한 원래 유보 표현과 집합 소속을 유지합니다. 집합 원문 수신자와 관계 주체 대안은 같은 후보에 함께 성립할 수 있으며, 개별 식별번호 부재만으로 집합 공유를 수신자 미결로 바꾸지 않습니다.
+
+입력 필드나 코드의 의미상 정답 목록은 추가하지 않습니다. 독립 검토는 본문 후보 검토와 함께 `qualifyBeforeIdentity: true`로 새 정책을 사용합니다. 기본/v61 및 본문 후보만 확장한/v62 검토 모드와 과거 요청·원응답·조립 재현은 유지합니다. 출력 스키마, 필수 검토 범위, 최초 contents와 자동 채택하지 않는 불일치 기록도 유지합니다. 특정 보고서의 답을 넣지 않는 범용 원문·문맥 규칙입니다.
+
+### 직접 설명되는 사업범위와 반환 후보 원래 번호 대조 (프롬프트 v64)
+
+양 단계에서 직접 설명되는 조사 사업범위와 시대 등으로 한정한 유구 집합을 독립적으로 확인합니다. 원래 본문·문맥으로 사업범위가 식별되고 그 범위의 고고학적 내용이 직접 설명되면 유구와 함께 보존합니다. 유구 후보의 시대 한정만으로 시대 표기가 없는 사업범위를 없애지 않습니다. 단순 위치 참조·포함·같은 장·일반 보존 목적은 별도 공유 근거가 되지 않습니다.
+
+명시 번호를 반환하기 전 실제 후보 ref를 원래 유형·명칭·번호·조사 문맥으로 역대조하고, 범위의 양 끝과 중간 번호 및 따로 나열된 번호를 모두 비교합니다. reason에 올바른 번호를 적는 것은 후보 선택을 대신하지 않습니다. 이 검사는 번호 없는 집합 원문이나 본문 사업범위 수신자를 좁히지 않습니다. 독립 검토의 `reconcileRecipientRefs: true`로 새 정책을 사용하며 과거 모드와 v1~v63 요청·조립을 재현할 수 있습니다. 입력·스키마·검토 범위·자동 검사·원응답 보존과 불일치 비채택 방식은 유지하고, 코드에 의미상 정답 보정이나 보고서별 정답 목록을 넣지 않습니다.
+
+### 명시된 조사범위·사업대상지 후보 검토 (추출 프롬프트 v7)
+
+선택 가능한 본문·실질 표에 명시된 현재 시굴·발굴·사업 범위를 `area` 맥락 후보로 각각 검토합니다. 층위 등 다른 객체를 다루는 장의 도입부 범위 정의도 포함하며, 유구·유물의 독립 본문 조건을 적용하지 않고 `explicit_context_unit`을 사용합니다. 근거 있는 범위를 제안하거나 원문에 연결한 구체적 제외 이유를 남기고 범위 표현·면적 단위를 그대로 보존하도록 지시합니다. 읽기 전용·모호한 위치·이전 조사·단순 치수만으로 새 범위를 만들지 않습니다.
+
+전체 사업범위와 별도로 정의된 부분 조사범위는 구별하며 같은 명칭·주소·포함 관계만으로 동일시하지 않습니다. 이전 범위를 넓히거나 속성·부모·잔여 면적을 계산하지 않습니다. 스키마와 자동 검사는 유지하므로 프롬프트의 전수 검토 지시가 모든 누락의 자동 검출을 보장하지는 않습니다. v6의 번호 셀 검사와 과거 v4~v6 응답 재현을 유지합니다. 선택한 묶음만 재실행하고 다른 감사 응답을 보존한 뒤 기존 동일성 규칙으로 전체 후보를 통합할 수 있으며, 원문 붙이기를 실행하거나 과거 붙이기 스냅샷을 자동 교체하지 않습니다.
+
+### 전체 원문을 통한 층위 동일성·미결 검토 (통합 프롬프트 v4)
+
+후보의 짧은 인용만 보지 않고 제공된 전체 원문에서 층위의 보고서 정의·분포·위치·재질·형성 성격·층위 역할을 연결해 국지 출현과의 동일성을 판단하도록 명시합니다. 짧은 발췌에 없더라도 전체 본문에 있는 정보는 누락된 근거가 아닙니다. 국지 언급·기반 재질 표현·별도 문단이라는 이유만으로 별개 세부층을 만들지 않으며, 정의와 위치·재질·역할의 연결 또는 실제 불일치에 근거합니다.
+
+서로 다른 객체의 중복·절단·인접 관계만으로는 `uncertainMatches`에 넣지 않습니다. 실제 동일성 미결은 원문상 연결 가능성과 해소되지 않은 충돌·공백을 함께 설명해야 합니다. 전체 층위 정의·출현을 마지막에 대조해 같은 식별자나 정의 연결에 시대·자연/인위 형성 등 충돌이 남으면 별도 그룹과 미결 이유를 모두 유지합니다. 스키마·완전 분할 검사·원래 후보/출처·응답 비보정 방식은 유지하며 v3 요청과 결과도 명시적으로 재현합니다. v4는 모델 지시를 보강할 뿐 코드가 의미상 합침·미결을 삽입하거나 정답을 보장하지 않습니다.
+
+### 층군 소속·동일성 및 비배타적 분포 구분 (통합 프롬프트 v5)
+
+통합은 국지 퇴적층의 상위 층군 분류·소속과 같은 객체라는 동일성을 구분합니다. 같은 층군, 대안으로 나열된 재질, 양립하는 시기·위치, 별도 세부층 번호가 없다는 사실만으로 동일성을 확정하지 않습니다. 출력의 단일 그룹은 모든 구성원이 같은 대상을 가리킨다는 뜻이며, 원래 문구를 각각 보존한다고 별도 객체가 유지되지는 않습니다. 전체 문맥이 같은 정의층군의 또 다른 출현임을 확인해 주면 국지 표현도 통합할 수 있습니다. 명확한 소속·포함 관계와 실제 동일성 미결을 구분하며 관계 필드 추가나 원문 보정은 하지 않습니다.
+
+‘주로’·‘대체로’ 같은 분포 한정은 원문에 실제 제한이 없는 한 배타적이지 않습니다. 주된 분포 밖의 출현 자체를 충돌로 읽지 않고, 양립하는 위치만으로 같은 층이라고 확정하지도 않습니다. 미결 이유에는 실제로 남은 동일성 근거의 부족이나 충돌을 명시합니다. 반복 식별자와 시기·형성원인 충돌은 계속 보존합니다. 사용자 입력·출력 스키마·결정론적 검사는 바뀌지 않으며, 저장된 v3·v4 판단은 새 의미 규칙을 소급 적용하지 않고 재생합니다. 새 호출 기본값은 v5입니다.
+
+### 미결을 통합그룹쌍으로 표시
+
+`groupCandidateUncertainties(result, candidates)`는 검증된 통합 결과에서 좌우 순서와 무관한 그룹쌍 표시를 만듭니다. 같은 두 그룹을 연결하는 여러 후보쌍을 미결 한 건으로 보여주되, 원래 후보쌍·이유·0부터 시작하는 원본 순번과 양쪽 후보 전체를 `candidateMatches`에 모두 남깁니다. 그룹 ID로 쌍을 식별하며 원래 후보쌍의 방향을 유지합니다. 그룹 행은 처음 등장한 순서로, 행 내부의 근거쌍은 원래 상대 순서로 표시하며 원본 순번으로 전체 응답 순서도 확인할 수 있습니다. 다른 그룹쌍은 별도입니다.
+
+이 순수 변환은 모델을 호출하지 않고 `uncertainMatches`·저장된 감사·그룹 구성·후보 근거를 바꾸지 않습니다. 과거 결과도 재추출이나 원문 붙이기 없이 재조립해 같은 함수로 표시할 수 있습니다. 원래 후보·그룹 연결이 없거나 같은 그룹 내부의 미결이면 근거를 조용히 누락하지 않고 오류를 반환합니다. 모델 프롬프트·출력 스키마·결과 형식은 유지합니다.
+
+### 전체 사업대상지와 부분 조사범위 및 장을 넘는 검토 (프롬프트 v65)
+
+원래 범위 정의·제외 부분·조사 단계와 앞뒤 본문으로 영역을 식별합니다. 일반 명칭이 같더라도 전체 사업대상지와 일부 시굴·발굴 범위는 구별합니다. 전체 범위 설명을 포함된 부분 범위에 자동 배정하거나 부분 설명을 전체에 전파하지 않습니다. 기존 유구 집합 공유와 관계 주체 미결은 별도로 유지합니다.
+
+독립 검토의 `includeBodyContext: true, crossChapterAreas: true`는 기존 장 문맥 풀에 더해 본문 근거가 있는 모든 `area` 후보와 현재 본문에서 최초 선택·미결로 제안된 본문 근거 후보를 장 경로와 관계없이 검토합니다. 코드는 검토 범위만 정하고 연결 정답은 정하지 않습니다. 첫 결정과 이유를 숨긴 채 모든 필수 후보를 E/자기 K 근거로 독립 판단하며, 다른 종류의 무관한 장외 후보까지 모두 넣지는 않습니다. 스키마는 필수 검토 누락을 막으며 두 원응답과 비채택 불일치는 그대로 보존합니다. 과거 옵션과 v1~v64 요청·조립 재현을 유지하고 보고서명·페이지·정답 후보나 원문·응답 보정은 넣지 않습니다.
+
+### 본문 유구 집계와 조사범위 자체 작업의 공통 판단 기준 (프롬프트 v66)
+
+최초 배정과 독립 검토가 같은 정책을 사용합니다. 본문의 유구 집계를 원래 표의 구성원이라는 이유로 트렌치 전체에 전파하지 않습니다. 원래 유구 현황 셀의 행 주인 공유는 해당 셀에만 적용하고, 트렌치 자체의 작업·상태·근거 있는 결과 설명은 별도로 보존합니다.
+
+원래 범위 정의와 본문으로 식별된 조사범위 자체의 경계 측량·그리드·구획·트렌치 배치·조사 전 현장 사진·기록은 실질적인 설명입니다. 방법론이나 단순 위치 참조로 일괄 제외하지 않고, 앞 절이 이전 조사·주변 상황을 설명하더라도 현재 범위 내 작업을 별도로 확인합니다. 전체·부분 범위 식별과 직접 설명 여부를 구분하며 포함된 상위 범위나 모든 트렌치로 확대하지 않습니다. 독립 검토의 `preserveAreaWork: true`로 같은 정책을 적용합니다. v65의 검토 범위·입력·스키마·원응답 보존·불일치 비채택은 유지하고 과거 요청·조립도 재현합니다. 보고서별 정답이나 응답 보정은 넣지 않습니다.
+
+### 식별된 조사범위의 결과와 유구 집합을 함께 보존 (프롬프트 v67)
+
+최초 배정과 독립 검토가 같은 조사범위 결과 기준을 사용합니다. 원래 범위 정의·현재 조사 단계·본문 연속성과 등록 유구 집합으로 해당 범위가 식별되면, 그 조사에서 확인한 유구 결과는 범위 자체의 조사 결과와 관련 유구 양쪽의 설명입니다. 유구를 서술한다는 이유만으로 범위를 제외하거나 별도 형상 설명·면적·명칭 반복을 요구하지 않습니다.
+
+식별된 조사범위를 일반 위치 참조나 포함 관계상의 전체 사업대상지와 구별합니다. 본문 집계를 모든 트렌치에 전파하거나 각 단위의 동일한 발견·범위 전면 발굴을 추론하지 않습니다. 원래 한정·수량·불확실성·자체 작업 배정·관계 주체 미결을 보정 없이 보존합니다. 독립 검토의 `preserveAreaResults: true`로 같은 정책을 적용합니다. 근거 입력·검토 범위·스키마·독립 판단 비채택은 유지하고 v1~v66 요청·조립도 재현합니다. 보고서별 정답이나 원문·응답 보정은 넣지 않습니다.
+
+### 조사범위 결과 보존과 유구 수신자 집합을 분리 (프롬프트 v68)
+
+최초 배정과 독립 검토가 식별된 조사범위, 현재 문장이 설명하는 유구 집합, 관계 주체 미결을 각각 판단합니다. 범위의 조사 결과를 보존해도 유구 집합을 넓히거나 줄이지 않습니다. 현재 문장의 시대·조사 단계·위치·유형 한정을 먼저 적용합니다. 조사범위 결과 규칙의 관련 유구는 현재 문장이 뒷받침하는 구성원이며, 같은 범위·시대·표·행의 모든 유구가 아닙니다. 원래 행은 동일성·소속의 근거이며 후속 모든 문장이 직접 설명한다는 근거는 아닙니다. 비배타적 열거만으로 다른 등록 유형 전체를 포함하지 않고, 확장에는 원래 문맥이나 정의의 연결 근거가 필요합니다.
+
+독립적으로 설명되는 조사범위, 집합 원문 공유, 추정 표기와 관계 주체 미결을 함께 보존합니다. 독립 검토는 `boundAreaResultRecipients: true`로 같은 추가 정책을 적용하고 최초 선택을 보지 않으며 검토 수정도 채택하지 않습니다. 입력·검토 범위·출력 스키마는 유지하고 v1~v67 요청·조립을 재현합니다. 보고서별 정답이나 원문·응답 보정은 넣지 않습니다.
+
+### 자체 작업 기준 통일과 표 데이터 셀 독립 검토 (프롬프트 v69)
+
+두 단계 모두 원래 범위와 본문 연속성으로 식별된 조사범위의 조사 단위 배치·배치 현황 측량·그 조사 배치의 도면과 기록을 범위 자체와 해당 단위에 보존합니다. 일반 방법론이나 포함 관계만으로 전파하지 않고 전체·부분 범위와 유구 대상 집합을 구분합니다.
+
+연결된 일지의 생략된 작업 대상은 본문이 확정한 동일 작업의 참여자를 표 제목·헤더·행 전체·날짜·본문과 표의 연결 근거로 이어받습니다. 회의와 작업이 한 셀에 있어도 작업 참여자에 원문 전체를 보존합니다. 같은 행의 가까운 명시 대상은 유지하되, 다른 날짜 행의 대상만으로 확정된 집합 전체 완료 작업을 바꾸지 않습니다.
+
+독립 검토의 `reviewTableWork: true`로 같은 정책과 표 검토를 활성화합니다. 작업 키워드를 코드로 판정하지 않고 현재 표의 선택 가능한 비헤더 셀 전체를 필수 검토에 넣으므로 최초 제외 셀도 다시 판단합니다. 날짜·날씨도 LLM이 제외 여부를 판단하고 헤더·표 구조는 문맥으로 전달합니다. 후보 풀은 본문과 연결된 원래 인벤토리, 장 문맥 또는 현재 원래 표로 연결되는 인벤토리와 기존 본문 문맥 풀로 제한합니다. 모든 필수 셀·후보 반환을 스키마가 요구하지만 포함을 강제하지 않습니다. 최초 응답과 비채택 검토 차이는 그대로 보존합니다. 셀·후보 검토 수에 따라 검토 입력·출력이 늘며 실제 시도와 토큰을 감사에 남깁니다. 과거 v1~v68 요청·검토 범위·조립도 재현합니다.
+
+### 조사범위 정의·배치·기록 연결을 두 판단에서 확인 (프롬프트 v70)
+
+두 단계 모두 후보 자체의 K 정의·조사 범위, 그 범위의 한정된 조사 배치를 정한 E·본문, 같은 문단에서 그 배치를 기록하는 현재 E의 세 연결을 확인합니다. 연결이 뒷받침되면 해당 조사범위 자체와 별도로 설명된 단위를 함께 보존합니다. 마지막 문장에 범위명·번호가 반복되지 않거나 문법상 주어가 트렌치라는 이유만으로 범위를 누락하지 않습니다. 포함 관계·일반 방법론·무관한 개별 도면만으로 연결을 만들지는 않습니다.
+
+관련 판단의 기존 reason에 범위 K와 배치·현재 E 참조를 짧게 남깁니다. 제외·불확실성은 “단위 기록”이라는 분류만 쓰지 않고 빠지거나 모순된 연결을 설명합니다. 독립 검토는 `traceAreaRecording: true`로 같은 정책을 적용하지만 스키마가 포함을 강제하지는 않습니다. v69의 입력·검토 범위·스키마·원응답·비채택 불일치를 유지하며 과거 v1~v69 요청과 조립도 재현합니다. 보고서별 정답이나 원문·응답 보정은 넣지 않습니다.
+
+### 범위 자체의 배치 기록과 개별 조사 단위 작업 구분 (프롬프트 v71)
+
+두 단계 모두 범위 자체의 경계·그리드·구획·집합 배치 기록과 개별 조사 단위의 제토·정리·내부 조사·측량·사진·복토를 구분합니다. 범위 안에서 수행했거나 여러 단위·전체 단위의 작업이거나 현장 일지에 기록됐다는 사실만으로 범위를 추가하지 않습니다. 원문으로 연결된 집합 배치 기록은 해당 범위에 보존하고, 개별 작업은 원문으로 확인된 작업 대상에 보존합니다. 본문에서 표로 같은 작업을 이어받을 때도 작업 대상을 복원할 뿐 포함하는 범위를 추가하지 않습니다.
+
+독립 검토는 `boundAreaRecording: true`로 같은 경계를 적용합니다. 범위 판단의 reason에 K·E 근거와 실제 작업 대상을 설명합니다. 입력·검토 범위·출력 스키마·원응답·비채택 불일치를 유지하고 과거 v1~v70 요청·조립도 재현합니다. 코드가 수신자를 넣거나 검토 수정을 자동 채택하지 않습니다.
+
+### 회의 개최만 있는 문장과 반환 후보 근거 대조 (프롬프트 v72)
+
+두 단계 모두 조사 결과를 바탕으로 했더라도 회의·행정 행사 개최 사실만 서술한 문장은 제외합니다. 옆 문장의 실질적인 객체 설명을 회의 개최 문장에 옮기지 않습니다. 관찰·관계·작업이 실제로 함께 있는 문장이나 셀은 해당 객체에 원문 전체를 보존합니다.
+
+반환 전에 선택할 참조를 후보 자신의 원래 명칭·K 근거·행 문맥으로 역대조하고 현재 문장의 시대 등 한정과 비교합니다. reason에 시대를 맞게 썼더라도 선택 목록에 맞지 않는 후보가 있으면 올바른 판단이 아닙니다. 앞선 혼합 집합이나 같은 표 행은 현재 한정을 없애지 않습니다. 별도로 설명되는 범위·한정된 집합·관계 주체 미결을 구분합니다. 독립 검토도 `checkClauseGrounds: true`로 최초 응답을 보지 않고 같은 기준을 적용합니다. 입력 구성·검토 범위 생성·스키마 구성 규칙과 원응답 보존을 유지하며 과거 v1~v71 요청·조립을 재현합니다. 최초 응답이 다른 본문 근거 후보를 추가하면 기존 규칙에 따라 실제 검토 범위가 늘어날 수 있습니다. 코드가 의미상 답을 걸러내거나 검토 수정을 자동 채택하지 않습니다.
+
+### 후보별 현재 한정과 조사 단계 간 관계 상대 동일성 (프롬프트 v73)
+
+두 단계 모두 넓은 집합 소속을 판단 근거로 쓰기 전에 현재 문장의 시대 등 한정을 후보 자신의 명칭·K 근거에 각각 적용합니다. 같은 지역·유형·혼합 표 행이라는 이유로 시대 불일치를 없애지 않습니다. 원문이 특정 예외를 뒷받침하지 않으면 비교 가능한 구성원에 같은 제한을 적용하고, reason의 의도뿐 아니라 실제 반환 참조를 대조합니다.
+
+관계 참여자의 동일성은 따로 확인합니다. 조사 단계·차수가 다른 후보를 관계 상대로 연결하려면 원문의 교차 참조나 대상을 식별하는 연속 문맥이 필요합니다. 같은 유형·유적명·시대나 나중 발굴 설명만으로 동일시하지 않으며 번호 반복이 반드시 필요한 것은 아닙니다. 독립 검토는 `gateQualifierStage: true`로 같은 기준을 적용합니다. 입력 구성·검토 범위 생성·스키마·원응답 보존 규칙을 유지하고 과거 v1~v72 요청·조립을 재현합니다. 최초 제안에 따라 실제 검토 범위가 달라질 수 있는 기존 동작은 유지하며, 코드가 의미상 수신자를 걸러내거나 검토 수정을 자동 채택하지 않습니다.
+
+### 추정 분류와 집합 소속, 공유와 관계 주체 미결 구분 (프롬프트 v74)
+
+두 단계 모두 원래 조사 목록의 소속과 유형 분류의 확실성을 구분합니다. 원문에 등록된 추정 유형은 같은 조사·한정된 유형 집합에서 적격 구성원으로 보존하며 집합 표현에 추정 유형을 따로 반복할 필요는 없습니다. 원래 유보를 유지하되 분류를 확정하지 않습니다. 제외에는 별도의 원문 모순·소속 부재 근거가 필요하고, 실제 시대·조사 단계 불일치 및 단계 간 동일성 연결 기준은 그대로 적용합니다.
+
+같은 E의 집합 원문 공유와 개별 관계 주체 미결은 따로 판단합니다. 집합 공유를 보존하면서 추정 구성원도 실제 근거가 있는 관계 대안에 남깁니다. 관계 서술이 없는 집합 문장에는 분류 불확실성이나 옆 문장만으로 관계 대안을 만들지 않습니다. 독립 검토는 `preserveTentativeMembership: true`로 같은 기준을 적용합니다. 입력·검토 구성·스키마 규칙과 최초 제안에 따른 검토 범위 변화는 유지하며 과거 v1~v73 요청·조립을 재현합니다. 원응답을 보정하거나 검토 결과로 자동 대체하지 않습니다.
+
+### 원문 근거에 따른 독립 검토 후보 선정
+
+새 실행의 독립 검토는 기존 원문 붙이기 프롬프트 버전과 별도로 `coverage.version: source-grounded.v1`을 기록합니다. `sourceGroundedCoverage: true`는 기존 검토 풀에 원래 표의 소속과 등록 명칭의 실제 출현으로 회수한 후보를 추가합니다. 출처로 연결된 표 집합은 시대·조사 단계 때문에 제외될 구성원도 포함해 전체를 검토합니다. 본문 등록 후보는 현재 발췌 또는 같은 원래 본문 블록에 등록 명칭이나 문자와 숫자로 된 명시 식별자가 나올 때 장을 넘어 회수합니다. 검색용 문자 비교만 파생하며 원문·후보 근거는 수정하지 않습니다. 숫자·라틴 문자 경계와 리터럴 문장부호를 확인하고, 식별자만으로 장 밖 후보를 회수할 때는 문자 두 개 이상을 요구합니다. 숫자나 짧은 일반 번호 접미사만으로는 수량·다른 유형의 객체와 구별할 수 없습니다. 표에서만 등록된 후보는 일반 명칭의 문서 전체 검색 대신 원래 표 집합으로 회수합니다.
+
+추가 본문 풀은 명칭이 확인된 발췌·블록과 원등록 장 문맥으로 한정합니다. 감사에는 후보·원래 명칭·등록 문맥·명칭을 확인한 블록의 발췌 ID를 남깁니다. 기존 후보와 최초 제안은 최소 검토 범위로 유지하며, 명칭 일치나 검토 풀 소속으로 배정·동일성·관계 주체를 확정하지 않습니다. 실제 검토 범위는 요청·스키마로 확인하고 검토 밖 후보는 원등록부와 대조할 수 있습니다. 임의 상위 몇 개 제한, 보고서별 후보나 평가 정답은 사용하지 않습니다. 이 검색으로 모든 의미상 별칭을 회수한다고 보장하지는 않습니다.
+
+검토 범위 메타데이터가 없는 과거 감사는 종전 후보 선정 방식으로 재현하고, 새 감사는 기록된 선정 버전으로 재현합니다. 검토 판단을 최초 응답에 자동 채택하지 않으며 프롬프트 지시문·원응답도 유지합니다. 후보 증가에 따라 입력과 필수 출력 판단량이 늘 수 있으므로 LLM 호출 없는 요청 재구성으로 증가량을 확인할 수 있습니다.
+
+### 독립 검토의 어절 ID 근거 선택
+
+새 실행의 독립 검토는 `wordEvidence: true`로 활성화하고 `wordEvidence.version: word-ranges.v1`을 감사에 기록합니다. 최초 배정의 기존 프롬프트와 원문 문장·셀 입력은 유지합니다. 검토 후보 범위·원등록 표·필수 반환·두 종류 미결도 유지하며, 이 스냅샷이 없는 과거 감사는 종전 요청·스키마로 재현합니다.
+
+코드는 공백이 아닌 연속 문자에 E별 W번호를 붙입니다. 읽기 전용 문맥에는 검토 풀과 구별되는 X번호를 붙이고, 코드 전용 스냅샷에 원래 참조·리소스 경로를 남깁니다. 의미 경계·정규화 문장·배정 대상을 미리 만들지 않습니다. 문장부호·띄어진 번호·불완전한 괄호·공백·UTF-16 원문 위치를 보존합니다. 공백 없는 구절은 하나의 표면 단위가 됩니다.
+
+필수 후보마다 `wordRanges`를 반환합니다. `E7:W2-W5`, `X1:W1-W3`처럼 양 끝 어절을 포함하는 짧은 문자열 목록이며, 제외 후보마다 직접 근거·문맥의 빈 배열을 각각 반복하지 않도록 한 필드로 표현합니다. 코드는 현재 E의 범위를 직접 근거, 다른 E/X의 범위를 문맥으로 구분합니다. 포함·수신 대상 동일성 미결·관계 주체 대안에는 현재 E의 범위가 하나 이상 필요하고, 동일성·연속성을 설명하는 문맥만으로는 이를 대신할 수 없습니다. 떨어진 여러 구간과 여러 대상이 공유하는 서술부도 선택할 수 있습니다. 제외는 빈 목록을 허용하되 후보 자신의 K 근거와 이유를 유지합니다. 영어 검토 정책은 모든 실질적 작업을 후보별로 확인하고 조사범위 자체 작업과 개별 단위 작업을 각각 보존하도록 명시합니다.
+
+스키마와 자동 검사는 필드 누락, 잘못된 형식·존재하지 않는 ID·범위 초과·역방향·중복 범위, 문맥만 있는 긍정 판단, 변조된 스냅샷을 거부합니다. 파생 검토 결과에는 선택한 정확한 원문·상대 위치·원래 E 출처 위치를 표시하며 원응답은 수정하지 않습니다. 레코드에는 여전히 원래 E 전체를 보존하고 독립 검토 차이를 자동 채택하지 않습니다. 유효한 범위는 출처의 유효성을 뜻하므로 의미 정확도·토큰·회귀는 고정 평가에서 별도로 확인합니다.
+
+### 구간별 판단을 먼저 남기는 독립 검토
+
+새 독립 검토는 `segmentReview: true`를 활성화하고 `segmentReview.version: segment-review.v1`을 감사에 기록합니다. 같은 독립 검토 호출에서 후보 판단보다 먼저 필수 E별 공유 구간 목록을 한 번 반환합니다. LLM이 독립적인 작업·설명·개별 객체 제목의 원문 어절 범위를 선택하고, 비실질적인 내용도 명시합니다. 코드는 의미 경계나 배정 대상을 결정하지 않고 원래 문장·표 셀을 유지합니다. 공통 서술부의 범위 중첩은 허용하되 모든 원문 어절이 구간에 포함돼야 합니다.
+
+필수 E/검토 풀/후보마다 `segmentDecisions`에 모든 구간의 1부터 시작하는 번호를 한 번씩 반환합니다. 제외·비실질적 구간도 배정 판단, 별도 관계 주체 미결 판단과 근거 이유를 남깁니다. 후보 자신의 K 출처도 유지합니다. 구간의 포함·수신 대상 동일성 미결·관계 주체 대안에는 해당 구간과 겹치는 현재 E의 선택 근거가 필요합니다. 비실질적 구간은 제외하고 관계 주체 대안도 없어야 합니다. 최종 배정은 포함 구간이 하나라도 있으면 포함, 없고 수신 대상 미결이 있으면 미결, 모두 제외면 제외입니다. 관계 주체 대안은 구간 중 하나라도 대안이면 유지합니다. 최종 판단과 구간 판단이 모순되면 보정하지 않고 거부합니다.
+
+자동 검사는 다루지 않은 어절, 중복 구간·범위, 다른 출처로 정의한 구간, 누락·중복·존재하지 않는 구간 판단, 구간의 선택 근거 누락을 검출합니다. 파생 `segmentEvidence`에는 제외 이유까지 포함해 구간별 실제 원문·판단을 표시합니다. 원래 E 전체와 원응답은 보존하고 검토를 자동 채택하지 않습니다. 구조적 반환 검사는 의미 정확성을 보장하지 않으므로, LLM이 구간을 너무 넓게 묶거나 대상을 잘못 읽는 문제는 남습니다. 구간별 판단으로 출력량이 늘 수 있으며 실제 고정 평가 전에는 정확도·토큰 개선을 주장하지 않습니다. 구간 메타데이터가 없는 기존 어절 검토와 더 오래된 감사는 당시 요청·스키마를 유지합니다.
+
+### 독립된 원문 구간 식별 단계
+
+`createContentAttachmentSegmentationRequest(input, excerptRefs)`와 `identifyContentAttachmentSegments(input, excerptRefs, options)`는 원문만 다루는 `content-segmentation.v2` 단계입니다. 명시한 발췌 ID만 식별 대상으로 삼습니다. 코드는 원래 E 전체와 W 인덱스, 한정된 작업 묶음의 본문 블록, 기존 앞뒤 본문 문맥, 관련 표의 헤더와 선택 행을 투영합니다. 병합 구조와 별도 발췌가 없는 헤더 원문도 유지하며 참조하는 장 경로만 전달합니다. 후보 등록부·K 근거·표 후보 소속·기존 배정·정답은 전송하지 않습니다.
+
+LLM은 `segments: { E: [{ wordRanges: [...] }] }`만 반환합니다. 제목·행정 기록을 버리거나 구간의 실질성까지 판정하지 않습니다. `inspectContentAttachmentSegmentation`은 같은 요청·원문 스냅샷을 재현하고 현재 E의 유효 범위·모든 어절의 반환·중복 범위를 검사한 뒤 E:S 구간 ID와 원래 출처 위치를 복원합니다. 원문·응답을 보정하지 않으며, 범위가 유효하다고 의미 경계까지 정확하다는 뜻은 아닙니다. 공백뿐인 발췌는 빈 목록을 반환할 수 있고, 빈 대상 목록·중복·존재하지 않는 발췌 ID는 거부합니다.
+
+호출은 원래 파싱 응답·사용량·실제 호출 시도를 버전별 감사로 반환합니다. 후보 판단·최초 배정·원장 조립을 호출하지 않으며 기존 `attachContentUnit`에도 자동 연결하지 않습니다. 구간 결과를 확인한 뒤 후속 후보 판단 단계를 별도로 구현·호출해야 합니다. 원래 E 전체는 계속 보존합니다. 합의된 후속 관계 구간의 기준은 확정 수신 대상을 만들지 않고 관계 주체 미결만 남기는 것입니다. 앞의 집합 구간을 근거로 E 전체가 보존될 수 있으며, 이 API에 해당 후보 판단 단계가 구현된 것은 아닙니다.
+
+V2는 독립성이 명확한 작업·주장만 나눕니다. 쉼표·접속사·명사 나열만으로 경계를 만들지 않으며, 주어·대상·범위는 해당 작업과 함께 보존합니다. 공통 범위를 분배하기 어렵다면 연결된 작업을 함께 두고, 명확히 분리되는 작업은 필요한 원문 어절을 중첩 선택할 수 있습니다. 실제 원문의 불완전한 조각은 유지하고, 독립적으로 해석되는 집합 설명과 관계 설명은 구별합니다. 보고서·기대 후보·구간 수를 지정하지 않습니다. 자동 검사는 여전히 원문·범위·누락 검증이며 문법·의미 정확성을 보장하지 않습니다.
+
+`createContentAttachmentSegmentationRequest`의 선택적 세 번째 `version` 인자로 v1 요청을 재현합니다. 검사는 감사의 원래 버전을 사용하고 프롬프트 불일치를 거부하며, 새 호출은 v2를 사용합니다. 입력 투영·출력 스키마·후속 후보 판단의 경계는 바뀌지 않습니다.
+
+### 독립된 구간별 후보 판단
+
+`createContentAttachmentRecipientRequest(input, segmentationAudit)`, `judgeContentAttachmentRecipients(input, segmentationAudit, options)`, `inspectContentAttachmentRecipients(input, segmentationAudit, audit)`는 `segment-recipients.v13` 단계입니다. 유효하고 비어 있지 않은 독립 구간 식별 감사를 받아 원래 E 전체·구간·어절·본문/표 문맥을 그대로 사용합니다. 명시적인 입력 필드 목록으로 전체 후보 그룹·원래 언급·K 근거·표 행/앵커·수량·후보 미결을 유지하고 긴 출처 위치는 코드용 감사에 둡니다. 기존 배정·독립 검토 판단·기대 답은 전달하지 않습니다.
+
+출력 스키마는 모든 구간을 키로 요구하며, 각 구간에 배정·수신 대상 동일성 미결·관계 주체 미결 배열과 짧은 이유를 따로 반환합니다. 배정·미결에는 해당 구간의 원문 어절, 선택적인 문맥 범위, 후보 자신의 K 근거, 선택적인 원래 표 행을 지정합니다. 미결 그룹도 각 후보 근거가 필요합니다. 다른 후보의 근거·중복·구간 밖 직접 근거·확정 배정과 수신 미결의 충돌은 보정 없이 거부합니다. 집합 설명의 확정 배정과 별도 개별 관계 주체의 미결은 독립적으로 유지합니다. 추정 표기·현재 한정·전체/부분 범위·개별 작업의 원문 적용 범위를 존중합니다.
+
+감사는 실제 프롬프트·검사된 구간·후보 출처 바인딩·파싱 원응답·호출 시도·토큰을 보존합니다. 검사는 출처와 구조를 확인하며 의미 정확성을 보장하지 않습니다. 문제가 있는 구간은 검사 결과에서 제외하고 문제를 명시하지만 원응답은 유지하므로, 문제가 있는 검사 결과를 후속 조립에 사용하면 안 됩니다. 이 API는 후보 판단 호출만 수행하며 구간 재추출·최초 배정 변경·독립 검토 채택·원장 조립·전체 실행은 하지 않습니다. 원래 E 보존과 구간별 근거·관계 미결을 조립하는 단계는 별도입니다.
+
+V2는 같은 후보 판단 호출에서 모든 구간에 `collectiveAssessment`·`qualifierAssessment`·`inventoryMembershipLinks`를 필수 반환합니다. LLM이 집합 설명 여부, 현재 시대·유형·범위의 원문 어절 근거, 관련된 원래 표를 선택합니다. 표별 스키마는 선택한 표의 전체 등록 구성원을 행 주인·제외 대상까지 빠짐없이 요구하며, 코드가 표나 정답 구성원을 미리 선택하지 않습니다. 각 구성원은 자신의 K·행 근거, 시대·유형 적합성, 추정 표기 보존, 현재 집합 소속, 배정·제외·미결과 이유를 남깁니다. 집합이 아니면 표 목록을 명시적으로 비우며, 본문만으로 성립하는 집합도 표 없이 원문 근거를 설명할 수 있습니다.
+
+검사는 표·행·후보 바인딩과 어절 근거, 중간 판단과 최종 배정·수신 미결의 일관성을 확인합니다. 표가 겹치면 포함·미결·제외 순으로 합치되 관계 주체 미결은 독립적으로 둡니다. 모순은 검사 문제로 남기고 대상을 보정하지 않습니다. 이는 원문 근거와 응답 내부 일관성 검증이며 표 선택·한정 해석의 의미 정확성을 보장하지 않습니다. 요청 함수의 선택적 세 번째 인자로 v1을 재현하며, 검사는 감사의 원래 버전을 사용해 기존 입력·프롬프트·스키마·검사 결과를 보존합니다. 입력 투영·이전 실행 흐름은 바꾸지 않고 추가 LLM 단계도 만들지 않습니다.
+
+### 집합 결론에 앞선 표별 검토 기록 (후보 판단 v3)
+
+V3는 모든 구간에서 원래 표 ID별 `inventoryReviews`를 필수 반환합니다. 키는 입력 표 목록으로 생성하며 LLM의 표 선택이나 정답 후보에 의존하지 않습니다. 각 표의 채택·기각·미결과 함께 현재 구간 어절, 선택적인 원문 문맥, 해당 표의 장 문맥 ID, 선택적인 후보 자신의 K 근거와 원래 행, 연결되거나 끊기는 구체적 이유를 남깁니다. 표 키로 코드가 원래 메타데이터를 찾으므로 LLM이 제목·장 경로를 재작성하지 않습니다. 집합이 아니라는 결론도 검토 이력을 비울 수 없습니다. 모든 표는 간단히 검토하고 채택한 표만 전체 구성원을 상세 판단하여 무관한 표의 모든 구성원까지 검토하는 비용은 피합니다.
+
+채택된 표는 집합 결론과 정확히 하나의 구성원 연결을 요구하고, 기각·미결 표는 채택된 구성원 연결에 들어갈 수 없습니다. 표 연결이 미결인데 집합이 아니라고 확정하는 모순도 보고합니다. 본문만으로 성립하는 집합은 허용합니다. 현재 한정, 포함 단위로의 전파 제한, 독립적인 조사범위 배정, 추정 표기와 관계 주체 미결의 분리를 유지합니다. 검사는 근거·중복·필드 간 일관성을 확인하며 의미 판단이나 원응답 보정·채택은 하지 않습니다. 구조적으로 유효한 기각도 의미상 틀릴 수 있으므로 별도로 보존한 검토 사례와 비교해야 합니다.
+
+입력 투영과 독립 호출의 경계는 유지합니다. 선택적 요청 버전과 감사 버전으로 v1·v2의 프롬프트·스키마·검사 결과를 재현하고 새 호출은 v3을 사용합니다. 추가 LLM 단계·구간 재호출·자동 원장 조립·전체 실행은 없습니다.
+
+### 원래 표 문맥의 결정론적 연결 (후보 판단 v4)
+
+V4는 LLM의 표별 검토 응답에서 `inventoryContextRefs`를 제거합니다. 엄격한 응답 스키마가 해당 필드를 거부하며 잘못 반복한 표 ID를 허용하거나 보정하지 않습니다. 모든 원래 표 키의 검토와 기존 의미 판단·원문 근거는 유지합니다. 프롬프트는 v3에서 이 중복 필드를 선택하라는 문구만 제거하며, 원래 입력·필드 순서·의미 판단 규칙은 유지합니다.
+
+검사에 통과한 결과의 별도 `inventoryContexts`에 원래 표 ID별 `contextRefs`와 정확한 `chapterPaths`를 입력 등록부에서 복사해 연결합니다. 이는 코드가 찾은 고정 메타데이터이며 LLM이 선택한 근거나 새로운 의미 판단이 아닙니다. 검토 원응답은 그대로 유지하고 과거 U→C 보정은 하지 않습니다. v1·v2·v3 요청·스키마·검사 결과와 v3의 참조 실패도 원래 감사 버전으로 재현합니다. 구간 재추출·원장 조립·전체 실행 없이 명시적인 후보 판단 호출만 수행합니다.
+
+### 집합 원문 보존과 개별 세부 연대의 분리 (후보 판단 v5)
+
+V5는 집합 설명의 원문 배정과 개별 유구의 세부 연대 입증을 구분합니다. 원래 조사범위·본문 연결·표 행으로 구성원을 식별하되 현재 문장의 실제 범위와 명시적인 시대·유형 충돌, 구성원이 불분명한 별도 하위집합은 존중합니다. 같은 집합을 이어 설명하는 더 세밀한 시대 표현만으로 모든 구성원의 개별 연대 입증을 원문 공유의 선행 조건으로 요구하지 않습니다. 서로 다른 시대 원문과 한정은 그대로 보존하며, 배정이 각 개체의 연대 표준화나 모든 집합 속성의 개별 적용을 뜻하지 않습니다.
+
+개별 세부 연대의 미확정만으로 수신 대상 동일성 미결로 옮기지 않습니다. 원문으로 수신 대상이 식별되면 기존 필드에서 시대 근거 미결과 소속 연결·배정을 구분할 수 있으며, 진짜 소속 미상은 미결로, 명시적 시대·유형 충돌은 제외로 유지합니다. 관계 주체 미결과 포함 단위로의 전파 제한도 독립적으로 유지합니다. 범용 프롬프트 규칙만 추가하며 입력·응답 스키마와 순서·출처 검사·표 문맥 코드 연결·독립 호출 범위는 바꾸지 않습니다. v1~v4의 감사 재현을 유지하고 보고서별 ID·기대 답은 프롬프트에 넣지 않습니다.
+
+### 집합 공유에서 현재 유형 범위 유지 (후보 판단 v6)
+
+V6는 원래 집합과의 연결과 현재 문장의 유형별 배정 가능성을 구분합니다. 명시된 현재 유형과 원문으로 확인되는 동의어·약칭으로 범위를 정하며, 같은 조사·표 행·호환되는 시대라는 이유로 다른 유형을 추가하지 않습니다. ‘등’·‘etc.’ 같은 나열 표현이나 일반 명사만으로 앞선 표의 모든 유형을 가져오지 않습니다. 다른 유형을 포함하려면 원문에 정의된 포괄 용어나 전체 유형을 명시한 표현처럼 별도 연결 근거가 필요하며, 기존 원문 ID와 이유로 설명합니다. 앞선 유형 목록이 그 유형의 존재를 입증하는 것과 이후 문장이 그 모두를 설명하는 것은 다릅니다.
+
+서술된 유형의 확인된 구성원은 개별 세부 연대 입증 없이 원문을 보존하고, 명시적 충돌과 실제 소속 미상은 제외·미결로 유지합니다. 조사범위 자체의 배정과 개별 관계 주체 미결도 독립적으로 판단합니다. 범용 프롬프트 규칙만 추가하며 입력·출력 스키마와 순서·출처 검사·표 문맥 코드 연결·호출 범위는 유지합니다. v1~v5 요청·스키마·검사 결과를 원래 감사 버전으로 재현하고, 보고서별 ID·기대 답 전송이나 원응답 보정은 하지 않습니다.
+
+### 조사 집합과 개별 작업의 수행 범위 구분 (수신 대상 v7)
+
+V7은 조사 전체의 구성원 정의와 특정 작업 기록의 수행 범위를 구분합니다. 날짜별 작업 행이나 국소 작업을 전체 구성원에 배정하려면 해당 작업이 전체에 적용된다는 원문 연결 근거가 필요합니다. 앞선 조사 방법 설명, 같은 유형, 등록된 구성원 목록이나 제한 표현이 없다는 사실만으로 전체 수행을 확정하지 않습니다. 원문이 공통 작업과 대상을 연결하면 개별 번호를 반복하지 않아도 보존합니다. 범위 자체의 경계·구획·기록과 번호가 명시된 국소 작업을 각각 판단하며, 기존 집합 결과 설명·현재 유형/시대 한정·관계 주체 미결 기준을 유지합니다.
+
+범용 영어 프롬프트만 보강합니다. 실제 입력·출력 스키마·메타데이터 매핑·출처 및 일관성 검사는 유지하고 v1~v6 감사를 원래 계약으로 재현합니다. 추가 모델 단계·응답 보정·자동 채택·전체 실행은 도입하지 않습니다. 구조 검사는 작업 범위 해석의 정확성을 보장하지 않으므로 별도 합의 사례와 실제 결과를 비교해야 합니다.
+
+### 독립적인 작업 적용 범위 응답 계약 (수신 대상 v8)
+
+V8은 모든 구간에 `collectiveAssessment`와 독립된 `workScopeAssessment`를 필수로 반환합니다. 모델은 작업을 `operation`, 그 밖의 설명을 `not_applicable`로 판정하고 현재 어절과 이유를 선택합니다. 비작업에는 대상 집합이 없습니다. 작업의 각 관련 집합은 `targetIdentification`으로 후보·현재/문맥 어절·각 후보의 K·필요한 원래 표 행을 식별하고, 별도의 `operationCoverage`로 전체 작업 적용을 판단합니다. 독립적으로 설명되는 단일 대상도 집합 하나로 둘 수 있습니다. 전체 등록부를 검토 목록으로 강제하지 않으며 작업 분류·집합의 완전성은 의미 판단으로 남습니다.
+
+범위 판정은 `established` 또는 `not_established`입니다. `supportingWordRanges`에는 해당 작업을 전체 대상에 연결하는 긍정 근거, `consideredWordRanges`에는 검토했지만 충분하지 않은 문맥을 분리합니다. 확인 판정에는 현재 원문이나 읽기 전용 문맥의 긍정 근거가 하나 이상 필요합니다. 미확보 판정에는 긍정 근거가 없어야 하며 그 집합 전체를 확정 배정할 수 없습니다. 확정된 작업 수신자마다 적용이 확인된 집합이 있어야 하므로, 넓은 집합의 확장이 미확보여도 별도로 뒷받침되는 부분집합·범위를 보존할 수 있습니다. 작업에는 현재 구간 근거가 필수이며 발견 결과·관계 설명의 기존 배정 및 미결 기준은 유지합니다.
+
+검사는 집합 판정과 무관하게 어절·후보·행의 출처, 긍정 근거 누락과 판정/배정 모순을 확인합니다. 작업 범위 문제는 구간과 사유를 표시하고 해당 구간만 검사 결과에서 제외하며, 원응답과 다른 유효 구간은 보존합니다. 감사의 후보를 자동 추가·삭제하거나 미결로 바꾸지 않습니다. 유효한 ID와 내부 일관성이 의미 정확성을 보장하지는 않습니다. 작업 분류나 연결 근거 자체를 잘못 판단할 수 있으므로 고정 평가가 필요합니다. 입력 투영·호출 수·v1~v7의 프롬프트·스키마·검사 재현을 유지하며 실제 재호출·추가 모델 단계·자동 보정·채택을 이 계약에 포함하지 않습니다.
+
+### 독립적인 조사범위 검토 (수신 대상 v9)
+
+V9은 모든 구간에 `areaAssessments`를 필수로 반환하며 키는 등록부 전체의 고유한 `kind: area` 후보 참조에서 만듭니다. 코드가 중복 언급을 묶되 장 경로·표 소속·작업 여부로 검토 키를 제외하지 않습니다. 다른 종류는 추가하지 않고 area가 없으면 빈 객체를 요구합니다. 원문 입력은 유지하며 인용 중복 전송이나 추가 모델 단계는 없습니다. 각 범위는 `included`·`excluded`·`unresolved`, 현재/문맥 어절, 해당 후보 자신의 K 근거와 이유를 반환합니다. 제외에도 K와 이유가 필요하고 현재 어절은 비어 있어도 됩니다. 포함·수신 대상 동일성 미결에는 현재 구간의 근거가 필수입니다.
+
+범위 판단은 채택된 유구 표 및 작업 적용 범위와 독립적입니다. 원문 정의와 연결로 식별된 범위 자체의 결과·작업을 보존하되 포함 관계나 위치 참조만으로 전파하지 않습니다. 전체 사업대상지와 부분 조사범위를 구분합니다. 포함은 최종 배정, 제외는 배정·수신 대상 동일성 미결 모두 없음, 미결은 확정 배정 없이 수신 대상 동일성 미결과 일치해야 합니다. 기존 대안의 그룹 구성과 관계 주체 판단은 별도로 유지합니다. 비작업 구간에도 범위 판단을 모두 요구하고, 작업 구간에는 기존 v8 적용 범위 검사도 유지합니다.
+
+필수 판단은 엄격한 스키마로, 원래 어절·K의 출처와 최종 목록 일치는 검사로 확인합니다. 범위 관련 문제에 구간과 이유를 표시하고 해당 구간만 검사 결과에서 제외하며 원응답과 다른 유효 구간은 보존합니다. 코드는 수신 대상을 대신 선택하거나 누락을 보정하지 않습니다. 그럴듯한 근거로 잘못 제외하면 구조 검사를 통과할 수 있으므로 고정 평가가 필요합니다. v1~v8 프롬프트·스키마·검사 및 기존 오류를 원래대로 재현하고 과거 응답에 새 필드를 채워 넣지 않습니다. 실제 모델의 정확도·토큰 비용은 별도 승인한 실행에서 확인해야 합니다.
+
+필수 키 누락·빈 K/이유·잘못된 필드는 구간별 검사 전에 응답 스키마를 거부합니다. 스키마를 통과한 검토의 출처·판정 오류는 해당 구간만 식별해 검사 결과에서 제외합니다. 어느 경우에도 원래 감사의 원응답은 보존합니다.
+
+### 조사범위 확인 결과와 위치 참조의 구별 (후보 판단 v10)
+
+V10은 범용 영어 area 판단 프롬프트만 보강한다. 원래 정의·조사 단계·원문 연속성으로 범위를 식별한 뒤, 그 범위의 조사 결과를 보고하는 주장인지 다른 객체의 위치를 제공하는 수식인지 구분한다. 식별된 조사범위는 고고학적 확인 결과를 통해 설명될 수 있으며 경계·치수나 범위만의 속성을 다시 서술할 필요는 없다. 단순 위치·출토지 참조만으로 범위 자체를 설명한다고 판단하지 않으며, 특정 단어나 문법 표지 대신 전체 주장과 문맥을 본다.
+
+이 기준은 유구 집합을 넓히거나 상위 범위로 결과를 전파하지 않으며, 작업 적용 범위나 관계 주체 동일성도 별도로 유지한다. 원문 입력과 v9의 엄격한 응답 스키마는 동일하고 추가 모델 단계나 원문·응답 보정은 없다. V1~v9의 프롬프트·스키마·검사 결과는 각 버전으로 재현한다. 출처·일관성 검사 통과가 의미적 정확성을 보장하지 않으므로, 실제 판단은 별도 확정 평가와 비교한다.
+
+### 표 연결·구성원 선별·범위 배정의 분리 (후보 판단 v11)
+
+V11은 범용 프롬프트 문단만 추가한다. 표 채택은 원문 집합과의 연결이며 모든 구성원 배정이 아니다. 일부 구성원이 현재 시대·유형에 맞지 않는다는 이유만으로 근거가 확립된 표 연결을 기각하지 않고, 모든 원래 구성원을 검토해 각 한정을 적용하며 기존 기준대로 추정 표기를 보존한다. 범위는 자신의 정의와 현재 근거로 독립 판단한다. 범위 포함이 유구 집합 공유를 대체하거나 증명하지 않으며 표 채택·기각도 범위 배정을 대신 결정하지 않는다. 없는 원문 연결은 추론해 채우지 않는다.
+
+입력과 v10의 엄격한 응답 스키마는 동일하고 새 필드·모델 단계·배정 보정·자동 채택은 없다. v1~v10의 프롬프트·스키마·검사 결과를 원래대로 재현한다. 구조적 일관성은 의미적 정확성을 보장하지 않으며 실제 응답은 별도 고정 평가와 비교한다.
+
+### 작업 근거의 구간 경계와 집합 전체 적용 (후보 판단 v12)
+
+V12는 합의한 범용 문안만 추가한다. 비작업 판정을 포함한 모든 작업 판단의 현재 근거는 해당 구간 안에서 선택한다. 이웃 원문은 문맥으로 볼 수 있지만 현재 근거 경계를 넓히지 않는다. 작업 대상 집합의 식별과 이번 작업이 전체 대상에 적용됐다는 근거를 구분한다. 방법 본문·표·집합 정의만으로는 전체 적용을 확정하지 않으며 검토했으나 부족한 근거는 consideredWordRanges에 남긴다. 전체 적용을 연결하는 원문 근거가 없으면 supportingWordRanges를 비우고 not_established로 반환하되 별도 근거가 있는 대상·부분집합은 유지한다. 집합 발견 설명·구성원 선별·독립 범위 판단도 별도로 유지한다.
+
+입력과 v11의 엄격한 응답 스키마는 동일하며 새 필드·단계·응답 자동 보정·채택은 없다. v1~v11의 프롬프트·스키마·검사 결과와 기존 오류를 그대로 재현한다. 구조 검사는 근거 경계와 선언된 일관성을 확인하고, 의미적인 작업 적용은 별도 확정 평가로 검증한다.
+
+### 현재 시대 한정과 개별 정밀 연대 미확정 (후보 판단 v13)
+
+V13은 합의한 범용 문단만 추가한다. 현재 시대 한정이 적용되는 각 구성원에서 그 원문 어절 ID와 후보 자신의 K를 대조한다. 같은 표 소속이거나 유형이 맞는다고 시대 한정이 사라지지 않는다. 원문으로 소속이 연결되고 넓은 시대 표기가 호환되는 경우, 개별 정밀 연대는 unresolved로 남기면서 다른 제외 근거가 없으면 linked·included를 유지할 수 있다. 원래 K의 시대가 명시적으로 불일치하면 소속·유형이 맞아도 incompatible·excluded로 판단한다. 기존 reason에 비교 근거를 남기고 원래 연대를 추론·재작성하지 않으며 독립 범위 판단과 다른 제외 기준을 유지한다.
+
+입력과 v12의 엄격한 응답 스키마는 동일하며 새 필드·호출·결정론적 시대 매핑·응답 자동 보정·채택은 없다. v1~v12의 프롬프트·스키마·검사 및 기존 오류를 그대로 재현한다. 기존 검사는 출처와 선언된 일관성을 확인하며 의미적 시대 호환성은 별도 확정 평가로 검증한다.
+
+### 원래 표 집합의 필수 작업 검토 (후보 판단 v14)
+
+V14는 v13 시스템 프롬프트를 그대로 유지한다. 코드는 입력에 전달된 모든 원래 표의 등록 구성원을 종류별로 나누고 표·구성원 순서를 보존하며 중복 언급을 제거한다. 축약 `workGroups`에는 집합·표·종류 참조만 추가하고 구성원 목록·K·원래 행은 기존 근거를 이용한다. 장 경로·모델 판단·기대 정답으로 필수 집합을 거르지 않는다. 본문만으로 정의된 집합의 열거는 이번 계약 범위 밖이다.
+
+작업 구간의 `workScopeAssessment.groupReviews`는 입력 집합 키를 빠짐없이 반환하고 임의 키를 추가할 수 없다. 각 판단에는 이유가 필수다. `relevant`는 0부터 시작하는 정수 `targetGroups` 인덱스를 하나 이상, `not_relevant`는 빈 목록을 반환한다. 비작업은 빈 검토 객체를 반환한다. 검사는 중복·범위 밖 인덱스와 다른 집합 구성원을 거부한다. 참조한 대상 중 하나는 코드가 묶은 전체 구성원과 순서와 무관하게 일치해야 한다. 별도 근거가 있는 부분집합도 추가할 수 있지만 전체 검토를 대체하지 못한다. 범위 같은 독립 대상은 표 집합에 속할 필요가 없다. 기존 근거·작업 적용 검사도 유지하며 관련 없음 판정으로 집합 전체 배정을 숨길 수 없다.
+
+키 누락·추가와 잘못된 필드는 경로를 표시하며 스키마에서 거부한다. 스키마를 통과한 참조 오류는 구간·집합·해당 인덱스를 표시하고 해당 구간의 첫 오류에서 멈추며 그 구간의 검사 결과만 제외한다. 잘못된 참조 뒤에 전체 집합 누락 오류를 연쇄 생성하지 않는다. 원래 배정·감사는 그대로 보존하며 검토를 채우거나 결과를 자동 채택하지 않는다. 구조 통과가 관련성·실제 전체 작업 적용의 의미적 정확성을 보장하지는 않는다. V1~v13의 입력·프롬프트·제공자 스키마·원래 검사 결과와 오류를 그대로 재현하고 추가 모델 호출은 도입하지 않는다.
+
+### 제공자 호환 작업 검토 스키마 (후보 판단 v15)
+
+V15는 v14의 프롬프트·입력·작업 집합 계약을 그대로 유지하고 작업/비작업 및 관련/관련 없음 분기를 중첩 `oneOf` 대신 `anyOf`로 출력한다. 필수 `state`·`relevance` 고정값이 서로 달라 분기가 겹치지 않으므로 허용되는 응답은 동일하다. 필수 키·인덱스·구성원·전체 집합 검토와 독립적인 범위 배정·원응답 보존은 유지한다. 과거 v14는 모델 판단 전에 거부된 요청의 `oneOf` 스키마까지 그대로 재현하고 v1~v13도 유지한다.
+
+오프라인 테스트는 AI SDK가 생성한 실제 제공자 스키마를 정의·속성·배열 항목·합성 분기 안까지 순회한다. `oneOf`·`allOf`·`not`·조건/의존 합성 문법, 최상위 `anyOf`와 참조의 형제 필드를 검출하되 같은 단어를 쓴 일반 필드명·원문 문자열은 오류로 보지 않는다. [OpenAI Structured Outputs 공식 문서](https://developers.openai.com/api/docs/guides/structured-outputs)의 일부 구조 제약과 실제 v14 거부를 검사하며, 모든 제공자 제약이나 별도 승인할 실제 API 호출을 대체하지는 않는다. 이번 스키마 변경에는 프롬프트 수정·응답 보정·모델 호출·자동 채택을 포함하지 않는다.
+
+### 작업 집합 관련성과 전체 적용의 구분 (후보 판단 v16)
+
+V16은 합의한 범용 영어 문안만 추가한다. 작업 대상과 집합 객체 사이의 원문 연결로 관련성을 판단하고, 작업을 굴착으로 한정하거나 모든 구성원의 수행 입증을 관련성 조건으로 삼지 않는다. 관련 집합의 전체 대상을 식별해 검토한 뒤 전체 적용 여부는 별도로 판단한다. 전체 수행 근거가 부족하면 `not_established`와 빈 긍정 근거·검토한 불충분 근거를 반환하며, 그 자체를 `not_relevant`로 바꾸지 않는다. 별도 근거가 있는 대상·부분집합과 독립 범위 배정을 유지하고 집합 전체를 확정 배정하지 않는다.
+
+V15의 입력·제공자 스키마·출처 및 일관성 검사는 그대로 유지한다. V1~v15의 원래 요청·결과와 v14 API 거부·v15 의미 및 일관성 오류도 그대로 재현한다. 보고서별 식별자·기대 배정·추가 단계·원문 및 응답 보정은 추가하지 않는다. 구조 검사가 관련성·전체 적용의 의미적 정확성을 보장하지 않으므로 실제 응답은 별도로 검토한 기대 기준과 비교해야 한다.
+
+### 전체 작업 집합 검토 객체 필수 반환 (후보 판단 v17)
+
+V17은 v16 프롬프트와 입력을 그대로 유지한다. 작업 구간은 모든 입력 `groupReviews` 키를 반환하며, `relevant` 판단에는 `targetIdentification`과 `operationCoverage`를 담은 `fullGroupAssessment` 객체 자체가 필수다. `not_relevant`는 판정과 비어 있지 않은 이유만 반환한다. 두 분기 모두 숫자 `targetGroupIndexes`를 허용하지 않는다. 객체 누락·빈 객체는 참조 검사 전에 스키마에서 거부한다. 전체 식별 대상은 원래 입력에 묶인 집합과 정확히 일치해야 하며 중복을 허용하지 않는다. 기존 구간·문맥 어절, 후보별 근거, 원래 표 행과 작업 적용 검사를 유지한다. 전체 적용 미확립 객체에는 비어 있지 않은 검토 근거가 필요하며 긍정 적용 근거는 비워 둔다.
+
+독립 대상과 원문으로 확인된 부분집합은 각각 확립된 작업 근거를 갖춘 `targetGroups` 객체로 유지한다. 전체 적용 미확립을 이유로 독립 범위나 부분집합 배정을 지우거나 동일성·관계 미결을 만들지 않는다. 같은 조사 문맥에 있다는 사실만으로 작업 대상을 연결하지 않는다. 코드는 선언된 판단을 검사하고 원응답을 보존하며 관련성을 대신 결정하거나 응답 보정·객체 채움·추가 모델 호출을 하지 않는다. V1~v16의 원래 입력·프롬프트·제공자 스키마·검사 결과와 실패도 그대로 재현한다. 오프라인 호환 검사는 실제 API 수락이나 의미적 정확성을 보장하지 않는다.
+
+### 범위 단일 판단과 별도 배정 조립 결과 (후보 판단 v18)
+
+V18은 모델이 최종 `attachments`를 중복 작성하는 대신 `nonAreaAttachments`를 반환한다. 등록된 범위 이외 후보만 허용하고, 범위만 있는 등록부에서는 빈 배열을 요구한다. `areaAssessments`는 전체 등록부의 범위 키를 빠짐없이 반환하며 기존 어절·K 근거와 함께 `originRowRefs`도 보존한다. 범위별 포함·제외·미결은 한 번만 판단한다. 사용자 입력은 그대로 유지하고, v17 프롬프트에서 필드·조립 설명 두 곳과 범용 영어 응답 계약 문단만 변경한다. 샘플별 분기·추가 모델 단계·관련성이나 연대의 의미 판단 규칙은 넣지 않는다.
+
+검사는 범위 이외 배정 뒤에 등록부 순서대로 포함 범위를 조립하며 해당 범위 판단의 근거를 그대로 사용한다. 제외·미결 범위는 확정 배정을 만들지 않는다. 기존 수신 대상 동일성 미결·독립적인 관계 주체 미결의 그룹과 근거, 출처·표 구성원·작업 적용 검사를 유지한다. 미결 범위에는 명시적으로 반환한 수신 대상 미결 그룹이 필요하고 포함·제외 범위는 그 그룹에 들어갈 수 없다. 코드가 미결을 새로 만들거나 합치거나 나누지 않으며 범위 포함만으로 작업 적용 근거를 만들지 않는다.
+
+감사는 모델 원응답을 그대로 보존한다(`ContentAttachmentRecipientAudit<ContentAttachmentAreaRecipientResponse>`). 검사를 통과한 구간만 별도 `derivedResponse.decisions`에 반환하고, `derivedResponse.attachmentOrigins`는 각 배정이 범위 이외 배열의 어느 위치 또는 어느 범위 판단 키에서 왔는지 표시한다. 잘못된 구간은 원응답에 남고 검사 결과와 조립 결과에서는 제외된다. 조립 결과를 원장에 자동 채택하지 않는다. 잘못된 포함 판단은 여전히 잘못된 범위 배정을 만들며 구조 일치가 의미 정확성을 보장하지 않는다. V1~v17의 원래 프롬프트·스키마·응답·검사 결과와 실패를 그대로 재현한다. 이번 구현 단계에서는 실제 모델을 호출하지 않는다.
+
+### 수신 대상 미결과 관계 주체 미결의 구분 (후보 판단 v19)
+
+V19는 기존 미결 역할 구분 문단 뒤에 범용 문안만 추가한다. 불확실성이 개별 관계의 주체 식별뿐이면 `relationshipSubjectAlternatives`만 반환한다. 두 종류 미결을 함께 반환하려면 별개의 불확실한 원문 지시 대상 또는 독립 서술을 기존 근거 ID로 뒷받침하고 기존 `reason`에서 차이를 설명한다. 같은 불확실성을 다른 역할로 반복하는 것으로는 충분하지 않으며, 후보 ID 겹침 자체는 독립 판단의 성립·오류를 결정하지 않는다.
+
+V18의 사용자 입력·제공자 스키마·출처 검사·범위 배정 조립·작업 적용·원응답 보존은 유지한다. 코드가 겹친 그룹을 삭제하거나 의미 역할을 대신 정하지 않는다. V1~v18의 원래 프롬프트·스키마·검사 결과를 그대로 재현한다. 실제 출력은 별도로 검토한 기대와 비교해야 하며 구조 검사만으로 의미 정확성을 보장하지 않는다.
+
+### 현재 작업 대상과 집합 전체 적용의 구분 (후보 판단 v20)
+
+V20은 현재 작업의 원문상 대상과 집합 구성원을 분리하는 승인 문안만 추가한다. 전체 적용에는 해당 작업의 대상이 식별된 집합 전체를 포괄한다는 원문 연결이 필요하다. 복수 표현·수량 일치·방법 정의·목록 소속만으로는 충분하지 않으며 특정 단어를 요구하지 않는다. 기존 근거 ID와 `reason`으로 연결 또는 부족한 지점을 설명하고 집합 식별·긍정 적용·검토했지만 불충분한 문맥을 기존 필드에 구분한다. 집합 관련성과 별도 근거가 있는 범위·부분집합 배정은 독립적으로 유지한다.
+
+V19의 원문 입력·결정론적 검사·조립과 스키마 검증 계약은 유지한다. 제공자 직렬화 최적화는 다음 절에서 설명한다. 키워드 규칙·원문 및 응답 보정·새 모델 단계·자동 채택을 추가하지 않는다. V1~v19의 원래 프롬프트·스키마·검사 결과를 재현한다. 구조 일치가 적용 범위 판단의 의미적 정확성을 보장하지 않는다.
+
+### 제공자 스키마 공통 정의 재사용 (후보 판단 v20)
+
+V20은 작업 대상에서도 등록부의 `RecipientCandidateRef` 선택지를 재사용하고 공통 `WorkTargetGroup`·`WorkGroupReview` 구조에 이름을 부여한다. 제공자 요청은 같은 선택지와 검토 객체를 반복하는 대신 JSON Schema 참조를 사용한다. 전체 후보·원문 입력·프롬프트·출력 필드·필수 집합 및 구성원 키·출처 및 일관성 검사는 유지한다. 참조를 펼치면 검증 계약이 동일하며 기존 원응답의 변환은 필요 없다. V1~v19는 과거 제공자 표현을 유지한다. 모델 판단이나 추가 호출이 아닌 직렬화 최적화이며 오프라인 크기 측정만으로 실제 제공자 토큰 사용량이나 API 수락을 확정하지 않는다.
+
+### 반환 작업 대상 교차 확인 (후보 판단 v21)
+
+V21은 승인된 범용 반환 전 교차 확인 문안만 추가한다. 작업 구간에서 모델은 비범위 배정과 포함된 범위를 실제로 반환한 작업 적용 확립 객체와 대조한다. 검토 집합 밖에서 독립적으로 설명되는 작업 대상은 별도 대상 객체로 남기고, 누락을 숨기기 위해 근거 있는 배정을 제거하거나 근거를 만들어 내지 않는다. 기존 전체·부분집합 적용과 두 종류 미결은 유지하며 비작업 구간에는 작업 객체를 요구하지 않는다. 전체 축약 입력·공유 제공자 스키마·근거 검사·결정론적 조립은 v20과 같다. V1~v20의 프롬프트와 결과를 재현하고 v20은 공유 스키마 표현을 유지한다. 원응답 보정이나 추가 모델 단계는 없다.
+
+### 표 검토의 선택 근거 (후보 판단 v22)
+
+V22는 승인된 범용 문안만 표 검토 지침에 추가한다. 모든 검토와 두 근거 필드는 계속 필수이며, 사용하지 않은 K·행 근거 배열은 비워 둔다. 선택한 K는 검토 중인 표 구성원 후보의 근거여야 하고 원래 행도 해당 표에 속해야 한다. 배열마다 같은 참조는 한 번만 반환하며 K와 행 배열은 독립된 집합이다. 여러 후보가 같은 물리 행을 공유하면 그 행은 한 번만 인용한다. 다른 수신 대상·범위·구성원·작업 근거 요구는 유지한다.
+
+V21의 전체 사용자 입력·공유 제공자 스키마·검사·조립은 그대로다. V1~v21의 원래 프롬프트와 결과도 유지한다. 특정 자료용 규칙·응답 중복 제거·보정·추가 모델 단계·자동 채택은 넣지 않으며 실제 응답은 출처 검사와 별도로 확정한 기대값 대조가 필요하다.
+
+### 범위 식별과 작업 연결 (후보 판단 v23)
+
+V23은 범위의 식별 근거와 현재 작업이 그 범위에 적용된다는 근거를 구분하는 승인된 범용 문안만 추가한다. 축약되거나 여러 대상을 함께 지목한 작업 항목도 전체 구간과 원래 셀·본문 문맥으로 읽어 공통 작업의 대상을 판단한다. 다른 대상의 작업을 설명하는 연결 표만으로 독립적인 범위 작업을 확립하거나 취소하지 않는다. 범위 정의·포함 관계·등록표 구성원 정보만으로 작업 적용을 확립하지 않는다. 기존 reason과 근거 ID로 연결 또는 근거 부족을 설명하고, 집합 적용과 별도로 판단하며 포함된 독립 범위 대상의 작업 적용 확립 객체를 유지한다.
+
+V22의 전체 입력·공유 제공자 스키마·근거 검사·결정론적 조립은 그대로다. V1~v22의 원래 프롬프트와 결과를 재현한다. 특정 자료의 단어·후보 ID·추가 필드·모델 단계·응답 보정·자동 채택을 넣지 않는다. 의미 판단은 계속 별도로 확정한 기대값과 대조해야 한다.
+
+### 표의 출처 연결과 한정 근거 역할 (후보 판단 v24)
+
+V24는 후보 식별과 현재 설명에 대한 표의 출처 연결을 구분하는 승인된 범용 문안만 추가한다. 식별에 썼다는 사실만으로 표 연결을 확정하지 않는다. 표 연결을 기각해도 타당한 수신 대상·작업 대상 식별 근거는 보존하며, 본문이 정의한 한정 집합은 채택한 표 없이도 collective로 유지할 수 있다. 설명 문장이 본문에 있어도 원문으로 입증된 표 연결은 허용한다.
+
+한정 근거 ID는 의미 역할대로 보존한다. 고고학적 연대는 `periodWordRanges`, 작업 시점·대상 선택 조건은 `scopeWordRanges`, 유형은 `typeWordRanges`에 둔다. 완전한 한정 표현을 보존하며 선택 시점만으로 대상 연대나 작업 실시 시점을 확정하지 않는다. 독립 수신 대상 배정과 작업 적용은 각각의 근거 계약을 유지한다.
+
+전체 입력·공유 제공자 스키마·근거 검사·결정론적 조립은 그대로다. V1~v23의 원래 프롬프트와 재현을 유지한다. 특정 사례의 식별자·추가 필드·모델 단계·응답 보정·자동 채택은 추가하지 않는다. 확정된 의미 기대값은 별도의 평가 계약으로 비교한다.
+
+### 본문 부분집합과 집합 작업 서술 (후보 판단 v25)
+
+V25는 현재 원문이 정의한 집합이 부분집합이나 작업 서술일 수도 있음을 명확히 하는 승인된 범용 문안만 추가한다. 현재 표현과 원문 연속성이 집합을 확립하고 구성원을 함께 설명하면 전체 등록 집합의 결과나 채택된 표 없이도 collective를 반환한다. 표 채택 기각이나 상위 집합의 작업 적용 미확립이 그 본문 집합을 부정하지 않는다.
+
+작업 적용은 대상 집합마다 독립적인 원문 근거로 판단한다. collective 판정만으로 작업 적용을 확립하거나 수신 대상을 추가하거나 미결을 해소하지 않는다. 기존 표 검토·한정 근거·독립 범위 판단은 유지한다. 입력·공유 제공자 스키마·검사·결정론적 조립은 그대로이며 v1~v24의 원래 프롬프트와 재현을 유지한다. 특정 사례 식별자·추가 필드·모델 단계·응답 보정은 추가하지 않는다.
+
+### 원문 구조를 보존하는 명시적 입력(context v1, recipient v25/v26)
+
+`createContentAttachmentSourceContextRequest(plan, unit, segmentation, options, recipientVersion?)`는 선택적으로 사용하는 오프라인 문맥 컴파일러입니다. 기본값은 동결한 v25 시스템 프롬프트·제공자 출력 스키마·전체 후보군·현재 구간·기존 E/X/W 참조를 유지합니다. 다섯 번째 인수로 v26을 명시적으로 선택해도 입력과 스키마는 같으며 과거 요청도 유지합니다. 기본 후보 판단 호출이 이 문맥 입력을 자동 채택하지는 않습니다. 별도의 `contextVersion: 'content-source-context.v1'`은 입력 계약의 버전이며 추가 모델 단계가 아닙니다.
+
+각 원문에는 원래 자료 종류·장 문맥 참조·PDF 쪽·본문 블록 또는 표 셀 위치가 붙습니다. `bodySequences`는 같은 원래 textBlocks 배열에서 선택한 블록의 순서를 표시하고 `complete: false`로 생략을 드러냅니다. 자료 종류 사이의 PDF 읽기 순서나 조사 단계 태그를 추정하지 않습니다. 표 위치는 병합 구조를 포함한 전처리 grid 배열의 인덱스이며 확장된 논리 열 번호가 아닙니다. 긴 위치 정보는 `contextBindings`에 남습니다.
+
+호출자는 `tablePairs: [{ precedingTableKey, followingTableKey, boundaryCellIndexes }]`로 대조할 표 쌍을 명시합니다. 컴파일러는 표 카드와 각 표의 캡션을 따로 유지하고 원래 헤더·선택한 경계 셀을 제공하며, PDF 쪽 인접 여부·원래 소속 장의 겹침·헤더와 병합 구조의 정확한 일치 여부를 표시합니다. `tableContinuationCandidates.*.judgment`는 `not_evaluated`로 유지합니다. 이러한 사실만으로 연속표를 확정하거나 작업 대상을 선택하지 않습니다. 없는 캡션은 null로 남습니다. 제공한 캡션·경계 셀에는 기존 ID 뒤에 결정론적으로 X/W 참조를 붙이고, 이미 같은 원문 전체의 참조가 있으면 재사용합니다. 잘못된 선택이나 원문·표의 불일치는 보정하지 않고 거부합니다.
+
+반환하는 `wordEvidence`와 `contextBindings`는 원래 구간 식별 감사와 분리됩니다. `resolveContentAttachmentSourceContextRange(request, range, currentExcerptRef)`는 원래 필드와 UTF-16 위치로 근거를 해석합니다. 원문 중간에서 시작하는 본문 발췌와 표 캡션도 지원합니다. 컴파일러는 파일·네트워크 I/O나 모델 호출을 수행하지 않고, 배정·작업 적용·미결을 판단하지 않습니다.
+
+이 컴파일러는 실제 모델 실행을 수행하지 않습니다. 아래의 별도 문맥 응답 검사기가 명시적으로 저장한 문맥 요청을 검사합니다. 기존 후보 판단 실행·과거 검사 API는 원래 요청을 유지하며 새 문맥 계약을 자동으로 채택하지 않습니다. 오프라인 보존 검사는 제공자 수락·의미 정확도·실제 토큰 사용량을 입증하지 않습니다.
+
+### 별도 문맥 응답 검사
+
+`inspectContentAttachmentSourceContextRecipients(document, plan, unit, segmentation, audit)`는 I/O나 모델 호출 없이 새 문맥 계약을 비동기로 검사합니다. `createContentAttachmentSourceContextReplaySnapshot`은 원본 문서·plan·원래 구간 식별 감사의 정확한 JSON 해시와 문서/후보/등록부/작업 묶음 식별 정보를 구성합니다. 이는 재현 검사이며 실제 모델이 응답을 생성했다는 증명은 아닙니다.
+
+코드용 `ContentAttachmentSourceContextRecipientAudit`에는 `version: 'segment-recipients.v25' | 'segment-recipients.v26'`, `contextVersion`, 명시적 `contextOptions`, `replaySnapshot`, 실제 `providerOutputSchema`, 프롬프트·후보/구간 스냅샷, 별도 `wordEvidence`/`contextBindings`, 원응답·사용량·호출 시도를 보존합니다. 동결 입력으로 요청을 재생성한 뒤 선택 결과를 검사합니다. 제공자 스키마 변환은 로컬 작업이며 기존 스키마를 바꾸거나 요청을 전송하지 않습니다. 원래 구간 식별 감사에 새 X를 덧붙이지 않습니다.
+
+검사기는 제공된 원본 문서에서 표·헤더·필드·전체 문자열·원래 메타데이터·UTF-16 위치·재생성한 W 경계를 독립적으로 대조합니다. 캡션은 셀의 `text`가 아니라 `fullText`로 해석합니다. 요청 또는 원문 스냅샷이 다르면 감사 전체를 거부합니다. 이후 배정·area·표/집합·한정·두 종류 미결·작업 검사는 같은 검증된 어절 스냅샷을 사용합니다. X 문맥을 현재 E의 직접 근거로 바꾸거나 같은 E의 다른 S 구간을 현재 근거로 선택할 수 없습니다. 잘못된 참조는 해당 구간을 실패시키며 다른 정상 구간은 유지하고 원응답을 보정하지 않습니다.
+
+별도의 `sourceRanges`에는 정상 구간에서 선택된 WordRanges의 각 참조, 응답 내 위치, 원문 필드, 원래 필드 기준 UTF-16 범위, 출처 참조와 페이지 메타데이터를 남깁니다. 기존 finding의 위치 표현은 유지합니다. 현재/문맥 구분과 선언된 작업 적용의 검사 기준은 동일합니다. 유효한 참조라는 사실만으로 배정·연속표·작업 연결의 의미가 옳다고 확정하지 않습니다. 기존 v25 응답은 원래 요청의 관측으로 보존하며, 합성 문맥 fixture를 새 모델 관측으로 등록하지 않습니다. 실제 호출이나 자동 원장 채택은 추가하지 않습니다.
+
+### 본문·표 연속성·작업 대상 연결 (후보 판단 v26)
+
+V26은 합의한 범용 영어 문안만 덧붙입니다. 본문→표 참조, 표 조각 사이 연속성, 현재 작업→후보 연결을 구분하고 필요한 연결마다 근거와 판단 결과를 기존 작업 적용 reason에 따로 설명합니다. 작업 대상 객체가 없으면 기존 area reason을 사용합니다. 구조 참조는 reason에, 실제 원문 어절과 후보 K는 기존 근거 필드에 남깁니다. 미판정 연속성은 기각이 아니며 표 연속성이나 후보 정의가 작업 적용을 대신하지 않습니다. 명시적 원문 경계·현재 작업 한정·독립적인 배정을 유지하고 동일성 미결을 자동으로 만들지 않습니다.
+
+기본 후보 판단 생성기는 v26을 선택합니다. 별도 문맥 컴파일러는 동결한 v25를 기본값으로 유지하며 다섯 번째 인수에 `segment-recipients.v26`을 지정하면 새 프롬프트를 명시적으로 선택합니다. 문맥 검사기는 감사에 기록된 v25/v26을 재현합니다. 입력·공유 제공자 스키마·근거 검사·조립은 유지하고 v1~v25의 요청과 응답도 재현합니다. 추가 모델 단계·원문/응답 보정·자동 채택은 없습니다. reason의 설명만으로 세 연결의 의미가 코드에서 강제 검증되는 것은 아닙니다.
+
+### 오프라인 근거 단위의 범위 제한(window contract v1)
+
+`createContentAttachmentEvidenceWindowRequest(document, plan, unit, segmentation, options?, baseVersion?)`는 `executionMode: 'offline-only'`인 별도 `content-evidence-windows.v1` 요청을 컴파일합니다. 전체 원문·전체 후보·기존 E/X/W 및 E:S 참조·본문 순서·원래 표 셀·캡션을 유지합니다. 어절 목록에만 최대 16개의 원래 비공백 단위를 담는 Q 주소를 추가합니다. 지역 L 번호는 원래 W와 원문을 함께 보존합니다. Q 경계는 의미 구간이나 작업 대상의 경계가 아닙니다.
+
+출력 스키마 복사본은 범위가 제한된 Q/L 정의 하나를 공유합니다. 모델은 원문이나 문자 위치 대신 `Q37:L1-L4` 같은 문자열을 선택하도록 설계됐습니다. 기존 파서는 이 새 문법을 받지 않습니다. 기본 v26 프롬프트는 오프라인 비교를 위해 유지하며 v25도 명시적으로 선택할 수 있습니다. **유지한 프롬프트에는 아직 Q/L 지침을 반영하지 않았으므로 제공자에게 전송하면 안 됩니다.** 모델 호출 함수나 기본 파이프라인의 자동 채택은 추가하지 않습니다.
+
+`inspectContentAttachmentEvidenceWindowRecipients(document, plan, unit, segmentation, { request, rawResponse })`는 신뢰하는 입력에서 요청을 다시 만들고 전체 스냅샷·원문 필드·위치·출처 메타데이터·후보·스키마를 대조한 후 선택을 해석합니다. 컴파일러 버전·상한·문맥 옵션·구간 식별·출처 순서를 스냅샷에 연결합니다. 변조한 감사 매핑의 자체 해시를 다시 계산해도 통과하지 않습니다. 해시는 재현 일치 확인 수단이며 모델 응답 작성자의 인증은 아닙니다.
+
+알 수 없는 주소·역순·비정규 번호·범위 초과·현재 원문 역할 혼동·현재 E:S 밖의 선택·한 근거 목록 안의 중복 및 부분 겹침은 해당 구간을 무효로 둡니다. 다른 정상 구간은 독립 검사합니다. 스냅샷·출처·매핑 불일치는 감사 전체를 무효로 둡니다. 원문의 역할은 E/X 접두사가 아닌 실제 요청의 소속으로 결정합니다. 기존처럼 `contextWordRanges`에 현재 원문을 참조할 수 있지만 필수 `currentWordRanges`를 대신 채우지는 않습니다. 서로 다른 판단 필드의 근거 재사용은 허용합니다.
+
+검사기는 명시적인 파생 W 범위 해석을 기존 판단 검사에 전달하며 Q/L 원응답을 수정하지 않습니다. 정상 finding의 `windowSelections`에는 원래 선택·응답 내 위치·구간·원래 범위·필드·UTF-16 위치·출처를 남깁니다. 원문과 기존 관측을 수정하지 않습니다. 스키마·출처의 유효성이 의미적 충분성을 증명하거나 수신 대상을 자동 채택하지는 않습니다.
+
+`resolveContentAttachmentEvidenceWindowRange`는 새로 컴파일한 신뢰 요청에서만 사용합니다. `projectContentAttachmentEvidenceWindowChain`은 같은 원문의 비어 있지 않은 정순·연속 어절 연결만 허용하며, 원래 필드에서 사이 공백까지 읽습니다. 비연속 조각·역순 목록·다른 본문/셀/캡션은 별도 근거로 유효할 수 있지만 한 연속 구절로 조회하지 않습니다. 원응답 목록을 정렬·중복 제거·보정하지 않습니다. 기존 v25/v26 요청·검사는 원래 API로 계속 재현합니다.
+
+### 선택적으로 적용하는 Q/L 주소 지침(window contract v2)
+
+`createContentAttachmentEvidenceWindowRequest`의 일곱 번째 인수에 `'content-evidence-windows.v2'`를 지정하면 선택한 v25/v26 기본 프롬프트 뒤에 Q/L 근거 주소 지침만 덧붙입니다. 여섯 번째 인수는 기존처럼 기본 후보 판단 버전을 선택합니다. `CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_PROMPT_VERSION`은 v2를 가리키며 `CONTENT_ATTACHMENT_EVIDENCE_WINDOWS_VERSION`과 기본값은 v1을 유지합니다. `ContentAttachmentEvidenceWindowVersion`은 두 버전을 표현합니다.
+
+추가 지침은 입력의 원래 E/X/W 위치와 응답의 Q/L 선택을 구별하고, 주소 단위와 의미 구간을 분리하며 현재 E:S 범위·원문 역할을 유지하고 지역 L 끝점과 구조 참조 L을 구별합니다. 기존 수신 대상·미결·목록·조사범위·작업 적용 규칙은 그대로 상속합니다. 사용자 입력·전체 후보·Q 매핑·원래 출처·제공자 출력 스키마는 v1과 같습니다. 버전·시스템 프롬프트·스냅샷 해시만 달라집니다.
+
+검사기는 감사에 기록된 버전을 명시적으로 재컴파일하며 v1/v2 감사 표지만 서로 바꾼 경우 거부합니다. 기존 v1 요청도 정확히 재현합니다. 두 버전 모두 `executionMode: 'offline-only'`를 유지하며 이번 프롬프트 버전 추가로 제공자 호출·기본 파이프라인 채택·응답 보정을 추가하지 않습니다.

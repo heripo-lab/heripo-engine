@@ -87,7 +87,7 @@ export class ChapterConverter {
     this.logger.info('[ChapterConverter] Starting chapter conversion...');
 
     // Step 1: Create Front Matter chapter
-    const frontMatter = this.createFrontMatterChapter();
+    const frontMatter = this.createFrontMatterChapter(pageRangeMap);
 
     // Step 2: Build chapter tree from TOC
     const tocChapters = this.buildChapterTree(tocEntries);
@@ -131,12 +131,17 @@ export class ChapterConverter {
   /**
    * Create Front Matter chapter for pre-TOC content
    */
-  private createFrontMatterChapter(): Chapter {
+  private createFrontMatterChapter(
+    pageRangeMap: Record<number, PageRange>,
+  ): Chapter {
+    const logicalPages = Object.values(pageRangeMap).map(
+      (range) => range.startPageNo,
+    );
     return {
       id: ChapterConverter.FRONT_MATTER_ID,
       originTitle: ChapterConverter.FRONT_MATTER_TITLE,
       title: ChapterConverter.FRONT_MATTER_TITLE,
-      pageNo: 1,
+      pageNo: logicalPages.length > 0 ? Math.min(...logicalPages) : 1,
       level: 1,
       sourceRefs: [],
       textBlocks: [],
@@ -204,7 +209,7 @@ export class ChapterConverter {
    * Uses next chapter's start page as end boundary
    *
    * Front Matter (ch-000) gets special handling:
-   * - startPage: 1
+   * - startPage: the first logical page
    * - endPage: first TOC entry's page - 1 (or 0 if TOC starts at page 1)
    */
   private calculatePageRanges(
@@ -231,9 +236,9 @@ export class ChapterConverter {
     // Sort by TOC page number
     const sorted = [...tocChapters].sort((a, b) => a.tocPageNo - b.tocPageNo);
 
-    // Set Front Matter range (always page 1 to firstTocPage - 1)
+    // Include front matter at zero and negative logical pages.
     ranges.set(ChapterConverter.FRONT_MATTER_ID, {
-      startPage: 1,
+      startPage: flatChapters[0].tocPageNo,
       endPage: firstTocPage - 1,
     });
 
@@ -322,7 +327,7 @@ export class ChapterConverter {
     chapterRanges: Map<string, ChapterRange>,
   ): string | null {
     let bestMatch: string | null = null;
-    let bestStartPage = -1;
+    let bestStartPage = -Infinity;
 
     for (const [chapterId, range] of chapterRanges) {
       // Check if page is within range

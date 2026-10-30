@@ -68,7 +68,7 @@ import type { DoclingDocument } from '@heripo/model';
 - `texts`, `pictures`, `tables`: 추출된 content node
 - `pages`: 페이지 metadata와 렌더링된 페이지 이미지 참조
 
-`DoclingReference.$ref`와 각 노드의 `self_ref`로 원천 노드를 연결합니다. `DoclingProv.page_no`와 처리 모델의 `pdfPageNo`는 1부터 시작하지만 렌더링 파일은 `pages/page_0.png`부터 시작합니다. `Chapter.pageNo`와 `PageRange`는 인쇄된 문서의 논리 페이지 번호이므로 PDF 페이지 번호와 구분하세요. `DoclingBBox.coord_origin`을 확인한 뒤 좌표를 해석해야 합니다.
+`DoclingReference.$ref`와 각 노드의 `self_ref`로 원천 노드를 연결합니다. `DoclingProv.page_no`와 처리 모델의 `pdfPageNo`는 1부터 시작하지만 렌더링 파일은 `pages/page_0.png`부터 시작합니다. `Chapter.pageNo`와 `PageRange`는 본문 1쪽 기준의 논리 페이지 번호이므로 PDF 페이지 번호와 구분하세요. `DoclingBBox.coord_origin`을 확인한 뒤 좌표를 해석해야 합니다.
 
 ### ProcessedDocument
 
@@ -214,6 +214,8 @@ interface Caption {
 ### PageRange
 
 PDF 페이지와 문서 페이지 매핑입니다.
+
+PDF 물리 페이지는 1부터 시작합니다. 논리 페이지는 본문 1쪽을 기준으로 앞쪽도 연속해서 매기므로 `-2, -1, 0, 1` 같은 모든 정수를 허용합니다. `Chapter.pageNo`도 같은 논리 번호를 사용하며, 범위는 `startPageNo <= endPageNo`여야 합니다.
 
 ```typescript
 import type { PageRange } from '@heripo/model';

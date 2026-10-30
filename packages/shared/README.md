@@ -13,6 +13,7 @@ Internal ESM utilities used by the PDF parser and document processor. This packa
 | `LLMCaller`               | `call` and `callVision` perform model calls with schema validation, retries and fallback                  |
 | `LLMTokenUsageAggregator` | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset` aggregate usage            |
 | `detectProvider`          | Detect a provider from the model's `provider` value, returning `unknown` when unrecognized                |
+| `createSpendGuard`        | Hard caps on calls and tokens: reserve a worst case before a call, settle it with reported usage          |
 | `spawnAsync`              | Run a child process and return `{ stdout, stderr, code }`                                                 |
 
 The [export list](./src/index.ts) also includes call configuration/results, token usage and process option types.
@@ -35,9 +36,9 @@ console.log(batches, results);
 
 ## LLM Calls and Usage
 
-Recognizes OpenAI, Google, Anthropic, Together AI, Ollama and LM Studio. Together AI/Ollama use tool calls; the other providers use structured output. Zod validates the response schema. Configuration requires a model, schema, prompts (or vision messages), `maxRetries`, `component` and `phase`; `fallbackModel`, `abortSignal`, `temperature` and `metadata` are optional.
+Recognizes OpenAI, Google, Anthropic, Together AI, Ollama and LM Studio. Together AI/Ollama use tool calls; the other providers use structured output. Zod validates the response schema. Configuration requires a model, schema, prompts (or vision messages), `maxRetries`, `component` and `phase`; `fallbackModel`, `abortSignal`, `temperature` and `metadata` are optional. `cacheSystemPrompt: true` marks the system prompt as an Anthropic prompt-cache breakpoint, so calls sharing it read it from the cache; other providers ignore the mark. `providerOptions` is passed to the AI SDK unchanged, such as `{ anthropic: { effort: 'low' } }`.
 
-Calls return `{ output, usage, usedFallback }`. Pass `usage` to the aggregator's `track()`. `getReport()` includes component/phase/model totals and metadata. Multiple models in one phase produce model-separated phase rows, so phase names need not be unique. Usage covers tracked calls and is not guaranteed to match provider billing.
+Calls return `{ output, usage, usedFallback }`, plus `finishReason` and `structuredAttempts` when known. Structured output is retried up to ten more times on a schema mismatch regardless of `maxRetries`; `structuredAttempts` counts those attempts, and `usage` covers only the attempt that produced the output. `usage.reasoningTokens` is set when the provider reports reasoning tokens. Pass `usage` to the aggregator's `track()`. `getReport()` includes component/phase/model totals and metadata. Multiple models in one phase produce model-separated phase rows, so phase names need not be unique. Usage covers tracked calls and is not guaranteed to match provider billing.
 
 `spawnAsync` captures stdout/stderr by default, with options to disable capture. Check returned nonzero exit codes; process startup failures reject the promise.
 
@@ -54,3 +55,13 @@ pnpm --filter @heripo/shared test:coverage
 ```
 
 [Project README](../../README.md) · [License](../../LICENSE)
+
+## Provider Attempt Audits
+
+`createAuditedModel(model, onAttempt?)` returns `{ model, attempts }`. Pass that model to `LLMCaller` to capture each non-streaming provider `doGenerate` invocation before structured-output parsing. Schema retries and SDK transport retries remain separate attempt records. Records retain the SDK's original request body, complete provider response body, content, usage, unified/raw finish reason, API status, incomplete details and response ID when available. Provider exceptions retain their original response body and error metadata before rethrowing. No prompt, output, limit, temperature or retry policy is changed.
+
+Bodies are preserved as returned by the provider SDK, without reconstructing HTTP bytes; unavailable metadata is null. Authorization and response headers are not copied. `onAttempt` can persist records immediately, including when all structured attempts eventually fail. Callback persistence errors propagate. This opt-in helper requires a model instance and observes generation calls, not streaming. Existing `LLMCaller` result and final-attempt usage contracts are unchanged; per-attempt usage is available for separate audit/accounting.
+
+## Spend Guards
+
+`createSpendGuard({ maxCalls, maxTotalTokens })` holds hard caps for a whole run. `reserve(label, amount)` holds a worst case synchronously or throws `SpendLimitError` without calling anything; `settle(actual)` replaces it with what was used, and `refused()` returns the latest refusal so a caller that turns failed calls into results can still stop at the cap. `wrap(model)` returns a model whose every provider `doGenerate` attempt, schema retries and concurrent callers included, reserves `spendInputTokenBound` of its serialized prompt, schema and tools plus its output limit before it is sent, and settles with the reported usage. `spendInputTokenBound` is the UTF-8 byte length plus `SPEND_GUARD_ATTEMPT_OVERHEAD_TOKENS` (1,000) for instructions the provider adds, since a byte-level tokenizer never makes more tokens than bytes. An attempt without an output limit gets `SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS` (32,000); a prompt with a file given by URL or provider reference is refused, and a failed attempt keeps its whole reservation. Under caps, if an attempt still reports more than it reserved, the usage is counted and every later reservation is refused, so the run stops instead of trusting a bound that proved wrong. `createSpendGuard()` without caps only counts: it refuses nothing and adds no output limit.

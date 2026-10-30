@@ -17,3 +17,19 @@ export {
   type TokenUsage,
 } from './utils/llm-token-usage-aggregator';
 export { detectProvider, type ProviderType } from './utils/provider-detector';
+
+export {
+  createAuditedModel,
+  type LLMCallAttempt,
+} from './utils/llm-call-audit';
+export {
+  SPEND_GUARD_ATTEMPT_OVERHEAD_TOKENS,
+  SPEND_GUARD_DEFAULT_MAX_OUTPUT_TOKENS,
+  SpendLimitError,
+  createSpendGuard,
+  spendInputTokenBound,
+  type SpendAmount,
+  type SpendGuard,
+  type SpendLimits,
+  type SpendReservation,
+} from './utils/spend-guard';

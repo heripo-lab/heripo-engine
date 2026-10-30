@@ -39,13 +39,13 @@ export interface Caption {
  */
 export interface PageRange {
   /**
-   * Starting page number in the actual document (inclusive)
+   * Starting logical page number (inclusive). Signed integers count from body page 1.
    * @type {number}
    */
   startPageNo: number;
 
   /**
-   * Ending page number in the actual document (inclusive)
+   * Ending logical page number (inclusive). Zero and negative values identify front matter.
    * @type {number}
    */
   endPageNo: number;
@@ -151,7 +151,7 @@ export interface Chapter {
   title: string;
 
   /**
-   * Page number in the actual document (page where this chapter starts)
+   * Signed logical page number where this chapter starts, relative to body page 1
    * @type {number}
    */
   pageNo: number;

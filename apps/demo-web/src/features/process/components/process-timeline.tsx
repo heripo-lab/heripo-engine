@@ -2,6 +2,7 @@
 
 import { Check, Circle, Clock, Loader2, X } from 'lucide-react';
 
+import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 import { cn } from '~/lib/utils';
 
 import {
@@ -17,10 +18,12 @@ interface TimelineStep {
   id: string;
   title: string;
   description: string;
+  /** Korean title and description, shown to Korean browsers. */
+  ko?: { title: string; description: string };
   progressThreshold: number;
 }
 
-const STEPS: TimelineStep[] = [
+const RAW_DATA_STEPS: TimelineStep[] = [
   {
     id: 'pdf-parse',
     title: 'PDF Parsing',
@@ -47,7 +50,81 @@ const STEPS: TimelineStep[] = [
   },
 ];
 
+const LEDGER_STEPS: TimelineStep[] = [
+  {
+    id: 'json-parse',
+    title: 'JSON Parsing',
+    description: 'Read and parse the uploaded processed-document.json',
+    ko: {
+      title: 'JSON 읽기',
+      description: '올린 processed-document.json을 읽습니다',
+    },
+    progressThreshold: 0,
+  },
+  {
+    id: 'document-validate',
+    title: 'Document Validation',
+    description: 'Validate the JSON against the ProcessedDocument model',
+    ko: {
+      title: '문서 검증',
+      description: 'JSON이 ProcessedDocument 형식에 맞는지 확인합니다',
+    },
+    progressThreshold: 20,
+  },
+  {
+    id: 'ledger-extract',
+    title: 'Document Preview',
+    description: 'Summarize the document into a ledger extraction preview',
+    ko: {
+      title: '문서 미리보기',
+      description: '원장 추출을 위해 문서를 요약합니다',
+    },
+    progressThreshold: 10,
+  },
+  {
+    id: 'report-profile',
+    title: 'Report Profile',
+    description: 'Classify the report and its investigation scope (1 call)',
+    ko: {
+      title: '보고서 유형 분류',
+      description: '보고서 유형과 조사 범위를 판단합니다',
+    },
+    progressThreshold: 15,
+  },
+  {
+    id: 'candidate-discovery',
+    title: 'Candidate Discovery',
+    description: 'Find archaeological records and review duplicates',
+    ko: {
+      title: '객체 후보 탐색',
+      description: '고고학 객체를 찾고 중복을 검토합니다',
+    },
+    progressThreshold: 20,
+  },
+  {
+    id: 'content-attachment',
+    title: 'Content Attachment',
+    description: 'Attach source sentences and table cells to each record',
+    ko: {
+      title: '원문 배정',
+      description: '객체마다 원문 문장과 표 칸을 붙입니다',
+    },
+    progressThreshold: 45,
+  },
+  {
+    id: 'ledger-build',
+    title: 'Ledger Build',
+    description: 'Parents, attributes, figures, links and validation',
+    ko: {
+      title: '원장 조립',
+      description: '상하위, 속성, 도면·사진, 관계를 정리하고 검증합니다',
+    },
+    progressThreshold: 95,
+  },
+];
+
 function getStepStatus(
+  STEPS: TimelineStep[],
   step: TimelineStep,
   currentStep: string,
   progress: number,
@@ -82,25 +159,34 @@ interface ProcessTimelineProps {
   currentStep?: string;
   progress?: number;
   status?: TaskStatus;
+  kind?: 'raw-data' | 'ledger';
 }
 
 export function ProcessTimeline({
   currentStep = '',
   progress = 0,
   status,
+  kind = 'raw-data',
 }: ProcessTimelineProps) {
+  const lang = useBrowserLanguage();
+  const STEPS = kind === 'ledger' ? LEDGER_STEPS : RAW_DATA_STEPS;
+
   return (
     <Card className="h-full">
       <CardHeader>
-        <CardTitle>Processing Steps</CardTitle>
+        <CardTitle>
+          {lang === 'ko' ? '처리 단계' : 'Processing Steps'}
+        </CardTitle>
         <CardDescription>
-          Track progress through each processing stage
+          {lang === 'ko'
+            ? '단계별 진행 상황을 확인합니다'
+            : 'Track progress through each processing stage'}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col">
         <div className="space-y-4">
           {STEPS.map((step, index) => {
-            let stepStatus = getStepStatus(step, currentStep, progress);
+            let stepStatus = getStepStatus(STEPS, step, currentStep, progress);
             if (status === 'failed' && stepStatus === 'in_progress') {
               stepStatus = 'failed';
             }
@@ -152,11 +238,12 @@ export function ProcessTimeline({
                         stepStatus === 'pending' && 'text-muted-foreground',
                       )}
                     >
-                      {step.title}
+                      {(lang === 'ko' && step.ko?.title) || step.title}
                     </h4>
                   </div>
                   <p className="text-muted-foreground text-sm">
-                    {step.description}
+                    {(lang === 'ko' && step.ko?.description) ||
+                      step.description}
                   </p>
                 </div>
               </div>
@@ -164,15 +251,17 @@ export function ProcessTimeline({
           })}
         </div>
 
-        {/* Timing Warning */}
-        <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          <Clock className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <p>
-            PDF OCR and parsing may take <strong>10+ minutes</strong> depending
-            on document size. Please wait unless you see an error message or no
-            log changes for <strong>30+ minutes</strong>.
-          </p>
-        </div>
+        {/* Timing Warning (PDF pipeline only) */}
+        {kind === 'raw-data' && (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <Clock className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <p>
+              PDF OCR and parsing may take <strong>10+ minutes</strong>{' '}
+              depending on document size. Please wait unless you see an error
+              message or no log changes for <strong>30+ minutes</strong>.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

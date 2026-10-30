@@ -215,6 +215,8 @@ interface Caption {
 
 PDF page to document page mapping.
 
+Physical PDF pages start at 1. Logical pages count continuously relative to body page 1, so signed integers such as `-2, -1, 0, 1` are valid. `Chapter.pageNo` uses the same logical numbering, and ranges must satisfy `startPageNo <= endPageNo`.
+
 ```typescript
 import type { PageRange } from '@heripo/model';
 

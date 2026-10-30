@@ -112,7 +112,7 @@ export class TocValidator {
     parentEntry: TocEntry | null,
     seenKeys: Set<string>,
   ): void {
-    let prevPageNo = parentEntry?.pageNo ?? 0;
+    let prevPageNo = parentEntry?.pageNo ?? -Infinity;
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
@@ -180,10 +180,10 @@ export class TocValidator {
    * V002: Validate page number range
    */
   private validatePageRange(entry: TocEntry, path: string): void {
-    if (entry.pageNo < 1) {
+    if (!Number.isInteger(entry.pageNo)) {
       this.addIssue({
         code: 'V002',
-        message: `Page number must be >= 1, got ${entry.pageNo}`,
+        message: `Page number must be an integer, got ${entry.pageNo}`,
         path,
         entry,
       });

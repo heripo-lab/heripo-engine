@@ -75,7 +75,9 @@ export function resolvePageViewInfo(
   const pdfPages = docToPdfMap.get(pageNo);
 
   if (!pdfPages || pdfPages.length === 0) {
-    // Fallback: treat document page as PDF page if no mapping exists
+    if (pageNo < 1) return null;
+
+    // Fall back to a physical page only when it is positive.
     return {
       pdfPageNo: pageNo,
       pageIndex: pageNo - 1,

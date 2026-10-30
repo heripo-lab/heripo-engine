@@ -140,6 +140,33 @@ describe('LLMCaller', () => {
     });
   });
 
+  test('reports the finish reason, reasoning tokens and structured-output attempts', async () => {
+    vi.mocked(generateText).mockResolvedValueOnce({
+      output: { value: 'ok' },
+      finishReason: 'stop',
+      usage: {
+        inputTokens: 100,
+        outputTokens: 40,
+        totalTokens: 140,
+        outputTokenDetails: { textTokens: 10, reasoningTokens: 30 },
+      },
+    } as any);
+
+    const result = await LLMCaller.call({
+      schema: mockSchema,
+      systemPrompt: 'system',
+      userPrompt: 'user',
+      primaryModel: mockPrimaryModel,
+      maxRetries: 0,
+      component: 'Test',
+      phase: 'details',
+    });
+
+    expect(result.finishReason).toBe('stop');
+    expect(result.structuredAttempts).toBe(1);
+    expect(result.usage.reasoningTokens).toBe(30);
+  });
+
   test('keeps default cache writes when steps have no one-hour cache data', async () => {
     vi.mocked(generateText).mockResolvedValueOnce({
       output: { value: 'ok' },
@@ -437,6 +464,38 @@ describe('LLMCaller', () => {
         prompt: 'User prompt text',
         temperature: 0.7,
         maxRetries: 5,
+      });
+    });
+
+    test('marks the system prompt as a cache breakpoint when asked', async () => {
+      vi.mocked(generateText).mockResolvedValueOnce(
+        createMockGenerateTextResult(
+          { result: 'success' },
+          { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        ),
+      );
+
+      await LLMCaller.call({
+        schema: mockSchema,
+        systemPrompt: 'System prompt text',
+        userPrompt: 'User prompt text',
+        primaryModel: mockPrimaryModel,
+        maxRetries: 0,
+        component: 'TestExtractor',
+        phase: 'testing',
+        cacheSystemPrompt: true,
+        providerOptions: { anthropic: { effort: 'low' } },
+      });
+
+      expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
+        providerOptions: { anthropic: { effort: 'low' } },
+        instructions: {
+          role: 'system',
+          content: 'System prompt text',
+          providerOptions: {
+            anthropic: { cacheControl: { type: 'ephemeral' } },
+          },
+        },
       });
     });
 
@@ -1036,6 +1095,7 @@ describe('LLMCaller', () => {
 
       expect(result.output).toEqual({ result: 'recovered' });
       expect(generateText).toHaveBeenCalledTimes(3);
+      expect(result.structuredAttempts).toBe(3);
     });
 
     test('should use empty string when result.text is undefined in tool call error', async () => {
