@@ -2,6 +2,7 @@ import type {
   CandidateDeduplicationBlockAudit,
   CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
+  SpendGuard,
 } from '@heripo/ledger-extractor';
 
 import {
@@ -34,6 +35,7 @@ export async function answerDeduplicationBlocksByBatch(input: {
   completed: CandidateDeduplicationBlockAudit[];
   abortSignal?: AbortSignal;
   log?: (message: string) => void;
+  guard?: SpendGuard;
 }): Promise<CandidateDeduplicationBlockAudit[]> {
   const { plan, discovery, modelId } = input;
   const done = new Set(input.completed.map((a) => a.blockId));
@@ -53,6 +55,7 @@ export async function answerDeduplicationBlocksByBatch(input: {
     maxOutputTokens: BATCH_MAX_OUTPUT_TOKENS,
     abortSignal: input.abortSignal,
     log: input.log,
+    guard: input.guard,
     calls: open.map((block) => ({
       customId: block.blockId,
       systemPrompt: requests.get(block.blockId)!.systemPrompt,

@@ -7,6 +7,7 @@ import type {
   CandidateDiscoveryAudit,
   ContentAttachmentThinProviderOptions,
   ContentAttachmentThinRequest,
+  SpendGuard,
 } from '@heripo/ledger-extractor';
 import type { LanguageModelUsage } from 'ai';
 import type { z } from 'zod';
@@ -199,7 +200,9 @@ const sleep = (ms: number, signal?: AbortSignal) =>
  * send with the system prompt marked for the prompt cache, with a fixed output limit. The batch ID is saved in
  * `batchFile` before waiting; a call with the same file and the same custom IDs waits for that batch instead of
  * submitting another while it is uncollected. On abort the batch is cancelled. Every answer is checked against its
- * schema; nothing is repaired.
+ * schema; nothing is repaired. With `guard`, every item's worst case (its request body length in tokens plus the
+ * output limit) is reserved before the batch is sent or waited for, and settled with the usage the items
+ * report, failed ones included; a batch that stops before its results are read keeps the whole reservation.
  */
 export async function runStructuredBatch(input: {
   modelId: string;
@@ -209,6 +212,7 @@ export async function runStructuredBatch(input: {
   pollMs?: number;
   abortSignal?: AbortSignal;
   log?: (message: string) => void;
+  guard?: SpendGuard;
 }): Promise<Map<string, StructuredBatchAnswer>> {
   const ids = input.calls.map((c) => c.customId);
   const saved: { id: string; customIds: string[]; collected?: boolean } | null =
@@ -216,82 +220,109 @@ export async function runStructuredBatch(input: {
       ? JSON.parse(readFileSync(input.batchFile, 'utf8'))
       : null;
   let batchId = saved?.id;
-  if (
-    !saved ||
-    saved.collected ||
-    JSON.stringify(saved.customIds) !== JSON.stringify(ids)
-  ) {
-    const items = await Promise.all(
-      input.calls.map(async (call) => ({
-        custom_id: call.customId,
-        params: {
-          ...(await captureAnthropicParams(input.modelId, {
-            instructions: {
-              role: 'system',
-              content: call.systemPrompt,
-              providerOptions: {
-                anthropic: { cacheControl: { type: 'ephemeral' } },
-              },
+  const items = await Promise.all(
+    input.calls.map(async (call) => ({
+      custom_id: call.customId,
+      params: {
+        ...(await captureAnthropicParams(input.modelId, {
+          instructions: {
+            role: 'system',
+            content: call.systemPrompt,
+            providerOptions: {
+              anthropic: { cacheControl: { type: 'ephemeral' } },
             },
-            prompt: call.userPrompt,
-            schema: call.schema,
-            providerOptions: call.providerOptions,
-          })),
-          max_tokens: input.maxOutputTokens,
+          },
+          prompt: call.userPrompt,
+          schema: call.schema,
+          providerOptions: call.providerOptions,
+        })),
+        max_tokens: input.maxOutputTokens,
+      },
+    })),
+  );
+  const worst = {
+    calls: items.length,
+    totalTokens: items.reduce(
+      (n, item) =>
+        n + JSON.stringify(item.params).length + input.maxOutputTokens,
+      0,
+    ),
+  };
+  const reservation = input.guard?.reserve('Message batch', worst);
+  let answers: Map<string, StructuredBatchAnswer>;
+  try {
+    answers = await submitAndCollect();
+  } catch (error) {
+    reservation?.settle(worst);
+    throw error;
+  }
+  reservation?.settle({
+    calls: items.length,
+    totalTokens: [...answers.values()].reduce(
+      (n, a) => n + (a.usage?.totalTokens ?? 0),
+      0,
+    ),
+  });
+  return answers;
+
+  async function submitAndCollect() {
+    if (
+      !saved ||
+      saved.collected ||
+      JSON.stringify(saved.customIds) !== JSON.stringify(ids)
+    ) {
+      const batch = await createAnthropicBatch(items);
+      batchId = batch.id;
+      writeFileSync(
+        input.batchFile,
+        JSON.stringify({ id: batch.id, customIds: ids }),
+      );
+      input.log?.(`Submitted ${items.length} calls as ${batch.id}`);
+    }
+    for (;;) {
+      const batch = await retrieveAnthropicBatch(batchId!);
+      if (batch.processing_status === 'ended') break;
+      if (input.abortSignal?.aborted) {
+        await cancelAnthropicBatch(batchId!);
+        throw new Error('Batch was cancelled');
+      }
+      await sleep(input.pollMs ?? 60_000, input.abortSignal).catch(
+        async (error) => {
+          await cancelAnthropicBatch(batchId!);
+          throw error;
         },
-      })),
+      );
+    }
+    const results = new Map(
+      (await anthropicBatchResults(batchId!)).map((item) => [
+        item.custom_id,
+        item,
+      ]),
     );
-    const batch = await createAnthropicBatch(items);
-    batchId = batch.id;
+    const answers = new Map<string, StructuredBatchAnswer>();
+    for (const call of input.calls) {
+      const item = results.get(call.customId);
+      const read = item
+        ? readAnthropicBatchItem(item)
+        : { error: 'batch item missing' };
+      if (read.error) {
+        answers.set(call.customId, read);
+        continue;
+      }
+      const parsed = call.schema.safeParse(read.rawResponse);
+      answers.set(
+        call.customId,
+        parsed.success
+          ? { ...read, output: parsed.data }
+          : { ...read, error: 'response does not match the schema' },
+      );
+    }
     writeFileSync(
       input.batchFile,
-      JSON.stringify({ id: batch.id, customIds: ids }),
+      JSON.stringify({ id: batchId, customIds: ids, collected: true }),
     );
-    input.log?.(`Submitted ${items.length} calls as ${batch.id}`);
+    return answers;
   }
-  for (;;) {
-    const batch = await retrieveAnthropicBatch(batchId!);
-    if (batch.processing_status === 'ended') break;
-    if (input.abortSignal?.aborted) {
-      await cancelAnthropicBatch(batchId!);
-      throw new Error('Batch was cancelled');
-    }
-    await sleep(input.pollMs ?? 60_000, input.abortSignal).catch(
-      async (error) => {
-        await cancelAnthropicBatch(batchId!);
-        throw error;
-      },
-    );
-  }
-  const items = new Map(
-    (await anthropicBatchResults(batchId!)).map((item) => [
-      item.custom_id,
-      item,
-    ]),
-  );
-  const answers = new Map<string, StructuredBatchAnswer>();
-  for (const call of input.calls) {
-    const item = items.get(call.customId);
-    const read = item
-      ? readAnthropicBatchItem(item)
-      : { error: 'batch item missing' };
-    if (read.error) {
-      answers.set(call.customId, read);
-      continue;
-    }
-    const parsed = call.schema.safeParse(read.rawResponse);
-    answers.set(
-      call.customId,
-      parsed.success
-        ? { ...read, output: parsed.data }
-        : { ...read, error: 'response does not match the schema' },
-    );
-  }
-  writeFileSync(
-    input.batchFile,
-    JSON.stringify({ id: batchId, customIds: ids, collected: true }),
-  );
-  return answers;
 }
 
 /** Token usage in the shape `LLMCaller` reports. */

@@ -2,6 +2,7 @@ import type {
   CandidateDiscoveryAudit,
   CandidateDiscoveryCallResult,
   CandidateDiscoveryUnit,
+  SpendGuard,
 } from '@heripo/ledger-extractor';
 
 import {
@@ -30,6 +31,7 @@ export async function discoverUnitsByBatch(input: {
   directory: string;
   abortSignal?: AbortSignal;
   log?: (message: string) => void;
+  guard?: SpendGuard;
 }): Promise<{
   audits: Array<{ index: number; audit: CandidateDiscoveryAudit }>;
   failures: string[];
@@ -72,6 +74,7 @@ export async function discoverUnitsByBatch(input: {
     maxOutputTokens: BATCH_MAX_OUTPUT_TOKENS,
     abortSignal: input.abortSignal,
     log: input.log,
+    guard: input.guard,
   });
   const answered = units.flatMap(({ index, unit }) => {
     const answer = first.get(`u${index}`)!;
@@ -103,6 +106,7 @@ export async function discoverUnitsByBatch(input: {
         maxOutputTokens: BATCH_MAX_OUTPUT_TOKENS,
         abortSignal: input.abortSignal,
         log: input.log,
+        guard: input.guard,
       })
     : new Map();
   const audits = answered.flatMap(({ index, unit, first: call, followUp }) => {

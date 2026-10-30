@@ -2,6 +2,7 @@ import type {
   CandidateDeduplicationResult,
   CandidateDiscoveryAudit,
   CandidateDiscoveryResult,
+  SpendGuard,
 } from '@heripo/ledger-extractor';
 
 import {
@@ -126,7 +127,12 @@ export function cancelCandidateDiscovery(taskId: string): void {
 export async function startCandidateDiscovery(
   taskId: string,
   requested: CandidateDiscoveryRunSettings,
+  /** With `guard`, every direct attempt and every batch is reserved against the caps of the caller's run. */
+  options: { guard?: SpendGuard } = {},
 ): Promise<CandidateDiscoveryRun> {
+  const { guard } = options;
+  const guarded = (modelId: string) =>
+    guard ? guard.wrap(createModel(modelId)) : createModel(modelId);
   const existing = getCandidateDiscoveryRun(taskId);
   if (existing?.status === 'running') return existing;
   const stored = requested.useProfileScope
@@ -205,7 +211,7 @@ export async function startCandidateDiscovery(
     plan = retry.plan;
     initialResult = retry.result;
   }
-  const model = createModel(settings.modelId);
+  const model = guarded(settings.modelId);
   const deduplicationModelId =
     settings.deduplicationModelId ?? settings.modelId;
   if (settings.deduplicationBatch && !isAnthropicModelId(deduplicationModelId))
@@ -213,7 +219,7 @@ export async function startCandidateDiscovery(
   if (settings.discoveryBatch && !isAnthropicModelId(settings.modelId))
     throw new Error('Batch discovery needs an Anthropic model');
   const deduplicationModel = settings.deduplicationModelId
-    ? createModel(settings.deduplicationModelId)
+    ? guarded(settings.deduplicationModelId)
     : model;
   const runId = randomUUID();
   const directory = join(rootFor(taskId), runId);
@@ -272,6 +278,7 @@ export async function startCandidateDiscovery(
             modelId: settings.modelId,
             directory,
             abortSignal: controller.signal,
+            guard,
           });
           for (const { index, audit } of batch.audits) {
             writeFileSync(
@@ -328,6 +335,7 @@ export async function startCandidateDiscovery(
               batchFile: join(directory, 'deduplication-batch.json'),
               completed,
               abortSignal: controller.signal,
+              guard,
             })),
           );
         const audit = await deduplicateCandidateBlocks(plan, run.result, {

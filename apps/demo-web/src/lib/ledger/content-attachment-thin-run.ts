@@ -3,6 +3,7 @@ import type {
   ContentAttachmentThinCall,
   ContentAttachmentThinResult,
   ContentAttachmentThinUnitResult,
+  SpendGuard,
 } from '@heripo/ledger-extractor';
 
 import {
@@ -12,6 +13,7 @@ import {
   attachContentThinUnit,
   contentAttachmentThinNextRun,
   createContentAttachmentThinUnitRequest,
+  createSpendGuard,
   recordContentAttachmentThinCall,
   routeContentAttachmentThinTwoRuns,
 } from '@heripo/ledger-extractor';
@@ -45,8 +47,8 @@ const UNIT_CONCURRENCY = 3;
 const MAX_CALLS_PER_UNIT = CONTENT_ATTACHMENT_THIN_DEFAULT_RUNS + 2;
 const MAX_CONSECUTIVE_FAILURES = 5;
 /**
- * Output limit of a batch item. Every item of a batch is in flight at once, so the budget reserves this much
- * output per call; the largest saved thin answer was about 18,300 tokens. A longer answer fails the call.
+ * Output limit of a batch item and of a direct call. The budget reserves this much output per call in flight; the
+ * largest saved thin answer was about 18,300 tokens. A longer answer fails the call.
  */
 const BATCH_MAX_OUTPUT_TOKENS = 32_000;
 /** Input tokens reserved per prompt character; saved thin calls used at most 0.64. */
@@ -559,7 +561,7 @@ export function startContentAttachmentThin(
   taskId: string,
   budget: ContentAttachmentThinBudget,
   modelId: string,
-  options: { batch?: boolean } = {},
+  options: { batch?: boolean; guard?: SpendGuard } = {},
 ): ContentAttachmentThinState {
   if (options.batch && !isAnthropicModelId(modelId))
     throw new Error('Batch attachment needs an Anthropic model');
@@ -636,19 +638,23 @@ export function startContentAttachmentThin(
     return state;
   }
 
-  const model = createModel(modelId);
+  // every attempt reserves its worst case before it is sent, so units in flight together cannot pass the caps;
+  // a caller's guard holds the caps of a whole run, otherwise this start gets its own from the budget
+  const guard = options.guard ?? createSpendGuard(budget);
+  const model = guard.wrap(createModel(modelId), {
+    defaultMaxOutputTokens: BATCH_MAX_OUTPUT_TOKENS,
+  });
+  // units taken but not finished; each may still send all of its calls
+  let inFlight = 0;
   running.add(run.runId);
   const stopReason = () => {
     persist();
     if (state.stopRequested) return 'stop requested';
     if (state.stoppedBy) return state.stoppedBy;
-    if (
-      state.usage.calls - atStart.calls + MAX_CALLS_PER_UNIT >
-      budget.maxCalls
-    )
+    const left = guard.left();
+    if (left.calls - inFlight * MAX_CALLS_PER_UNIT < MAX_CALLS_PER_UNIT)
       return 'call budget';
-    if (state.usage.totalTokens - atStart.totalTokens >= budget.maxTotalTokens)
-      return 'token budget';
+    if (left.totalTokens <= 0) return 'token budget';
     if (state.usage.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
       return 'consecutive failures';
     if (state.usage.failures >= MAX_TOTAL_FAILURES) return 'total failures';
@@ -662,6 +668,7 @@ export function startContentAttachmentThin(
         Array.from({ length: UNIT_CONCURRENCY }, async () => {
           while (queue.length && !stopReason()) {
             const unit = queue.shift()!;
+            inFlight++;
             const u = unitDir(root, unit.unitId);
             mkdirSync(u, { recursive: true });
             const result: ContentAttachmentThinUnitResult =
@@ -678,6 +685,7 @@ export function startContentAttachmentThin(
                   persist();
                 },
               });
+            inFlight--;
             write(join(u, 'result.json'), result);
             state.units[unit.unitId] =
               result.status === 'failed' ? 'failed' : 'completed';

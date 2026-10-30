@@ -2,6 +2,7 @@ import type {
   ReportProfile,
   ReportProfileProposal,
   ReportRouterCall,
+  SpendGuard,
 } from '@heripo/ledger-extractor';
 
 import {
@@ -103,6 +104,8 @@ export function getLatestReportRouterRun(
 export async function runReportRouter(
   taskId: string,
   modelId: string,
+  /** With `guard`, the router call is reserved against the caps of the caller's run. */
+  options: { guard?: SpendGuard } = {},
 ): Promise<ReportRouterRunSummary> {
   const raw = readFileSync(paths.task(taskId).inputJson);
   const document = parseLedgerInputText(raw.toString('utf8'));
@@ -111,7 +114,9 @@ export async function runReportRouter(
   const runId = randomUUID();
   const result = await prepareReportProfile(document, index, {
     inputSha256,
-    model: createModel(modelId),
+    model: options.guard
+      ? options.guard.wrap(createModel(modelId))
+      : createModel(modelId),
     routerRunId: runId,
   });
   const validation = result.profile
