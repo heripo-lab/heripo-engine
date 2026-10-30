@@ -1,21 +1,24 @@
 /**
  * @heripo/ledger-extractor
  *
- * Ledger extraction preview package.
+ * Archaeology ledger extraction from a ProcessedDocument (produced by
+ * `@heripo/document-processor`).
  *
- * Takes a ProcessedDocument (produced by `@heripo/document-processor`) and
- * summarizes it into a LedgerExtractionPreview: aggregated counts and a few
- * representative samples. This is the first vertical slice of the ledger
- * extraction stage. Separate APIs provide a complete resource index and bounded,
- * source-backed LLM candidate proposals. The final ledger domain schema,
- * standardization, and storage are follow-up work.
+ * Builds an experimental `archaeology-ledger.v1` ledger: report profile,
+ * investigation-object candidate discovery with duplicate review, thin per-unit
+ * content attachment, parents, media references, table attributes, record links
+ * and validation. Model calls run in separate steps that return their prompts,
+ * raw responses and usage; ledger assembly makes no model calls. Original source
+ * text is kept unchanged and model output is never repaired. Standardization and
+ * storage are follow-up work.
  *
  * ## Key Features
  * - Runtime validation of unknown input (`parseProcessedDocument`)
- * - Recursive chapter/text-block aggregation
- * - Table grid cell aggregation
- * - Bounded samples (chapter titles, text blocks, image URLs, tables)
- * - Whole-document source lookup and investigation candidate review
+ * - Whole-document resource index and source lookup (S0)
+ * - Source-backed candidate discovery, duplicate review and content attachment
+ * - Ledger assembly and validation (`buildArchaeologyLedger`)
+ * - Spend guard with hard call and token caps (`createSpendGuard`)
+ * - Bounded extraction preview (`LedgerExtractor`)
  *
  * @packageDocumentation
  */

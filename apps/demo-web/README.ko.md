@@ -3,7 +3,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](../../LICENSE)
 
-> heripo engine의 PDF 처리 기능을 시각화하는 Next.js 웹 애플리케이션
+> heripo engine의 PDF 처리와 고고학 데이터 원장 추출을 시각화하는 Next.js 웹 애플리케이션
 
 [English](./README.md) | **한국어**
 
@@ -11,7 +11,7 @@
 
 ## 개요
 
-Demo Web은 heripo engine의 PDF 파싱 및 문서 처리 기능을 실시간으로 모니터링하고 시각화할 수 있는 풀스택 Next.js 애플리케이션입니다.
+Demo Web은 heripo engine의 PDF 파싱, 문서 처리, 고고학 데이터 원장 추출을 실시간으로 모니터링하고 시각화할 수 있는 풀스택 Next.js 애플리케이션입니다.
 
 홈에서는 heripo engine으로 자체 보고서 데이터를 구축하는 별도의 연구 지원 서비스 [heripo 베이스캠프](https://heripo.app)도 소개합니다. 브라우저 언어에 따라 한국어·영어로 표시하며, 비공개 알파 테스트 상태를 안내합니다. 한국의 발굴조사보고서에서 시작해 국가 경계를 넘어 확장해 나간다는 방향도 소개합니다. 데모에 업로드한 보고서와 처리 결과는 베이스캠프에 반영되지 않습니다.
 
@@ -212,7 +212,9 @@ pnpm dev
 
 ### 5. 원장 추출
 
-`Ledger Extraction` 단계는 PDF 파싱과 문서 전처리를 건너뛰고, 전처리된 문서로 `@heripo/ledger-extractor`의 고고학 데이터 원장을 만듭니다. 두 가지로 시작할 수 있습니다. 원장 추출은 보고서 3종(『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』)만 대상으로 개발하고 측정했기 때문에 다른 유형과 형식의 보고서에서는 부족한 점이 많을 수 있습니다. 데이터를 차차 쌓아 가면서 개선해 나갈 예정입니다.
+`Ledger Extraction` 단계는 PDF 파싱과 문서 전처리를 건너뛰고, 전처리된 문서로 `@heripo/ledger-extractor`의 고고학 데이터 원장을 만듭니다. 원장 추출은 보고서 3종(『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』)만 대상으로 개발하고 측정했기 때문에 다른 유형과 형식의 보고서에서는 부족한 점이 많을 수 있습니다. 데이터를 차차 쌓아 가면서 개선해 나갈 예정입니다. 원장 형식은 실험적이며 0.2.x 릴리스 안에서도 바뀔 수 있습니다.
+
+두 가지로 시작할 수 있습니다.
 
 - **단독 실행:** 파이프라인 스텝퍼에서 **Ledger Extraction**을 고르고 `processed-document.json` 하나(최대 100MB, ZIP 불가)를 첨부한 뒤 구간별 모델(보고서 유형 분류·객체 후보 탐색·후보 중복 검토·원문 배정, 기본은 모두 Claude Haiku 5.5)을 골라 "Start Ledger Extraction"을 누릅니다. 확장자/MIME → 파일 크기 → JSON 파싱 → `ProcessedDocument` 런타임 검증을 거쳐 작업이 큐에 등록됩니다.
 - **전처리 후 이어서:** 완료된 Raw Data Extraction 결과 페이지의 "이 결과로 원장 만들기"에서 같은 방식으로 구간별 모델을 고릅니다. 원장 작업은 그 결과의 전처리 문서를 그대로 쓰고 같은 브라우저 세션에 속합니다. 이후 카드는 두 번째 실행을 만들지 않고 그 원장으로 연결합니다(실패·취소된 실행은 다시 만들 수 있음).
@@ -254,21 +256,29 @@ pnpm dev
 
 작업 API는 브라우저 세션으로 접근 범위를 제한합니다. 삭제 API는 대기·실행 중인 작업을 취소한 뒤 기록과 파일을 삭제합니다.
 
-| 메서드          | 경로                                    | 역할                                    |
-| --------------- | --------------------------------------- | --------------------------------------- |
-| `GET`, `POST`   | `/api/tasks`                            | 작업 목록 / 5 MiB 미만 직접 업로드·생성 |
-| `GET`, `DELETE` | `/api/tasks/[taskId]`                   | 작업 조회 / 취소·삭제                   |
-| `GET`           | `/api/tasks/[taskId]/stream`            | SSE 상태·로그·사용량                    |
-| `GET`           | `/api/tasks/[taskId]/result`            | 처리된 문서                             |
-| `GET`           | `/api/tasks/[taskId]/download`          | 결과 ZIP                                |
-| `GET`           | `/api/tasks/[taskId]/images/[imageId]`  | 이미지                                  |
-| `GET`           | `/api/tasks/[taskId]/pages/[pageIndex]` | 렌더링 페이지                           |
-| `POST`          | `/api/upload/session`                   | 청크 업로드 세션 생성                   |
-| `POST`          | `/api/upload/chunks`                    | 청크 업로드                             |
-| `POST`          | `/api/upload/complete`                  | 업로드 합치기·작업 생성                 |
-| `DELETE`        | `/api/upload/session/[uploadSessionId]` | 업로드 취소                             |
-| `GET`           | `/api/rate-limit/check`                 | 퍼블릭 모드 제한 조회                   |
-| `GET`           | `/api/system/status`                    | 시스템 상태                             |
+| 메서드                  | 경로                                     | 역할                                         |
+| ----------------------- | ---------------------------------------- | -------------------------------------------- |
+| `GET`, `POST`           | `/api/tasks`                             | 작업 목록 / 5 MiB 미만 직접 업로드·생성      |
+| `GET`, `DELETE`         | `/api/tasks/[taskId]`                    | 작업 조회 / 취소·삭제                        |
+| `GET`                   | `/api/tasks/[taskId]/stream`             | SSE 상태·로그·사용량                         |
+| `GET`                   | `/api/tasks/[taskId]/result`             | 처리된 문서                                  |
+| `GET`                   | `/api/tasks/[taskId]/download`           | 결과 ZIP                                     |
+| `GET`                   | `/api/tasks/[taskId]/images/[imageId]`   | 이미지                                       |
+| `GET`                   | `/api/tasks/[taskId]/pages/[pageIndex]`  | 렌더링 페이지                                |
+| `POST`                  | `/api/upload/session`                    | 청크 업로드 세션 생성                        |
+| `POST`                  | `/api/upload/chunks`                     | 청크 업로드                                  |
+| `POST`                  | `/api/upload/complete`                   | 업로드 합치기·작업 생성                      |
+| `DELETE`                | `/api/upload/session/[uploadSessionId]`  | 업로드 취소                                  |
+| `GET`                   | `/api/rate-limit/check`                  | 퍼블릭 모드 제한 조회                        |
+| `GET`                   | `/api/system/status`                     | 시스템 상태                                  |
+| `POST`                  | `/api/tasks/ledger`                      | `processed-document.json`으로 원장 작업 생성 |
+| `GET`, `POST`           | `/api/tasks/[taskId]/ledger-task`        | 전처리 결과의 원장 작업 조회·생성            |
+| `GET`                   | `/api/tasks/[taskId]/ledger`             | 고고학 데이터 원장                           |
+| `GET`                   | `/api/tasks/[taskId]/resource-index`     | S0 자원 색인                                 |
+| `GET`, `POST`, `PUT`    | `/api/tasks/[taskId]/report-profile`     | 보고서 프로필                                |
+| `GET`, `POST`, `DELETE` | `/api/tasks/[taskId]/candidates`         | 후보 발견과 중복 검토                        |
+| `GET`, `POST`           | `/api/tasks/[taskId]/content-attachment` | 원문 배정 계획과 얇은 배정 실행              |
+| `GET`, `PUT`, `DELETE`  | `/api/tasks/[taskId]/place-aliases`      | 장소 약칭표                                  |
 
 현재 ZIP에는 처리된 JSON, 보정된 Docling JSON, handoff manifest, `images/`, `pages/`만 포함됩니다. OCR 스냅샷·검토 리포트·체크포인트는 서버 산출물 디렉터리에 별도로 남습니다.
 
@@ -284,6 +294,7 @@ src/
 │   │   ├── upload/           # 청크 업로드 session/chunk/complete API
 │   │   ├── rate-limit/       # public mode rate limit 확인
 │   │   └── system/           # system status API
+│   ├── ledger/validation/[taskId]/ # 고고학 데이터 원장 페이지
 │   ├── legal/                # 약관 및 개인정보 처리방침 페이지
 │   ├── tasks/                # 작업 목록 페이지
 │   ├── process/[taskId]/     # 실시간 처리 페이지
@@ -293,6 +304,7 @@ src/
 │   ├── providers/            # React Query Provider
 │   └── ui/                   # shadcn/ui 컴포넌트
 ├── features/                 # 기능별 모듈
+│   ├── ledger/               # 원장 추출과 원장 화면
 │   ├── upload/               # PDF 업로드 & 설정
 │   ├── process/              # 실시간 처리
 │   ├── result/               # 결과 표시
@@ -304,6 +316,7 @@ src/
     ├── config/               # public mode, webhook, cleanup config
     ├── cost/                 # token 가격 및 비용 계산
     ├── db/                   # JSON 파일 DB
+    ├── ledger/               # 원장 파이프라인, Message Batches, 일괄 실행기 지원
     ├── processing/           # LLM model factory
     ├── queue/                # 작업 큐
     ├── session/              # browser session 관리

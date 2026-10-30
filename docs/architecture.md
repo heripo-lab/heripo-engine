@@ -31,8 +31,9 @@ flowchart TB
             P1_1[Receive PDF File]
             P1_2[OCR Processing - Deep Learning]
             P1_3[Structure Analysis - Docling]
+            P1_3b[OCR Correction - VLM]
             P1_4[Generate DoclingDocument]
-            P1_1 --> P1_2 --> P1_3 --> P1_4
+            P1_1 --> P1_2 --> P1_3 --> P1_3b --> P1_4
         end
 
         subgraph Phase2[Preprocessing 2: Archaeological Data Preprocessing]
@@ -57,13 +58,15 @@ flowchart TB
         C1 --> C2 --> C3
     end
 
-    subgraph Ledger[Archaeological Data Ledger Extraction - Coming Soon]
+    subgraph Ledger[Archaeological Data Ledger Extraction - 0.2.x, Experimental]
         direction TB
-        L1[Per-Chapter Analysis]
-        L2[Feature/Artifact/Stratum Extraction - LLM]
-        L3[Image Matching]
-        L4[Generate ArchaeologyLedger]
-        L1 --> L2 --> L3 --> L4
+        L1[Report Profile - Rules+LLM]
+        L2[Object Candidate Discovery + Duplicate Review - LLM]
+        L3[Content Attachment - LLM, multi-run]
+        L4[Parents, Media, Attributes, Links - Rules+LLM]
+        L5[Ledger Validation - Rules]
+        L6[Generate archaeology-ledger.v1]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6
     end
 
     subgraph Standard[Archaeological Data Standardization - Coming Soon]
@@ -81,8 +84,9 @@ flowchart TB
     end
 
     PDF --> RawData
-    RawData --> Classification
-    Classification --> Ledger
+    RawData --> Ledger
+    RawData -.-> Classification
+    Classification -.-> Ledger
     Ledger --> Standard
     Standard --> Ontology
 ```
@@ -93,11 +97,11 @@ flowchart TB
 
 heripo engine utilizes two types of AI technology:
 
-| Type              | Technology                   | Stage                            | Characteristics                                                      |
-| ----------------- | ---------------------------- | -------------------------------- | -------------------------------------------------------------------- |
-| **Deep Learning** | Apple Vision Framework (OCR) | Preprocessing 1                  | Text recognition from images, local processing, free                 |
-| **VLM**           | GPT, Gemini, etc. (Vision)   | Preprocessing 1                  | Korean report detection and full-document text correction, API calls |
-| **LLM**           | GPT, Claude, Qwen, etc.      | Preprocessing 2, Main Processing | Text understanding/analysis, API calls, cost per token               |
+| Type              | Technology                   | Stage                              | Characteristics                                                    |
+| ----------------- | ---------------------------- | ---------------------------------- | ------------------------------------------------------------------ |
+| **Deep Learning** | Apple Vision Framework (OCR) | Preprocessing 1                    | Text recognition from images, local processing, free               |
+| **VLM**           | GPT, Gemini, etc. (Vision)   | Preprocessing 1                    | Page-level OCR text/table-cell correction on every page, API calls |
+| **LLM**           | GPT, Claude, Qwen, etc.      | Preprocessing 2, Ledger Extraction | Text understanding/analysis, API calls, cost per token             |
 
 ### LLM Model Selection Strategy
 
@@ -126,6 +130,8 @@ This system enables:
 - **Cost Savings**: Most processing done with low-cost open source models
 - **Accuracy Guarantee**: Frontier models validate results for quality assurance
 - **Automatic Correction**: Frontier model reprocesses on validation failure
+
+The ledger extraction stage (0.2.x) follows a different rule: model output is inspected by code but never repaired. Instead of a correcting model, it relies on repeated runs and agreement (content attachment accepts what both runs return or, after a tie-break run, what two of three runs return; parent judgment accepts only what all three runs return), and every unresolved decision becomes a review item for a person.
 
 ---
 
@@ -168,15 +174,15 @@ Preprocessing 1 is designed for macOS only, considering **performance** (output 
 flowchart LR
     subgraph PDFParser[PDF Parser - macOS]
         direction TB
-        A[Receive PDF File] --> B[OCR Strategy Sampling]
-        B -->|ocrmac| C[OCR Processing - Apple Vision]
-        B -->|vlm| C
+        A[Receive PDF File] --> B[Language Detection - ocr_lang]
+        B --> C[OCR Processing - ocrmac / Apple Vision]
         C --> D[Structure Analysis - Docling]
-        D --> E[Image Extraction]
-        E --> F{Korean Report Detected?}
-        F -->|Yes| G[VLM Text Correction]
-        F -->|No| H[Save Results]
-        G --> H
+        D --> E[Image and Page Image Extraction]
+        E --> F[VLM Text/Table-Cell Correction - every page]
+        F --> G{Review Assistance Enabled?}
+        G -->|Yes| R[Page Gate + Structural Review + Table Correction]
+        G -->|No| H[Save Results]
+        R --> H
     end
 
     PDF[PDF File] --> PDFParser
@@ -190,9 +196,10 @@ flowchart LR
 | Feature                      | Description                                                                   | AI Technology                |
 | ---------------------------- | ----------------------------------------------------------------------------- | ---------------------------- |
 | **OCR Processing**           | Text extraction from scanned images (Korean/English)                          | Deep Learning (Apple Vision) |
-| **Korean Report Detection**  | Auto-detect Korean documents via text layer pre-check + VLM language sampling | VLM (Vision LLM)             |
-| **VLM Text Correction**      | Full-document OCR text correction for Korean reports                          | VLM (Vision LLM)             |
-| **Document Type Validation** | Verify document is an archaeological report before processing                 | LLM                          |
+| **Language Detection**       | Set OCR languages from the local text layer, with an optional vision model    | VLM (optional)               |
+| **VLM Text Correction**      | Mandatory page-level OCR text and table-cell correction on every page         | VLM (Vision LLM)             |
+| **Review Assistance**        | Optional page gate, structural review and table correction with audit reports | VLM (Vision LLM)             |
+| **Document Type Validation** | Optional check that the document is an archaeological report                  | LLM                          |
 | **Structure Analysis**       | Automatic identification of text, table, image regions                        | Docling (Rules + ML)         |
 | **Chunked Conversion**       | Split large PDFs into chunks for reliable processing                          | -                            |
 | **Image PDF Fallback**       | Convert PDF to images when direct conversion fails                            | -                            |
@@ -200,17 +207,16 @@ flowchart LR
 | **Page Images**              | Save each page as image (for LLM Vision)                                      | -                            |
 | **Server Crash Recovery**    | Automatic restart of docling-serve on connection failure                      | -                            |
 
-#### OCR Strategy System
+#### OCR and Correction Pipeline
 
-The OCR strategy system addresses a key challenge: **ocrmac (Apple Vision Framework) is excellent for large-scale processing** — it's free, GPU-accelerated, and delivers high-quality results, making it the ideal solution for processing thousands to millions of reports. **However, Korean archaeological reports often require Hanja restoration and script-aware correction** that standard OCR cannot reliably handle.
+The parser no longer selects between OCR strategies. **ocrmac (Apple Vision Framework) is excellent for large-scale processing** — free, GPU-accelerated and high quality — so Docling conversion always uses it. **Korean archaeological reports, however, often need Hanja restoration and script-aware fixes** that OCR alone cannot reliably deliver, so a VLM correction stage always runs after conversion, regardless of document language:
 
-To solve this, the system uses a **two-stage Korean document detection + full-document correction** approach:
+1. **Language Detection** (OCR languages only) — An explicit `ocr_lang` takes precedence. Otherwise the local PDF text layer is inspected, with an optional vision model when needed; remote or undetected inputs use `ko-KR` and `en-US`. This does not select an OCR engine.
+2. **Docling Conversion** — ocrmac OCR and structure analysis, saving `result_ocr_origin.json` before any correction.
+3. **Mandatory Text/Table-Cell Correction** — Every page with text or table content is sent to VLM text and table-cell correction.
+4. **Review Assistance** (enabled by default, can be disabled) — A page gate skips low-value pages, then structural review and table-specific correction write audit proposals and auto-apply high-confidence fixes.
 
-1. **Stage 1: Text Layer Pre-Check** (zero cost) — Uses `pdftotext` to check for Hangul in the document's text layer. If Hangul is present, the document is treated as Korean.
-2. **Stage 2: VLM Sampling** (only when needed) — Samples up to 15 pages and analyzes them with a Vision LLM for language detection. Uses early exit when `ko-KR` is detected.
-3. **Full-Document Correction** — Korean reports run through the standard OCR pipeline first, then every page is sent to VLM text correction.
-
-This approach keeps non-Korean documents on the fast, free ocrmac engine while ensuring Korean archaeological reports receive consistent VLM correction across the whole document.
+All three correction models (`textCorrection`, `pageGate`, `reviewAssistance`) are required for every `parse()` call, even when structural review is disabled. Failed correction calls keep the original OCR text and log warnings.
 
 #### Output: DoclingDocument
 
@@ -228,7 +234,7 @@ DoclingDocument
 
 > **Currently Implemented** ✅
 
-This stage refines and structures extracted raw data into a **form optimized for archaeological data construction**. It separates documents into chapter units and establishes relationships with images/tables so that the main processing (data extraction) can work efficiently.
+This stage refines and structures extracted raw data into a **form optimized for archaeological data construction**. It separates documents into chapter units and establishes relationships with images/tables so that ledger extraction can work efficiently.
 
 #### Design Philosophy: Extreme Cost Efficiency + Self-Validation
 
@@ -338,68 +344,109 @@ This stage classifies report types in detail to facilitate ledger extraction.
 
 The output format for report classification is not yet finalized. It is planned to be included as metadata for the archaeological data ledger.
 
+> The ledger stage (0.2.x) already includes a narrower **report profile**: trait judgments and the investigation scope used to route ledger extraction (see below). It is not the book/survey/period classification described here.
+
 ---
 
-### Archaeological Data Ledger Extraction
+### Archaeological Data Ledger Extraction (`@heripo/ledger-extractor`)
 
-> **Coming Soon** 🔒
+> **First Release (0.2.x), Experimental** 🧪
 
-Extracts actual archaeological data (features, artifacts, strata, etc.) from classified documents to generate ledger data.
+Extracts investigation objects (sites, areas, trenches, layers, features, artifacts, etc.) from a `ProcessedDocument` and assembles a **ledger** in the experimental `archaeology-ledger.v1` format. The format, review items and prompts may change within 0.2.x releases without a migration path, so keep the source processed documents and rebuild ledgers after upgrading. The stage was developed and measured on three reports only (『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』); expect gaps on other report types and layouts.
+
+#### Design Principles
+
+- **Source fidelity**: Records keep original source text (sentences, table phrases, names) and source references (resource key, character span, PDF page, chapter, `sourceRef`). Nothing is normalized or converted.
+- **No repair of model output**: Code inspects every model response against the input; invalid answers become issues, never silently fixed values.
+- **Agreement over correction**: Content attachment sends each unit twice and confirms the targets both runs return; where they disagree, a third run decides by two-of-three majority (`model_majority`) and what it cannot settle goes to review. Parent judgment runs three times and sets a parent only when all runs agree.
+- **People decide what is unresolved**: Uncertain identities, contested attachments, open parents, ambiguous media and attribute owners become review items. A person can also inject a report profile/scope or a place-alias table as JSON.
+- **Deterministic assembly**: Model steps save their results; `buildArchaeologyLedger` assembles and validates the ledger from those results without model calls, so the same inputs always give the same ledger.
+- **Hard spend caps**: When caps are given, `createSpendGuard` (from `@heripo/shared`, re-exported) reserves each call's worst case before sending and stops a run before it can pass its call or token cap. The demo's CLI batch runner sets per-report caps by default (600 calls, 13M tokens); a demo web task runs uncapped.
 
 #### Cost Outlook
 
-With documents well-refined in preprocessing stages, LLM costs for main processing are expected to remain low.
-
-- **Goal**: Under **$2.00** total for preprocessing + main processing for thick reports
-- **Expected**: Under **$1.00** possible with optimization
+- **Goal**: Under **$2.00** total for preprocessing + ledger extraction for thick reports
+- **Measured (one report)**: About **US$0.33** per ledger run with about 15 review items on the Taean Mado report with Claude Haiku 5.5 (demo defaults). Costs on other reports have not been measured systematically.
 
 ```mermaid
 flowchart TB
-    subgraph DataExtractor[Data Extractor]
+    subgraph LedgerExtractor[Ledger Extractor]
         direction TB
 
-        subgraph Analysis[Per-Chapter Analysis - Rules]
-            A1[Text Classification]
-            A2[Table Data Classification]
-            A3[Image Classification]
+        subgraph Profile[1. Report Profile - Rules+LLM]
+            R1[Report Signals - Rules]
+            R2[Report Router - LLM, 1 call]
+            R3[Scope Completion - Rules]
         end
 
-        subgraph Extract[Archaeological Object Extraction - LLM]
-            E1[Feature Information]
-            E2[Artifact Information]
-            E3[Stratum Information]
-            E4[Trench Information]
+        subgraph Registry[2. Object Registry - Rules+LLM]
+            D1[Candidate Discovery per Chapter Unit - LLM]
+            D2[Duplicate Review - Rules first, then LLM]
+            D3[Frozen Candidate Registry]
         end
 
-        subgraph Match[Matching Processing - Rules]
-            M1[Image-Artifact Matching]
-            M2[Diagram-Feature Matching]
-            M3[Relationship Data Generation]
+        subgraph Attach[3. Content Attachment - LLM]
+            A1[Two Runs per Unit]
+            A2[Targets Both Runs Agree On Confirmed]
+            A3[Tie-Break Run: 2-of-3 Majority / Review Items]
         end
 
-        Analysis --> Extract --> Match
+        subgraph Relate[4. Hierarchy and References - Rules+LLM]
+            P1[Code-Decided Parents]
+            P2[Place-Alias Proposal - LLM, 2 runs]
+            P3[Parent Judgment - LLM, 3 runs]
+            P4[Media References, Attributes, Record Links, Layer Mentions - Rules]
+        end
+
+        subgraph Validate[5. Assembly and Validation - Rules]
+            V1[Name Anchors]
+            V2[Ledger Validation]
+        end
+
+        Profile --> Registry --> Attach --> Relate --> Validate
     end
 
-    Classified[(Report Classification Data<br/>Format TBD)] --> DataExtractor
-    DataExtractor --> LedgerData[ArchaeologyLedger]
+    Processed[ProcessedDocument] --> LedgerExtractor
+    Person[(Person-Injected JSON<br/>Profile/Scope, Place Aliases)] -.-> LedgerExtractor
+    LedgerExtractor --> LedgerData[archaeology-ledger.v1]
+    LedgerExtractor --> Review[Review Items]
 ```
+
+The package exposes each step as functions; the demo web app (`apps/demo-web/src/lib/ledger/ledger-pipeline.ts`) chains them into one unattended run.
 
 #### Processing Method Classification
 
-| Stage                                | Processing Method | Description                                                                       |
-| ------------------------------------ | ----------------- | --------------------------------------------------------------------------------- |
-| **Per-Chapter Analysis**             | Rule-Based        | Utilizes data already structured in preprocessing, no LLM needed                  |
-| **Archaeological Object Extraction** | LLM               | Structuring work requiring domain knowledge for features, artifacts, strata, etc. |
-| **Image-Data Matching**              | Rule-Based        | Matching based on caption numbers and text references                             |
+| Stage                   | Component / Function                                         | Rule-Based                                          | LLM                                                 | Handling of Model Output                                       |
+| ----------------------- | ------------------------------------------------------------ | --------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
+| Source Lookup           | `buildDocumentResourceIndex`                                 | ✅ Whole-document resource index                    | -                                                   | -                                                              |
+| Report Profile          | `collectReportSignals`, `routeReport`, `completeReportScope` | ✅ Signals, scope completion                        | ✅ Router (1 call)                                  | Only high-confidence, problem-free traits kept; rest `unclear` |
+| Candidate Discovery     | `prepareCandidateDiscovery`, `discoverCandidateUnit`         | ✅ Unit planning                                    | ✅ Per chapter unit                                 | Inspected, never repaired; selective retry                     |
+| Duplicate Review        | `planCandidateDeduplication`, `deduplicateCandidateBlocks`   | ✅ Same identifier/name merges                      | ✅ Remaining candidates in blocks                   | Uncertain identities → review items                            |
+| Registry Freeze         | `prepareContentAttachment`                                   | ✅ Frozen registry and attachment plan              | -                                                   | -                                                              |
+| Content Attachment      | `attachContentThinUnit`                                      | ✅ Row ownership, candidate prefilter, routing      | ✅ Two runs per unit, tie-break run                 | Agreed or 2-of-3 majority targets confirmed; rest → review     |
+| Parent Hierarchy        | `resolveRelationParents`, `judgeRelationParentBatch`         | ✅ Find-spot phrases, membership columns            | ✅ Three-run judgment                               | Set only when every run agrees; otherwise → review             |
+| Place Aliases           | `validatePlaceAliases`, `proposePlaceAliases`                | ✅ Validation of person or model tables             | ✅ Two-run proposal (only without a person's table) | Only rules both runs give alike and that pass checks           |
+| Media References        | `indexMediaCaptions`, `applyLedgerMedia`                     | ✅ Caption labels, text and caption references      | -                                                   | -                                                              |
+| Attributes              | `collectTableAttributes`, `collectTextAttributes`            | ✅ Table rows and measurement runs, kept as written | -                                                   | -                                                              |
+| Record Links            | `collectRelationSentences`, `resolveRecordLinks`             | ✅ Relation cues and relation columns               | -                                                   | -                                                              |
+| Assembly and Validation | `buildArchaeologyLedger`, `validateArchaeologyLedger`        | ✅ Deterministic assembly, source/fidelity checks   | -                                                   | -                                                              |
 
 #### Extraction Target Data
 
-| Data Type     | Description                     | Examples                         |
-| ------------- | ------------------------------- | -------------------------------- |
-| **Features**  | Excavated buildings, structures | Dwellings, pits, tombs           |
-| **Artifacts** | Discovered objects              | Pottery, stone tools, iron       |
-| **Strata**    | Stratigraphy information        | Topsoil, cultural layer, subsoil |
-| **Trenches**  | Excavation unit information     | Location, size                   |
+Records are registered in eight kinds:
+
+| Kind          | Description                                  | Examples                   |
+| ------------- | -------------------------------------------- | -------------------------- |
+| **Site**      | Site or investigation as a whole             | Excavated site             |
+| **Area**      | Survey or excavation area                    | Numbered survey areas      |
+| **Trench**    | Trench or test pit                           | Trench 1                   |
+| **Layer**     | Stratigraphic unit named in the report       | Topsoil, cultural layer    |
+| **Feature**   | Excavated structures and remains             | Dwellings, pits, tombs     |
+| **Artifact**  | Discovered objects                           | Pottery, stone tools, iron |
+| **Shipwreck** | Shipwrecks in underwater investigations      | Sunken ships               |
+| **Unknown**   | Objects whose kind the source does not state | -                          |
+
+Each record carries its content excerpts, sources and, where found, a parent record, attributes, figure/photo references and links to other records. Layer mentions are kept as relation candidates; fuller relation extraction is still planned.
 
 ---
 
@@ -431,7 +478,7 @@ flowchart TB
         direction LR
         D1[ProcessedDocument<br/>Raw Data]
         D2[(Report Classification Data<br/>Format TBD)]
-        D3[ArchaeologyLedger<br/>Ledger Data - Planned]
+        D3[archaeology-ledger.v1<br/>Ledger Data - Experimental]
         D4[Standard Data<br/>Standard Data - Planned]
         D5[Domain Ontology<br/>Ontology Data - Planned]
     end
@@ -440,14 +487,14 @@ flowchart TB
         direction TB
         U1[Document Structure Analysis<br/>Text Search]
         U2[Report Type<br/>Statistical Analysis - Planned]
-        U3[Archaeological Object<br/>Detailed Lookup - Planned]
+        U3[Archaeological Object<br/>Detailed Lookup]
         U4[Inter-Organization<br/>Data Exchange - Planned]
         U5[Semantic Search<br/>Knowledge Graph - Planned]
     end
 
     D1 --> U1
     D2 -.-> U2
-    D3 -.-> U3
+    D3 --> U3
     D4 -.-> U4
     D5 -.-> U5
 ```
@@ -495,14 +542,15 @@ Ontology extension enables:
 
 ### Core Technologies
 
-| Technology                 | Purpose                                   | Stage                            |
-| -------------------------- | ----------------------------------------- | -------------------------------- |
-| **TypeScript**             | Overall system development language       | All                              |
-| **Docling**                | PDF parsing (open source)                 | Preprocessing 1                  |
-| **Apple Vision Framework** | OCR (deep learning)                       | Preprocessing 1                  |
-| **AI SDK (Vercel)**        | LLM integration (OpenAI, Anthropic, etc.) | Preprocessing 2, Main Processing |
-| **pnpm**                   | Monorepo package management               | All                              |
-| **Turbo**                  | Build system                              | All                              |
+| Technology                 | Purpose                                   | Stage                                |
+| -------------------------- | ----------------------------------------- | ------------------------------------ |
+| **TypeScript**             | Overall system development language       | All                                  |
+| **Docling**                | PDF parsing (open source)                 | Preprocessing 1                      |
+| **Apple Vision Framework** | OCR (deep learning)                       | Preprocessing 1                      |
+| **AI SDK (Vercel)**        | LLM integration (OpenAI, Anthropic, etc.) | Preprocessing 1-2, Ledger Extraction |
+| **Zod**                    | Structured output and input validation    | Preprocessing 1-2, Ledger Extraction |
+| **pnpm**                   | Monorepo package management               | All                                  |
+| **Turbo**                  | Build system                              | All                                  |
 
 ### Package Structure
 
@@ -513,16 +561,19 @@ heripo-engine/
 ├── packages/
 │   ├── pdf-parser/           # Preprocessing 1: Technical preprocessing
 │   ├── document-processor/   # Preprocessing 2: Archaeological data preprocessing
+│   ├── ledger-extractor/     # Archaeological data ledger extraction (0.2.x, experimental)
 │   ├── model/                # Data model definitions
-│   └── shared/               # Shared utilities
+│   ├── logger/               # Logger interface and adapter
+│   └── shared/               # Shared utilities (LLM caller, spend guard, etc.)
 └── tools/
-    ├── logger/               # Logging tools
-    └── ...                   # Configuration tools
+    ├── tsconfig/             # Shared TypeScript configurations
+    ├── tsup-config/          # Shared tsup configuration
+    └── vitest-config/        # Shared Vitest configuration
 ```
 
 ### Demo Web Application (`demo-web`)
 
-A Next.js 16-based web application for visualizing and testing the PDF processing pipeline.
+A Next.js 16-based web application for visualizing and testing the PDF processing and ledger extraction pipeline.
 
 **Key Features:**
 
@@ -531,6 +582,8 @@ A Next.js 16-based web application for visualizing and testing the PDF processin
 - Processing result visualization (chapter tree, image/table viewer, page viewer)
 - Token usage analysis and cost calculation
 - Result download (ZIP, JSON)
+- Archaeology ledger runs from a `processed-document.json` upload or a preprocessing result, with a model per step (default Claude Haiku 5.5; local models via LM Studio are possible)
+- CLI batch runner for ledger runs over many documents (`pnpm --filter @heripo/demo-web ledger:batch`) with hard caps on calls and tokens, using the Anthropic Message Batches API for Anthropic models by default
 
 **Technology Stack:**
 
@@ -542,14 +595,14 @@ A Next.js 16-based web application for visualizing and testing the PDF processin
 
 ## Processing Cost Summary
 
-| Pipeline Stage                             | AI Type                      | Cost                      | Notes                                               |
-| ------------------------------------------ | ---------------------------- | ------------------------- | --------------------------------------------------- |
-| **Raw Data Extraction (Preprocessing 1)**  | Deep Learning (Apple Vision) | **Free**                  | Local processing, only machine costs                |
-| **Raw Data Extraction (Preprocessing 2)**  | LLM (GPT, Claude, etc.)      | **$0.10-0.50**            | Under $0.10 for thin reports, under $0.50 for thick |
-| **Preprocessing 3: Report Classification** | LLM (expected)               | **TBD**                   | Coming Soon                                         |
-| **Archaeological Data Ledger Extraction**  | LLM (GPT, Claude, etc.)      | **$0.50-1.50** (expected) | Coming Soon, room for optimization                  |
-| **Archaeological Data Standardization**    | Rule-Based (expected)        | **Free** (expected)       | Coming Soon                                         |
-| **Domain Ontology**                        | LLM/Rules hybrid (expected)  | **TBD**                   | Coming Soon                                         |
+| Pipeline Stage                             | AI Type                                | Cost                                     | Notes                                                                                               |
+| ------------------------------------------ | -------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Raw Data Extraction (Preprocessing 1)**  | Deep Learning (Apple Vision)           | **Free** (OCR) + VLM correction          | Apple Vision OCR is local; the mandatory VLM correction costs depend on the model and page count    |
+| **Raw Data Extraction (Preprocessing 2)**  | LLM (GPT, Claude, etc.)                | **$0.10-0.50**                           | Under $0.10 for thin reports, under $0.50 for thick                                                 |
+| **Preprocessing 3: Report Classification** | LLM (expected)                         | **TBD**                                  | Coming Soon                                                                                         |
+| **Archaeological Data Ledger Extraction**  | LLM (default Claude Haiku 5.5) + Rules | **About $0.33** (measured on one report) | 0.2.x, experimental; Taean Mado report, about 15 review items; not yet measured across report types |
+| **Archaeological Data Standardization**    | Rule-Based (expected)                  | **Free** (expected)                      | Coming Soon                                                                                         |
+| **Domain Ontology**                        | LLM/Rules hybrid (expected)            | **TBD**                                  | Coming Soon                                                                                         |
 
 ### Cost Reduction Strategies
 
@@ -557,16 +610,18 @@ A Next.js 16-based web application for visualizing and testing the PDF processin
 - **Rule-Based Processing First**: Process what can be handled by rules before LLM calls
 - **Batch Processing**: Bundle multiple requests to minimize API call count
 - **Self-Validation**: Reprocess only failed items to prevent unnecessary costs
+- **Hard Spend Caps**: When caps are given, the ledger stage's spend guard reserves each call's worst case before sending, so a run stops rather than exceed its call or token cap (the CLI batch runner sets per-report caps by default; a demo web task runs uncapped)
+- **Batch APIs**: The demo sends Anthropic ledger calls through the Message Batches API by default
 
 ---
 
 ## Development Status
 
-| Pipeline Stage                         | Output Data                 | Status         | Description                         |
-| -------------------------------------- | --------------------------- | -------------- | ----------------------------------- |
-| Raw Data Extraction (Preprocessing 1)  | DoclingDocument             | ✅ Complete    | PDF → Structured document           |
-| Raw Data Extraction (Preprocessing 2)  | ProcessedDocument           | ✅ Complete    | DoclingDocument → Chapter structure |
-| Preprocessing 3: Report Classification | (Format TBD)                | 🔒 Coming Soon | Report/survey type classification   |
-| Archaeological Data Ledger Extraction  | ArchaeologyLedger (Planned) | 🔒 Coming Soon | Archaeological data extraction      |
-| Archaeological Data Standardization    | Standard Data (Planned)     | 🔒 Coming Soon | Standard schema conversion          |
-| Domain Ontology                        | Domain Ontology (Planned)   | 🔒 Coming Soon | Domain ontology application         |
+| Pipeline Stage                         | Output Data                          | Status                   | Description                                                                                 |
+| -------------------------------------- | ------------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------- |
+| Raw Data Extraction (Preprocessing 1)  | DoclingDocument                      | ✅ Complete              | PDF → Structured document                                                                   |
+| Raw Data Extraction (Preprocessing 2)  | ProcessedDocument                    | ✅ Complete              | DoclingDocument → Chapter structure                                                         |
+| Preprocessing 3: Report Classification | (Format TBD)                         | 🔒 Coming Soon           | Report/survey type classification                                                           |
+| Archaeological Data Ledger Extraction  | archaeology-ledger.v1 (experimental) | 🚧 First release (0.2.x) | ProcessedDocument → source-backed ledger with review items; validated on three reports only |
+| Archaeological Data Standardization    | Standard Data (Planned)              | 🔒 Coming Soon           | Standard schema conversion                                                                  |
+| Domain Ontology                        | Domain Ontology (Planned)            | 🔒 Coming Soon           | Domain ontology application                                                                 |

@@ -14,8 +14,9 @@
 > ⚠️ **macOS 전용**: PDF 파서와 이를 사용하는 데모는 macOS (Apple Silicon 또는 Intel) 전용입니다. 다른 라이브러리 패키지에는 OS 설치 제한이 없습니다.
 > 자세한 시스템 요구사항은 [@heripo/pdf-parser README](./packages/pdf-parser/README.ko.md#사전-요구사항)를 참고하세요.
 
-> ℹ️ **참고 사항 (v0.1.x)**:
+> ℹ️ **참고 사항 (v0.2.x)**:
 >
+> - **실험적 원장**: `archaeology-ledger.v1` 형식은 0.2.x 릴리스 안에서도 바뀔 수 있습니다. 원장 단계는 보고서 3종만 대상으로 개발하고 측정했기 때문에 다른 유형과 형식의 보고서에서는 부족한 점이 있을 수 있습니다.
 > - **필수 보정**: 고정 ocrmac OCR 후 언어와 관계없이 VLM 텍스트 보정을 수행합니다. 구조 검토는 라이브러리 기본 활성화, 데모 기본 비활성화입니다.
 > - **목차 의존성**: 자동 목차 추출이 실패하면 처리도 실패합니다. 검토한 `tocEntries`와 `pageRangeMap`을 직접 제공하여 자동 추출을 건너뛸 수 있습니다.
 > - **세로쓰기 문서**: 페이지 번호가 한자인 오래된 세로쓰기 문서는 장기 목표이나 현재 계획에 없음
@@ -94,22 +95,23 @@ heripo lab은 고고학 도메인 지식과 소프트웨어 엔지니어링 기�
 | 단계                 | 설명                                                                        |
 | -------------------- | --------------------------------------------------------------------------- |
 | **원천 데이터 추출** | PDF 보고서의 양식 그대로 구조적으로 추출한 문서 데이터 (고고학적 해석 없음) |
-| **데이터 원장**      | 전세계 고고학을 포괄하는 범용 모델로 구조화된 불변의 원장                   |
+| **데이터 원장**      | 전세계 고고학을 포괄하는 범용 모델로 구조화된 원장                          |
 | **데이터 표준**      | 확장 가능한 표준 모델 (기본 표준 → 국가별 → 분야별 확장)                    |
 | **온톨로지**         | 도메인 특화 시맨틱 모델 및 지식 그래프                                      |
 | **DB 저장**          | 각 파이프라인 단계별로 독립적 저장 및 활용                                  |
 
 PDF 물리 페이지는 1부터 시작합니다. 논리 페이지는 본문 1쪽을 기준으로 연속해서 매기며, 앞쪽 페이지에는 음수와 0을 사용합니다.
 
-**현재 구현 단계 (v0.1.x):**
+**현재 구현 단계 (v0.2.x):**
 
 - ✅ PDF 파싱 및 OCR (Docling SDK)
 - ✅ 문서 구조 추출 (목차, 장/절, 페이지 매핑)
 - ✅ 이미지/테이블 추출 및 캡션 파싱
+- ✅ 고고학 데이터 원장(실험적): 조사 객체, 원문 발췌, 상위 관계, 도면·사진, 속성, 링크, 검수 항목
 
 **계획된 단계:**
 
-- 🔜 불변의 원장 (범용 고고학 모델, 개념 추출)
+- 🔜 더 많은 유형의 보고서로 원장 검증 및 형식 안정화
 - 🔜 확장 표준화 (계층적 표준 모델, 정규화)
 - 🔜 온톨로지 (시맨틱 모델, 지식 그래프)
 - 🔜 프로덕션 준비 (성능 최적화, API 안정성)
@@ -149,6 +151,15 @@ PDF 물리 페이지는 1부터 시작합니다. 논리 페이지는 본문 1쪽
 - **테이블 그리드 정규화**: row/column span을 보존하고 병합 셀의 shadow entry 제거
 - **LLM 유연성**: OpenAI, Anthropic, Google 등 다양한 LLM 지원
 
+### 원장 추출 (`@heripo/ledger-extractor`)
+
+- **고고학 데이터 원장**: 호출자가 고른 모델로 `ProcessedDocument`에서 실험적 `archaeology-ledger.v1` 원장을 만듭니다
+- **보고서 프로필**: 코드로 구한 보고서 신호와 라우터 호출 한 번으로 판단하며, 사람이 프로필과 조사 범위를 JSON으로 주입할 수 있습니다
+- **후보 발견**: 유적, 조사구역, 트렌치, 층위, 유구, 유물, 난파선을 정확한 원문 인용과 함께 제안하고 중복을 검토합니다
+- **원문 배정**: 본문 문장과 표 항목을 고정된 후보 목록에 배정합니다. 두 실행이 같이 고른 대상을 확정하고, 갈린 곳은 동점 해소 실행으로 세 실행 중 둘이 같은 쪽을 확정하며, 나머지는 검수로 보냅니다
+- **원문 보존**: 모든 발췌는 원문과 출처 위치를 그대로 유지하며, 모델 출력은 검사만 하고 고치지 않습니다
+- **절대 상한**: 지출 가드가 공급자 호출마다 호출 수·토큰 상한에 맞춰 예약합니다
+
 ### 데이터 모델 (`@heripo/model`)
 
 - **ProcessedDocument**: LLM 분석에 최적화된 중간 데이터 모델
@@ -165,6 +176,7 @@ heripo-engine/
 ├── packages/              # 핵심 라이브러리
 │   ├── pdf-parser/        # PDF → DoclingDocument
 │   ├── document-processor/ # DoclingDocument → ProcessedDocument
+│   ├── ledger-extractor/  # ProcessedDocument → 고고학 데이터 원장
 │   ├── model/             # 데이터 모델 및 타입 정의
 │   ├── logger/            # 로깅 adapter 패키지
 │   └── shared/            # 내부 유틸리티 (배포 안 함)
@@ -215,23 +227,25 @@ npm install -g pnpm@12
 # 개별 패키지 설치
 pnpm add @heripo/pdf-parser
 pnpm add @heripo/document-processor
+pnpm add @heripo/ledger-extractor
 pnpm add @heripo/model
 pnpm add @heripo/logger
 
 # 또는 모두 설치
-pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/model @heripo/logger
+pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/ledger-extractor @heripo/model @heripo/logger
 ```
 
 ## 패키지
 
-| 패키지                                                                   | 버전  | 설명                       |
-| ------------------------------------------------------------------------ | ----- | -------------------------- |
-| [@heripo/pdf-parser](./packages/pdf-parser/README.ko.md)                 | 0.1.x | PDF 파싱 및 OCR            |
-| [@heripo/document-processor](./packages/document-processor/README.ko.md) | 0.1.x | 문서 구조 분석 및 LLM 처리 |
-| [@heripo/model](./packages/model/README.ko.md)                           | 0.1.x | 데이터 모델 및 타입 정의   |
-| [@heripo/logger](./packages/logger/README.ko.md)                         | 0.1.x | 로거 인터페이스 및 adapter |
+| 패키지                                                                   | 버전  | 설명                            |
+| ------------------------------------------------------------------------ | ----- | ------------------------------- |
+| [@heripo/pdf-parser](./packages/pdf-parser/README.ko.md)                 | 0.2.x | PDF 파싱 및 OCR                 |
+| [@heripo/document-processor](./packages/document-processor/README.ko.md) | 0.2.x | 문서 구조 분석 및 LLM 처리      |
+| [@heripo/ledger-extractor](./packages/ledger-extractor/README.ko.md)     | 0.2.x | 고고학 데이터 원장 추출(실험적) |
+| [@heripo/model](./packages/model/README.ko.md)                           | 0.2.x | 데이터 모델 및 타입 정의        |
+| [@heripo/logger](./packages/logger/README.ko.md)                         | 0.2.x | 로거 인터페이스 및 adapter      |
 
-파서와 문서 프로세서는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 워크스페이스 개발·빌드에는 tsup 9의 요구사항에 맞는 Node.js `^24.11.0 || >=26.0.0`과 pnpm 12가 필요합니다. 배포 라이브러리의 런타임 요구사항은 Node.js 24 이상으로 유지됩니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
+파서, 문서 프로세서, 원장 추출기는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 워크스페이스 개발·빌드에는 tsup 9의 요구사항에 맞는 Node.js `^24.11.0 || >=26.0.0`과 pnpm 12가 필요합니다. 배포 라이브러리의 런타임 요구사항은 Node.js 24 이상으로 유지됩니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
 
 ```bash
 pnpm add @ai-sdk/openai
@@ -312,7 +326,7 @@ try {
 
 `parse()`는 문서가 아닌 `TokenUsageReport | null`을 반환합니다. 보정된 Docling 문서는 콜백의 `artifactDir/result.json`에서 읽습니다. `cleanupAfterCallback: true`이면 디렉터리가 삭제되므로 필요한 JSON과 이미지·페이지 파일을 콜백 안에서 별도 저장하세요. 프로세서의 `process()`는 `{ document, usage }`를 반환하며 파일을 자동 저장하지 않습니다.
 
-수동 목차·페이지 매핑과 출처 추적 옵션은 [document-processor 문서](./packages/document-processor/README.ko.md)를, 단계별 모델·fallback·보정 옵션은 [pdf-parser 문서](./packages/pdf-parser/README.ko.md)를 참고하세요.
+수동 목차·페이지 매핑과 출처 추적 옵션은 [document-processor 문서](./packages/document-processor/README.ko.md)를, 단계별 모델·fallback·보정 옵션은 [pdf-parser 문서](./packages/pdf-parser/README.ko.md)를 참고하세요. 전처리된 문서로 고고학 데이터 원장을 만드는 방법은 [ledger-extractor 문서](./packages/ledger-extractor/README.ko.md)를 참고하세요.
 
 ## 데모 애플리케이션
 
@@ -344,6 +358,7 @@ pnpm demo-web:dev
 - PDF 업로드 및 처리 옵션 설정
 - 실시간 처리 상태 모니터링 (SSE)
 - 처리 결과 시각화 (목차, 이미지, 표)
+- 처리 결과나 업로드한 `processed-document.json`으로 고고학 데이터 원장 추출, 명령줄 일괄 실행기
 - 작업 큐 관리
 
 자세한 사용법은 [apps/demo-web/README.ko.md](./apps/demo-web/README.ko.md)를 참고하세요.
@@ -360,14 +375,15 @@ pnpm demo-web:dev
 
 - [@heripo/pdf-parser](./packages/pdf-parser/README.ko.md)
 - [@heripo/document-processor](./packages/document-processor/README.ko.md)
+- [@heripo/ledger-extractor](./packages/ledger-extractor/README.ko.md)
 - [@heripo/model](./packages/model/README.ko.md)
 - [@heripo/logger](./packages/logger/README.ko.md)
 
 ## 로드맵
 
-현재 버전: **v0.1.x** (초기 공개)
+현재 버전: **v0.2.x** (고고학 데이터 원장, 실험적)
 
-### v0.1.x - 원천 데이터 추출 (현재)
+### v0.1.x - 원천 데이터 추출 (완료)
 
 - ✅ PDF 파싱 with OCR
 - ✅ 문서 구조 추출 (목차, 장/절)
@@ -375,13 +391,17 @@ pnpm demo-web:dev
 - ✅ 페이지 매핑
 - ✅ 캡션 파싱
 
-### v0.2.x - 불변의 원장
+### v0.2.x - 고고학 데이터 원장 (현재)
 
-`@heripo/ledger-extractor`와 데모에서 S0 출처 조회와 조사내용 범위의 객체 후보 제안을 제공합니다. 최종 원장 등록 전에 근거 원문과 함께 제안 후보를 검토할 수 있습니다. 묶음 단위 얇은 원문 배정은 본문 문장과 표 항목을 고정된 후보 목록에 배정하며, 반복 호출 결과가 갈린 구간과 면적, 대형 집합 진술은 사람 검수로 보냅니다. 관계 링크, 사람 검수, 다른 보고서 검증은 다음 작업입니다. 원장 단계는 보고서 3종(『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』)만 대상으로 개발하고 측정했기 때문에 다른 유형과 형식의 보고서에서는 부족한 점이 많을 수 있습니다. 데이터를 차차 쌓아 가면서 개선해 나갈 예정입니다. 원장 형식은 실험적이며 0.2.x 릴리스 안에서도 바뀔 수 있습니다.
+`@heripo/ledger-extractor`는 전처리된 문서로 실험적 `archaeology-ledger.v1` 원장을 만들고, 데모는 처리 결과나 업로드한 `processed-document.json`으로 원장 파이프라인 전체를 실행합니다. 원장 단계는 보고서 3종(『태안 마도 해역 수중발굴조사』, 『부여 화지산 백제과원 및 둘레길 조성사업부지내 유적』, 『거제 사등성 하수관로 매설구간 내 유적 발굴조사』)만 대상으로 개발하고 측정했기 때문에 다른 유형과 형식의 보고서에서는 부족한 점이 많을 수 있습니다. 데이터를 차차 쌓아 가면서 개선해 나갈 예정입니다. 원장 형식은 실험적이며 0.2.x 릴리스 안에서도 바뀔 수 있습니다.
 
-- 전세계 고고학을 포괄하는 범용 데이터 모델 설계
-- 고고학 개념 추출 (유구, 유물, 층위, 조사구역)
-- LLM 기반 정보 추출 파이프라인
+- ✅ 보고서 프로필과 조사 범위 (라우터 호출 또는 사람이 JSON으로 주입)
+- ✅ 조사 객체 후보 발견과 중복 검토
+- ✅ 묶음 단위 얇은 원문 배정(본문 문장·표 항목)과 결과가 갈린 구간의 검수 항목
+- ✅ 상위 관계, 도면·사진 참조, 표 속성, 기록 간 링크, 원장 검증
+- ✅ 데모의 호출 수·토큰 절대 상한, Anthropic Message Batches, 명령줄 일괄 실행기
+- 🔜 더 많은 유형과 형식의 보고서로 검증
+- 🔜 원장 형식 안정화
 
 ### v0.3.x - 확장 표준화
 
@@ -517,23 +537,3 @@ heripo lab의 오픈소스 연구를 후원하려면 다음 경로를 이용할 
 ---
 
 **heripo lab** | [GitHub](https://github.com/heripo-lab) | [heripo engine](https://github.com/heripo-lab/heripo-engine)
-
-조사내용 후보 추출 후에는 별도 LLM 단계에서 전체 후보의 중복을 검토합니다. 통합 제안은 모든 원래 후보와 원문·출처를 보존하며 사람이 검토할 수 있습니다.
-
-조사내용 추출에서 문제가 난 묶음만 재실행하고 나머지 원래 응답을 보존한 뒤 전체 후보 중복 통합을 다시 수행할 수 있습니다.
-
-원장 후보 추출은 병합 표 헤더와 챕터 연속 본문의 원래 출처를 보존하고, 표 식별자를 명시적으로 선택한 원문 셀과 대조합니다. 검사 실패와 함께 검토한 누락·제외 묶음도 선택 재실행하며 나머지 감사 기록은 유지합니다.
-
-전체 후보 통합에서 번호 없는 국지적 층위도 전처리 입력의 전체 층위 정의·위치·지층 성격·층위 맥락으로 동일성을 판단하며, 원래 후보의 표기와 식별자는 보존합니다.
-
-원문 배정 단계는 고정 후보 등록부와 PDF 페이지별 순회 계획을 만듭니다. 로컬 데모에서 첫 묶음의 실제 입력을 확인하고 그 묶음만 실행하며, 본문·표 원문과 모든 출처 및 미결 판단을 보존합니다.
-
-원문 배정 v2는 전체 후보를 축약 행과 공통 장 문맥으로 제공하며, 저장 ID·출처 위치·스냅샷 해시는 코드 전용 매핑에 보존합니다. 로컬 데모에서 첫 호출의 실제 토큰 사용량을 확인할 수 있습니다.
-
-원문 배정 v3 프롬프트는 문장마다 별도 판단을 반환하고 명확히 관련된 대상·출토 맥락 후보 모두에 연결하도록 하며, 과거 프롬프트 감사 기록과 원문을 보존합니다.
-
-원문 배정 v4 프롬프트는 출처 블록과 문장 발췌 단위를 구분하며, 경계의 첫 불완전 조각과 뒤의 완결 문장을 각각 분리하도록 명확히 합니다. 원문과 저장 응답은 보정하지 않습니다.
-
-원문 배정 v5 프롬프트는 일반 분류 제목과 이미 등록된 객체의 번호·명칭 제목을 구분해 후자를 원문 발췌로 보존하며, 경계 문장 분리와 공유 맥락 규칙도 유지합니다.
-
-묶음 단위 얇은 원문 배정(`content-attachment-thin.v8`)은 미리 거른 후보, 장 핸들, Q/L 단어 창으로 묶음마다 오프라인 컴파일하고, 표의 등록 행은 코드로 배정하며, 묶음마다 재시도 없이 모델을 세 번 호출합니다. 모든 호출이 같이 고른 대상만 확정하고, 결과가 갈린 구간과 면적, 이름이 그대로 나온 층위, 대상이 50개를 넘는 배정은 검수로 보냅니다. 로컬 데모는 호출·토큰 예산을 두고 모든 묶음을 실행할 수 있으며, 다시 시작하면 끝난 묶음은 다시 보내지 않습니다.
