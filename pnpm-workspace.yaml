@@ -4,26 +4,27 @@ packages:
   - 'tools/*'
 
 catalog:
-  '@ai-sdk/anthropic': ^4.0.82
-  '@ai-sdk/google': ^4.0.99
-  '@ai-sdk/openai': ^4.0.96
-  '@ai-sdk/openai-compatible': ^3.0.71
-  '@ai-sdk/togetherai': ^3.0.72
+  '@ai-sdk/anthropic': ^4.0.94
+  '@ai-sdk/google': ^4.0.109
+  '@ai-sdk/openai': ^4.0.106
+  '@ai-sdk/openai-compatible': ^3.0.82
+  '@ai-sdk/togetherai': ^3.0.83
   '@anthropic-ai/sdk': ^1.3.0
   '@vitest/coverage-v8': ^5.0.5
   '@vitest/expect': ^5.0.5
-  'ai': ^7.0.143
-  'ai-sdk-ollama': ^4.5.0
-  'es-toolkit': '^1.52.0'
+  'ai': ^7.0.159
+  'ai-sdk-ollama': ^4.6.1
+  'es-toolkit': ^1.53.1
   'tsup': '^9.0.0'
-  'tsx': '^4.21.0'
+  'tsx': ^4.23.15
   'vitest': ^5.0.5
   'zod': ^4.6.7
 
 overrides:
   # Preserve the coverage mapper used by the existing 100% coverage baseline.
   ast-v8-to-istanbul: 1.0.6
-  minimatch: '^10.2.4'
+  minimatch: '^11.0.1'
+  'glob@>=9.0.0 <=14.0.1': '^14.0.2'
   rollup: '^4.59.0'
   'picomatch@>=4.0.0 <4.0.4': '>=4.0.4'
   'lodash-es@>=4.0.0 <=4.17.23': '>=4.18.0'
