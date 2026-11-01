@@ -1,4 +1,4 @@
-import { Agent } from 'undici';
+import { Agent, fetch as undiciFetch } from 'undici';
 
 /**
  * Reconnect policy for local model servers (LM Studio, Ollama) used by the demo.
@@ -71,12 +71,35 @@ function wait(ms: number, signal?: AbortSignal | null): Promise<void> {
  * following LOCAL_MODEL_RECONNECT. HTTP error responses are returned unchanged.
  */
 export const reconnectingFetch: typeof fetch = async (input, init) => {
+  const request = input instanceof Request ? input : null;
+  const fetchInput = request ? request.url : input;
+  const requestInit = request
+    ? {
+        method: request.method,
+        headers: [...request.headers],
+        body: request.body,
+        cache: request.cache,
+        credentials: request.credentials,
+        integrity: request.integrity,
+        keepalive: request.keepalive,
+        mode: request.mode,
+        referrer: request.referrer,
+        referrerPolicy: request.referrerPolicy,
+        signal: request.signal,
+        redirect: request.redirect,
+        duplex: 'half' as const,
+      }
+    : undefined;
   for (let attempt = 0; ; attempt++) {
     try {
-      return await fetch(input, {
-        ...init,
-        dispatcher: localModelDispatcher,
-      } as RequestInit);
+      return (await undiciFetch(
+        fetchInput as Parameters<typeof undiciFetch>[0],
+        {
+          ...requestInit,
+          ...init,
+          dispatcher: localModelDispatcher,
+        } as Parameters<typeof undiciFetch>[1],
+      )) as unknown as Response;
     } catch (error) {
       if (
         attempt >= LOCAL_MODEL_RECONNECT.maxRetries ||
@@ -87,7 +110,10 @@ export const reconnectingFetch: typeof fetch = async (input, init) => {
       console.warn(
         `[local-model] connection failed, retry ${attempt + 1}/${LOCAL_MODEL_RECONNECT.maxRetries} in ${LOCAL_MODEL_RECONNECT.delayMs} ms: ${(error as Error).message}`,
       );
-      await wait(LOCAL_MODEL_RECONNECT.delayMs, init?.signal);
+      await wait(
+        LOCAL_MODEL_RECONNECT.delayMs,
+        init?.signal ?? request?.signal,
+      );
     }
   }
 };

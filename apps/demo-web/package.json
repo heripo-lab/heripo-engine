@@ -10,6 +10,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test scripts/local-model-reconnect.integration.test.ts",
+    "test:ci": "pnpm test",
     "generate:otp-secret": "node scripts/generate-otp-secret.js",
     "release": "node scripts/release.mjs",
     "ledger:batch": "tsx --env-file-if-exists=.env scripts/ledger-batch.ts"
