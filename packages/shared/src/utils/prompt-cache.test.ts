@@ -1,7 +1,10 @@
 import type { LanguageModel } from 'ai';
 
+import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, test } from 'vitest';
+import { z } from 'zod';
 
+import { LLMCaller } from './llm-caller';
 import {
   supportsOpenAICacheBreakpoints,
   withSystemPromptCache,
@@ -107,4 +110,59 @@ test.each([
   ['o3-mini', false],
 ])('cache breakpoint support of %s is %s', (modelId, expected) => {
   expect(supportsOpenAICacheBreakpoints(modelId)).toBe(expected);
+});
+
+function mockModel(provider: string, modelId: string) {
+  return new MockLanguageModelV4({
+    provider,
+    modelId,
+    doGenerate: async () => ({
+      content: [{ type: 'text', text: '{"value":"ok"}' }],
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage: {
+        inputTokens: {
+          total: 8,
+          noCache: undefined,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
+        outputTokens: { total: 2, text: undefined, reasoning: 0 },
+      },
+      warnings: [],
+    }),
+  });
+}
+
+test('LLMCaller sends the cache breakpoint on the system message of the actual request', async () => {
+  const anthropic = mockModel('anthropic.messages', 'claude-haiku-5-5');
+  await LLMCaller.call({
+    schema: z.object({ value: z.string() }),
+    systemPrompt: 'System prompt',
+    userPrompt: 'User content',
+    primaryModel: anthropic,
+    maxRetries: 0,
+    component: 'Test',
+    phase: 'test',
+  });
+  const prompt = anthropic.doGenerateCalls[0].prompt;
+  expect(prompt[0]).toMatchObject({
+    role: 'system',
+    content: 'System prompt',
+    providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
+  });
+  // the per-call user content carries no breakpoint
+  expect(prompt[1].providerOptions).toBeUndefined();
+
+  const openai = mockModel('openai.responses', 'gpt-6-luna');
+  await LLMCaller.callVision({
+    schema: z.object({ value: z.string() }),
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'Page' }] }],
+    primaryModel: openai,
+    maxRetries: 0,
+    component: 'Test',
+    phase: 'test',
+  });
+  expect(openai.doGenerateCalls[0].providerOptions).toEqual({
+    openai: { promptCacheOptions: { mode: 'explicit' } },
+  });
 });
