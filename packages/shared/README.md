@@ -6,15 +6,17 @@ Internal ESM utilities used by the PDF parser and document processor. This packa
 
 ## Exports
 
-| API                       | Purpose                                                                                                   |
-| ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `BatchProcessor`          | Split/process arrays with `createBatches`, `processBatch`, `processBatchSync`                             |
-| `ConcurrentPool`          | `run(items, concurrency, processFn, onItemComplete?)` bounds workers and preserves input order in results |
-| `LLMCaller`               | `call` and `callVision` perform model calls with schema validation, retries and fallback                  |
-| `LLMTokenUsageAggregator` | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset` aggregate usage            |
-| `detectProvider`          | Detect a provider from the model's `provider` value, returning `unknown` when unrecognized                |
-| `createSpendGuard`        | Hard caps on calls and tokens: reserve a worst case before a call, settle it with reported usage          |
-| `spawnAsync`              | Run a child process and return `{ stdout, stderr, code }`                                                 |
+| API                        | Purpose                                                                                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BatchProcessor`           | Split/process arrays with `createBatches`, `processBatch`, `processBatchSync`                                                                  |
+| `ConcurrentPool`           | `run(items, concurrency, processFn, onItemComplete?)` bounds workers and preserves input order in results                                      |
+| `LLMCaller`                | `call` and `callVision` perform model calls with schema validation, retries and fallback                                                       |
+| `LLMTokenUsageAggregator`  | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset` aggregate usage                                                 |
+| `detectProvider`           | Detect a provider from the model's `provider` value, returning `unknown` when unrecognized                                                     |
+| `withSystemPromptCache`    | Prompt cache settings `LLMCaller` applies, for direct `generateText` calls: a breakpoint only at the end of the system prompt                  |
+| `withRepeatedRequestCache` | For a request sent again unchanged after an earlier answer (r2 after r1): Anthropic also marks the user prompt; other providers are left as is |
+| `createSpendGuard`         | Hard caps on calls and tokens: reserve a worst case before a call, settle it with reported usage                                               |
+| `spawnAsync`               | Run a child process and return `{ stdout, stderr, code }`                                                                                      |
 
 The [export list](./src/index.ts) also includes call configuration/results, token usage and process option types.
 

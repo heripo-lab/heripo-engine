@@ -6,15 +6,17 @@ PDF 파서와 문서 프로세서가 사용하는 내부 ESM 유틸리티 패키
 
 ## 내보내는 API
 
-| API                       | 역할                                                                                                 |
-| ------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `BatchProcessor`          | `createBatches`, `processBatch`, `processBatchSync`로 배열 분할·처리                                 |
-| `ConcurrentPool`          | `run(items, concurrency, processFn, onItemComplete?)`로 worker 수를 제한하고 입력 순서대로 결과 반환 |
-| `LLMCaller`               | `call`과 `callVision`으로 스키마 검증, 재시도, fallback을 포함한 모델 호출                           |
-| `LLMTokenUsageAggregator` | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset`으로 사용량 집계       |
-| `detectProvider`          | 모델의 `provider` 값으로 provider 구분; 미인식 값은 `unknown`                                        |
-| `createSpendGuard`        | 호출 전 최악 사용량을 예약하고 보고된 사용량으로 정산하는 호출 수·토큰 절대 상한                     |
-| `spawnAsync`              | 자식 프로세스를 실행하고 `{ stdout, stderr, code }` 반환                                             |
+| API                        | 역할                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `BatchProcessor`           | `createBatches`, `processBatch`, `processBatchSync`로 배열 분할·처리                                                           |
+| `ConcurrentPool`           | `run(items, concurrency, processFn, onItemComplete?)`로 worker 수를 제한하고 입력 순서대로 결과 반환                           |
+| `LLMCaller`                | `call`과 `callVision`으로 스키마 검증, 재시도, fallback을 포함한 모델 호출                                                     |
+| `LLMTokenUsageAggregator`  | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset`으로 사용량 집계                                 |
+| `detectProvider`           | 모델의 `provider` 값으로 provider 구분; 미인식 값은 `unknown`                                                                  |
+| `withSystemPromptCache`    | `LLMCaller`가 쓰는 프롬프트 캐시 설정을 `generateText` 직접 호출에 적용; 시스템 프롬프트 끝에만 경계                           |
+| `withRepeatedRequestCache` | 앞선 답을 받은 뒤 같은 요청을 다시 보낼 때(r1 다음 r2) 사용; Anthropic은 사용자 프롬프트 끝도 표시하고 다른 제공자는 그대로 둠 |
+| `createSpendGuard`         | 호출 전 최악 사용량을 예약하고 보고된 사용량으로 정산하는 호출 수·토큰 절대 상한                                               |
+| `spawnAsync`               | 자식 프로세스를 실행하고 `{ stdout, stderr, code }` 반환                                                                       |
 
 [전체 export](./src/index.ts)에는 호출 설정·결과·토큰 사용량·프로세스 실행 옵션 타입도 포함됩니다.
 
