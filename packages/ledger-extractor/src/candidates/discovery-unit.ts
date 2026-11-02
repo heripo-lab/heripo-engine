@@ -149,7 +149,6 @@ export async function discoverCandidateUnit(
       schema: request.schema,
       systemPrompt: request.systemPrompt,
       userPrompt: request.userPrompt,
-      cacheSystemPrompt: true,
       primaryModel: options.model,
       maxRetries: options.maxRetries,
       abortSignal: options.abortSignal,

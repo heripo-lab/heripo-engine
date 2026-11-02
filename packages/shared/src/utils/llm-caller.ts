@@ -10,6 +10,7 @@ import {
   tool,
 } from 'ai';
 
+import { withSystemPromptCache } from './prompt-cache';
 import { detectProvider } from './provider-detector';
 
 /**
@@ -70,12 +71,6 @@ export interface LLMCallConfig<TSchema extends z.ZodType> {
    * Structured metadata attached to token usage for this call.
    */
   metadata?: TokenUsageMetadata;
-
-  /**
-   * Mark the system prompt as a prompt-cache breakpoint for providers that support it (Anthropic), so calls that
-   * share the system prompt read it from the cache. Other providers ignore the mark.
-   */
-  cacheSystemPrompt?: boolean;
 
   /**
    * Provider options passed to the AI SDK unchanged, such as `{ anthropic: { effort: 'low' } }`. A provider
@@ -488,7 +483,8 @@ export class LLMCaller {
    * 2. If all fail and fallbackModel provided, try fallback up to maxRetries times
    * 3. Throw error if all attempts exhausted
    *
-   * Provider-aware strategy is automatically applied based on the model's provider field.
+   * Provider-aware strategy is automatically applied based on the model's provider field, and the prompt cache
+   * breakpoint is placed only at the end of the system prompt (see `withSystemPromptCache`).
    *
    * @template TOutput - Output type from schema validation
    * @param config - LLM call configuration
@@ -500,19 +496,12 @@ export class LLMCaller {
   ): Promise<LLMCallResult<TOutput>> {
     return this.executeWithFallback(config, (model) =>
       this.generateStructuredOutput(model, config.schema, {
-        instructions: config.cacheSystemPrompt
-          ? {
-              role: 'system',
-              content: config.systemPrompt,
-              providerOptions: {
-                anthropic: { cacheControl: { type: 'ephemeral' } },
-              },
-            }
-          : config.systemPrompt,
+        ...withSystemPromptCache(
+          model,
+          config.systemPrompt,
+          config.providerOptions,
+        ),
         prompt: config.userPrompt,
-        ...(config.providerOptions && {
-          providerOptions: config.providerOptions,
-        }),
         temperature: config.temperature,
         maxRetries: config.maxRetries,
         abortSignal: config.abortSignal,
@@ -537,6 +526,7 @@ export class LLMCaller {
     return this.executeWithFallback(config, (model) =>
       this.generateStructuredOutput(model, config.schema, {
         messages: config.messages,
+        ...withSystemPromptCache(model, undefined, undefined),
         temperature: config.temperature,
         maxRetries: config.maxRetries,
         abortSignal: config.abortSignal,

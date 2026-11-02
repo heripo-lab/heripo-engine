@@ -1,0 +1,110 @@
+import type { LanguageModel } from 'ai';
+
+import { describe, expect, test } from 'vitest';
+
+import {
+  supportsOpenAICacheBreakpoints,
+  withSystemPromptCache,
+} from './prompt-cache';
+
+function model(provider: string, modelId?: string): LanguageModel {
+  return { provider, modelId } as unknown as LanguageModel;
+}
+
+describe('withSystemPromptCache', () => {
+  test('places an Anthropic breakpoint only at the end of the system prompt', () => {
+    const providerOptions = { anthropic: { effort: 'low' } };
+    expect(
+      withSystemPromptCache(
+        model('anthropic.messages', 'claude-haiku-5-5'),
+        'System prompt',
+        providerOptions,
+      ),
+    ).toEqual({
+      instructions: {
+        role: 'system',
+        content: 'System prompt',
+        providerOptions: {
+          anthropic: { cacheControl: { type: 'ephemeral' } },
+        },
+      },
+      // request-wide automatic caching stays off, so per-call user content is never written
+      providerOptions,
+    });
+  });
+
+  test('uses explicit mode for GPT 5.6+ and keeps existing options', () => {
+    expect(
+      withSystemPromptCache(
+        model('openai.responses', 'gpt-6-luna'),
+        'System prompt',
+        { openai: { reasoningEffort: 'low' } },
+      ),
+    ).toEqual({
+      instructions: {
+        role: 'system',
+        content: 'System prompt',
+        providerOptions: {
+          openai: { promptCacheBreakpoint: { mode: 'explicit' } },
+        },
+      },
+      providerOptions: {
+        openai: {
+          reasoningEffort: 'low',
+          promptCacheOptions: { mode: 'explicit' },
+        },
+      },
+    });
+  });
+
+  test('makes no cache write for GPT 5.6+ calls without a system prompt', () => {
+    expect(
+      withSystemPromptCache(
+        model('openai.chat', 'gpt-5.6-terra'),
+        undefined,
+        undefined,
+      ),
+    ).toEqual({
+      providerOptions: { openai: { promptCacheOptions: { mode: 'explicit' } } },
+    });
+  });
+
+  test.each([
+    ['openai.responses', 'gpt-4.1', 'System prompt'],
+    ['openai.responses', undefined, 'System prompt'],
+    // Gemini caches the request prefix implicitly without settings
+    ['google.generative-ai', 'gemini-3.8-flash', 'System prompt'],
+    ['lmstudio.chat', 'gemma-4-26b-a4b-it-mlx', 'System prompt'],
+    ['byok.chat', 'gpt-6-luna', 'System prompt'],
+    ['anthropic.messages', 'claude-haiku-5-5', undefined],
+  ])('leaves %s %s unchanged', (provider, modelId, systemPrompt) => {
+    expect(
+      withSystemPromptCache(model(provider, modelId), systemPrompt, undefined),
+    ).toEqual(systemPrompt === undefined ? {} : { instructions: systemPrompt });
+  });
+
+  test('never overwrites an OpenAI cache mode chosen by the caller', () => {
+    const providerOptions = {
+      openai: { promptCacheOptions: { mode: 'implicit' as const } },
+    };
+    expect(
+      withSystemPromptCache(
+        model('openai.responses', 'gpt-6-luna'),
+        'System prompt',
+        providerOptions,
+      ),
+    ).toEqual({ instructions: 'System prompt', providerOptions });
+  });
+});
+
+test.each([
+  ['gpt-5.6-terra', true],
+  ['openai/gpt-6.1-sol', true],
+  ['gpt-6-luna', true],
+  ['gpt-5.5', false],
+  ['gpt-5', false],
+  ['gpt-4.1', false],
+  ['o3-mini', false],
+])('cache breakpoint support of %s is %s', (modelId, expected) => {
+  expect(supportsOpenAICacheBreakpoints(modelId)).toBe(expected);
+});

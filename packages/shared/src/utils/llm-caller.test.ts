@@ -467,7 +467,8 @@ describe('LLMCaller', () => {
       });
     });
 
-    test('marks the system prompt as a cache breakpoint when asked', async () => {
+    test('marks the Anthropic system prompt as a cache breakpoint and keeps provider options', async () => {
+      vi.mocked(detectProvider).mockReturnValueOnce('anthropic');
       vi.mocked(generateText).mockResolvedValueOnce(
         createMockGenerateTextResult(
           { result: 'success' },
@@ -483,7 +484,6 @@ describe('LLMCaller', () => {
         maxRetries: 0,
         component: 'TestExtractor',
         phase: 'testing',
-        cacheSystemPrompt: true,
         providerOptions: { anthropic: { effort: 'low' } },
       });
 
@@ -642,6 +642,34 @@ describe('LLMCaller', () => {
         messages,
         maxRetries: 3,
       });
+    });
+
+    test('applies the prompt cache policy to each model it tries', async () => {
+      vi.mocked(generateText)
+        .mockRejectedValueOnce(new Error('Vision call failed'))
+        .mockResolvedValueOnce(createMockGenerateTextResult({ result: 'ok' }));
+      const messages = [{ role: 'user' as const, content: 'Read this page' }];
+
+      await LLMCaller.callVision({
+        schema: mockSchema,
+        messages,
+        primaryModel: { modelId: 'gpt-6-luna' } as LanguageModel,
+        fallbackModel: mockPrimaryModel,
+        maxRetries: 0,
+        component: 'PageRangeParser',
+        phase: 'sampling',
+      });
+
+      // GPT 5.6+ uses explicit mode, so no cache write is made without a system prompt
+      expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
+        messages,
+        providerOptions: {
+          openai: { promptCacheOptions: { mode: 'explicit' } },
+        },
+      });
+      expect(vi.mocked(generateText).mock.calls[1][0]).not.toHaveProperty(
+        'providerOptions',
+      );
     });
 
     test('should fallback with messages when vision primary fails', async () => {
@@ -1129,9 +1157,9 @@ describe('LLMCaller', () => {
     test('should fallback to different provider strategy when primary fails', async () => {
       // Primary: togetherai (tool call) → fails
       // Fallback: openai (Output.object) → succeeds
-      vi.mocked(detectProvider)
-        .mockReturnValueOnce('togetherai')
-        .mockReturnValueOnce('openai');
+      vi.mocked(detectProvider).mockImplementation((model) =>
+        model === mockPrimaryModel ? 'togetherai' : 'openai',
+      );
 
       vi.mocked(generateText).mockRejectedValueOnce(
         new Error('Tool call failed'),
