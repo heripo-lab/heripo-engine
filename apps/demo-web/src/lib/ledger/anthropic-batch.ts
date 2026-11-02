@@ -34,7 +34,9 @@ class Captured extends Error {
 
 /**
  * The exact Messages API body the AI SDK would send for this request and model, captured without sending it,
- * so a batch item asks the same as a direct call (system, prompt, max_tokens, structured output format).
+ * so a batch item asks the same as a direct call (system, prompt, max_tokens, structured output format). The
+ * system prompt shared by every unit is a cache breakpoint; the user prompt is not, because r1 and r2 of a unit
+ * go in the same batch and cannot rely on reading each other's cache.
  */
 export async function anthropicMessageParams(
   modelId: string,
@@ -43,7 +45,13 @@ export async function anthropicMessageParams(
 ): Promise<MessageCreateParamsNonStreaming> {
   return captureAnthropicParams(modelId, {
     providerOptions,
-    instructions: request.systemPrompt,
+    instructions: {
+      role: 'system',
+      content: request.systemPrompt,
+      providerOptions: {
+        anthropic: { cacheControl: { type: 'ephemeral' } },
+      },
+    },
     prompt: request.userPrompt,
     schema: jsonSchema(
       request.providerOutputSchema as Parameters<typeof jsonSchema>[0],
