@@ -1,4 +1,9 @@
-import type { LanguageModel, SystemModelMessage, generateText } from 'ai';
+import type {
+  LanguageModel,
+  ModelMessage,
+  SystemModelMessage,
+  generateText,
+} from 'ai';
 
 import { detectProvider } from './provider-detector';
 
@@ -62,6 +67,46 @@ export function withSystemPromptCache(
         promptCacheOptions: { mode: 'explicit' },
       },
     },
+  };
+}
+
+/**
+ * Cache the whole request, for a request sent again unchanged once an earlier answer has returned (such as r2
+ * after r1). Use `withSystemPromptCache` when the user prompt changes per call or the copies are sent together:
+ * then nothing could read the user prompt from the cache.
+ * - Anthropic: breakpoints at the end of the system prompt, which other requests sharing it can read, and at the
+ *   end of the user prompt, which the repeated request reads.
+ * - Other providers are left as is. OpenAI's default implicit mode already places the breakpoint at the end of
+ *   the last user message.
+ */
+export function withRepeatedRequestCache(
+  model: LanguageModel,
+  systemPrompt: string,
+  userPrompt: string,
+  providerOptions: ProviderOptions,
+): {
+  instructions: string | SystemModelMessage;
+  providerOptions?: ProviderOptions;
+} & ({ prompt: string } | { messages: ModelMessage[] }) {
+  const anthropicBreakpoint = {
+    anthropic: { cacheControl: { type: 'ephemeral' } },
+  };
+  if (detectProvider(model) === 'anthropic')
+    return {
+      ...(providerOptions === undefined ? {} : { providerOptions }),
+      instructions: cachedSystem(systemPrompt, anthropicBreakpoint),
+      messages: [
+        {
+          role: 'user',
+          content: userPrompt,
+          providerOptions: anthropicBreakpoint,
+        },
+      ],
+    };
+  return {
+    instructions: systemPrompt,
+    prompt: userPrompt,
+    ...(providerOptions === undefined ? {} : { providerOptions }),
   };
 }
 

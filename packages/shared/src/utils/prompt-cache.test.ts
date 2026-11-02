@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { LLMCaller } from './llm-caller';
 import {
   supportsOpenAICacheBreakpoints,
+  withRepeatedRequestCache,
   withSystemPromptCache,
 } from './prompt-cache';
 
@@ -97,6 +98,73 @@ describe('withSystemPromptCache', () => {
         providerOptions,
       ),
     ).toEqual({ instructions: 'System prompt', providerOptions });
+  });
+});
+
+describe('withRepeatedRequestCache', () => {
+  test('places Anthropic breakpoints at the end of the system and user prompts', () => {
+    const breakpoint = { anthropic: { cacheControl: { type: 'ephemeral' } } };
+    const providerOptions = { anthropic: { effort: 'low' } };
+    expect(
+      withRepeatedRequestCache(
+        model('anthropic.messages', 'claude-haiku-5-5'),
+        'System prompt',
+        'User prompt',
+        providerOptions,
+      ),
+    ).toEqual({
+      instructions: {
+        role: 'system',
+        content: 'System prompt',
+        providerOptions: breakpoint,
+      },
+      messages: [
+        { role: 'user', content: 'User prompt', providerOptions: breakpoint },
+      ],
+      providerOptions,
+    });
+  });
+
+  test('sends no provider options to Anthropic when none are given', () => {
+    expect(
+      withRepeatedRequestCache(
+        model('anthropic.messages', 'claude-haiku-5-5'),
+        'System prompt',
+        'User prompt',
+        undefined,
+      ),
+    ).not.toHaveProperty('providerOptions');
+  });
+
+  test.each([
+    // the implicit mode already caches up to the end of the last user message
+    ['openai.responses', 'gpt-6-luna'],
+    ['google.generative-ai', 'gemini-3.8-flash'],
+  ])('leaves %s %s unchanged', (provider, modelId) => {
+    expect(
+      withRepeatedRequestCache(
+        model(provider, modelId),
+        'System prompt',
+        'User prompt',
+        undefined,
+      ),
+    ).toEqual({ instructions: 'System prompt', prompt: 'User prompt' });
+  });
+
+  test('keeps provider options for other providers', () => {
+    const providerOptions = { openai: { reasoningEffort: 'low' } };
+    expect(
+      withRepeatedRequestCache(
+        model('openai.responses', 'gpt-6-luna'),
+        'System prompt',
+        'User prompt',
+        providerOptions,
+      ),
+    ).toEqual({
+      instructions: 'System prompt',
+      prompt: 'User prompt',
+      providerOptions,
+    });
   });
 });
 

@@ -393,6 +393,7 @@ export async function proposePlaceAliases(
             >[0],
           ),
         }),
+        // r1 and r2 are sent together, so neither can read the other's user prompt from the cache
         ...withSystemPromptCache(
           audited.model,
           request.systemPrompt,

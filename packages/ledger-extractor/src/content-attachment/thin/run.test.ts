@@ -275,32 +275,32 @@ describe('attachContentThinUnit', () => {
     ]);
   });
 
-  test('applies the prompt cache policy on top of the recorded provider options', async () => {
+  test('caches the whole request for the repeated runs and records the chosen provider options', async () => {
     const { plan, unit } = fixture();
+    const request = createContentAttachmentThinUnitRequest(plan, unit)!;
     respond(agreed(), agreed());
 
     const result = await attachContentThinUnit(plan, unit, {
       model: {
-        provider: 'openai.responses',
-        modelId: 'gpt-6-luna',
+        provider: 'anthropic.messages',
+        modelId: 'claude-haiku-5-5',
       } as unknown as Ai.LanguageModel,
       tiebreak: false,
     });
 
-    expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
-      instructions: {
-        role: 'system',
-        providerOptions: {
-          openai: { promptCacheBreakpoint: { mode: 'explicit' } },
+    const breakpoint = { anthropic: { cacheControl: { type: 'ephemeral' } } };
+    expect(vi.mocked(generateText).mock.calls[1][0]).toMatchObject({
+      instructions: { role: 'system', providerOptions: breakpoint },
+      messages: [
+        {
+          role: 'user',
+          content: request.userPrompt,
+          providerOptions: breakpoint,
         },
-      },
-      providerOptions: {
-        anthropic: { effort: 'low' },
-        openai: { promptCacheOptions: { mode: 'explicit' } },
-      },
+      ],
+      providerOptions: CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
     });
-    // the audit keeps the options the caller chose
-    expect(result.calls[0].providerOptions).toEqual(
+    expect(result.calls[1].providerOptions).toEqual(
       CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
     );
   });
