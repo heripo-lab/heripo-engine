@@ -10,7 +10,7 @@ import type {
 } from './report-router';
 import type { ReportSignals } from './report-signals';
 
-import { createAuditedModel } from '@heripo/shared';
+import { createAuditedModel, withSystemPromptCache } from '@heripo/shared';
 import { Output, generateText, jsonSchema } from 'ai';
 
 import {
@@ -64,7 +64,7 @@ export async function routeReport(
           request.providerOutputSchema as Parameters<typeof jsonSchema>[0],
         ),
       }),
-      system: request.systemPrompt,
+      ...withSystemPromptCache(audited.model, request.systemPrompt, undefined),
       prompt: request.userPrompt,
       maxRetries: options.maxRetries ?? 0,
       abortSignal: options.abortSignal,

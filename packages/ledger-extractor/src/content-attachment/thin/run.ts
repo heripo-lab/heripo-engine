@@ -9,7 +9,7 @@ import type {
   ContentAttachmentThinRoutedSegment,
 } from './routing';
 
-import { createAuditedModel } from '@heripo/shared';
+import { createAuditedModel, withSystemPromptCache } from '@heripo/shared';
 import { NoObjectGeneratedError, Output, generateText, jsonSchema } from 'ai';
 
 import { createContentAttachmentThinInput } from './compile';
@@ -324,11 +324,14 @@ export async function attachContentThinUnit(
             request.providerOutputSchema as Parameters<typeof jsonSchema>[0],
           ),
         }),
-        system: request.systemPrompt,
+        ...withSystemPromptCache(
+          audited.model,
+          request.systemPrompt,
+          providerOptions,
+        ),
         prompt: request.userPrompt,
         maxRetries: options.maxRetries ?? 0,
         abortSignal: options.abortSignal,
-        providerOptions,
       });
       result = recordContentAttachmentThinCall(plan, unit, {
         run,

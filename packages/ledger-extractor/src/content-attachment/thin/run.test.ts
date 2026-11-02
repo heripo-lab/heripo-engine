@@ -175,7 +175,7 @@ describe('attachContentThinUnit', () => {
     >;
     expect(args).toMatchObject({
       model,
-      system: request.systemPrompt,
+      instructions: request.systemPrompt,
       prompt: request.userPrompt,
       maxRetries: 0,
       abortSignal,
@@ -273,6 +273,36 @@ describe('attachContentThinUnit', () => {
       ['r1', 'completed'],
       ['r2', 'failed'],
     ]);
+  });
+
+  test('applies the prompt cache policy on top of the recorded provider options', async () => {
+    const { plan, unit } = fixture();
+    respond(agreed(), agreed());
+
+    const result = await attachContentThinUnit(plan, unit, {
+      model: {
+        provider: 'openai.responses',
+        modelId: 'gpt-6-luna',
+      } as unknown as Ai.LanguageModel,
+      tiebreak: false,
+    });
+
+    expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
+      instructions: {
+        role: 'system',
+        providerOptions: {
+          openai: { promptCacheBreakpoint: { mode: 'explicit' } },
+        },
+      },
+      providerOptions: {
+        anthropic: { effort: 'low' },
+        openai: { promptCacheOptions: { mode: 'explicit' } },
+      },
+    });
+    // the audit keeps the options the caller chose
+    expect(result.calls[0].providerOptions).toEqual(
+      CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+    );
   });
 
   test('sends a tie-breaking r3 when r1 and r2 disagree and decides those segments by majority', async () => {

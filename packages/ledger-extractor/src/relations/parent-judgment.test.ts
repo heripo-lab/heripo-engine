@@ -163,7 +163,7 @@ describe('judgeRelationParentBatch', () => {
 
     expect(createAuditedModel).toHaveBeenCalledWith(model, onAttempt);
     expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
-      system: 'system',
+      instructions: 'system',
       prompt: 'user',
       maxRetries: 0,
     });

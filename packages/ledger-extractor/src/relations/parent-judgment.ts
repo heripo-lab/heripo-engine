@@ -6,7 +6,7 @@ import type {
   RelationParentJudgmentRequest,
 } from './parent-judgment-request';
 
-import { createAuditedModel } from '@heripo/shared';
+import { createAuditedModel, withSystemPromptCache } from '@heripo/shared';
 import { Output, generateText, jsonSchema } from 'ai';
 
 /** One question's answer after code checks; `parentRecordId` null means `none`. */
@@ -183,7 +183,11 @@ export async function judgeRelationParentBatch(
             >[0],
           ),
         }),
-        system: request.systemPrompt,
+        ...withSystemPromptCache(
+          audited.model,
+          request.systemPrompt,
+          undefined,
+        ),
         prompt: request.userPrompt,
         maxRetries: options.maxRetries ?? 0,
         abortSignal: options.abortSignal,
