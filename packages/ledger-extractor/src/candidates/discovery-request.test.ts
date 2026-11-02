@@ -226,7 +226,6 @@ describe('candidate discovery', () => {
         userPrompt: createCandidateDiscoveryRequest(
           createFollowUpUnit(unit, [3, 4]),
         ).userPrompt,
-        cacheSystemPrompt: true,
         metadata: expect.objectContaining({ followUp: true }),
       }),
     );

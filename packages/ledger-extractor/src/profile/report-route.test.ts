@@ -109,7 +109,7 @@ describe('routeReport', () => {
     expect(createAuditedModel).toHaveBeenCalledWith(model, onAttempt);
     expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
       model,
-      system: call.request.systemPrompt,
+      instructions: call.request.systemPrompt,
       prompt: call.request.userPrompt,
       maxRetries: 0,
     });

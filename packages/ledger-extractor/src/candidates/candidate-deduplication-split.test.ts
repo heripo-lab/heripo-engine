@@ -293,7 +293,6 @@ describe('deduplicateCandidateBlocks', () => {
     const args = vi.mocked(LLMCaller.call).mock.calls[1][0];
     expect(args).toMatchObject({
       maxRetries: 1,
-      cacheSystemPrompt: true,
       providerOptions: { anthropic: { effort: 'low' } },
       phase: 'candidate-deduplication-block',
       metadata: { blockId: 'block-2', candidateCount: 3 },

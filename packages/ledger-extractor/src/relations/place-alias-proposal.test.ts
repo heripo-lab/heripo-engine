@@ -365,7 +365,7 @@ describe('proposePlaceAliases', () => {
     });
     expect(generateText).toHaveBeenCalledTimes(2);
     expect(vi.mocked(generateText).mock.calls[0][0]).toMatchObject({
-      system: request.systemPrompt,
+      instructions: request.systemPrompt,
       prompt: request.userPrompt,
       maxRetries: 0,
     });

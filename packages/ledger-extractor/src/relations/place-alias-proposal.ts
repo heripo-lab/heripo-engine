@@ -6,7 +6,7 @@ import type { ArchaeologyLedgerResult } from '../ledger/archaeology-ledger';
 import type { PlaceAliasRule, PlaceAliasTable } from './place-aliases';
 import type { RelationParents } from './relation-parents';
 
-import { createAuditedModel } from '@heripo/shared';
+import { createAuditedModel, withSystemPromptCache } from '@heripo/shared';
 import { Output, generateText, jsonSchema } from 'ai';
 
 import { labelOf, placeCandidates, wordsOf } from './parent-judgment-request';
@@ -393,7 +393,12 @@ export async function proposePlaceAliases(
             >[0],
           ),
         }),
-        system: request.systemPrompt,
+        // r1 and r2 are sent together, so neither can read the other's user prompt from the cache
+        ...withSystemPromptCache(
+          audited.model,
+          request.systemPrompt,
+          undefined,
+        ),
         prompt: request.userPrompt,
         maxRetries: options.maxRetries ?? 0,
         abortSignal: options.abortSignal,

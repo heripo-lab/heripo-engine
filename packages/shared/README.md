@@ -6,15 +6,17 @@ Internal ESM utilities used by the PDF parser and document processor. This packa
 
 ## Exports
 
-| API                       | Purpose                                                                                                   |
-| ------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `BatchProcessor`          | Split/process arrays with `createBatches`, `processBatch`, `processBatchSync`                             |
-| `ConcurrentPool`          | `run(items, concurrency, processFn, onItemComplete?)` bounds workers and preserves input order in results |
-| `LLMCaller`               | `call` and `callVision` perform model calls with schema validation, retries and fallback                  |
-| `LLMTokenUsageAggregator` | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset` aggregate usage            |
-| `detectProvider`          | Detect a provider from the model's `provider` value, returning `unknown` when unrecognized                |
-| `createSpendGuard`        | Hard caps on calls and tokens: reserve a worst case before a call, settle it with reported usage          |
-| `spawnAsync`              | Run a child process and return `{ stdout, stderr, code }`                                                 |
+| API                        | Purpose                                                                                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BatchProcessor`           | Split/process arrays with `createBatches`, `processBatch`, `processBatchSync`                                                                  |
+| `ConcurrentPool`           | `run(items, concurrency, processFn, onItemComplete?)` bounds workers and preserves input order in results                                      |
+| `LLMCaller`                | `call` and `callVision` perform model calls with schema validation, retries and fallback                                                       |
+| `LLMTokenUsageAggregator`  | `track`, `getReport`, `getTotalUsage`, `getByComponent`, `logSummary`, `reset` aggregate usage                                                 |
+| `detectProvider`           | Detect a provider from the model's `provider` value, returning `unknown` when unrecognized                                                     |
+| `withSystemPromptCache`    | Prompt cache settings `LLMCaller` applies, for direct `generateText` calls: a breakpoint only at the end of the system prompt                  |
+| `withRepeatedRequestCache` | For a request sent again unchanged after an earlier answer (r2 after r1): Anthropic also marks the user prompt; other providers are left as is |
+| `createSpendGuard`         | Hard caps on calls and tokens: reserve a worst case before a call, settle it with reported usage                                               |
+| `spawnAsync`               | Run a child process and return `{ stdout, stderr, code }`                                                                                      |
 
 The [export list](./src/index.ts) also includes call configuration/results, token usage and process option types.
 
@@ -36,7 +38,7 @@ console.log(batches, results);
 
 ## LLM Calls and Usage
 
-Recognizes OpenAI, Google, Anthropic, Together AI, Ollama and LM Studio. Together AI/Ollama use tool calls; the other providers use structured output. Zod validates the response schema. Configuration requires a model, schema, prompts (or vision messages), `maxRetries`, `component` and `phase`; `fallbackModel`, `abortSignal`, `temperature` and `metadata` are optional. `cacheSystemPrompt: true` marks the system prompt as an Anthropic prompt-cache breakpoint, so calls sharing it read it from the cache; other providers ignore the mark. `providerOptions` is passed to the AI SDK unchanged, such as `{ anthropic: { effort: 'low' } }`.
+Recognizes OpenAI, Google, Anthropic, Together AI, Ollama and LM Studio. Together AI/Ollama use tool calls; the other providers use structured output. Zod validates the response schema. Configuration requires a model, schema, prompts (or vision messages), `maxRetries`, `component` and `phase`; `fallbackModel`, `abortSignal`, `temperature` and `metadata` are optional. The prompt-cache breakpoint is placed only at the end of the system prompt, so per-call content is never written to the cache: Anthropic calls mark the system prompt as an ephemeral breakpoint, and OpenAI GPT 5.6 and later use explicit mode (vision calls, which have no system prompt, make no cache write). Gemini keeps its implicit prefix cache and other providers are left as is; an OpenAI `promptCacheOptions` given by the caller is kept. `providerOptions` is passed to the AI SDK unchanged, such as `{ anthropic: { effort: 'low' } }`.
 
 Calls return `{ output, usage, usedFallback }`, plus `finishReason` and `structuredAttempts` when known. Structured output is retried up to ten more times on a schema mismatch regardless of `maxRetries`; `structuredAttempts` counts those attempts, and `usage` covers only the attempt that produced the output. `usage.reasoningTokens` is set when the provider reports reasoning tokens. Pass `usage` to the aggregator's `track()`. `getReport()` includes component/phase/model totals and metadata. Multiple models in one phase produce model-separated phase rows, so phase names need not be unique. Usage covers tracked calls and is not guaranteed to match provider billing.
 

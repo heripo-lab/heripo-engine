@@ -348,7 +348,6 @@ export async function deduplicateCandidateBlocks(
       systemPrompt: request.systemPrompt,
       userPrompt: request.userPrompt,
       // every block shares the system prompt, so later blocks read it from the provider's prompt cache
-      cacheSystemPrompt: true,
       providerOptions: CANDIDATE_DEDUPLICATION_BLOCK_PROVIDER_OPTIONS,
       primaryModel: options.model,
       maxRetries: options.maxRetries,

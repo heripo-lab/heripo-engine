@@ -175,7 +175,7 @@ describe('attachContentThinUnit', () => {
     >;
     expect(args).toMatchObject({
       model,
-      system: request.systemPrompt,
+      instructions: request.systemPrompt,
       prompt: request.userPrompt,
       maxRetries: 0,
       abortSignal,
@@ -273,6 +273,36 @@ describe('attachContentThinUnit', () => {
       ['r1', 'completed'],
       ['r2', 'failed'],
     ]);
+  });
+
+  test('caches the whole request for the repeated runs and records the chosen provider options', async () => {
+    const { plan, unit } = fixture();
+    const request = createContentAttachmentThinUnitRequest(plan, unit)!;
+    respond(agreed(), agreed());
+
+    const result = await attachContentThinUnit(plan, unit, {
+      model: {
+        provider: 'anthropic.messages',
+        modelId: 'claude-haiku-5-5',
+      } as unknown as Ai.LanguageModel,
+      tiebreak: false,
+    });
+
+    const breakpoint = { anthropic: { cacheControl: { type: 'ephemeral' } } };
+    expect(vi.mocked(generateText).mock.calls[1][0]).toMatchObject({
+      instructions: { role: 'system', providerOptions: breakpoint },
+      messages: [
+        {
+          role: 'user',
+          content: request.userPrompt,
+          providerOptions: breakpoint,
+        },
+      ],
+      providerOptions: CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+    });
+    expect(result.calls[1].providerOptions).toEqual(
+      CONTENT_ATTACHMENT_THIN_PROVIDER_OPTIONS,
+    );
   });
 
   test('sends a tie-breaking r3 when r1 and r2 disagree and decides those segments by majority', async () => {
