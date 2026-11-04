@@ -29,7 +29,15 @@ export class DoclingServer {
       }
 
       const doclingServePath = join(this.venvPath, 'bin', 'docling-serve');
-      const args = ['run', '--port', this.port.toString()];
+      // Bind to loopback only: the parser talks to it via localhost, and docling-serve
+      // has no auth, so it must not be reachable from the LAN.
+      const args = [
+        'run',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        this.port.toString(),
+      ];
 
       this.logger.info(
         '[DoclingEnvironment] Starting docling-serve on port',
