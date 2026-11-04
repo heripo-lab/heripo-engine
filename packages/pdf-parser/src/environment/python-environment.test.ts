@@ -108,7 +108,7 @@ describe('PythonEnvironment', () => {
         'pydantic~=2.10',
         'pydantic-settings~=2.4',
         'python-multipart<0.1.0,>=0.0.14',
-        'typer==0.24.2',
+        'typer==0.21.2',
         'uvicorn[standard]<1.0.0,>=0.29.0',
         'websockets<17.0,>=14.0',
         'scalar-fastapi>=1.0.3',
