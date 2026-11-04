@@ -123,14 +123,22 @@ export class DoclingServer {
       const withoutKey = await fetch(url, {
         signal: AbortSignal.timeout(5000),
       });
-      if (withoutKey.status !== 401) {
+      // The task does not exist, so a request that passes auth answers 404.
+      // Anything other than 401/404 (5xx, ...) says nothing about auth.
+      if (withoutKey.status === 404) {
         return 'not-enforced';
+      }
+      if (withoutKey.status !== 401) {
+        return 'unknown';
       }
       const withKey = await fetch(url, {
         headers: { 'X-Api-Key': loadOrCreateDoclingApiKey(this.venvPath) },
         signal: AbortSignal.timeout(5000),
       });
-      return withKey.status === 401 ? 'not-enforced' : 'enforced';
+      if (withKey.status === 404) {
+        return 'enforced';
+      }
+      return withKey.status === 401 ? 'not-enforced' : 'unknown';
     } catch {
       return 'unknown';
     }

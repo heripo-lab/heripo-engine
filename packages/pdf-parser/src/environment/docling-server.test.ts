@@ -430,6 +430,24 @@ describe('DoclingServer', () => {
       ).resolves.toBe('not-enforced');
     });
 
+    test('is unknown for unexpected answers instead of not enforced', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({ status: 503 }));
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).checkApiKeyEnforcement(),
+      ).resolves.toBe('unknown');
+
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce({ status: 401 })
+          .mockResolvedValueOnce({ status: 500 }),
+      );
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).checkApiKeyEnforcement(),
+      ).resolves.toBe('unknown');
+    });
+
     test('is unknown when the server does not answer', async () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')));
 
