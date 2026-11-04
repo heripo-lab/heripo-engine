@@ -190,6 +190,26 @@ describe('DoclingEnvironment', () => {
     });
   });
 
+  describe('stopOwnServer', () => {
+    test('should delegate to server.stopOwnServer', async () => {
+      const stopOwnServer = vi.fn().mockResolvedValue(false);
+      MockPythonEnvironment.mockImplementation(function () {
+        return { setup: vi.fn() } as any;
+      });
+      MockDoclingServer.mockImplementation(function () {
+        return { stopOwnServer } as any;
+      });
+      const env = new DoclingEnvironment({
+        logger,
+        venvPath: '/test/venv',
+        port: 8080,
+        killExistingProcess: false,
+      });
+
+      await expect(env.stopOwnServer()).resolves.toBe(false);
+    });
+  });
+
   describe('assertServerOwnership', () => {
     test('should delegate to server.assertOwnListener', async () => {
       const assertOwnListener = vi.fn().mockResolvedValue(undefined);

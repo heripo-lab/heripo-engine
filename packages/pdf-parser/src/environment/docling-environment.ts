@@ -77,6 +77,14 @@ export class DoclingEnvironment {
     await this.server.assertOwnListener();
   }
 
+  /**
+   * Stops this venv's docling-serve on the port. Returns false and leaves the
+   * process running when another process holds the port.
+   */
+  public async stopOwnServer(): Promise<boolean> {
+    return this.server.stopOwnServer();
+  }
+
   public static async killProcessOnPort(
     logger: LoggerMethods,
     port: number,

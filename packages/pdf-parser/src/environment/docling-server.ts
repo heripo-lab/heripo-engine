@@ -114,22 +114,50 @@ export class DoclingServer {
     }
   }
 
+  /**
+   * Waits until no process listens on the port. Throws if it stays in use, so
+   * a failed stop is never mistaken for a restart: the new docling-serve would
+   * fail to bind and the old server would keep answering.
+   */
   private async waitForPortRelease(): Promise<void> {
     for (let attempt = 0; attempt < 25; attempt++) {
       if (!(await this.isPortInUse())) return;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
+    throw new Error(
+      `[DoclingEnvironment] Port ${this.port} is still in use after stopping its server`,
+    );
+  }
+
+  /**
+   * Stops this venv's docling-serve on the port. Returns false and leaves the
+   * process running when the port is held by any other process.
+   */
+  async stopOwnServer(): Promise<boolean> {
+    const listener = await this.findListener();
+    if (!listener) {
+      return true;
+    }
+    if (!this.isOwnListener(listener)) {
+      return false;
+    }
+    await DoclingServer.killProcessOnPort(this.logger, this.port);
+    await this.waitForPortRelease();
+    return true;
   }
 
   async start(killExistingProcess: boolean): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-      if (killExistingProcess) {
-        await DoclingServer.killProcessOnPort(this.logger, this.port);
-        // The killed process can hold the port for a moment; a docling-serve
-        // spawned before it is released fails to bind without any error here.
-        await this.waitForPortRelease();
-      }
+    if (killExistingProcess) {
+      await DoclingServer.killProcessOnPort(this.logger, this.port);
+      // The killed process can hold the port for a moment; a docling-serve
+      // spawned before it is released fails to bind without any error here.
+      await this.waitForPortRelease();
+    }
 
+    // Read before the Promise so a key file error rejects start().
+    const apiKey = loadOrCreateDoclingApiKey(this.venvPath);
+
+    return new Promise((resolve, reject) => {
       const doclingServePath = join(this.venvPath, 'bin', 'docling-serve');
       // Bind to loopback only: the parser talks to it via localhost, and docling-serve
       // has no auth, so it must not be reachable from the LAN.
@@ -151,7 +179,7 @@ export class DoclingServer {
         env: {
           ...process.env,
           DOCLING_SERVE_ENABLE_REMOTE_SERVICES: 'true',
-          DOCLING_SERVE_API_KEY: loadOrCreateDoclingApiKey(this.venvPath),
+          DOCLING_SERVE_API_KEY: apiKey,
         },
       });
 

@@ -274,6 +274,57 @@ describe('DoclingServer', () => {
     });
   });
 
+  describe('stopOwnServer', () => {
+    const uid = String(process.getuid?.() ?? 0);
+
+    test('does nothing when no listener is visible', async () => {
+      mockSpawnAsync.mockResolvedValueOnce(
+        createSpawnResult({ stdout: '', code: 1 }),
+      );
+
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).stopOwnServer(),
+      ).resolves.toBe(true);
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    test('leaves another process running', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: `p7\nu${uid}\n` }))
+        .mockResolvedValueOnce(
+          createSpawnResult({
+            stdout: '/py /other/venv/bin/docling-serve run',
+          }),
+        );
+
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).stopOwnServer(),
+      ).resolves.toBe(false);
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    test('stops this venv server and waits for the port', async () => {
+      const lsofProcess = createMockProcess();
+      const killProcess = createMockProcess();
+      setupProcessMock(lsofProcess, { stdout: '7', code: 0 });
+      setupProcessMock(killProcess, { code: 0 });
+      mockSpawn
+        .mockReturnValueOnce(lsofProcess as any)
+        .mockReturnValueOnce(killProcess as any);
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: `p7\nu${uid}\n` }))
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: '/py /test/venv/bin/docling-serve run' }),
+        )
+        .mockResolvedValueOnce(createSpawnResult({ stdout: '', code: 1 }));
+
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).stopOwnServer(),
+      ).resolves.toBe(true);
+      expect(mockSpawn).toHaveBeenNthCalledWith(2, 'kill', ['-9', '7']);
+    });
+  });
+
   describe('enforcesApiKey', () => {
     afterEach(() => {
       vi.unstubAllGlobals();
@@ -414,25 +465,36 @@ describe('DoclingServer', () => {
       expect(mockSpawn).toHaveBeenCalledTimes(3);
     });
 
-    test('starts anyway when the port stays in use', async () => {
+    test('fails instead of starting when the port stays in use', async () => {
       const lsofProcess = createMockProcess();
-      const doclingServeProcess = createMockProcess();
       setupProcessMock(lsofProcess, { stdout: '', code: 1 });
-      setupProcessMock(doclingServeProcess, {});
-      mockSpawn
-        .mockReturnValueOnce(lsofProcess as any)
-        .mockReturnValueOnce(doclingServeProcess as any);
+      mockSpawn.mockReturnValueOnce(lsofProcess as any);
       mockSpawnAsync.mockResolvedValue(
         createSpawnResult({ stdout: '999', code: 0 }),
       );
 
       const server = new DoclingServer(logger, '/test/venv', 8080);
       const startPromise = server.start(true);
-      await vi.advanceTimersByTimeAsync(5000 + 2000);
-      await startPromise;
+      const assertion = expect(startPromise).rejects.toThrow(
+        'Port 8080 is still in use after stopping its server',
+      );
+      await vi.advanceTimersByTimeAsync(5000);
+      await assertion;
 
       expect(mockSpawnAsync).toHaveBeenCalledTimes(25);
-      expect(mockSpawn).toHaveBeenCalledTimes(2);
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+    });
+
+    test('rejects when the API key cannot be read', async () => {
+      const { loadOrCreateDoclingApiKey } = await import('./docling-api-key');
+      vi.mocked(loadOrCreateDoclingApiKey).mockImplementationOnce(() => {
+        throw new Error('EACCES: permission denied');
+      });
+
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.start(false)).rejects.toThrow('EACCES');
+      expect(mockSpawn).not.toHaveBeenCalled();
     });
 
     test('should handle docling-serve error event', async () => {

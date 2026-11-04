@@ -267,17 +267,19 @@ export class PDFParser {
   private async restartServer(): Promise<void> {
     this.logger.info('[PDFParser] Restarting server...');
 
-    // Kill existing process on port
     // Note: this.port is guaranteed to be defined by the caller (canRecover check)
-    await DoclingEnvironment.killProcessOnPort(this.logger, this.port!);
-
-    // Start new server
     const environment = new DoclingEnvironment({
       logger: this.logger,
       venvPath: this.venvPath,
       port: this.port!,
-      killExistingProcess: false, // Already killed above
+      killExistingProcess: false, // Stopped below, only if it is ours
     });
+
+    if (!(await environment.stopOwnServer())) {
+      throw new Error(
+        `[PDFParser] Port ${this.port} is held by another process; not restarting it`,
+      );
+    }
 
     await environment.startServer();
 
@@ -458,7 +460,7 @@ export class PDFParser {
   /**
    * Dispose the parser instance.
    * - Sets the internal client to null
-   * - If a local docling server was started (no baseUrl), kills the process on the configured port
+   * - If a local docling server was started (no baseUrl), stops this venv's server on the configured port
    */
   public async dispose(): Promise<void> {
     this.logger.info('[PDFParser] Disposing...');
@@ -466,7 +468,19 @@ export class PDFParser {
     try {
       // Only manage local server lifecycle when we started it (i.e., no external baseUrl)
       if (!this.baseUrl && this.port) {
-        await DoclingEnvironment.killProcessOnPort(this.logger, this.port);
+        const environment = new DoclingEnvironment({
+          logger: this.logger,
+          venvPath: this.venvPath,
+          port: this.port,
+          killExistingProcess: false,
+        });
+        if (!(await environment.stopOwnServer())) {
+          this.logger.warn(
+            '[PDFParser] Port',
+            this.port,
+            'is held by another process; leaving it running',
+          );
+        }
       }
     } catch (error) {
       this.logger.error('[PDFParser] Error while disposing:', error);
