@@ -24,7 +24,7 @@ import {
   createTaskFailedPayload,
   sendWebhookAsync,
 } from '../webhook';
-import { createTaskLogger } from './task-logger';
+import { createTaskLogger, maskFilePaths } from './task-logger';
 
 const LEDGER_STEPS = [
   { id: 'upload', name: 'Uploading JSON', weight: 0 },
@@ -188,8 +188,10 @@ export async function runLedgerTaskWorker(
       throw error;
     }
 
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error';
+    // Failure messages reach the public UI and webhooks; strip server paths.
+    const errorMessage = maskFilePaths(
+      error instanceof Error ? error.message : 'Unknown error',
+    );
     const errorCode =
       error instanceof LedgerInputError
         ? error.code

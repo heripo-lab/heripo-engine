@@ -32,7 +32,7 @@ import {
   sendWebhookAsync,
 } from '../webhook';
 import { PDFParserManager } from './pdf-parser-manager';
-import { createTaskLogger } from './task-logger';
+import { createTaskLogger, maskFilePaths } from './task-logger';
 
 const SOURCE_HANDOFF_MANIFEST_FILENAME = 'source-handoff-manifest.json';
 
@@ -542,8 +542,10 @@ export async function runRawDataTaskWorker(
     }
 
     const isDocTypeError = error instanceof InvalidDocumentTypeError;
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error';
+    // Failure messages reach the public UI and webhooks; strip server paths.
+    const errorMessage = maskFilePaths(
+      error instanceof Error ? error.message : 'Unknown error',
+    );
     const errorCode = isDocTypeError
       ? 'INVALID_DOCUMENT_TYPE'
       : 'PROCESSING_ERROR';

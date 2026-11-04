@@ -30,9 +30,9 @@ export function maskFilePaths(message: string): string {
     message
       // file:// URL
       .replace(/file:\/\/[^\s]+/g, (match) => match.split('/').pop() || match)
-      // Absolute paths (/Users, /var, /tmp, /home, ...)
+      // Absolute paths under common roots (/Users, /opt for the deployed app, /tmp, ...)
       .replace(
-        /\/(?:Users|var|tmp|home)[^\s]*/g,
+        /\/(?:Users|opt|private|var|tmp|home|Library|Volumes)(?=\/)[^\s]*/g,
         (match) => match.split('/').pop() || match,
       )
   );

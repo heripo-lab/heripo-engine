@@ -11,6 +11,7 @@ import {
   updateTaskStatus,
 } from '../db/repositories/task-repository';
 import { createTaskCancelledPayload, sendWebhookAsync } from '../webhook';
+import { maskFilePaths } from './task-logger';
 
 export type TaskKind = 'raw-data' | 'ledger';
 
@@ -259,8 +260,10 @@ class TaskQueueManager {
         return;
       }
 
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
+      // Failure messages reach the public UI and webhooks; strip server paths.
+      const errorMessage = maskFilePaths(
+        error instanceof Error ? error.message : 'Unknown error',
+      );
 
       updateTaskStatus(task.taskId, 'failed', {
         errorCode: 'WORKER_ERROR',
