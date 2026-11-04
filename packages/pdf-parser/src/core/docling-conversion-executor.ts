@@ -10,7 +10,7 @@ import type {
   PDFConvertOptions,
 } from './pdf-converter';
 
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ImageExtractor } from '../processors/image-extractor';
@@ -58,6 +58,14 @@ export class DoclingConversionExecutor {
       '[PDFConverter] Results will be returned as ZIP to avoid memory limits',
     );
 
+    // Temporary files live under the report's output directory, like the chunked
+    // converter's `_chunks`, so they stay in a writable, per-report location even
+    // when the working directory is read-only.
+    const outputDir = join(process.cwd(), 'output', reportId);
+    const workDir = join(outputDir, '_single');
+    const zipPath = join(workDir, 'result.zip');
+    const extractDir = join(workDir, 'result_extracted');
+
     // Resolve URL (start local server for file:// URLs)
     const { httpUrl, server } = await this.resolveUrl(url);
 
@@ -83,8 +91,7 @@ export class DoclingConversionExecutor {
         throw error;
       }
 
-      const cwd = process.cwd();
-      const zipPath = join(cwd, 'result.zip');
+      mkdirSync(workDir, { recursive: true });
       await downloadTaskResult(
         this.client,
         task.taskId,
@@ -99,11 +106,6 @@ export class DoclingConversionExecutor {
         await server.stop();
       }
     }
-
-    const cwd = process.cwd();
-    const zipPath = join(cwd, 'result.zip');
-    const extractDir = join(cwd, 'result_extracted');
-    const outputDir = join(cwd, 'output', reportId);
 
     try {
       await this.processConvertedFiles(zipPath, extractDir, outputDir);
@@ -140,11 +142,8 @@ export class DoclingConversionExecutor {
     } finally {
       // Clean up temporary files (always cleanup temp files)
       this.logger.info('[PDFConverter] Cleaning up temporary files...');
-      if (existsSync(zipPath)) {
-        rmSync(zipPath, { force: true });
-      }
-      if (existsSync(extractDir)) {
-        rmSync(extractDir, { recursive: true, force: true });
+      if (existsSync(workDir)) {
+        rmSync(workDir, { recursive: true, force: true });
       }
 
       // Cleanup output directory only if requested

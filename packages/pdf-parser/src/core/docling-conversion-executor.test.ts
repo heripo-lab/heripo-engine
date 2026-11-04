@@ -1,7 +1,7 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
 
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -35,6 +35,7 @@ vi.mock('../utils/local-file-server', () => ({
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
+  mkdirSync: vi.fn(),
   rmSync: vi.fn(),
 }));
 
@@ -159,18 +160,24 @@ describe('DoclingConversionExecutor', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).toHaveBeenCalledWith(
         logger,
-        '/test/cwd/result.zip',
-        '/test/cwd/result_extracted',
+        '/test/cwd/output/report123/_single/result.zip',
+        '/test/cwd/output/report123/_single/result_extracted',
         '/test/cwd/output/report123',
       );
       expect(onComplete).toHaveBeenCalledWith('/test/cwd/output/report123');
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result.zip', {
-        force: true,
-      });
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result_extracted', {
-        recursive: true,
-        force: true,
-      });
+      expect(mkdirSync).toHaveBeenCalledWith(
+        '/test/cwd/output/report123/_single',
+        {
+          recursive: true,
+        },
+      );
+      expect(rmSync).toHaveBeenCalledWith(
+        '/test/cwd/output/report123/_single',
+        {
+          recursive: true,
+          force: true,
+        },
+      );
       expect(rmSync).not.toHaveBeenCalledWith(
         '/test/cwd/output/report123',
         expect.any(Object),
@@ -230,13 +237,13 @@ describe('DoclingConversionExecutor', () => {
         ),
       ).rejects.toThrow('Callback error');
 
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result.zip', {
-        force: true,
-      });
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result_extracted', {
-        recursive: true,
-        force: true,
-      });
+      expect(rmSync).toHaveBeenCalledWith(
+        '/test/cwd/output/report789/_single',
+        {
+          recursive: true,
+          force: true,
+        },
+      );
     });
 
     test('should handle non-existent files during cleanup', async () => {
@@ -317,13 +324,13 @@ describe('DoclingConversionExecutor', () => {
         ),
       ).rejects.toThrow('Processing failed');
 
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result.zip', {
-        force: true,
-      });
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result_extracted', {
-        recursive: true,
-        force: true,
-      });
+      expect(rmSync).toHaveBeenCalledWith(
+        '/test/cwd/output/report-process-fail/_single',
+        {
+          recursive: true,
+          force: true,
+        },
+      );
     });
 
     test('should log OCR languages and conversion info', async () => {
@@ -614,8 +621,8 @@ describe('DoclingConversionExecutor', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).toHaveBeenCalledWith(
         logger,
-        '/test/cwd/result.zip',
-        '/test/cwd/result_extracted',
+        '/test/cwd/output/report123/_single/result.zip',
+        '/test/cwd/output/report123/_single/result_extracted',
         '/test/cwd/output/report123',
       );
     });
