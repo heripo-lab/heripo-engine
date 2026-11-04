@@ -53,4 +53,43 @@ describe('maskFilePaths', () => {
       'server http://127.0.0.1:5501/health ready, ocr_options kept, /api/tasks ok, /optimize';
     assert.equal(maskFilePaths(input), input);
   });
+
+  test('keeps web URLs whose path contains a root name', () => {
+    for (const input of [
+      'see https://example.com/opt/docs/setup',
+      'see http://example.com/home/user/guide.html',
+      "fetch 'https://example.com/Users/list'",
+      'host example.com/opt/docs',
+    ]) {
+      assert.equal(maskFilePaths(input), input);
+    }
+  });
+
+  test('masks quoted paths that contain spaces', () => {
+    assert.equal(
+      maskFilePaths('open "/Volumes/My Drive/reports/final.pdf" failed'),
+      'open "final.pdf" failed',
+    );
+    assert.equal(
+      maskFilePaths(
+        "ENOENT: open '/Library/Application Support/heripo/a.json'",
+      ),
+      "ENOENT: open 'a.json'",
+    );
+    const input = JSON.stringify({
+      source: '/Volumes/My Drive/a.pdf',
+      result: '/opt/app/b.json',
+    });
+    assert.deepEqual(JSON.parse(maskFilePaths(input)), {
+      source: 'a.pdf',
+      result: 'b.json',
+    });
+  });
+
+  test('does not treat an apostrophe in text as a quote', () => {
+    assert.equal(
+      maskFilePaths("can't read /opt/app/a.json"),
+      "can't read a.json",
+    );
+  });
 });
