@@ -50,16 +50,6 @@ jobs:
           mkdir -p "$handoff"
           rsync -a --delete --exclude '/.git/' ./ "$handoff/"
 
-      # One-time migration from the PM2 process that ran as the runner account.
-      - name: Stop legacy PM2 process
-        run: |
-          if command -v pm2 >/dev/null 2>&1 && pm2 describe demo-web >/dev/null 2>&1; then
-            pm2 delete demo-web
-            # Plain `pm2 save` skips an empty process list and leaves the old dump,
-            # so `pm2 resurrect` at boot would start demo-web as the runner again.
-            pm2 save --force
-          fi
-
       - name: Deploy as the service account
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
