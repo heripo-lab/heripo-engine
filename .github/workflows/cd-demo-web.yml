@@ -55,7 +55,9 @@ jobs:
         run: |
           if command -v pm2 >/dev/null 2>&1 && pm2 describe demo-web >/dev/null 2>&1; then
             pm2 delete demo-web
-            pm2 save
+            # Plain `pm2 save` skips an empty process list and leaves the old dump,
+            # so `pm2 resurrect` at boot would start demo-web as the runner again.
+            pm2 save --force
           fi
 
       - name: Deploy as the service account
