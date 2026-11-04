@@ -168,7 +168,7 @@ describe('DoclingServer', () => {
       );
       expect(mockSpawn).toHaveBeenCalledWith(
         '/test/venv/bin/docling-serve',
-        ['run', '--port', '8080'],
+        ['run', '--host', '127.0.0.1', '--port', '8080'],
         {
           detached: true,
           stdio: 'ignore',

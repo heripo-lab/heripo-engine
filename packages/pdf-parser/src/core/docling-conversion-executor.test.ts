@@ -1,7 +1,8 @@
 import type { LoggerMethods } from '@heripo/logger';
 import type { AsyncConversionTask, DoclingAPIClient } from 'docling-sdk';
 
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -35,7 +36,12 @@ vi.mock('../utils/local-file-server', () => ({
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
+  mkdtempSync: vi.fn(),
   rmSync: vi.fn(),
+}));
+
+vi.mock('node:os', () => ({
+  tmpdir: vi.fn(),
 }));
 
 vi.mock('node:path', () => ({
@@ -121,6 +127,8 @@ describe('DoclingConversionExecutor', () => {
     });
 
     vi.mocked(join).mockImplementation((...args) => args.join('/'));
+    vi.mocked(tmpdir).mockReturnValue('/tmp');
+    vi.mocked(mkdtempSync).mockReturnValue('/tmp/heripo-docling-abc');
 
     vi.mocked(LocalFileServer).mockImplementation(function () {
       return {
@@ -159,15 +167,13 @@ describe('DoclingConversionExecutor', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).toHaveBeenCalledWith(
         logger,
-        '/test/cwd/result.zip',
-        '/test/cwd/result_extracted',
+        '/tmp/heripo-docling-abc/result.zip',
+        '/tmp/heripo-docling-abc/result_extracted',
         '/test/cwd/output/report123',
       );
       expect(onComplete).toHaveBeenCalledWith('/test/cwd/output/report123');
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result.zip', {
-        force: true,
-      });
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result_extracted', {
+      expect(mkdtempSync).toHaveBeenCalledWith('/tmp/heripo-docling-');
+      expect(rmSync).toHaveBeenCalledWith('/tmp/heripo-docling-abc', {
         recursive: true,
         force: true,
       });
@@ -230,10 +236,7 @@ describe('DoclingConversionExecutor', () => {
         ),
       ).rejects.toThrow('Callback error');
 
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result.zip', {
-        force: true,
-      });
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result_extracted', {
+      expect(rmSync).toHaveBeenCalledWith('/tmp/heripo-docling-abc', {
         recursive: true,
         force: true,
       });
@@ -257,7 +260,12 @@ describe('DoclingConversionExecutor', () => {
         withCorrection(),
       );
 
-      expect(rmSync).not.toHaveBeenCalled();
+      // The temp dir is always removed with force; a missing output dir is skipped.
+      expect(rmSync).toHaveBeenCalledTimes(1);
+      expect(rmSync).toHaveBeenCalledWith('/tmp/heripo-docling-abc', {
+        recursive: true,
+        force: true,
+      });
     });
 
     test('should handle conversion task failure', async () => {
@@ -317,10 +325,7 @@ describe('DoclingConversionExecutor', () => {
         ),
       ).rejects.toThrow('Processing failed');
 
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result.zip', {
-        force: true,
-      });
-      expect(rmSync).toHaveBeenCalledWith('/test/cwd/result_extracted', {
+      expect(rmSync).toHaveBeenCalledWith('/tmp/heripo-docling-abc', {
         recursive: true,
         force: true,
       });
@@ -614,8 +619,8 @@ describe('DoclingConversionExecutor', () => {
         ImageExtractor.extractAndSaveDocumentsFromZip,
       ).toHaveBeenCalledWith(
         logger,
-        '/test/cwd/result.zip',
-        '/test/cwd/result_extracted',
+        '/tmp/heripo-docling-abc/result.zip',
+        '/tmp/heripo-docling-abc/result_extracted',
         '/test/cwd/output/report123',
       );
     });
