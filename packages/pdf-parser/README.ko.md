@@ -120,9 +120,11 @@ brew install imagemagick ghostscript
 
 1. 현재 작업 디렉토리의 `.venv`에 Python 가상환경 생성 (`venvPath`로 설정 가능)
 2. `docling-serve` 및 의존성 설치
-3. 로컬 포트에서 docling-serve 프로세스 시작
+3. 로컬 포트에서 docling-serve 프로세스 시작 (`127.0.0.1`에만 바인딩, API 키로 보호)
 
 가상환경은 재사용하지만 로컬 초기화에서 의존성 설치 단계를 다시 실행합니다. 설치 코드는 docling-serve 1.16.1과 명시적인 Docling 런타임 버전을 사용합니다. [python-environment.ts](./src/environment/python-environment.ts)를 참고하세요. 별도 `python3.11` 설치 여부보다 PATH의 `python3` 버전이 중요합니다.
+
+로컬 docling-serve는 API 키를 요구합니다. loopback에는 같은 머신의 모든 계정이 접근할 수 있기 때문입니다. 키는 처음 기동할 때 만들어 venv의 `.docling-serve-api-key`(권한 `0600`)에 저장합니다. 같은 계정·같은 venv의 파서는 키를 공유하고, 다른 계정은 읽을 수 없습니다. 키는 같은 계정이 실행한 이 venv의 docling-serve에만 보냅니다. 포트의 기존 서버를 재사용하기 전과 새로 띄운 뒤에 listen 중인 프로세스를 확인합니다(`lsof`, `ps`). 다른 프로세스가 포트를 쓰고 있으면 재사용하거나 종료하지 않고 초기화를 실패시킵니다(`killExistingProcess: false`여도 같음). 이 venv의 서버는 키 없는 요청을 거부하고 이 키를 받아들일 때만 재사용하고, 그렇지 않으면(키 도입 전에 띄운 서버, venv를 다시 만들기 전의 서버 등) 다시 띄웁니다.
 
 ## 설치
 

@@ -26,17 +26,30 @@ vi.mock('docling-sdk', () => {
   };
 });
 
+vi.mock('../environment/docling-api-key', () => ({
+  loadOrCreateDoclingApiKey: vi.fn(() => 'test-api-key'),
+}));
+
 vi.mock('../environment/docling-environment', () => {
   const setupMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const assertServerOwnershipMock = vi
+    .fn<() => Promise<void>>()
+    .mockResolvedValue(undefined);
+  // Implementation passed to vi.fn so it survives mock resets between tests.
+  const stopOwnServerMock = vi.fn<() => Promise<boolean>>(async () => true);
   const DoclingEnvironment = vi.fn(function (_: any) {
-    return { setup: setupMock };
+    return {
+      setup: setupMock,
+      assertServerOwnership: assertServerOwnershipMock,
+      stopOwnServer: stopOwnServerMock,
+    };
   }) as any;
   (DoclingEnvironment as any).killProcessOnPort = vi
     .fn<(logger: any, port: number) => Promise<void>>()
     .mockResolvedValue(undefined);
   return {
     DoclingEnvironment,
-    __envMocks: { setupMock },
+    __envMocks: { setupMock, assertServerOwnershipMock, stopOwnServerMock },
   };
 });
 
@@ -87,6 +100,8 @@ const mockDoclingEnvironment = (
     return {
       setup: envMocks.setupMock,
       startServer: startServerMock,
+      assertServerOwnership: envMocks.assertServerOwnershipMock,
+      stopOwnServer: envMocks.stopOwnServerMock,
     };
   });
 
@@ -141,9 +156,36 @@ describe('PDFParser', () => {
       killExistingProcess: true,
     });
     expect(envMocks.setupMock).toHaveBeenCalledTimes(1);
-    expect(Docling).toHaveBeenCalledWith({
-      api: { baseUrl: 'http://localhost:3210', timeout: 5000 },
+    // Wait for the server without the key, confirm ownership, then use the key.
+    expect(Docling).toHaveBeenNthCalledWith(1, {
+      api: { baseUrl: 'http://127.0.0.1:3210', timeout: 5000 },
     });
+    expect(envMocks.assertServerOwnershipMock).toHaveBeenCalledTimes(1);
+    expect(Docling).toHaveBeenNthCalledWith(2, {
+      api: {
+        baseUrl: 'http://127.0.0.1:3210',
+        timeout: 5000,
+        apiKey: 'test-api-key',
+      },
+    });
+  });
+
+  test('init with local server never sends the key when the port is not this venv server', async () => {
+    vi.mocked(Docling).mockClear();
+    doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+    vi.mocked(envMocks.assertServerOwnershipMock).mockRejectedValueOnce(
+      new Error("Port 3210 is not served by this venv's docling-serve"),
+    );
+
+    const parser = new PDFParser({ logger: makeLogger(), port: 3210 });
+
+    await expect(parser.init()).rejects.toThrow(
+      "Port 3210 is not served by this venv's docling-serve",
+    );
+    for (const [config] of vi.mocked(Docling).mock.calls as any[]) {
+      expect(config.api.apiKey).toBeUndefined();
+    }
   });
 
   test('init with local server wraps environment setup error', async () => {
@@ -575,33 +617,59 @@ describe('PDFParser', () => {
     expect(doclingClient.destroy).toHaveBeenCalledTimes(1);
   });
 
-  test('dispose with local server kills process and destroys client', async () => {
+  test('dispose with local server stops this venv server and destroys client', async () => {
     doclingClient.health.mockResolvedValueOnce();
     vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
-    const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
-    killSpy.mockResolvedValueOnce();
+    vi.mocked(envMocks.stopOwnServerMock).mockClear();
 
     const logger = makeLogger();
     const parser = new PDFParser({ logger, port: 5555 });
     await parser.init();
+    // init destroys the keyless readiness client once before switching.
+    doclingClient.destroy.mockClear();
     await parser.dispose();
 
-    expect(killSpy).toHaveBeenCalledWith(logger, 5555);
+    expect(DoclingEnvironment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ port: 5555, killExistingProcess: false }),
+    );
+    expect(envMocks.stopOwnServerMock).toHaveBeenCalledTimes(1);
     expect(doclingClient.destroy).toHaveBeenCalledTimes(1);
   });
 
-  test('dispose swallows kill errors but still destroys client', async () => {
+  test('dispose leaves a server of another process running', async () => {
     doclingClient.health.mockResolvedValueOnce();
     vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
-    const killSpy = vi.mocked((DoclingEnvironment as any).killProcessOnPort);
-    killSpy.mockRejectedValueOnce(new Error('kill failed'));
+    vi.mocked(envMocks.stopOwnServerMock).mockResolvedValueOnce(false);
+
+    const logger = makeLogger();
+    const parser = new PDFParser({ logger, port: 5556 });
+    await parser.init();
+    await parser.dispose();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[PDFParser] Port',
+      5556,
+      'is held by another process; leaving it running',
+    );
+  });
+
+  test('dispose swallows stop errors but still destroys client', async () => {
+    doclingClient.health.mockResolvedValueOnce();
+    vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+    vi.mocked(envMocks.stopOwnServerMock).mockRejectedValueOnce(
+      new Error('kill failed'),
+    );
 
     const logger = makeLogger();
     const parser = new PDFParser({ logger, port: 7777 });
     await parser.init();
+    doclingClient.destroy.mockClear();
 
     await expect(parser.dispose()).resolves.toBeUndefined();
-    expect(killSpy).toHaveBeenCalledWith(logger, 7777);
+    expect(logger.error).toHaveBeenCalledWith(
+      '[PDFParser] Error while disposing:',
+      expect.any(Error),
+    );
     expect(doclingClient.destroy).toHaveBeenCalledTimes(1);
   });
 
@@ -704,6 +772,14 @@ describe('PDFParser', () => {
         '[PDFParser] Connection refused, attempting server recovery...',
       );
       expect(result).toBe('OK');
+      // The restarted server and its new client use the same venv API key.
+      expect(Docling).toHaveBeenLastCalledWith({
+        api: {
+          baseUrl: 'http://127.0.0.1:5001',
+          timeout: expect.any(Number),
+          apiKey: 'test-api-key',
+        },
+      });
     });
 
     test('parse does not recover from ECONNREFUSED error on external server', async () => {
@@ -730,6 +806,32 @@ describe('PDFParser', () => {
       ).rejects.toThrow('ECONNREFUSED');
 
       expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    test('parse does not restart a server held by another process', async () => {
+      doclingClient.health.mockResolvedValue(undefined);
+      vi.mocked(envMocks.setupMock).mockResolvedValueOnce();
+      convertMock.mockRejectedValueOnce(
+        new Error('connect ECONNREFUSED 127.0.0.1:5001'),
+      );
+      const startServerMock = mockDoclingEnvironment();
+
+      const parser = new PDFParser({ logger: makeLogger(), port: 5001 });
+      await parser.init();
+      vi.mocked(envMocks.stopOwnServerMock).mockResolvedValueOnce(false);
+
+      await expect(
+        parser.parse(
+          'http://file.pdf',
+          'report-1',
+          vi.fn(),
+          false,
+          withCorrection({ num_threads: 4 }),
+        ),
+      ).rejects.toThrow(
+        'Port 5001 is held by another process; not restarting it',
+      );
+      expect(startServerMock).not.toHaveBeenCalled();
     });
 
     test('parse throws after recovery attempt fails', async () => {

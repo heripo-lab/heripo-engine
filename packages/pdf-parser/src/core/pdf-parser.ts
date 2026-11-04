@@ -6,6 +6,7 @@ import { Docling } from 'docling-sdk';
 import { join } from 'node:path';
 
 import { PDF_PARSER } from '../config/constants';
+import { loadOrCreateDoclingApiKey } from '../environment/docling-api-key';
 import { DoclingEnvironment } from '../environment/docling-environment';
 import {
   checkCommandExists,
@@ -171,16 +172,7 @@ export class PDFParser {
       });
 
       await this.environment.setup();
-
-      const clientUrl = `http://localhost:${this.port}`;
-      this.client = new Docling({
-        api: {
-          baseUrl: clientUrl,
-          timeout: this.timeout,
-        },
-      });
-
-      await this.waitForServerReady();
+      await this.connectToLocalServer(this.environment);
       this.logger.info('[PDFParser] Ready');
     } catch (error) {
       this.logger.error('[PDFParser] Initialization failed:', error);
@@ -232,6 +224,34 @@ export class PDFParser {
     return false;
   }
 
+  /**
+   * Wait for the local server without the API key, confirm this venv's
+   * docling-serve owns the port, then switch to a client that sends the key.
+   * docling-sdk sends the key on every request, health checks included, so a
+   * keyed client must not talk to a port another account may hold.
+   */
+  private async connectToLocalServer(
+    environment: DoclingEnvironment,
+  ): Promise<void> {
+    // Same address the server binds to and ownership is checked on: `localhost`
+    // may resolve to ::1, where another account could listen on the same port.
+    const baseUrl = `http://127.0.0.1:${this.port}`;
+    this.client = new Docling({
+      api: { baseUrl, timeout: this.timeout },
+    });
+    await this.waitForServerReady();
+    await environment.assertServerOwnership();
+
+    this.client.destroy();
+    this.client = new Docling({
+      api: {
+        baseUrl,
+        timeout: this.timeout,
+        apiKey: loadOrCreateDoclingApiKey(this.venvPath),
+      },
+    });
+  }
+
   private canRecoverLocalServer(): boolean {
     return !this.baseUrl && this.port !== undefined;
   }
@@ -247,30 +267,24 @@ export class PDFParser {
   private async restartServer(): Promise<void> {
     this.logger.info('[PDFParser] Restarting server...');
 
-    // Kill existing process on port
     // Note: this.port is guaranteed to be defined by the caller (canRecover check)
-    await DoclingEnvironment.killProcessOnPort(this.logger, this.port!);
-
-    // Start new server
     const environment = new DoclingEnvironment({
       logger: this.logger,
       venvPath: this.venvPath,
       port: this.port!,
-      killExistingProcess: false, // Already killed above
+      killExistingProcess: false, // Stopped below, only if it is ours
     });
+
+    if (!(await environment.stopOwnServer())) {
+      throw new Error(
+        `[PDFParser] Port ${this.port} is held by another process; not restarting it`,
+      );
+    }
 
     await environment.startServer();
 
-    // Recreate client
     this.client?.destroy();
-    this.client = new Docling({
-      api: {
-        baseUrl: `http://localhost:${this.port}`,
-        timeout: this.timeout,
-      },
-    });
-
-    await this.waitForServerReady();
+    await this.connectToLocalServer(environment);
     this.logger.info('[PDFParser] Server restarted successfully');
   }
 
@@ -446,7 +460,7 @@ export class PDFParser {
   /**
    * Dispose the parser instance.
    * - Sets the internal client to null
-   * - If a local docling server was started (no baseUrl), kills the process on the configured port
+   * - If a local docling server was started (no baseUrl), stops this venv's server on the configured port
    */
   public async dispose(): Promise<void> {
     this.logger.info('[PDFParser] Disposing...');
@@ -454,7 +468,19 @@ export class PDFParser {
     try {
       // Only manage local server lifecycle when we started it (i.e., no external baseUrl)
       if (!this.baseUrl && this.port) {
-        await DoclingEnvironment.killProcessOnPort(this.logger, this.port);
+        const environment = new DoclingEnvironment({
+          logger: this.logger,
+          venvPath: this.venvPath,
+          port: this.port,
+          killExistingProcess: false,
+        });
+        if (!(await environment.stopOwnServer())) {
+          this.logger.warn(
+            '[PDFParser] Port',
+            this.port,
+            'is held by another process; leaving it running',
+          );
+        }
       }
     } catch (error) {
       this.logger.error('[PDFParser] Error while disposing:', error);
