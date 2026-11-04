@@ -26,6 +26,10 @@ vi.mock('docling-sdk', () => {
   };
 });
 
+vi.mock('../environment/docling-api-key', () => ({
+  loadOrCreateDoclingApiKey: vi.fn(() => 'test-api-key'),
+}));
+
 vi.mock('../environment/docling-environment', () => {
   const setupMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const DoclingEnvironment = vi.fn(function (_: any) {
@@ -142,7 +146,11 @@ describe('PDFParser', () => {
     });
     expect(envMocks.setupMock).toHaveBeenCalledTimes(1);
     expect(Docling).toHaveBeenCalledWith({
-      api: { baseUrl: 'http://localhost:3210', timeout: 5000 },
+      api: {
+        baseUrl: 'http://localhost:3210',
+        timeout: 5000,
+        apiKey: 'test-api-key',
+      },
     });
   });
 
@@ -704,6 +712,14 @@ describe('PDFParser', () => {
         '[PDFParser] Connection refused, attempting server recovery...',
       );
       expect(result).toBe('OK');
+      // The restarted server and its new client use the same venv API key.
+      expect(Docling).toHaveBeenLastCalledWith({
+        api: {
+          baseUrl: 'http://localhost:5001',
+          timeout: expect.any(Number),
+          apiKey: 'test-api-key',
+        },
+      });
     });
 
     test('parse does not recover from ECONNREFUSED error on external server', async () => {

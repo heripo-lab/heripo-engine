@@ -2,12 +2,16 @@ import type { LoggerMethods } from '@heripo/logger';
 import type { SpawnResult } from '@heripo/shared';
 import type { ChildProcess } from 'node:child_process';
 
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { DoclingServer } from './docling-server';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
+}));
+
+vi.mock('./docling-api-key', () => ({
+  loadOrCreateDoclingApiKey: vi.fn(() => 'test-api-key'),
 }));
 
 vi.mock('@heripo/shared', () => ({
@@ -151,6 +155,44 @@ describe('DoclingServer', () => {
     });
   });
 
+  describe('acceptsApiKey', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    test('sends the venv API key to an authenticated endpoint', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ status: 404 });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.acceptsApiKey()).resolves.toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:8080/v1/status/poll/heripo-api-key-check',
+        expect.objectContaining({
+          headers: { 'X-Api-Key': 'test-api-key' },
+        }),
+      );
+    });
+
+    test('returns false when the server rejects the key', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 401 }));
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.acceptsApiKey()).resolves.toBe(false);
+    });
+
+    test('keeps reusing the server when the check cannot connect', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+      );
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.acceptsApiKey()).resolves.toBe(true);
+    });
+  });
+
   describe('start', () => {
     test('should start docling-serve without killing existing process', async () => {
       const doclingServeProcess = createMockProcess();
@@ -174,6 +216,7 @@ describe('DoclingServer', () => {
           stdio: 'ignore',
           env: expect.objectContaining({
             DOCLING_SERVE_ENABLE_REMOTE_SERVICES: 'true',
+            DOCLING_SERVE_API_KEY: 'test-api-key',
           }),
         },
       );

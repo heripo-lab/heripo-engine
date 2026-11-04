@@ -34,10 +34,19 @@ export class DoclingEnvironment {
 
     const portInUse = await this.server.isPortInUse();
     if (portInUse && !this.killExistingProcess) {
-      this.logger.info(
-        '[DoclingEnvironment] Reusing existing server on port',
-        this.port,
-      );
+      if (await this.server.acceptsApiKey()) {
+        this.logger.info(
+          '[DoclingEnvironment] Reusing existing server on port',
+          this.port,
+        );
+      } else {
+        this.logger.warn(
+          '[DoclingEnvironment] Existing server on port',
+          this.port,
+          'rejects the API key; restarting it',
+        );
+        await this.server.start(true);
+      }
     } else {
       await this.server.start(this.killExistingProcess);
     }

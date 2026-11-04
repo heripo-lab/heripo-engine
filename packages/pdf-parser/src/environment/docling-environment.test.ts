@@ -96,6 +96,7 @@ describe('DoclingEnvironment', () => {
     test('should reuse existing server when port is in use and killExistingProcess is false', async () => {
       const mockServerInstance = {
         isPortInUse: vi.fn().mockResolvedValue(true),
+        acceptsApiKey: vi.fn().mockResolvedValue(true),
         start: vi.fn(),
       };
       const mockPythonInstance = { setup: vi.fn() };
@@ -123,9 +124,38 @@ describe('DoclingEnvironment', () => {
       );
     });
 
+    test('should restart the existing server when it rejects the API key', async () => {
+      const mockServerInstance = {
+        isPortInUse: vi.fn().mockResolvedValue(true),
+        acceptsApiKey: vi.fn().mockResolvedValue(false),
+        start: vi.fn(),
+      };
+      MockPythonEnvironment.mockImplementation(function () {
+        return { setup: vi.fn() } as any;
+      });
+      MockDoclingServer.mockImplementation(function () {
+        return mockServerInstance as any;
+      });
+
+      const env = new DoclingEnvironment({
+        logger,
+        venvPath: '/test/venv',
+        port: 8080,
+        killExistingProcess: false,
+      });
+      await env.setup();
+
+      expect(mockServerInstance.start).toHaveBeenCalledWith(true);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[DoclingEnvironment] Existing server on port',
+        8080,
+        'rejects the API key; restarting it',
+      );
+    });
     test('should start server when port is in use and killExistingProcess is true', async () => {
       const mockServerInstance = {
         isPortInUse: vi.fn().mockResolvedValue(true),
+        acceptsApiKey: vi.fn().mockResolvedValue(true),
         start: vi.fn(),
       };
       const mockPythonInstance = { setup: vi.fn() };

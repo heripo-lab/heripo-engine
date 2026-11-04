@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
 import { DOCLING_ENVIRONMENT } from '../config/constants';
+import { loadOrCreateDoclingApiKey } from './docling-api-key';
 
 export class DoclingServer {
   constructor(
@@ -19,6 +20,27 @@ export class DoclingServer {
       return result.code === 0 && !!result.stdout.trim();
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Whether the server already running on this port accepts this venv's API
+   * key. A server started with another key, for example before the venv was
+   * recreated, answers 401 to every request, so it must not be reused. Any
+   * other answer or a connection error keeps the old behavior of reusing it.
+   */
+  async acceptsApiKey(): Promise<boolean> {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${this.port}/v1/status/poll/heripo-api-key-check`,
+        {
+          headers: { 'X-Api-Key': loadOrCreateDoclingApiKey(this.venvPath) },
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+      return response.status !== 401;
+    } catch {
+      return true;
     }
   }
 
@@ -49,6 +71,7 @@ export class DoclingServer {
         env: {
           ...process.env,
           DOCLING_SERVE_ENABLE_REMOTE_SERVICES: 'true',
+          DOCLING_SERVE_API_KEY: loadOrCreateDoclingApiKey(this.venvPath),
         },
       });
 

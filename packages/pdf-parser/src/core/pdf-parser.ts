@@ -6,6 +6,7 @@ import { Docling } from 'docling-sdk';
 import { join } from 'node:path';
 
 import { PDF_PARSER } from '../config/constants';
+import { loadOrCreateDoclingApiKey } from '../environment/docling-api-key';
 import { DoclingEnvironment } from '../environment/docling-environment';
 import {
   checkCommandExists,
@@ -177,6 +178,7 @@ export class PDFParser {
         api: {
           baseUrl: clientUrl,
           timeout: this.timeout,
+          apiKey: loadOrCreateDoclingApiKey(this.venvPath),
         },
       });
 
@@ -267,6 +269,7 @@ export class PDFParser {
       api: {
         baseUrl: `http://localhost:${this.port}`,
         timeout: this.timeout,
+        apiKey: loadOrCreateDoclingApiKey(this.venvPath),
       },
     });
 
