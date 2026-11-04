@@ -10,7 +10,8 @@ import type {
   PDFConvertOptions,
 } from './pdf-converter';
 
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ImageExtractor } from '../processors/image-extractor';
@@ -58,106 +59,105 @@ export class DoclingConversionExecutor {
       '[PDFConverter] Results will be returned as ZIP to avoid memory limits',
     );
 
-    // Temporary files live under the report's output directory, like the chunked
-    // converter's `_chunks`, so they stay in a writable, per-report location even
-    // when the working directory is read-only.
     const outputDir = join(process.cwd(), 'output', reportId);
-    const workDir = join(outputDir, '_single');
+    // ImageExtractor clears outputDir before writing results, so the ZIP and its
+    // extracted files must live outside it. A per-call temp dir also works when the
+    // working directory is read-only and keeps concurrent conversions apart.
+    const workDir = mkdtempSync(join(tmpdir(), 'heripo-docling-'));
     const zipPath = join(workDir, 'result.zip');
     const extractDir = join(workDir, 'result_extracted');
 
-    // Resolve URL (start local server for file:// URLs)
-    const { httpUrl, server } = await this.resolveUrl(url);
-
     try {
-      const task = await this.startConversionTask(httpUrl, conversionOptions);
-      await trackTaskProgress(
-        task,
-        this.timeout,
-        this.logger,
-        '[PDFConverter]',
-        {
-          showDetailedProgress: true,
-        },
-      );
+      // Resolve URL (start local server for file:// URLs)
+      const { httpUrl, server } = await this.resolveUrl(url);
 
-      // Check abort after docling task completes
-      if (abortSignal?.aborted) {
-        this.logger.info(
-          '[PDFConverter] Conversion aborted after docling completion',
+      try {
+        const task = await this.startConversionTask(httpUrl, conversionOptions);
+        await trackTaskProgress(
+          task,
+          this.timeout,
+          this.logger,
+          '[PDFConverter]',
+          {
+            showDetailedProgress: true,
+          },
         );
-        const error = new Error('PDF conversion was aborted');
-        error.name = 'AbortError';
-        throw error;
-      }
 
-      mkdirSync(workDir, { recursive: true });
-      await downloadTaskResult(
-        this.client,
-        task.taskId,
-        zipPath,
-        this.logger,
-        '[PDFConverter]',
-      );
-    } finally {
-      // Stop local file server if started
-      if (server) {
-        this.logger.info('[PDFConverter] Stopping local file server...');
-        await server.stop();
-      }
-    }
+        // Check abort after docling task completes
+        if (abortSignal?.aborted) {
+          this.logger.info(
+            '[PDFConverter] Conversion aborted after docling completion',
+          );
+          const error = new Error('PDF conversion was aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
 
-    try {
-      await this.processConvertedFiles(zipPath, extractDir, outputDir);
-
-      // Render page images using ImageMagick (replaces Docling's page image generation)
-      if (url.startsWith('file://')) {
-        await renderAndUpdatePageImages(
-          url.slice(7),
-          outputDir,
+        await downloadTaskResult(
+          this.client,
+          task.taskId,
+          zipPath,
           this.logger,
           '[PDFConverter]',
         );
-      } else {
-        this.logger.warn(
-          '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
-        );
+      } finally {
+        // Stop local file server if started
+        if (server) {
+          this.logger.info('[PDFConverter] Stopping local file server...');
+          await server.stop();
+        }
       }
 
-      // Check abort before callback
-      if (abortSignal?.aborted) {
-        this.logger.info('[PDFConverter] Conversion aborted before callback');
-        const error = new Error('PDF conversion was aborted');
-        error.name = 'AbortError';
-        throw error;
+      try {
+        await this.processConvertedFiles(zipPath, extractDir, outputDir);
+
+        // Render page images using ImageMagick (replaces Docling's page image generation)
+        if (url.startsWith('file://')) {
+          await renderAndUpdatePageImages(
+            url.slice(7),
+            outputDir,
+            this.logger,
+            '[PDFConverter]',
+          );
+        } else {
+          this.logger.warn(
+            '[PDFConverter] Page image rendering skipped: only supported for local files (file:// URLs)',
+          );
+        }
+
+        // Check abort before callback
+        if (abortSignal?.aborted) {
+          this.logger.info('[PDFConverter] Conversion aborted before callback');
+          const error = new Error('PDF conversion was aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
+
+        // Execute callback with absolute output path
+        this.logger.info('[PDFConverter] Executing completion callback...');
+        await onComplete(outputDir);
+
+        const duration = Date.now() - startTime;
+        this.logger.info('[PDFConverter] Conversion completed successfully!');
+        this.logger.info('[PDFConverter] Total time:', duration, 'ms');
+      } finally {
+        // Cleanup output directory only if requested
+        if (cleanupAfterCallback) {
+          this.logger.info(
+            '[PDFConverter] Cleaning up output directory:',
+            outputDir,
+          );
+          if (existsSync(outputDir)) {
+            rmSync(outputDir, { recursive: true, force: true });
+          }
+        } else {
+          this.logger.info('[PDFConverter] Output preserved at:', outputDir);
+        }
       }
-
-      // Execute callback with absolute output path
-      this.logger.info('[PDFConverter] Executing completion callback...');
-      await onComplete(outputDir);
-
-      const duration = Date.now() - startTime;
-      this.logger.info('[PDFConverter] Conversion completed successfully!');
-      this.logger.info('[PDFConverter] Total time:', duration, 'ms');
     } finally {
       // Clean up temporary files (always cleanup temp files)
       this.logger.info('[PDFConverter] Cleaning up temporary files...');
-      if (existsSync(workDir)) {
-        rmSync(workDir, { recursive: true, force: true });
-      }
-
-      // Cleanup output directory only if requested
-      if (cleanupAfterCallback) {
-        this.logger.info(
-          '[PDFConverter] Cleaning up output directory:',
-          outputDir,
-        );
-        if (existsSync(outputDir)) {
-          rmSync(outputDir, { recursive: true, force: true });
-        }
-      } else {
-        this.logger.info('[PDFConverter] Output preserved at:', outputDir);
-      }
+      rmSync(workDir, { recursive: true, force: true });
     }
 
     return null;
