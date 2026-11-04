@@ -60,6 +60,20 @@ describe('createPathMasker: known prefixes', () => {
     );
   });
 
+  test('keeps web URLs whose path contains a known prefix', () => {
+    for (const input of [
+      `see https://example.com${HOME}/download`,
+      `see http://example.com${TMP}/a.zip`,
+      `host example.com${HOME}/download`,
+    ]) {
+      assert.equal(mask(input), input);
+    }
+    assert.equal(
+      mask(`see https://example.com${HOME}/x and ${HOME}/a.json`),
+      'see https://example.com/Users/heripo-demo/x and ~/a.json',
+    );
+  });
+
   test('only matches a prefix at a path boundary', () => {
     assert.equal(mask(`${HOME}2/a.json`), 'a.json');
     assert.equal(mask(`${HOME}`), '~');

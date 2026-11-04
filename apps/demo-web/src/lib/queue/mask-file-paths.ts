@@ -12,18 +12,19 @@ export interface MaskedPrefix {
 const BOUNDARY = String.raw`(?=$|[/\s"'\x60,;()\[\]{}<>])`;
 
 // Fallback for paths outside the known prefixes: common server roots followed
-// by `/`, ending at whitespace, quotes or JSON delimiters. Web URLs and host or
-// relative paths are left alone.
+// by `/`, ending at whitespace, quotes or JSON delimiters.
 const ROOTS = '(?:Users|opt|private|var|tmp|home|Library|Volumes)';
 const PATH_CHARS = String.raw`[^\s"'\x60,;()\[\]{}<>]`;
-const FALLBACK = new RegExp(
-  [
-    String.raw`(https?://[^\s"'\x60<>]+)`,
-    String.raw`file://${PATH_CHARS}+`,
-    String.raw`(?<![\w.~-])/${ROOTS}(?=/)${PATH_CHARS}*`,
-  ].join('|'),
-  'g',
-);
+
+// Web URLs are matched first and kept, so neither a known prefix nor the
+// fallback rewrites a URL path such as https://example.com/Users/...
+const WEB_URL = String.raw`(https?://[^\s"'\x60<>]+)`;
+
+// A path must not continue a host or relative path (example.com/opt/...).
+const NOT_AFTER_WORD = String.raw`(?<![\w.~-])`;
+
+const FALLBACK_FILE_URL = String.raw`file://${PATH_CHARS}+`;
+const FALLBACK_PATH = String.raw`${NOT_AFTER_WORD}/${ROOTS}(?=/)${PATH_CHARS}*`;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -53,24 +54,30 @@ export function createPathMasker(
     ).values(),
   ].sort((a, b) => b.path.length - a.path.length);
 
-  const knownPattern = known.length
-    ? new RegExp(
-        `(?:file://)?(?:${known.map((p) => escapeRegExp(p.path)).join('|')})${BOUNDARY}`,
-        'g',
-      )
-    : null;
+  // One pass: at each position a web URL wins, then a known prefix, then the
+  // fallback. Capture groups: 1 = web URL, 2 = known prefix.
+  // With no known prefixes the group is `(?!)`, which never matches, so the
+  // capture group numbers stay the same.
+  const knownPaths = known.length
+    ? known.map((p) => escapeRegExp(p.path)).join('|')
+    : '(?!)';
+  const pattern = new RegExp(
+    [
+      WEB_URL,
+      String.raw`${NOT_AFTER_WORD}(?:file://)?(${knownPaths})${BOUNDARY}`,
+      FALLBACK_FILE_URL,
+      FALLBACK_PATH,
+    ].join('|'),
+    'g',
+  );
+  const replacements = new Map(known.map((p) => [p.path, p.replacement]));
 
-  return (message) => {
-    const masked = knownPattern
-      ? message.replace(knownPattern, (match) => {
-          const path = match.replace(/^file:\/\//, '');
-          return known.find((p) => p.path === path)?.replacement ?? match;
-        })
-      : message;
-    return masked.replace(FALLBACK, (match, url?: string) =>
-      url ? url : basename(match),
-    );
-  };
+  return (message) =>
+    message.replace(pattern, (match, url?: string, knownPath?: string) => {
+      if (url) return url;
+      if (knownPath) return replacements.get(knownPath) ?? match;
+      return basename(match);
+    });
 }
 
 function withRealPath(path: string, replacement: string): MaskedPrefix[] {
