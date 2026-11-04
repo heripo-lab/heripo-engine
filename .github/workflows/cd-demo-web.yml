@@ -21,153 +21,75 @@ jobs:
         with:
           node-version: 24
 
-      - name: Backup existing data
+      # The runner only builds. The server-side deploy script (root-owned, installed
+      # from heripo-engine-server-ops) copies the build to the service account,
+      # writes the runtime .env from stdin and restarts the launchd service.
+      # Only NEXT_PUBLIC_* values are written here because they are inlined at
+      # build time; runtime secrets never touch the runner workspace.
+      - name: Write build-time public env
         run: |
-          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
-          BACKUP_DIR="/tmp/demo-web-backup-$(date +%s)"
-
-          echo "📦 Backing up data and output directories..."
-          mkdir -p "$BACKUP_DIR"
-
-          if [ -d "$DEPLOY_PATH/apps/demo-web/data" ]; then
-            cp -r "$DEPLOY_PATH/apps/demo-web/data" "$BACKUP_DIR/"
-            echo "✅ data/ backed up"
-          else
-            echo "⚠️ No existing data/ directory found"
-          fi
-
-          if [ -d "$DEPLOY_PATH/apps/demo-web/output" ]; then
-            cp -r "$DEPLOY_PATH/apps/demo-web/output" "$BACKUP_DIR/"
-            echo "✅ output/ backed up"
-          else
-            echo "⚠️ No existing output/ directory found"
-          fi
-
-          echo "BACKUP_DIR=$BACKUP_DIR" >> $GITHUB_ENV
-
-      - name: Sync code to deploy path
-        run: |
-          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
-
-          echo "🔄 Syncing code to $DEPLOY_PATH..."
-          mkdir -p "$DEPLOY_PATH"
-          rsync -av --delete ./ "$DEPLOY_PATH/"
-          echo "✅ Code sync complete"
-
-      - name: Restore data from backup or initialize
-        run: |
-          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
-
-          echo "📦 Restoring data and output directories..."
-
-          if [ -d "$BACKUP_DIR/data" ]; then
-            cp -r "$BACKUP_DIR/data" "$DEPLOY_PATH/apps/demo-web/"
-            echo "✅ data/ restored"
-          else
-            echo "⚠️ No backup data found, creating empty directories..."
-            mkdir -p "$DEPLOY_PATH/apps/demo-web/data"
-            echo "✅ data/ created"
-          fi
-
-          if [ -d "$BACKUP_DIR/output" ]; then
-            cp -r "$BACKUP_DIR/output" "$DEPLOY_PATH/apps/demo-web/"
-            echo "✅ output/ restored"
-          else
-            mkdir -p "$DEPLOY_PATH/apps/demo-web/output"
-            echo "✅ output/ created"
-          fi
-
-          rm -rf "$BACKUP_DIR"
-          echo "🧹 Backup directory cleaned up"
-
-      - name: Create .env file
-        run: |
-          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
-
-          cat > "$DEPLOY_PATH/apps/demo-web/.env" <<EOF
-          # LLM API Keys
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_GENERATIVE_AI_API_KEY=${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
-          TOGETHER_AI_API_KEY=${{ secrets.TOGETHER_AI_API_KEY }}
-
-          # Local LLM Providers (Ollama / LM Studio) — 미설정 시 코드가 localhost 기본값 사용
-          OLLAMA_BASE_URL=${{ vars.DEMO_WEB_OLLAMA_BASE_URL }}
-          LMSTUDIO_BASE_URL=${{ vars.DEMO_WEB_LMSTUDIO_BASE_URL }}
-          LMSTUDIO_API_KEY=${{ secrets.LMSTUDIO_API_KEY }}
-
-          # PDF Parser Settings (optional)
-          PDF_PARSER_PORT=${{ vars.DEMO_WEB_PDF_PARSER_PORT }}
-          PDF_PARSER_TIMEOUT=${{ vars.DEMO_WEB_PDF_PARSER_TIMEOUT }}
-
-          # Debug Settings (optional)
-          AI_SDK_LOG_WARNINGS=false
-
-          # Public Mode Settings
-          NEXT_PUBLIC_PUBLIC_MODE=${{ vars.DEMO_WEB_PUBLIC_MODE }}
-          NEXT_PUBLIC_GA_MEASUREMENT_ID=${{ vars.DEMO_WEB_GA_ID }}
-
-          # Official Demo Settings
-          NEXT_PUBLIC_HERIPO_OFFICIAL_DEMO=${{ vars.DEMO_WEB_OFFICIAL_DEMO }}
-
-          # Data Retention Settings
-          NEXT_PUBLIC_DATA_RETENTION_DAYS=${{ vars.DEMO_WEB_DATA_RETENTION_DAYS }}
-
-          # Rate Limiting (server-side only)
-          TOTP_SECRET=${{ secrets.DEMO_WEB_TOTP_SECRET }}
-          DAILY_LIMIT=${{ vars.DEMO_WEB_DAILY_LIMIT }}
-          OTP_MAX_ATTEMPTS=${{ vars.DEMO_WEB_OTP_MAX_ATTEMPTS }}
-          CONCURRENT_TASK_LIMIT=${{ vars.DEMO_WEB_CONCURRENT_TASK_LIMIT }}
-
-          # Webhook Settings
-          WEBHOOK_URL=${{ secrets.DEMO_WEB_WEBHOOK_URL }}
-          WEBHOOK_SECRET=${{ secrets.DEMO_WEB_WEBHOOK_SECRET }}
-          
-          # Sample Task Settings
-          NEXT_PUBLIC_ALLOW_SAMPLE_DELETION=${{ vars.DEMO_WEB_ALLOW_SAMPLE_DELETION }}
-
-          # Turnstile Settings (Cloudflare CAPTCHA, Public Mode only)
-          NEXT_PUBLIC_TURNSTILE_SITE_KEY=${{ secrets.DEMO_WEB_TURNSTILE_SITE_KEY }}
-          TURNSTILE_SECRET_KEY=${{ secrets.DEMO_WEB_TURNSTILE_SECRET_KEY }}
-          
-          # Chunked Upload Settings (required for large file uploads >= 50MB)
-          UPLOAD_SESSION_SECRET=${{ secrets.DEMO_WEB_UPLOAD_SESSION_SECRET }}
-
-          # App Version (from root package.json)
-          NEXT_PUBLIC_APP_VERSION=$(node -p "require('./package.json').version")
-          EOF
-
-          # Remove leading whitespace from each line
-          sed -i '' 's/^[[:space:]]*//' "$DEPLOY_PATH/apps/demo-web/.env"
-
-          chmod 600 "$DEPLOY_PATH/apps/demo-web/.env"
-          echo "✅ .env file created"
+          {
+            printf 'NEXT_PUBLIC_PUBLIC_MODE=%s\n' "${{ vars.DEMO_WEB_PUBLIC_MODE }}"
+            printf 'NEXT_PUBLIC_GA_MEASUREMENT_ID=%s\n' "${{ vars.DEMO_WEB_GA_ID }}"
+            printf 'NEXT_PUBLIC_HERIPO_OFFICIAL_DEMO=%s\n' "${{ vars.DEMO_WEB_OFFICIAL_DEMO }}"
+            printf 'NEXT_PUBLIC_DATA_RETENTION_DAYS=%s\n' "${{ vars.DEMO_WEB_DATA_RETENTION_DAYS }}"
+            printf 'NEXT_PUBLIC_ALLOW_SAMPLE_DELETION=%s\n' "${{ vars.DEMO_WEB_ALLOW_SAMPLE_DELETION }}"
+            printf 'NEXT_PUBLIC_TURNSTILE_SITE_KEY=%s\n' "${{ secrets.DEMO_WEB_TURNSTILE_SITE_KEY }}"
+            printf 'NEXT_PUBLIC_APP_VERSION=%s\n' "$(node -p "require('./package.json').version")"
+          } > apps/demo-web/.env
 
       - name: Install dependencies
-        run: |
-          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
-          cd "$DEPLOY_PATH"
-          pnpm install
-          echo "✅ Dependencies installed"
+        run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: |
-          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
-          cd "$DEPLOY_PATH"
-          pnpm build
-          echo "✅ Build complete"
+        run: pnpm build
 
-      - name: Restart application with pm2
+      - name: Stage build for the deploy script
         run: |
-          DEPLOY_PATH="${{ vars.DEMO_WEB_DEPLOY_PATH }}"
-          cd "$DEPLOY_PATH"
+          handoff="$HOME/deploy-handoff/engine-demo"
+          mkdir -p "$handoff"
+          rsync -a --delete --exclude '/.git/' ./ "$handoff/"
 
-          # Replace the legacy pnpm-backed process so PM2 does not invoke pnpm's
-          # packageManager version switching when the application restarts.
-          pm2 delete demo-web || true
-          pm2 start ecosystem.config.cjs --only demo-web
-          pm2 save
-          echo "✅ Application restarted"
+      # One-time migration from the PM2 process that ran as the runner account.
+      - name: Stop legacy PM2 process
+        run: |
+          if command -v pm2 >/dev/null 2>&1 && pm2 describe demo-web >/dev/null 2>&1; then
+            pm2 delete demo-web
+            pm2 save
+          fi
+
+      - name: Deploy as the service account
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          TOGETHER_AI_API_KEY: ${{ secrets.TOGETHER_AI_API_KEY }}
+          OLLAMA_BASE_URL: ${{ vars.DEMO_WEB_OLLAMA_BASE_URL }}
+          LMSTUDIO_BASE_URL: ${{ vars.DEMO_WEB_LMSTUDIO_BASE_URL }}
+          LMSTUDIO_API_KEY: ${{ secrets.LMSTUDIO_API_KEY }}
+          PDF_PARSER_PORT: ${{ vars.DEMO_WEB_PDF_PARSER_PORT }}
+          PDF_PARSER_PORT_MAX: ${{ vars.DEMO_WEB_PDF_PARSER_PORT_MAX }}
+          PDF_PARSER_TIMEOUT: ${{ vars.DEMO_WEB_PDF_PARSER_TIMEOUT }}
+          TOTP_SECRET: ${{ secrets.DEMO_WEB_TOTP_SECRET }}
+          DAILY_LIMIT: ${{ vars.DEMO_WEB_DAILY_LIMIT }}
+          OTP_MAX_ATTEMPTS: ${{ vars.DEMO_WEB_OTP_MAX_ATTEMPTS }}
+          CONCURRENT_TASK_LIMIT: ${{ vars.DEMO_WEB_CONCURRENT_TASK_LIMIT }}
+          WEBHOOK_URL: ${{ secrets.DEMO_WEB_WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.DEMO_WEB_WEBHOOK_SECRET }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.DEMO_WEB_TURNSTILE_SECRET_KEY }}
+          UPLOAD_SESSION_SECRET: ${{ secrets.DEMO_WEB_UPLOAD_SESSION_SECRET }}
+        run: |
+          {
+            cat apps/demo-web/.env
+            for key in OPENAI_API_KEY ANTHROPIC_API_KEY GOOGLE_GENERATIVE_AI_API_KEY \
+              TOGETHER_AI_API_KEY OLLAMA_BASE_URL LMSTUDIO_BASE_URL LMSTUDIO_API_KEY \
+              PDF_PARSER_PORT PDF_PARSER_PORT_MAX PDF_PARSER_TIMEOUT TOTP_SECRET \
+              DAILY_LIMIT OTP_MAX_ATTEMPTS CONCURRENT_TASK_LIMIT WEBHOOK_URL \
+              WEBHOOK_SECRET TURNSTILE_SECRET_KEY UPLOAD_SESSION_SECRET; do
+              printf '%s=%s\n' "$key" "${!key}"
+            done
+            printf 'AI_SDK_LOG_WARNINGS=false\n'
+          } | sudo -n /usr/local/sbin/heripo-deploy engine-demo
 
       - name: Slack notification
         uses: slackapi/slack-github-action@v4
