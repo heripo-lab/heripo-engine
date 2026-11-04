@@ -15,25 +15,33 @@ const DOCLING_SERVE_PACKAGE = 'docling-serve==1.16.1';
 // docling-serve depends on docling-jobkit[kfp,ray,rq,vlm], which can push pip
 // into resolution-too-deep failures. Install the known runtime set explicitly,
 // then install docling-serve itself with --no-deps.
+// docling-serve imports the RQ orchestrator at startup, so the jobkit `rq` extra
+// (msgpack, rq, redis) is required even though no Redis server is used.
 const DOCLING_RUNTIME_PACKAGES = [
   'docling-jobkit==1.16.0',
   'docling==2.88.0',
   'docling-core==2.73.0',
   'docling-ibm-models==3.13.0',
   'docling-parse==5.9.0',
+  'msgpack==1.1.2',
+  'redis==7.4.0',
+  'rq==2.8.0',
 ];
 
+// Pinned to a verified working set. Unpinned docling-mcp pulls the latest
+// docling-slim, which upgrades docling-core past the pin above in a fresh venv.
 const DOCLING_SERVE_RUNTIME_PACKAGES = [
   'fastapi[standard]<0.130.0',
   'httpx~=0.28',
   'pydantic~=2.10',
   'pydantic-settings~=2.4',
   'python-multipart<0.1.0,>=0.0.14',
-  'typer~=0.12',
+  'typer==0.24.2',
   'uvicorn[standard]<1.0.0,>=0.29.0',
   'websockets<17.0,>=14.0',
   'scalar-fastapi>=1.0.3',
-  'docling-mcp>=1.0.0',
+  'docling-mcp==3.4.0',
+  'docling-slim==2.95.0',
   'opentelemetry-api==1.36.0',
   'opentelemetry-sdk==1.36.0',
   'opentelemetry-exporter-otlp==1.36.0',
