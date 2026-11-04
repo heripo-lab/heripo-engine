@@ -15,6 +15,8 @@ function listenPidArgs(port: number): string[] {
   return ['-t', `-iTCP:${port}`, '-sTCP:LISTEN'];
 }
 
+export type ApiKeyEnforcement = 'enforced' | 'not-enforced' | 'unknown';
+
 export interface DoclingListener {
   pid: number;
   uid: number;
@@ -38,11 +40,12 @@ export class DoclingServer {
   }
 
   /**
-   * The process listening on this port, if this account can see it. macOS
+   * The processes listening on this port that this account can see. macOS
    * `lsof` run without root lists only this account's processes, so a port held
-   * by another account reports no listener.
+   * by another account reports none. IPv4 and IPv6 listeners on the same port
+   * are separate entries.
    */
-  async findListener(): Promise<DoclingListener | null> {
+  async findListeners(): Promise<DoclingListener[]> {
     try {
       const lsof = await spawnAsync('lsof', [
         '-nP',
@@ -50,16 +53,33 @@ export class DoclingServer {
         '-sTCP:LISTEN',
         '-Fpu',
       ]);
-      const pid = Number(/^p(\d+)$/m.exec(lsof.stdout)?.[1]);
-      const uid = Number(/^u(\d+)$/m.exec(lsof.stdout)?.[1]);
-      if (lsof.code !== 0 || !pid || Number.isNaN(uid)) {
-        return null;
+      if (lsof.code !== 0) {
+        return [];
       }
 
-      const ps = await spawnAsync('ps', ['-o', 'command=', '-p', String(pid)]);
-      return { pid, uid, command: ps.stdout.trim() };
+      const entries: Array<{ pid: number; uid: number }> = [];
+      for (const line of lsof.stdout.split('\n')) {
+        if (line.startsWith('p')) {
+          entries.push({ pid: Number(line.slice(1)), uid: Number.NaN });
+        } else if (line.startsWith('u') && entries.length > 0) {
+          entries[entries.length - 1].uid = Number(line.slice(1));
+        }
+      }
+
+      const listeners: DoclingListener[] = [];
+      for (const { pid, uid } of entries) {
+        if (!pid || Number.isNaN(uid)) continue;
+        const ps = await spawnAsync('ps', [
+          '-o',
+          'command=',
+          '-p',
+          String(pid),
+        ]);
+        listeners.push({ pid, uid, command: ps.stdout.trim() });
+      }
+      return listeners;
     } catch {
-      return null;
+      return [];
     }
   }
 
@@ -75,16 +95,17 @@ export class DoclingServer {
   }
 
   /**
-   * Throws unless this venv's docling-serve owns the port. Call before sending
-   * the API key: after a start, another account may have held the port and the
-   * health check would have reached its server instead.
+   * Throws unless this venv's docling-serve is the only visible listener on
+   * the port. Call before sending the API key: after a start, another account
+   * may have held the port and the health check would have reached its server.
    */
   async assertOwnListener(): Promise<void> {
-    const listener = await this.findListener();
-    if (!listener || !this.isOwnListener(listener)) {
+    const listeners = await this.findListeners();
+    const foreign = listeners.find((l) => !this.isOwnListener(l));
+    if (listeners.length === 0 || foreign) {
       throw new Error(
         `[DoclingEnvironment] Port ${this.port} is not served by this venv's docling-serve` +
-          (listener ? ` (pid ${listener.pid})` : ''),
+          (foreign ? ` (pid ${foreign.pid})` : ''),
       );
     }
   }
@@ -93,24 +114,25 @@ export class DoclingServer {
    * Whether this venv's running server enforces this venv's API key: a request
    * without the key must be rejected and one with the key accepted. A server
    * started before the key existed accepts everything and must not be reused.
-   * Call only after {@link isOwnListener} confirmed the listener.
+   * `unknown` means it did not answer, so nothing can be concluded.
+   * Call only after {@link isOwnListener} confirmed the listeners.
    */
-  async enforcesApiKey(): Promise<boolean> {
+  async checkApiKeyEnforcement(): Promise<ApiKeyEnforcement> {
     const url = `http://127.0.0.1:${this.port}/v1/status/poll/heripo-api-key-check`;
     try {
       const withoutKey = await fetch(url, {
         signal: AbortSignal.timeout(5000),
       });
       if (withoutKey.status !== 401) {
-        return false;
+        return 'not-enforced';
       }
       const withKey = await fetch(url, {
         headers: { 'X-Api-Key': loadOrCreateDoclingApiKey(this.venvPath) },
         signal: AbortSignal.timeout(5000),
       });
-      return withKey.status !== 401;
+      return withKey.status === 401 ? 'not-enforced' : 'enforced';
     } catch {
-      return false;
+      return 'unknown';
     }
   }
 
@@ -130,18 +152,31 @@ export class DoclingServer {
   }
 
   /**
-   * Stops this venv's docling-serve on the port. Returns false and leaves the
-   * process running when the port is held by any other process.
+   * Stops this venv's docling-serve on the port, killing only the listener
+   * PIDs that were checked. Returns false and leaves every process running when
+   * any visible listener on the port belongs to another process.
    */
   async stopOwnServer(): Promise<boolean> {
-    const listener = await this.findListener();
-    if (!listener) {
+    const listeners = await this.findListeners();
+    if (listeners.length === 0) {
       return true;
     }
-    if (!this.isOwnListener(listener)) {
+    if (listeners.some((l) => !this.isOwnListener(l))) {
       return false;
     }
-    await DoclingServer.killProcessOnPort(this.logger, this.port);
+
+    const pids = listeners
+      .map((l) => String(l.pid))
+      .filter((pid) => pid !== String(process.pid));
+    this.logger.info(
+      '[DoclingEnvironment] Stopping docling-serve',
+      pids.join(', '),
+      'on port',
+      this.port,
+    );
+    for (const pid of pids) {
+      await spawnAsync('kill', ['-9', pid]).catch(() => undefined);
+    }
     await this.waitForPortRelease();
     return true;
   }

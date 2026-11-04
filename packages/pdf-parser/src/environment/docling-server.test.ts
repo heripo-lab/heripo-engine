@@ -159,24 +159,30 @@ describe('DoclingServer', () => {
     });
   });
 
-  describe('findListener', () => {
-    test('returns the pid, uid and command of the listening process', async () => {
+  describe('findListeners', () => {
+    test('returns every listening process with its uid and command', async () => {
       mockSpawnAsync
         .mockResolvedValueOnce(
-          createSpawnResult({ stdout: 'p4321\nu550\nf20\n' }),
+          createSpawnResult({ stdout: 'p4321\nu550\nf20\np99\nu777\nf21\n' }),
         )
         .mockResolvedValueOnce(
           createSpawnResult({
             stdout: '/opt/python /test/venv/bin/docling-serve run\n',
           }),
+        )
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: '/usr/bin/nc -l\n' }),
         );
       const server = new DoclingServer(logger, '/test/venv', 8080);
 
-      await expect(server.findListener()).resolves.toEqual({
-        pid: 4321,
-        uid: 550,
-        command: '/opt/python /test/venv/bin/docling-serve run',
-      });
+      await expect(server.findListeners()).resolves.toEqual([
+        {
+          pid: 4321,
+          uid: 550,
+          command: '/opt/python /test/venv/bin/docling-serve run',
+        },
+        { pid: 99, uid: 777, command: '/usr/bin/nc -l' },
+      ]);
       expect(mockSpawnAsync).toHaveBeenNthCalledWith(1, 'lsof', [
         '-nP',
         '-iTCP:8080',
@@ -191,20 +197,29 @@ describe('DoclingServer', () => {
       ]);
     });
 
-    test('returns null when no visible process listens', async () => {
+    test('skips entries without a uid', async () => {
+      mockSpawnAsync.mockResolvedValueOnce(
+        createSpawnResult({ stdout: 'u550\np12\nf3\n' }),
+      );
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.findListeners()).resolves.toEqual([]);
+    });
+
+    test('returns no listeners when none is visible', async () => {
       mockSpawnAsync.mockResolvedValueOnce(
         createSpawnResult({ stdout: '', code: 1 }),
       );
       const server = new DoclingServer(logger, '/test/venv', 8080);
 
-      await expect(server.findListener()).resolves.toBeNull();
+      await expect(server.findListeners()).resolves.toEqual([]);
     });
 
-    test('returns null when lsof fails', async () => {
+    test('returns no listeners when lsof fails', async () => {
       mockSpawnAsync.mockRejectedValueOnce(new Error('lsof missing'));
       const server = new DoclingServer(logger, '/test/venv', 8080);
 
-      await expect(server.findListener()).resolves.toBeNull();
+      await expect(server.findListeners()).resolves.toEqual([]);
     });
   });
 
@@ -255,19 +270,28 @@ describe('DoclingServer', () => {
       ).resolves.toBeUndefined();
     });
 
-    test('throws when another process or nothing visible owns the port', async () => {
+    test('throws when another listener shares the port', async () => {
       mockSpawnAsync
-        .mockResolvedValueOnce(createSpawnResult({ stdout: `p7\nu${uid}\n` }))
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: `p7\nu${uid}\np8\nu${uid}\n` }),
+        )
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: '/py /test/venv/bin/docling-serve run' }),
+        )
         .mockResolvedValueOnce(createSpawnResult({ stdout: '/usr/bin/nc -l' }));
+
       await expect(
         new DoclingServer(logger, '/test/venv', 8080).assertOwnListener(),
       ).rejects.toThrow(
-        "Port 8080 is not served by this venv's docling-serve (pid 7)",
+        "Port 8080 is not served by this venv's docling-serve (pid 8)",
       );
+    });
 
+    test('throws when nothing visible owns the port', async () => {
       mockSpawnAsync.mockResolvedValueOnce(
         createSpawnResult({ stdout: '', code: 1 }),
       );
+
       await expect(
         new DoclingServer(logger, '/test/venv', 8080).assertOwnListener(),
       ).rejects.toThrow(/not served by this venv's docling-serve$/);
@@ -285,12 +309,17 @@ describe('DoclingServer', () => {
       await expect(
         new DoclingServer(logger, '/test/venv', 8080).stopOwnServer(),
       ).resolves.toBe(true);
-      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(1);
     });
 
-    test('leaves another process running', async () => {
+    test('leaves every process running when any listener is not ours', async () => {
       mockSpawnAsync
-        .mockResolvedValueOnce(createSpawnResult({ stdout: `p7\nu${uid}\n` }))
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: `p7\nu${uid}\np8\nu${uid}\n` }),
+        )
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: '/py /test/venv/bin/docling-serve run' }),
+        )
         .mockResolvedValueOnce(
           createSpawnResult({
             stdout: '/py /other/venv/bin/docling-serve run',
@@ -300,47 +329,77 @@ describe('DoclingServer', () => {
       await expect(
         new DoclingServer(logger, '/test/venv', 8080).stopOwnServer(),
       ).resolves.toBe(false);
-      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(mockSpawnAsync).not.toHaveBeenCalledWith(
+        'kill',
+        expect.anything(),
+      );
     });
 
-    test('stops this venv server and waits for the port', async () => {
-      const lsofProcess = createMockProcess();
-      const killProcess = createMockProcess();
-      setupProcessMock(lsofProcess, { stdout: '7', code: 0 });
-      setupProcessMock(killProcess, { code: 0 });
-      mockSpawn
-        .mockReturnValueOnce(lsofProcess as any)
-        .mockReturnValueOnce(killProcess as any);
+    test('kills only the checked PIDs and waits for the port', async () => {
       mockSpawnAsync
         .mockResolvedValueOnce(createSpawnResult({ stdout: `p7\nu${uid}\n` }))
         .mockResolvedValueOnce(
           createSpawnResult({ stdout: '/py /test/venv/bin/docling-serve run' }),
         )
+        .mockResolvedValueOnce(createSpawnResult({ code: 0 }))
         .mockResolvedValueOnce(createSpawnResult({ stdout: '', code: 1 }));
 
       await expect(
         new DoclingServer(logger, '/test/venv', 8080).stopOwnServer(),
       ).resolves.toBe(true);
-      expect(mockSpawn).toHaveBeenNthCalledWith(2, 'kill', ['-9', '7']);
+      expect(mockSpawnAsync).toHaveBeenNthCalledWith(3, 'kill', ['-9', '7']);
+      expect(mockSpawnAsync).toHaveBeenNthCalledWith(4, 'lsof', [
+        '-t',
+        '-iTCP:8080',
+        '-sTCP:LISTEN',
+      ]);
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    test('never kills the current process and ignores kill failures', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(
+          createSpawnResult({
+            stdout: `p${process.pid}\nu${uid}\np7\nu${uid}\n`,
+          }),
+        )
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: '/py /test/venv/bin/docling-serve run' }),
+        )
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: '/py /test/venv/bin/docling-serve run' }),
+        )
+        .mockRejectedValueOnce(new Error('kill failed'))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: '', code: 1 }));
+
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).stopOwnServer(),
+      ).resolves.toBe(true);
+      expect(mockSpawnAsync).toHaveBeenCalledWith('kill', ['-9', '7']);
+      expect(mockSpawnAsync).not.toHaveBeenCalledWith('kill', [
+        '-9',
+        String(process.pid),
+      ]);
     });
   });
 
-  describe('enforcesApiKey', () => {
+  describe('checkApiKeyEnforcement', () => {
     afterEach(() => {
       vi.unstubAllGlobals();
     });
 
-    test('requires rejection without the key and acceptance with it', async () => {
+    const url = 'http://127.0.0.1:8080/v1/status/poll/heripo-api-key-check';
+
+    test('is enforced when rejected without the key and accepted with it', async () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce({ status: 401 })
         .mockResolvedValueOnce({ status: 404 });
       vi.stubGlobal('fetch', fetchMock);
 
-      const server = new DoclingServer(logger, '/test/venv', 8080);
-
-      await expect(server.enforcesApiKey()).resolves.toBe(true);
-      const url = 'http://127.0.0.1:8080/v1/status/poll/heripo-api-key-check';
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).checkApiKeyEnforcement(),
+      ).resolves.toBe('enforced');
       expect(fetchMock).toHaveBeenNthCalledWith(
         1,
         url,
@@ -353,30 +412,30 @@ describe('DoclingServer', () => {
       );
     });
 
-    test('returns false for a server that accepts requests without the key', async () => {
+    test('is not enforced when requests without the key are accepted', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ status: 404 });
       vi.stubGlobal('fetch', fetchMock);
 
       await expect(
-        new DoclingServer(logger, '/test/venv', 8080).enforcesApiKey(),
-      ).resolves.toBe(false);
+        new DoclingServer(logger, '/test/venv', 8080).checkApiKeyEnforcement(),
+      ).resolves.toBe('not-enforced');
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    test('returns false for a server that rejects this venv key', async () => {
+    test('is not enforced with this key when the server rejects it', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 401 }));
 
       await expect(
-        new DoclingServer(logger, '/test/venv', 8080).enforcesApiKey(),
-      ).resolves.toBe(false);
+        new DoclingServer(logger, '/test/venv', 8080).checkApiKeyEnforcement(),
+      ).resolves.toBe('not-enforced');
     });
 
-    test('returns false when the server does not answer', async () => {
+    test('is unknown when the server does not answer', async () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')));
 
       await expect(
-        new DoclingServer(logger, '/test/venv', 8080).enforcesApiKey(),
-      ).resolves.toBe(false);
+        new DoclingServer(logger, '/test/venv', 8080).checkApiKeyEnforcement(),
+      ).resolves.toBe('unknown');
     });
   });
 

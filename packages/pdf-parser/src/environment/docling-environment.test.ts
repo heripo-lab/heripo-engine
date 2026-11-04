@@ -74,9 +74,10 @@ describe('DoclingEnvironment', () => {
     ) {
       const mockPythonInstance = { setup: vi.fn(options.pythonSetup) };
       const mockServerInstance = {
-        findListener: vi.fn().mockResolvedValue(null),
+        findListeners: vi.fn().mockResolvedValue([]),
         isOwnListener: vi.fn().mockReturnValue(true),
-        enforcesApiKey: vi.fn().mockResolvedValue(true),
+        checkApiKeyEnforcement: vi.fn().mockResolvedValue('enforced'),
+        stopOwnServer: vi.fn().mockResolvedValue(true),
         start: vi.fn(),
         ...server,
       };
@@ -101,9 +102,9 @@ describe('DoclingEnvironment', () => {
       await env.setup();
 
       expect(mockPythonInstance.setup).toHaveBeenCalled();
-      expect(mockServerInstance.findListener).toHaveBeenCalled();
+      expect(mockServerInstance.findListeners).toHaveBeenCalled();
       expect(mockServerInstance.start).toHaveBeenCalledWith(false);
-      expect(mockServerInstance.enforcesApiKey).not.toHaveBeenCalled();
+      expect(mockServerInstance.checkApiKeyEnforcement).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
         '[DoclingEnvironment] Setting up Python environment...',
       );
@@ -114,7 +115,7 @@ describe('DoclingEnvironment', () => {
 
     test('should reuse this venv server when it enforces the API key', async () => {
       const { env, mockServerInstance } = setupWith({
-        findListener: vi.fn().mockResolvedValue(ownListener),
+        findListeners: vi.fn().mockResolvedValue([ownListener]),
       });
 
       await env.setup();
@@ -131,13 +132,14 @@ describe('DoclingEnvironment', () => {
 
     test('should restart this venv server when it does not enforce the API key', async () => {
       const { env, mockServerInstance } = setupWith({
-        findListener: vi.fn().mockResolvedValue(ownListener),
-        enforcesApiKey: vi.fn().mockResolvedValue(false),
+        findListeners: vi.fn().mockResolvedValue([ownListener]),
+        checkApiKeyEnforcement: vi.fn().mockResolvedValue('not-enforced'),
       });
 
       await env.setup();
 
-      expect(mockServerInstance.start).toHaveBeenCalledWith(true);
+      expect(mockServerInstance.stopOwnServer).toHaveBeenCalled();
+      expect(mockServerInstance.start).toHaveBeenCalledWith(false);
       expect(logger.warn).toHaveBeenCalledWith(
         '[DoclingEnvironment] Existing server on port',
         8080,
@@ -147,27 +149,40 @@ describe('DoclingEnvironment', () => {
 
     test('should refuse a port held by another process without probing or stopping it', async () => {
       const { env, mockServerInstance } = setupWith({
-        findListener: vi.fn().mockResolvedValue({ ...ownListener, pid: 99 }),
+        findListeners: vi.fn().mockResolvedValue([{ ...ownListener, pid: 99 }]),
         isOwnListener: vi.fn().mockReturnValue(false),
       });
 
       await expect(env.setup()).rejects.toThrow(
         'Port 8080 is in use by another process (pid 99); not reusing or stopping it',
       );
-      expect(mockServerInstance.enforcesApiKey).not.toHaveBeenCalled();
+      expect(mockServerInstance.checkApiKeyEnforcement).not.toHaveBeenCalled();
+      expect(mockServerInstance.start).not.toHaveBeenCalled();
+    });
+
+    test('should neither reuse nor stop a server whose API key cannot be verified', async () => {
+      const { env, mockServerInstance } = setupWith({
+        findListeners: vi.fn().mockResolvedValue([ownListener]),
+        checkApiKeyEnforcement: vi.fn().mockResolvedValue('unknown'),
+      });
+
+      await expect(env.setup()).rejects.toThrow(
+        'Could not verify the API key of the server on port 8080; not reusing or stopping it',
+      );
+      expect(mockServerInstance.stopOwnServer).not.toHaveBeenCalled();
       expect(mockServerInstance.start).not.toHaveBeenCalled();
     });
 
     test('should start server when killExistingProcess is true', async () => {
       const { env, mockServerInstance } = setupWith(
-        { findListener: vi.fn().mockResolvedValue(ownListener) },
+        { findListeners: vi.fn().mockResolvedValue([ownListener]) },
         { killExistingProcess: true },
       );
 
       await env.setup();
 
       expect(mockServerInstance.start).toHaveBeenCalledWith(true);
-      expect(mockServerInstance.enforcesApiKey).not.toHaveBeenCalled();
+      expect(mockServerInstance.checkApiKeyEnforcement).not.toHaveBeenCalled();
     });
 
     test('should propagate python setup error', async () => {

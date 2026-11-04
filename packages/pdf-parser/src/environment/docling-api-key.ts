@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const DOCLING_API_KEY_FILE = '.docling-serve-api-key';
@@ -27,6 +27,10 @@ export function loadOrCreateDoclingApiKey(venvPath: string): string {
       throw error;
     }
   }
+
+  // A file left with wider permissions (or created by an older version) must
+  // not stay readable by other accounts. Fails if this account does not own it.
+  chmodSync(path, 0o600);
 
   const key = readFileSync(path, 'utf8').trim();
   if (key) {

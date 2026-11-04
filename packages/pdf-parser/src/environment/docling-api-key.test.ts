@@ -44,6 +44,14 @@ describe('loadOrCreateDoclingApiKey', () => {
     expect(loadOrCreateDoclingApiKey(venvPath)).toBe('existing-key');
   });
 
+  test('restricts an existing key file to the owner', () => {
+    const path = join(venvPath, DOCLING_API_KEY_FILE);
+    writeFileSync(path, 'existing-key', { mode: 0o644 });
+
+    expect(loadOrCreateDoclingApiKey(venvPath)).toBe('existing-key');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
   test('replaces an empty key file', () => {
     writeFileSync(join(venvPath, DOCLING_API_KEY_FILE), '');
     const key = loadOrCreateDoclingApiKey(venvPath);
