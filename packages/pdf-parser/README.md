@@ -124,7 +124,7 @@ When using `@heripo/pdf-parser` for the first time, it automatically:
 
 The virtual environment is reused, but local initialization runs dependency setup again. The installer pins docling-serve 1.16.1 and an explicit Docling runtime set; see [python-environment.ts](./src/environment/python-environment.ts). Ensure the `python3` command on PATH is a supported version, not just a separately installed `python3.11`.
 
-The local docling-serve requires an API key, because every account on the machine can reach loopback. The key is created on first start and stored in the venv as `.docling-serve-api-key` (mode `0600`), so parsers of the same account and venv share it and other accounts cannot read it. A running server that rejects the key, for example after the venv was recreated, is restarted instead of reused.
+The local docling-serve requires an API key, because every account on the machine can reach loopback. The key is created on first start and stored in the venv as `.docling-serve-api-key` (mode `0600`), so parsers of the same account and venv share it and other accounts cannot read it. The key is only sent to this venv's docling-serve run by the same account: before reusing a server on the port, and again after starting one, the parser checks the listening process (`lsof`, `ps`). A port held by any other process fails initialization instead of being reused or stopped, even with `killExistingProcess: false`. This venv's server is reused only if it rejects requests without the key and accepts this key; otherwise (for example one started before the key existed, or before the venv was recreated) it is restarted.
 
 ## Installation
 

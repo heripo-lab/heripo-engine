@@ -155,41 +155,173 @@ describe('DoclingServer', () => {
     });
   });
 
-  describe('acceptsApiKey', () => {
+  describe('findListener', () => {
+    test('returns the pid, uid and command of the listening process', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: 'p4321\nu550\nf20\n' }),
+        )
+        .mockResolvedValueOnce(
+          createSpawnResult({
+            stdout: '/opt/python /test/venv/bin/docling-serve run\n',
+          }),
+        );
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.findListener()).resolves.toEqual({
+        pid: 4321,
+        uid: 550,
+        command: '/opt/python /test/venv/bin/docling-serve run',
+      });
+      expect(mockSpawnAsync).toHaveBeenNthCalledWith(1, 'lsof', [
+        '-nP',
+        '-iTCP:8080',
+        '-sTCP:LISTEN',
+        '-Fpu',
+      ]);
+      expect(mockSpawnAsync).toHaveBeenNthCalledWith(2, 'ps', [
+        '-o',
+        'command=',
+        '-p',
+        '4321',
+      ]);
+    });
+
+    test('returns null when no visible process listens', async () => {
+      mockSpawnAsync.mockResolvedValueOnce(
+        createSpawnResult({ stdout: '', code: 1 }),
+      );
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.findListener()).resolves.toBeNull();
+    });
+
+    test('returns null when lsof fails', async () => {
+      mockSpawnAsync.mockRejectedValueOnce(new Error('lsof missing'));
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+
+      await expect(server.findListener()).resolves.toBeNull();
+    });
+  });
+
+  describe('isOwnListener', () => {
+    const uid = process.getuid?.() ?? 0;
+    const server = () => new DoclingServer(logger, '/test/venv', 8080);
+
+    test('accepts this venv docling-serve of this account', () => {
+      expect(
+        server().isOwnListener({
+          pid: 1,
+          uid,
+          command: '/opt/python /test/venv/bin/docling-serve run',
+        }),
+      ).toBe(true);
+    });
+
+    test('rejects another account or another venv', () => {
+      expect(
+        server().isOwnListener({
+          pid: 1,
+          uid: uid + 1,
+          command: '/opt/python /test/venv/bin/docling-serve run',
+        }),
+      ).toBe(false);
+      expect(
+        server().isOwnListener({
+          pid: 1,
+          uid,
+          command: '/opt/python /other/venv/bin/docling-serve run',
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe('assertOwnListener', () => {
+    const uid = String(process.getuid?.() ?? 0);
+
+    test('passes for this venv docling-serve', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: `p7\nu${uid}\n` }))
+        .mockResolvedValueOnce(
+          createSpawnResult({ stdout: '/py /test/venv/bin/docling-serve run' }),
+        );
+
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).assertOwnListener(),
+      ).resolves.toBeUndefined();
+    });
+
+    test('throws when another process or nothing visible owns the port', async () => {
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: `p7\nu${uid}\n` }))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: '/usr/bin/nc -l' }));
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).assertOwnListener(),
+      ).rejects.toThrow(
+        "Port 8080 is not served by this venv's docling-serve (pid 7)",
+      );
+
+      mockSpawnAsync.mockResolvedValueOnce(
+        createSpawnResult({ stdout: '', code: 1 }),
+      );
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).assertOwnListener(),
+      ).rejects.toThrow(/not served by this venv's docling-serve$/);
+    });
+  });
+
+  describe('enforcesApiKey', () => {
     afterEach(() => {
       vi.unstubAllGlobals();
     });
 
-    test('sends the venv API key to an authenticated endpoint', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({ status: 404 });
+    test('requires rejection without the key and acceptance with it', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ status: 401 })
+        .mockResolvedValueOnce({ status: 404 });
       vi.stubGlobal('fetch', fetchMock);
 
       const server = new DoclingServer(logger, '/test/venv', 8080);
 
-      await expect(server.acceptsApiKey()).resolves.toBe(true);
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://127.0.0.1:8080/v1/status/poll/heripo-api-key-check',
-        expect.objectContaining({
-          headers: { 'X-Api-Key': 'test-api-key' },
-        }),
+      await expect(server.enforcesApiKey()).resolves.toBe(true);
+      const url = 'http://127.0.0.1:8080/v1/status/poll/heripo-api-key-check';
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        url,
+        expect.not.objectContaining({ headers: expect.anything() }),
+      );
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        url,
+        expect.objectContaining({ headers: { 'X-Api-Key': 'test-api-key' } }),
       );
     });
 
-    test('returns false when the server rejects the key', async () => {
+    test('returns false for a server that accepts requests without the key', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ status: 404 });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).enforcesApiKey(),
+      ).resolves.toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('returns false for a server that rejects this venv key', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 401 }));
-      const server = new DoclingServer(logger, '/test/venv', 8080);
 
-      await expect(server.acceptsApiKey()).resolves.toBe(false);
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).enforcesApiKey(),
+      ).resolves.toBe(false);
     });
 
-    test('keeps reusing the server when the check cannot connect', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
-      );
-      const server = new DoclingServer(logger, '/test/venv', 8080);
+    test('returns false when the server does not answer', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')));
 
-      await expect(server.acceptsApiKey()).resolves.toBe(true);
+      await expect(
+        new DoclingServer(logger, '/test/venv', 8080).enforcesApiKey(),
+      ).resolves.toBe(false);
     });
   });
 
@@ -247,6 +379,56 @@ describe('DoclingServer', () => {
         'on port',
         8080,
       );
+    });
+
+    test('waits for the killed process to release the port before starting', async () => {
+      const lsofProcess = createMockProcess();
+      const killProcess = createMockProcess();
+      const doclingServeProcess = createMockProcess();
+      setupProcessMock(lsofProcess, { stdout: '12345', code: 0 });
+      setupProcessMock(killProcess, { code: 0 });
+      setupProcessMock(doclingServeProcess, {});
+      mockSpawn
+        .mockReturnValueOnce(lsofProcess as any)
+        .mockReturnValueOnce(killProcess as any)
+        .mockReturnValueOnce(doclingServeProcess as any);
+      mockSpawnAsync
+        .mockResolvedValueOnce(createSpawnResult({ stdout: '12345', code: 0 }))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: '12345', code: 0 }))
+        .mockResolvedValueOnce(createSpawnResult({ stdout: '', code: 1 }));
+
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+      const startPromise = server.start(true);
+      // Polls at 0 ms and 200 ms still see the port in use.
+      await vi.advanceTimersByTimeAsync(300);
+      expect(mockSpawn).toHaveBeenCalledTimes(2);
+
+      // Released at 400 ms, then the startup delay runs.
+      await vi.advanceTimersByTimeAsync(2500);
+      await startPromise;
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(3);
+      expect(mockSpawn).toHaveBeenCalledTimes(3);
+    });
+
+    test('starts anyway when the port stays in use', async () => {
+      const lsofProcess = createMockProcess();
+      const doclingServeProcess = createMockProcess();
+      setupProcessMock(lsofProcess, { stdout: '', code: 1 });
+      setupProcessMock(doclingServeProcess, {});
+      mockSpawn
+        .mockReturnValueOnce(lsofProcess as any)
+        .mockReturnValueOnce(doclingServeProcess as any);
+      mockSpawnAsync.mockResolvedValue(
+        createSpawnResult({ stdout: '999', code: 0 }),
+      );
+
+      const server = new DoclingServer(logger, '/test/venv', 8080);
+      const startPromise = server.start(true);
+      await vi.advanceTimersByTimeAsync(5000 + 2000);
+      await startPromise;
+
+      expect(mockSpawnAsync).toHaveBeenCalledTimes(25);
+      expect(mockSpawn).toHaveBeenCalledTimes(2);
     });
 
     test('should handle docling-serve error event', async () => {

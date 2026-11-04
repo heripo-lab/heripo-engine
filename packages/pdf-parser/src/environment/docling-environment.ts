@@ -32,9 +32,16 @@ export class DoclingEnvironment {
 
     await this.pythonEnv.setup();
 
-    const portInUse = await this.server.isPortInUse();
-    if (portInUse && !this.killExistingProcess) {
-      if (await this.server.acceptsApiKey()) {
+    // Another account's server on the port is invisible to lsof here; the start
+    // then fails to bind and assertServerOwnership() rejects it after startup.
+    const listener = await this.server.findListener();
+    if (listener && !this.killExistingProcess) {
+      if (!this.server.isOwnListener(listener)) {
+        throw new Error(
+          `[DoclingEnvironment] Port ${this.port} is in use by another process (pid ${listener.pid}); not reusing or stopping it`,
+        );
+      }
+      if (await this.server.enforcesApiKey()) {
         this.logger.info(
           '[DoclingEnvironment] Reusing existing server on port',
           this.port,
@@ -43,7 +50,7 @@ export class DoclingEnvironment {
         this.logger.warn(
           '[DoclingEnvironment] Existing server on port',
           this.port,
-          'rejects the API key; restarting it',
+          'does not enforce the API key; restarting it',
         );
         await this.server.start(true);
       }
@@ -60,6 +67,14 @@ export class DoclingEnvironment {
    */
   public async startServer(): Promise<void> {
     await this.server.start(this.killExistingProcess);
+  }
+
+  /**
+   * Throws unless this venv's docling-serve owns the port. The parser calls
+   * this after the server is ready and before it sends the API key.
+   */
+  public async assertServerOwnership(): Promise<void> {
+    await this.server.assertOwnListener();
   }
 
   public static async killProcessOnPort(

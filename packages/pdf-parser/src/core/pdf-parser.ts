@@ -172,17 +172,7 @@ export class PDFParser {
       });
 
       await this.environment.setup();
-
-      const clientUrl = `http://localhost:${this.port}`;
-      this.client = new Docling({
-        api: {
-          baseUrl: clientUrl,
-          timeout: this.timeout,
-          apiKey: loadOrCreateDoclingApiKey(this.venvPath),
-        },
-      });
-
-      await this.waitForServerReady();
+      await this.connectToLocalServer(this.environment);
       this.logger.info('[PDFParser] Ready');
     } catch (error) {
       this.logger.error('[PDFParser] Initialization failed:', error);
@@ -234,6 +224,32 @@ export class PDFParser {
     return false;
   }
 
+  /**
+   * Wait for the local server without the API key, confirm this venv's
+   * docling-serve owns the port, then switch to a client that sends the key.
+   * docling-sdk sends the key on every request, health checks included, so a
+   * keyed client must not talk to a port another account may hold.
+   */
+  private async connectToLocalServer(
+    environment: DoclingEnvironment,
+  ): Promise<void> {
+    const baseUrl = `http://localhost:${this.port}`;
+    this.client = new Docling({
+      api: { baseUrl, timeout: this.timeout },
+    });
+    await this.waitForServerReady();
+    await environment.assertServerOwnership();
+
+    this.client.destroy();
+    this.client = new Docling({
+      api: {
+        baseUrl,
+        timeout: this.timeout,
+        apiKey: loadOrCreateDoclingApiKey(this.venvPath),
+      },
+    });
+  }
+
   private canRecoverLocalServer(): boolean {
     return !this.baseUrl && this.port !== undefined;
   }
@@ -263,17 +279,8 @@ export class PDFParser {
 
     await environment.startServer();
 
-    // Recreate client
     this.client?.destroy();
-    this.client = new Docling({
-      api: {
-        baseUrl: `http://localhost:${this.port}`,
-        timeout: this.timeout,
-        apiKey: loadOrCreateDoclingApiKey(this.venvPath),
-      },
-    });
-
-    await this.waitForServerReady();
+    await this.connectToLocalServer(environment);
     this.logger.info('[PDFParser] Server restarted successfully');
   }
 
