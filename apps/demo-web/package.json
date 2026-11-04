@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test scripts/local-model-reconnect.integration.test.ts",
+    "test": "node --import tsx --test scripts/local-model-reconnect.integration.test.ts src/lib/queue/mask-file-paths.test.ts",
     "test:ci": "pnpm test",
     "generate:otp-secret": "node scripts/generate-otp-secret.js",
     "release": "node scripts/release.mjs",

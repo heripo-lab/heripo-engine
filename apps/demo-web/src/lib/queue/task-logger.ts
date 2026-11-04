@@ -3,6 +3,7 @@ import type { EventEmitter } from 'events';
 import type { SSEEvent } from './task-queue-manager';
 
 import { createLog } from '../db/repositories/log-repository';
+import { maskFilePaths } from './mask-file-paths';
 
 export interface TaskLoggerMethods {
   debug: (...args: unknown[]) => void;
@@ -25,18 +26,7 @@ export interface TaskLoggerStepDetection {
   onStepDetected: (stepId: string) => void;
 }
 
-export function maskFilePaths(message: string): string {
-  return (
-    message
-      // file:// URL
-      .replace(/file:\/\/[^\s]+/g, (match) => match.split('/').pop() || match)
-      // Absolute paths under common roots (/Users, /opt for the deployed app, /tmp, ...)
-      .replace(
-        /\/(?:Users|opt|private|var|tmp|home|Library|Volumes)(?=\/)[^\s]*/g,
-        (match) => match.split('/').pop() || match,
-      )
-  );
-}
+export { maskFilePaths };
 
 /**
  * Creates a task-scoped logger that persists log lines to the DB and
