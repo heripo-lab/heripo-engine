@@ -122,7 +122,11 @@ describe('DoclingServer', () => {
       const result = await server.isPortInUse();
 
       expect(result).toBe(true);
-      expect(mockSpawnAsync).toHaveBeenCalledWith('lsof', ['-ti', ':8080']);
+      expect(mockSpawnAsync).toHaveBeenCalledWith('lsof', [
+        '-t',
+        '-iTCP:8080',
+        '-sTCP:LISTEN',
+      ]);
     });
 
     test('should return false when port is not in use', async () => {
@@ -468,6 +472,39 @@ describe('DoclingServer', () => {
         'on port',
         8080,
       );
+    });
+
+    test('lists only LISTENing processes and never kills the current process', async () => {
+      const lsofProcess = createMockProcess();
+      const killProcess = createMockProcess();
+      setupProcessMock(lsofProcess, {
+        stdout: `12345\n${process.pid}\n12345`,
+        code: 0,
+      });
+      setupProcessMock(killProcess, { code: 0 });
+      mockSpawn
+        .mockReturnValueOnce(lsofProcess as any)
+        .mockReturnValueOnce(killProcess as any);
+
+      await DoclingServer.killProcessOnPort(logger, 8080);
+
+      expect(mockSpawn).toHaveBeenNthCalledWith(1, 'lsof', [
+        '-t',
+        '-iTCP:8080',
+        '-sTCP:LISTEN',
+      ]);
+      expect(mockSpawn).toHaveBeenCalledTimes(2);
+      expect(mockSpawn).toHaveBeenNthCalledWith(2, 'kill', ['-9', '12345']);
+    });
+
+    test('does nothing when only the current process is listed', async () => {
+      const lsofProcess = createMockProcess();
+      setupProcessMock(lsofProcess, { stdout: String(process.pid), code: 0 });
+      mockSpawn.mockReturnValueOnce(lsofProcess as any);
+
+      await DoclingServer.killProcessOnPort(logger, 8080);
+
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
     });
 
     test('should handle when no processes are found', async () => {

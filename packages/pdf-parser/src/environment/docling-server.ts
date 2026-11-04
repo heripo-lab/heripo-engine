@@ -7,6 +7,14 @@ import { join } from 'node:path';
 import { DOCLING_ENVIRONMENT } from '../config/constants';
 import { loadOrCreateDoclingApiKey } from './docling-api-key';
 
+/**
+ * `lsof` arguments that list only processes LISTENing on the TCP port. A plain
+ * `lsof -ti :port` also lists clients connected to it, such as this process.
+ */
+function listenPidArgs(port: number): string[] {
+  return ['-t', `-iTCP:${port}`, '-sTCP:LISTEN'];
+}
+
 export interface DoclingListener {
   pid: number;
   uid: number;
@@ -22,7 +30,7 @@ export class DoclingServer {
 
   async isPortInUse(): Promise<boolean> {
     try {
-      const result = await spawnAsync('lsof', ['-ti', `:${this.port}`]);
+      const result = await spawnAsync('lsof', listenPidArgs(this.port));
       return result.code === 0 && !!result.stdout.trim();
     } catch {
       return false;
@@ -165,12 +173,12 @@ export class DoclingServer {
     port: number,
   ): Promise<void> {
     return new Promise((resolve) => {
-      const lsof = spawn('lsof', ['-ti', `:${port}`]);
-      const pids: string[] = [];
+      const lsof = spawn('lsof', listenPidArgs(port));
+      const found: string[] = [];
 
       lsof.stdout?.on('data', (data) => {
         const txt: string = data.toString();
-        pids.push(
+        found.push(
           ...txt
             .split(/\s+/)
             .map((s) => s.trim())
@@ -179,6 +187,10 @@ export class DoclingServer {
       });
 
       lsof.on('close', () => {
+        // Never the current process, which may hold a client connection.
+        const pids = [...new Set(found)].filter(
+          (pid) => pid !== String(process.pid),
+        );
         if (pids.length === 0) return resolve();
 
         let remaining = pids.length;

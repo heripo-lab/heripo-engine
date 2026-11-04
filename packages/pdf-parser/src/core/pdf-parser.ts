@@ -233,7 +233,9 @@ export class PDFParser {
   private async connectToLocalServer(
     environment: DoclingEnvironment,
   ): Promise<void> {
-    const baseUrl = `http://localhost:${this.port}`;
+    // Same address the server binds to and ownership is checked on: `localhost`
+    // may resolve to ::1, where another account could listen on the same port.
+    const baseUrl = `http://127.0.0.1:${this.port}`;
     this.client = new Docling({
       api: { baseUrl, timeout: this.timeout },
     });

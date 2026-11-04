@@ -154,12 +154,12 @@ describe('PDFParser', () => {
     expect(envMocks.setupMock).toHaveBeenCalledTimes(1);
     // Wait for the server without the key, confirm ownership, then use the key.
     expect(Docling).toHaveBeenNthCalledWith(1, {
-      api: { baseUrl: 'http://localhost:3210', timeout: 5000 },
+      api: { baseUrl: 'http://127.0.0.1:3210', timeout: 5000 },
     });
     expect(envMocks.assertServerOwnershipMock).toHaveBeenCalledTimes(1);
     expect(Docling).toHaveBeenNthCalledWith(2, {
       api: {
-        baseUrl: 'http://localhost:3210',
+        baseUrl: 'http://127.0.0.1:3210',
         timeout: 5000,
         apiKey: 'test-api-key',
       },
@@ -748,7 +748,7 @@ describe('PDFParser', () => {
       // The restarted server and its new client use the same venv API key.
       expect(Docling).toHaveBeenLastCalledWith({
         api: {
-          baseUrl: 'http://localhost:5001',
+          baseUrl: 'http://127.0.0.1:5001',
           timeout: expect.any(Number),
           apiKey: 'test-api-key',
         },
