@@ -66,10 +66,13 @@ export function LedgerModelSelect({
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Info
-                  className="text-muted-foreground h-4 w-4"
+                <button
+                  type="button"
+                  className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
                   aria-label={t.restricted}
-                />
+                >
+                  <Info className="text-muted-foreground h-4 w-4" aria-hidden />
+                </button>
               </TooltipTrigger>
               <TooltipContent>
                 <p>{t.restricted}</p>
