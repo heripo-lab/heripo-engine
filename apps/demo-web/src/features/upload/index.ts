@@ -15,6 +15,8 @@ export { KnownLimitationsBanner } from './components/known-limitations-banner';
 // Hooks
 export { useCreateTask } from './hooks/use-create-task';
 export { useRateLimitCheck } from './hooks/use-rate-limit';
+export { usePublicDemoAuth } from './hooks/use-public-demo-auth';
+export type { PublicDemoAuth } from './hooks/use-public-demo-auth';
 export type { RateLimitCheckResponse } from './hooks/use-rate-limit';
 export { useChunkedUpload } from './hooks/use-chunked-upload';
 export type {
