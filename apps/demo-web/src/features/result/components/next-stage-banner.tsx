@@ -4,7 +4,6 @@ import { ArrowRight, BookOpen, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { publicModeConfig } from '~/lib/config/public-mode';
 import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 
 import { Button } from '~/components/ui/button';
@@ -12,6 +11,11 @@ import { Card, CardContent } from '~/components/ui/card';
 import { LedgerModelSelect } from '~/features/ledger/components/ledger-model-select';
 import { DEFAULT_LEDGER_MODELS } from '~/features/ledger/constants/ledger-run';
 import { useLedgerFromResult } from '~/features/ledger/hooks/use-ledger-from-result';
+import {
+  BypassDialog,
+  ConsentDialog,
+  usePublicDemoAuth,
+} from '~/features/upload';
 
 const text = {
   ko: {
@@ -40,14 +44,29 @@ const text = {
 
 /**
  * The next stage after preprocessing: make the archaeology ledger from this result's processed document in
- * the same session, or open the one already made. The ledger runs every step with its chosen model; the public
- * demo has no OTP bypass here, so it always runs the default models.
+ * the same session, or open the one already made. The ledger runs every step with its chosen model. In public
+ * mode it takes the same consent (Turnstile) and OTP steps as the PDF flow: without OTP bypass the models are
+ * the defaults, and the session's weekly lockout does not apply to a ledger from its own result.
  */
 export function NextStageBanner({ taskId }: { taskId: string }) {
   const t = text[useBrowserLanguage()];
   const router = useRouter();
   const { query, create } = useLedgerFromResult(taskId);
   const [models, setModels] = useState(DEFAULT_LEDGER_MODELS);
+  const auth = usePublicDemoAuth(({ bypassCode, turnstileToken }) =>
+    create.mutate(
+      { models, bypassCode, turnstileToken },
+      {
+        onSuccess: (data) => {
+          auth.reset();
+          router.push(`/process/${data.taskId}`);
+        },
+        onError: (error) => {
+          auth.handleError(error);
+        },
+      },
+    ),
+  );
   const ledgerTask = query.data?.ledgerTask ?? null;
   const again =
     ledgerTask && ['failed', 'cancelled'].includes(ledgerTask.status);
@@ -94,19 +113,15 @@ export function NextStageBanner({ taskId }: { taskId: string }) {
               value={models}
               onChange={setModels}
               disabled={create.isPending || query.isLoading}
-              restricted={publicModeConfig.isPublicMode}
+              restricted={auth.isPublicMode && !auth.isOtpMode}
             />
-            {create.error && (
+            {create.error && !auth.bypassDialogProps.open && (
               <p className="text-destructive text-sm">{create.error.message}</p>
             )}
             <div className="flex justify-end">
               <Button
                 disabled={create.isPending || query.isLoading}
-                onClick={() =>
-                  create.mutate(models, {
-                    onSuccess: (data) => router.push(`/process/${data.taskId}`),
-                  })
-                }
+                onClick={auth.start}
               >
                 {create.isPending ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -118,6 +133,11 @@ export function NextStageBanner({ taskId }: { taskId: string }) {
           </div>
         )}
       </CardContent>
+      <BypassDialog {...auth.bypassDialogProps} />
+      <ConsentDialog
+        {...auth.consentDialogProps}
+        isPending={create.isPending}
+      />
     </Card>
   );
 }

@@ -8,6 +8,8 @@ import {
 } from '~/lib/api/tasks';
 import { taskKeys } from '~/lib/query-keys';
 
+import type { PublicDemoAuth } from '~/features/upload/hooks/use-public-demo-auth';
+
 /** The ledger task made from a PDF result in this session, and making one. */
 export function useLedgerFromResult(taskId: string) {
   const queryClient = useQueryClient();
@@ -16,8 +18,8 @@ export function useLedgerFromResult(taskId: string) {
     queryFn: () => getLedgerTaskForSource(taskId),
   });
   const create = useMutation({
-    mutationFn: (models: LedgerStageModels) =>
-      createLedgerTaskFromResult({ taskId, models }),
+    mutationFn: (input: { models: LedgerStageModels } & PublicDemoAuth) =>
+      createLedgerTaskFromResult({ taskId, ...input }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: taskKeys.all });
     },
