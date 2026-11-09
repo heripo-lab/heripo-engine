@@ -38,6 +38,9 @@ export interface TaskRecord {
   user_agent: string | null;
   // OTP bypass tracking
   is_otp_bypass: boolean;
+  // Left out of the public demo's daily usage (a ledger from the session's own preprocessing result); absent
+  // on older records
+  is_daily_limit_exempt?: boolean;
 }
 
 export interface TaskLogRecord {

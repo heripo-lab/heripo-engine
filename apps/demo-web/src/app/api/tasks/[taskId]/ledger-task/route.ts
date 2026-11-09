@@ -52,8 +52,9 @@ export async function GET(
  * Make a ledger task from a completed PDF processing task's processed document, in the caller's session, and
  * run every ledger step with its chosen model (`models`, or `modelId` for every step; default Claude Haiku 5.5). A session that already made one from
  * the same result gets that task back instead of a second run, unless that run failed or was cancelled.
- * In public mode it takes the same Turnstile or OTP check as other task APIs, but not the weekly session
- * lockout when the result is the session's own; without OTP bypass every step runs the default model.
+ * In public mode it takes the same Turnstile or OTP check as other task APIs; for the session's own result it
+ * skips the weekly session lockout and the daily limit (the concurrent limit still applies) and is left out of
+ * daily usage. Without OTP bypass every step runs the default model.
  */
 export async function POST(
   request: NextRequest,
@@ -89,15 +90,16 @@ export async function POST(
 
     const clientInfo = extractClientInfo(request);
     const filename = `${task.originalFilename.replace(/\.pdf$/i, '')}.processed-document.json`;
+    // one ledger per result (checked above) from the session's own run: the weekly lockout that run set and
+    // the daily limit do not apply; a sample result is shared by every session, so it keeps both
+    const ownResultLedger = task.sessionId === sessionId && !task.isSample;
     const guard = await enforcePublicDemoGuards({
       sessionId,
       clientInfo,
       filename,
       bypassCode: body.bypassCode ?? null,
       turnstileToken: body.turnstileToken ?? null,
-      // one ledger per result (checked above) from the session's own run, which is what locked the session;
-      // a sample result is shared by every session, so it keeps the lockout
-      skipWeeklyLockout: task.sessionId === sessionId && !task.isSample,
+      ownResultLedger,
     });
     if (!guard.ok) return guard.response;
 
@@ -109,6 +111,7 @@ export async function POST(
       sessionId,
       clientInfo,
       isOtpBypass: guard.isOtpBypass,
+      isDailyLimitExempt: ownResultLedger,
       options: {
         models: effectiveLedgerStageModels(resolved.models, guard.isOtpBypass),
         sourceTaskId: task.id,

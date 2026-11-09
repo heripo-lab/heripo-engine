@@ -26,8 +26,8 @@ export type PublicDemoGuardResult =
  * Applies the same policy the PDF task API has always used, in order:
  * 1. OTP bypass verification when a bypass code is provided (skips Turnstile)
  * 2. Turnstile verification otherwise
- * 3. Weekly session lockout (official demo, non-OTP only; skipped with `skipWeeklyLockout`)
- * 4. Daily rate limit (non-OTP only)
+ * 3. Weekly session lockout (official demo, non-OTP only; skipped with `ownResultLedger`)
+ * 4. Concurrent and daily limits (non-OTP only; `ownResultLedger` checks only the concurrent limit)
  *
  * Outside public mode this is a no-op that reports no OTP bypass.
  */
@@ -38,10 +38,11 @@ export async function enforcePublicDemoGuards(params: {
   bypassCode: string | null;
   turnstileToken: string | null;
   /**
-   * Skip the weekly session lockout, for a ledger made from the session's own completed preprocessing
-   * result: that preprocessing run is what locked the session, and the caller allows one ledger per result.
+   * A ledger made from the session's own completed preprocessing result, which the caller allows once per
+   * result: it skips the weekly session lockout that preprocessing run set and the daily limit, so the user
+   * can go on to the ledger the same day. Such a task is also left out of daily usage.
    */
-  skipWeeklyLockout?: boolean;
+  ownResultLedger?: boolean;
 }): Promise<PublicDemoGuardResult> {
   const {
     sessionId,
@@ -49,7 +50,7 @@ export async function enforcePublicDemoGuards(params: {
     filename,
     bypassCode,
     turnstileToken,
-    skipWeeklyLockout = false,
+    ownResultLedger = false,
   } = params;
 
   const isPublicMode = process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true';
@@ -157,7 +158,7 @@ export async function enforcePublicDemoGuards(params: {
   if (
     publicModeConfig.isPublicMode &&
     publicModeConfig.isOfficialDemo &&
-    !skipWeeklyLockout
+    !ownResultLedger
   ) {
     const lockoutStatus = getWeeklyLockoutStatus(sessionId);
     if (lockoutStatus.locked) {
@@ -186,7 +187,7 @@ export async function enforcePublicDemoGuards(params: {
   }
 
   // Step 4: Check rate limit (only for non-OTP users)
-  const usageStatus = getUsageStatus();
+  const usageStatus = getUsageStatus({ ignoreDailyLimit: ownResultLedger });
   if (!usageStatus.canCreate) {
     sendWebhookAsync(
       createRateLimitExceededPayload({

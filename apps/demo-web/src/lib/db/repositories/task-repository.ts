@@ -89,6 +89,8 @@ export interface CreateTaskInput {
   clientIp: string;
   userAgent: string;
   isOtpBypass: boolean;
+  /** Leave the task out of the public demo's daily usage. */
+  isDailyLimitExempt?: boolean;
 }
 
 export function createTask(input: CreateTaskInput): Task {
@@ -122,6 +124,7 @@ export function createTask(input: CreateTaskInput): Task {
     client_ip: input.clientIp,
     user_agent: input.userAgent,
     is_otp_bypass: input.isOtpBypass,
+    ...(input.isDailyLimitExempt ? { is_daily_limit_exempt: true } : {}),
   };
 
   db.tasks.push(record);
