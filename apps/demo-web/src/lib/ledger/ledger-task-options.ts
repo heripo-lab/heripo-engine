@@ -57,6 +57,18 @@ export function resolveLedgerStageModels(input: {
   return { models };
 }
 
+/**
+ * The step models a ledger task actually runs with. Like the PDF task options, the public demo ignores the
+ * requested models and runs the defaults, unless the request passed the OTP bypass.
+ */
+export const effectiveLedgerStageModels = (
+  requested: LedgerStageModels,
+  isOtpBypass: boolean,
+): LedgerStageModels =>
+  process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true' && !isOtpBypass
+    ? { ...DEFAULT_LEDGER_MODELS }
+    : requested;
+
 /** Whether a step of a ledger run uses the Message Batches API: an Anthropic model for it, batches not turned off. */
 export const usesBatch = (options: LedgerTaskOptions, modelId: string) =>
   options.batch !== false && modelId.startsWith('anthropic/');

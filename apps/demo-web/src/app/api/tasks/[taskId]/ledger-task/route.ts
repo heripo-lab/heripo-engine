@@ -11,6 +11,7 @@ import {
 } from '~/lib/ledger/ledger-input';
 import { createLedgerTask } from '~/lib/ledger/ledger-task';
 import {
+  effectiveLedgerStageModels,
   findLedgerTaskForSource,
   resolveLedgerStageModels,
 } from '~/lib/ledger/ledger-task-options';
@@ -104,7 +105,7 @@ export async function POST(
       clientInfo,
       isOtpBypass: guard.isOtpBypass,
       options: {
-        models: resolved.models,
+        models: effectiveLedgerStageModels(resolved.models, guard.isOtpBypass),
         sourceTaskId: task.id,
         ...(body.batch === false ? { batch: false } : {}),
       },
