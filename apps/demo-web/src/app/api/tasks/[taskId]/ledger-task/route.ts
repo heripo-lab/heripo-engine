@@ -52,6 +52,8 @@ export async function GET(
  * Make a ledger task from a completed PDF processing task's processed document, in the caller's session, and
  * run every ledger step with its chosen model (`models`, or `modelId` for every step; default Claude Haiku 5.5). A session that already made one from
  * the same result gets that task back instead of a second run, unless that run failed or was cancelled.
+ * In public mode it takes the same Turnstile or OTP check as other task APIs, but not the weekly session
+ * lockout when the result is the session's own; without OTP bypass every step runs the default model.
  */
 export async function POST(
   request: NextRequest,
@@ -93,6 +95,9 @@ export async function POST(
       filename,
       bypassCode: body.bypassCode ?? null,
       turnstileToken: body.turnstileToken ?? null,
+      // one ledger per result (checked above) from the session's own run, which is what locked the session;
+      // a sample result is shared by every session, so it keeps the lockout
+      skipWeeklyLockout: task.sessionId === sessionId && !task.isSample,
     });
     if (!guard.ok) return guard.response;
 

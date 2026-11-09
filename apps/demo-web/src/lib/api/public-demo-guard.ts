@@ -26,7 +26,7 @@ export type PublicDemoGuardResult =
  * Applies the same policy the PDF task API has always used, in order:
  * 1. OTP bypass verification when a bypass code is provided (skips Turnstile)
  * 2. Turnstile verification otherwise
- * 3. Weekly session lockout (official demo, non-OTP only)
+ * 3. Weekly session lockout (official demo, non-OTP only; skipped with `skipWeeklyLockout`)
  * 4. Daily rate limit (non-OTP only)
  *
  * Outside public mode this is a no-op that reports no OTP bypass.
@@ -37,9 +37,20 @@ export async function enforcePublicDemoGuards(params: {
   filename: string;
   bypassCode: string | null;
   turnstileToken: string | null;
+  /**
+   * Skip the weekly session lockout, for a ledger made from the session's own completed preprocessing
+   * result: that preprocessing run is what locked the session, and the caller allows one ledger per result.
+   */
+  skipWeeklyLockout?: boolean;
 }): Promise<PublicDemoGuardResult> {
-  const { sessionId, clientInfo, filename, bypassCode, turnstileToken } =
-    params;
+  const {
+    sessionId,
+    clientInfo,
+    filename,
+    bypassCode,
+    turnstileToken,
+    skipWeeklyLockout = false,
+  } = params;
 
   const isPublicMode = process.env.NEXT_PUBLIC_PUBLIC_MODE === 'true';
   if (!isPublicMode) {
@@ -143,7 +154,11 @@ export async function enforcePublicDemoGuards(params: {
   }
 
   // Step 3: Check weekly session lockout (official demo + non-OTP only)
-  if (publicModeConfig.isPublicMode && publicModeConfig.isOfficialDemo) {
+  if (
+    publicModeConfig.isPublicMode &&
+    publicModeConfig.isOfficialDemo &&
+    !skipWeeklyLockout
+  ) {
     const lockoutStatus = getWeeklyLockoutStatus(sessionId);
     if (lockoutStatus.locked) {
       sendWebhookAsync(
