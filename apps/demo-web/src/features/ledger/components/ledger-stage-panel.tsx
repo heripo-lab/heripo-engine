@@ -182,6 +182,7 @@ export function LedgerStagePanel() {
         value={models}
         onChange={setModels}
         disabled={isPending}
+        restricted={isPublicMode && !isOtpMode}
       />
 
       {/* Submit error */}

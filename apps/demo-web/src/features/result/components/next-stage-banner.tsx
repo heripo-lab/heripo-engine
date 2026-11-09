@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { publicModeConfig } from '~/lib/config/public-mode';
 import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 
 import { Button } from '~/components/ui/button';
@@ -39,7 +40,8 @@ const text = {
 
 /**
  * The next stage after preprocessing: make the archaeology ledger from this result's processed document in
- * the same session, or open the one already made. The ledger runs every step with its chosen model.
+ * the same session, or open the one already made. The ledger runs every step with its chosen model; the public
+ * demo has no OTP bypass here, so it always runs the default models.
  */
 export function NextStageBanner({ taskId }: { taskId: string }) {
   const t = text[useBrowserLanguage()];
@@ -92,6 +94,7 @@ export function NextStageBanner({ taskId }: { taskId: string }) {
               value={models}
               onChange={setModels}
               disabled={create.isPending || query.isLoading}
+              restricted={publicModeConfig.isPublicMode}
             />
             {create.error && (
               <p className="text-destructive text-sm">{create.error.message}</p>
