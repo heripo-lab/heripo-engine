@@ -12,6 +12,8 @@ interface UseAutoNavigateOptions {
   kind?: 'raw-data' | 'ledger';
   delay?: number;
   disabled?: boolean;
+  /** Keep OTP mode (`?otp=true`) on the result page, where the ledger card uses it. */
+  otpMode?: boolean;
 }
 
 /**
@@ -26,6 +28,7 @@ export function useAutoNavigate({
   kind = 'raw-data',
   delay = 1500,
   disabled = false,
+  otpMode = false,
 }: UseAutoNavigateOptions): void {
   const router = useRouter();
 
@@ -36,11 +39,11 @@ export function useAutoNavigate({
       const destination =
         kind === 'ledger'
           ? `/ledger/validation/${taskId}`
-          : `/result/${taskId}`;
+          : `/result/${taskId}${otpMode ? '?otp=true' : ''}`;
       const timer = setTimeout(() => {
         router.push(destination);
       }, delay);
       return () => clearTimeout(timer);
     }
-  }, [status, resultUrl, router, taskId, kind, delay, disabled]);
+  }, [status, resultUrl, router, taskId, kind, delay, disabled, otpMode]);
 }
