@@ -4,7 +4,12 @@ import { existsSync, readFileSync } from 'fs';
 import { NextResponse } from 'next/server';
 
 import { enforcePublicDemoGuards } from '~/lib/api/public-demo-guard';
-import { getTaskByIdForSession } from '~/lib/db/repositories/task-repository';
+import { publicModeConfig } from '~/lib/config/public-mode';
+import {
+  claimLedgerExemption,
+  getTaskByIdForSession,
+  isLedgerExemptionUsed,
+} from '~/lib/db/repositories/task-repository';
 import {
   LedgerInputError,
   parseLedgerInputText,
@@ -52,9 +57,10 @@ export async function GET(
  * Make a ledger task from a completed PDF processing task's processed document, in the caller's session, and
  * run every ledger step with its chosen model (`models`, or `modelId` for every step; default Claude Haiku 5.5). A session that already made one from
  * the same result gets that task back instead of a second run, unless that run failed or was cancelled.
- * In public mode it takes the same Turnstile or OTP check as other task APIs; for the session's own result it
- * skips the weekly session lockout and the daily limit (the concurrent limit still applies) and is left out of
- * daily usage. Without OTP bypass every step runs the default model.
+ * In public mode it takes the same Turnstile or OTP check as other task APIs. The first ledger from the
+ * session's own result skips the weekly session lockout and the daily limit (the concurrent limit still
+ * applies), is left out of daily usage and does not extend the lockout; that exemption is used once per result,
+ * even when the ledger is deleted. Without OTP bypass every step runs the default model.
  */
 export async function POST(
   request: NextRequest,
@@ -90,9 +96,14 @@ export async function POST(
 
     const clientInfo = extractClientInfo(request);
     const filename = `${task.originalFilename.replace(/\.pdf$/i, '')}.processed-document.json`;
-    // one ledger per result (checked above) from the session's own run: the weekly lockout that run set and
-    // the daily limit do not apply; a sample result is shared by every session, so it keeps both
-    const ownResultLedger = task.sessionId === sessionId && !task.isSample;
+    // the first ledger from the session's own run skips the weekly lockout that run set and the daily limit;
+    // a sample result is shared by every session, and a ledger made again (after deletion, failure or
+    // cancellation) keeps both
+    const ownResultLedger =
+      publicModeConfig.isPublicMode &&
+      task.sessionId === sessionId &&
+      !task.isSample &&
+      !isLedgerExemptionUsed(task.id);
     const guard = await enforcePublicDemoGuards({
       sessionId,
       clientInfo,
@@ -105,13 +116,20 @@ export async function POST(
 
     const rawText = readFileSync(task.processedResultPath, 'utf8');
     parseLedgerInputText(rawText);
+    // an OTP bypass has no limits to skip, so it leaves the exemption unused
+    const exempt = ownResultLedger && !guard.isOtpBypass;
+    if (exempt && !claimLedgerExemption(task.id))
+      return NextResponse.json(
+        { error: 'A ledger is already being made from this result' },
+        { status: 409 },
+      );
     const created = await createLedgerTask({
       rawText,
       filename,
       sessionId,
       clientInfo,
       isOtpBypass: guard.isOtpBypass,
-      isDailyLimitExempt: ownResultLedger,
+      isDailyLimitExempt: exempt,
       options: {
         models: effectiveLedgerStageModels(resolved.models, guard.isOtpBypass),
         sourceTaskId: task.id,

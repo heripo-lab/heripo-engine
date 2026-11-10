@@ -133,6 +133,24 @@ export function createTask(input: CreateTaskInput): Task {
   return recordToTask(record);
 }
 
+/** Whether a ledger exempt from the public demo's limits was already made from this preprocessing task. */
+export function isLedgerExemptionUsed(id: string): boolean {
+  return !!readDatabase().tasks.find((t) => t.id === id)?.ledger_exemption_used;
+}
+
+/**
+ * Marks the limit exemption of this preprocessing task as used. Returns false when it already was (another
+ * request took it first). The mark stays when the ledger is deleted, fails or is cancelled.
+ */
+export function claimLedgerExemption(id: string): boolean {
+  const db = readDatabase();
+  const record = db.tasks.find((t) => t.id === id);
+  if (!record || record.ledger_exemption_used) return false;
+  record.ledger_exemption_used = true;
+  writeDatabase(db);
+  return true;
+}
+
 export function getTaskById(id: string): Task | null {
   const db = readDatabase();
   const record = db.tasks.find((t) => t.id === id);
@@ -312,8 +330,10 @@ export function updateLedgerTaskResult(
   record.progress_percent = 100;
 
   // Record success session for weekly lockout (non-OTP bypass only),
-  // keeping the public demo policy consistent across task kinds
-  if (!record.is_otp_bypass) {
+  // keeping the public demo policy consistent across task kinds; a ledger
+  // exempt from the limits continues its preprocessing run and does not
+  // extend the lockout that run set
+  if (!record.is_otp_bypass && !record.is_daily_limit_exempt) {
     db.successSessions.push({
       session_id: record.session_id,
       task_id: record.id,

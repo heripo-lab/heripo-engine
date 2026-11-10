@@ -41,6 +41,9 @@ export interface TaskRecord {
   // Left out of the public demo's daily usage (a ledger from the session's own preprocessing result); absent
   // on older records
   is_daily_limit_exempt?: boolean;
+  // On a preprocessing task: a ledger exempt from the public demo's limits was made from it. Kept when that
+  // ledger is deleted, so the exemption is used once per result
+  ledger_exemption_used?: boolean;
 }
 
 export interface TaskLogRecord {
