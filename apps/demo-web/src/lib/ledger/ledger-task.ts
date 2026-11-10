@@ -19,6 +19,8 @@ export async function createLedgerTask(input: {
   sessionId: string;
   clientInfo: { ip: string; userAgent: string };
   isOtpBypass: boolean;
+  /** Leave the task out of the public demo's daily usage (a ledger from the session's own result). */
+  isDailyLimitExempt?: boolean;
   options: LedgerTaskOptions;
 }) {
   const taskId = `task_${crypto.randomUUID()}`;
@@ -41,6 +43,7 @@ export async function createLedgerTask(input: {
     clientIp: input.clientInfo.ip,
     userAgent: input.clientInfo.userAgent,
     isOtpBypass: input.isOtpBypass,
+    isDailyLimitExempt: input.isDailyLimitExempt,
   });
 
   // the dispatcher runs the ledger worker by task kind

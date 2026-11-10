@@ -286,15 +286,24 @@ export async function getLedgerTaskForSource(
   return handleResponse(response);
 }
 
-/** Make a ledger task from a completed PDF processing task in this session; an existing one is returned. */
+/**
+ * Make a ledger task from a completed PDF processing task in this session; an existing one is returned. In
+ * public mode the request carries a Turnstile token or an OTP bypass code.
+ */
 export async function createLedgerTaskFromResult(input: {
   taskId: string;
   models: LedgerStageModels;
+  bypassCode?: string;
+  turnstileToken?: string;
 }): Promise<{ taskId: string; existing: boolean }> {
   const response = await fetch(`/api/tasks/${input.taskId}/ledger-task`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ models: input.models }),
+    body: JSON.stringify({
+      models: input.models,
+      bypassCode: input.bypassCode,
+      turnstileToken: input.turnstileToken,
+    }),
   });
   return handleResponse(response);
 }

@@ -33,7 +33,13 @@ export function getNextResetTime(): Date {
   return tomorrow;
 }
 
-export function getUsageStatus(): UsageStatus {
+/**
+ * The public demo's usage: daily usage counts today's non-OTP tasks that are not exempt from it, and the
+ * concurrent limit counts every active task. `ignoreDailyLimit` checks only the concurrent limit.
+ */
+export function getUsageStatus(
+  options: { ignoreDailyLimit?: boolean } = {},
+): UsageStatus {
   const db = readDatabase();
   const todayUTC = getTodayUTC();
   const limit = parseInt(process.env.DAILY_LIMIT || '1', 10);
@@ -53,7 +59,8 @@ export function getUsageStatus(): UsageStatus {
     (t) =>
       t.status === 'completed' &&
       t.completed_at?.startsWith(todayUTC) &&
-      !t.is_otp_bypass,
+      !t.is_otp_bypass &&
+      !t.is_daily_limit_exempt,
   ).length;
 
   // Count active tasks (queued or running)
@@ -66,6 +73,7 @@ export function getUsageStatus(): UsageStatus {
     (t) =>
       (t.status === 'queued' || t.status === 'running') &&
       !t.is_otp_bypass &&
+      !t.is_daily_limit_exempt &&
       t.created_at.startsWith(todayUTC),
   ).length;
 
@@ -90,7 +98,7 @@ export function getUsageStatus(): UsageStatus {
   }
 
   // Block if daily limit reached
-  if (todayUsed >= limit) {
+  if (!options.ignoreDailyLimit && todayUsed >= limit) {
     return {
       canCreate: false,
       reason: `Daily limit (${limit} ${limit === 1 ? 'task' : 'tasks'}) reached. Please try again tomorrow.`,

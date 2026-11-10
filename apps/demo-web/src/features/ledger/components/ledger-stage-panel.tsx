@@ -1,11 +1,9 @@
 'use client';
 
 import { ArrowRight, Info, Loader2 } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
-import type { ApiResponseError } from '~/lib/api/tasks';
-import { publicModeConfig } from '~/lib/config/public-mode';
 import { useBrowserLanguage } from '~/lib/hooks/use-browser-language';
 
 import { Button } from '~/components/ui/button';
@@ -14,6 +12,7 @@ import {
   BypassDialog,
   ConsentDialog,
   RateLimitBanner,
+  usePublicDemoAuth,
   useRateLimitCheck,
 } from '~/features/upload';
 
@@ -51,94 +50,36 @@ export function LedgerStagePanel() {
   const t = text[useBrowserLanguage()];
   const [file, setFile] = useState<File | null>(null);
   const [models, setModels] = useState(DEFAULT_LEDGER_MODELS);
-  const [consentDialogOpen, setConsentDialogOpen] = useState(false);
-  const [bypassDialogOpen, setBypassDialogOpen] = useState(false);
-  const [bypassCode, setBypassCode] = useState('');
-  const [otpError, setOtpError] = useState<string | undefined>();
-  const [otpRemainingAttempts, setOtpRemainingAttempts] = useState<
-    number | undefined
-  >();
-  const [otpPermanentlyLocked, setOtpPermanentlyLocked] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const turnstileTokenRef = useRef<string | undefined>(undefined);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const createLedgerTaskMutation = useCreateLedgerTask();
   const { data: rateLimit } = useRateLimitCheck();
 
-  const isPublicMode = publicModeConfig.isPublicMode;
-  const isOtpMode = isPublicMode && searchParams.get('otp') === 'true';
-  const isBlocked =
-    isPublicMode && rateLimit && !rateLimit.canCreate && !bypassCode;
-
-  const performSubmit = (code: string) => {
+  const auth = usePublicDemoAuth(({ bypassCode, turnstileToken }) => {
     if (!file) return;
-
-    setOtpError(undefined);
     setSubmitError(null);
-
     createLedgerTaskMutation.mutate(
-      {
-        file,
-        models,
-        bypassCode: code || undefined,
-        turnstileToken: turnstileTokenRef.current,
-      },
+      { file, models, bypassCode, turnstileToken },
       {
         onSuccess: (data) => {
           setFile(null);
-          setOtpError(undefined);
-          setOtpRemainingAttempts(undefined);
-          setOtpPermanentlyLocked(false);
-          setBypassCode('');
-          turnstileTokenRef.current = undefined;
+          auth.reset();
           router.push(`/process/${data.taskId}`);
         },
         onError: (error) => {
-          const apiError = error as ApiResponseError;
-
-          if (
-            apiError.code === 'INVALID_OTP' ||
-            apiError.code === 'OTP_LOCKED' ||
-            apiError.code === 'OTP_PERMANENTLY_LOCKED'
-          ) {
-            setOtpError(apiError.message);
-            setOtpRemainingAttempts(apiError.remainingAttempts);
-            setOtpPermanentlyLocked(
-              apiError.code === 'OTP_PERMANENTLY_LOCKED' ||
-                apiError.code === 'OTP_LOCKED',
-            );
-            setBypassDialogOpen(true);
-            return;
-          }
-
-          setSubmitError(apiError.message || t.failed);
+          if (auth.handleError(error)) return;
+          setSubmitError(error.message || t.failed);
         },
       },
     );
-  };
+  });
+  const { isPublicMode, isOtpMode } = auth;
+  const isBlocked =
+    isPublicMode && rateLimit && !rateLimit.canCreate && !auth.bypassCode;
 
   const handleStartClick = () => {
     if (!file) return;
-    setConsentDialogOpen(true);
-  };
-
-  const handleConsentConfirm = (turnstileToken?: string) => {
-    setConsentDialogOpen(false);
-    turnstileTokenRef.current = turnstileToken;
-
-    if (isOtpMode && !bypassCode) {
-      setBypassDialogOpen(true);
-      return;
-    }
-
-    performSubmit(bypassCode);
-  };
-
-  const handleOtpSuccess = (code: string) => {
-    setBypassCode(code);
-    setBypassDialogOpen(false);
-    performSubmit(code);
+    auth.start();
   };
 
   const isPending = createLedgerTaskMutation.isPending;
@@ -182,6 +123,7 @@ export function LedgerStagePanel() {
         value={models}
         onChange={setModels}
         disabled={isPending}
+        restricted={isPublicMode && !isOtpMode}
       />
 
       {/* Submit error */}
@@ -214,24 +156,10 @@ export function LedgerStagePanel() {
       </div>
 
       {/* Bypass Dialog */}
-      <BypassDialog
-        open={bypassDialogOpen}
-        onOpenChange={setBypassDialogOpen}
-        onSuccess={handleOtpSuccess}
-        error={otpError}
-        remainingAttempts={otpRemainingAttempts}
-        isPermanentlyLocked={otpPermanentlyLocked}
-      />
+      <BypassDialog {...auth.bypassDialogProps} />
 
       {/* Consent Dialog */}
-      <ConsentDialog
-        open={consentDialogOpen}
-        onOpenChange={setConsentDialogOpen}
-        onConfirm={handleConsentConfirm}
-        isPending={isPending}
-        isPublicMode={isPublicMode}
-        isOfficialDemo={publicModeConfig.isOfficialDemo}
-      />
+      <ConsentDialog {...auth.consentDialogProps} isPending={isPending} />
     </div>
   );
 }

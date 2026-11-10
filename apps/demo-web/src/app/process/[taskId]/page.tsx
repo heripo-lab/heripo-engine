@@ -46,6 +46,7 @@ export default function ProcessPage({ params }: PageProps) {
     taskId,
     kind: task?.kind ?? 'raw-data',
     disabled: disableAutoNavigate,
+    otpMode: searchParams.get('otp') === 'true',
   });
 
   const handleCancelClick = () => {

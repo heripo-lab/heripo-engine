@@ -65,6 +65,9 @@ function HomePageContent() {
   const isOtpMode = isPublicMode && hasOtpParam;
   const isBlocked =
     isPublicMode && rateLimit && !rateLimit.canCreate && !bypassCode;
+  // OTP mode carries on to the process and result pages, so the ledger card there keeps it
+  const processPath = (taskId: string) =>
+    `/process/${taskId}${isOtpMode ? '?otp=true' : ''}`;
 
   // Centralized submit logic for both direct and chunked upload
   const performSubmit = useCallback(
@@ -98,7 +101,7 @@ function HomePageContent() {
             // Navigate after a short delay to show completion
             setTimeout(() => {
               setUploadProgressOpen(false);
-              router.push(`/process/${taskId}`);
+              router.push(processPath(taskId));
             }, 500);
           },
           onError: (error) => {
@@ -140,7 +143,7 @@ function HomePageContent() {
               setBypassCode('');
               turnstileTokenRef.current = undefined;
               pendingSubmitRef.current = null;
-              router.push(`/process/${data.taskId}`);
+              router.push(processPath(data.taskId));
             },
             onError: (error) => {
               // Handle OTP-related errors
@@ -168,7 +171,14 @@ function HomePageContent() {
         );
       }
     },
-    [bypassCode, bypassDialogOpen, chunkedUpload, createTaskMutation, router],
+    [
+      bypassCode,
+      bypassDialogOpen,
+      chunkedUpload,
+      createTaskMutation,
+      router,
+      isOtpMode,
+    ],
   );
 
   const form = useForm({
