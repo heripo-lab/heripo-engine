@@ -193,18 +193,73 @@ describe('planCandidateDeduplication', () => {
   test('merges same numbers and one-to-one correspondences by code and blocks the pairs a model must judge', () => {
     const split = planCandidateDeduplication(plan, discovery());
 
-    expect(split.version).toBe('candidate-deduplication-split.v3');
+    expect(split.version).toBe('candidate-deduplication-split.v4');
     expect(split.ruleMerges).toEqual([
       { candidateIds: ['a1', 'a2'], rule: 'same_number' },
       { candidateIds: ['b1', 'b2'], rule: 'number_correspondence' },
     ]);
     expect(split.blocks).toEqual([
-      { blockId: 'block-1', candidateIds: ['a1', 'a2', 'f1', 'f2'] },
-      { blockId: 'block-2', candidateIds: ['c1', 'c2', 'c3'] },
-      { blockId: 'block-3', candidateIds: ['d1', 'd2'] },
-      { blockId: 'block-4', candidateIds: ['e1', 'e2'] },
-      { blockId: 'block-5', candidateIds: ['g1', 'g2'] },
-      { blockId: 'block-6', candidateIds: ['h1', 'h2'] },
+      {
+        blockId: 'block-1',
+        candidateIds: ['a1', 'a2', 'f1', 'f2'],
+        ruleGroups: [['a1', 'a2']],
+      },
+      { blockId: 'block-2', candidateIds: ['c1', 'c2', 'c3'], ruleGroups: [] },
+      { blockId: 'block-3', candidateIds: ['d1', 'd2'], ruleGroups: [] },
+      { blockId: 'block-4', candidateIds: ['e1', 'e2'], ruleGroups: [] },
+      { blockId: 'block-5', candidateIds: ['g1', 'g2'], ruleGroups: [] },
+      { blockId: 'block-6', candidateIds: ['h1', 'h2'], ruleGroups: [] },
+    ]);
+  });
+
+  test('keeps rule-merged candidates as separate block members without groups in split v3', () => {
+    const split = planCandidateDeduplication(
+      plan,
+      discovery(),
+      'candidate-deduplication-split.v3',
+    );
+
+    expect(split.ruleMerges).toEqual(
+      planCandidateDeduplication(plan, discovery()).ruleMerges,
+    );
+    expect(split.blocks[0]).toEqual({
+      blockId: 'block-1',
+      candidateIds: ['a1', 'a2', 'f1', 'f2'],
+    });
+  });
+
+  test('marks the rule groups of a block from split v4 and leaves groups without model pairs out of blocks', () => {
+    const tombs = (): CandidateDiscoveryResult => ({
+      ...discovery(),
+      candidates: [
+        candidate('m1', 'feature', '墓', 'M218', '/t1'),
+        candidate('r1', 'feature', '墓葬', '218', '/r0c0'),
+        candidate('r2', 'feature', '墓葬', '218', '/r1c0'),
+        candidate('s1', 'feature', '墓葬', '206', '/r0c1'),
+        candidate('s2', 'feature', '墓葬', '206', '/r1c1'),
+      ],
+    });
+
+    const v4 = planCandidateDeduplication(plan, tombs());
+    const v3 = planCandidateDeduplication(
+      plan,
+      tombs(),
+      'candidate-deduplication-split.v3',
+    );
+
+    expect(v4.ruleMerges).toEqual([
+      { candidateIds: ['r1', 'r2'], rule: 'same_number' },
+      { candidateIds: ['s1', 's2'], rule: 'same_number' },
+    ]);
+    expect(v3.blocks).toEqual([
+      { blockId: 'block-1', candidateIds: ['m1', 'r1', 'r2'] },
+    ]);
+    expect(v4.blocks).toEqual([
+      {
+        blockId: 'block-1',
+        candidateIds: ['m1', 'r1', 'r2'],
+        ruleGroups: [['r1', 'r2']],
+      },
     ]);
   });
 
@@ -223,7 +278,11 @@ describe('planCandidateDeduplication', () => {
       ],
     });
 
-    const v3 = planCandidateDeduplication(plan, forms());
+    const v3 = planCandidateDeduplication(
+      plan,
+      forms(),
+      'candidate-deduplication-split.v3',
+    );
     const v2 = planCandidateDeduplication(
       plan,
       forms(),
@@ -314,6 +373,58 @@ describe('createCandidateDeduplicationBlockRequest', () => {
         ).userPrompt,
       ).scopeChapterIds,
     ).toEqual(['ch', 'ch2']);
+  });
+
+  test('sends a rule group as one ref with its other candidates under mergedByCode from split v4', () => {
+    const v4 = planCandidateDeduplication(plan, discovery());
+    const v3 = planCandidateDeduplication(
+      plan,
+      discovery(),
+      'candidate-deduplication-split.v3',
+    );
+
+    const grouped = createCandidateDeduplicationBlockRequest(
+      plan,
+      discovery(),
+      v4.blocks[0],
+    );
+    const separate = createCandidateDeduplicationBlockRequest(
+      plan,
+      discovery(),
+      v3.blocks[0],
+    );
+    const payload = JSON.parse(grouped.userPrompt);
+
+    expect(grouped.promptVersion).toBe('candidate-deduplication.v9');
+    expect(
+      payload.candidates.map(
+        (c: { ref: string; candidateId: string; mergedByCode?: unknown[] }) => [
+          c.ref,
+          c.candidateId,
+          c.mergedByCode?.length ?? 0,
+        ],
+      ),
+    ).toEqual([
+      ['C1', 'a1', 1],
+      ['C2', 'f1', 0],
+      ['C3', 'f2', 0],
+    ]);
+    expect(payload.candidates[0].mergedByCode[0].candidateId).toBe('a2');
+    expect(payload.rules).toEqual([expect.stringContaining('MERGED BY CODE:')]);
+    expect(separate.promptVersion).toBe('candidate-deduplication.v8');
+    expect(JSON.parse(separate.userPrompt).candidates).toHaveLength(4);
+    expect(JSON.parse(separate.userPrompt).rules).toBeUndefined();
+    // a v4 block without a rule group asks exactly what a v3 block asked
+    const plain = createCandidateDeduplicationBlockRequest(
+      plan,
+      discovery(),
+      v4.blocks[1],
+    );
+    expect(plain.promptVersion).toBe('candidate-deduplication.v9');
+    expect(plain.userPrompt).toBe(
+      createCandidateDeduplicationBlockRequest(plan, discovery(), v3.blocks[1])
+        .userPrompt,
+    );
   });
 });
 
@@ -416,7 +527,7 @@ describe('assembleCandidateDeduplicationSplit', () => {
     const audit = await splitAudit();
     audit.blocks[0].response = {
       mergesByKind: {
-        feature: [{ members: ['C1', 'C4'], reason: '같은 가마' }],
+        feature: [{ members: ['C1', 'C3'], reason: '같은 가마' }],
       },
       uncertainMatches: [],
     };
@@ -502,7 +613,7 @@ describe('assembleCandidateDeduplicationSplit', () => {
           },
         }),
       ),
-    ).toEqual(['Uncertain match inside one group: a2, a1']);
+    ).toEqual(['Uncertain match inside one group: f1, a1']);
     expect(blockMembers()[0]).toEqual(['a1', 'a2', 'f1', 'f2']);
   });
 });

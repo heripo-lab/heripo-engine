@@ -21,17 +21,23 @@ import { isSameCandidateDiscoveryScope } from './discovery-plan';
 import { sameObjectNumber } from './object-numbers';
 
 export const CANDIDATE_DEDUPLICATION_SPLIT_VERSION =
-  'candidate-deduplication-split.v3';
+  'candidate-deduplication-split.v4';
 /**
  * Split versions a saved audit may carry; v1 left number-linked pairs under different names apart, unasked; v2 did not
- * merge one object's number written in different forms (`107`, `M107`, `99XXM107`).
+ * merge one object's number written in different forms (`107`, `M107`, `99XXM107`); v3 put candidates that code had
+ * merged into a block as separate refs, so a model could call two of them uncertain.
  */
 export type CandidateDeduplicationSplitVersion =
   | 'candidate-deduplication-split.v1'
   | 'candidate-deduplication-split.v2'
+  | 'candidate-deduplication-split.v3'
   | typeof CANDIDATE_DEDUPLICATION_SPLIT_VERSION;
 export const CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION =
-  'candidate-deduplication.v8' as const;
+  'candidate-deduplication.v9' as const;
+/** Block prompt versions a saved audit may carry: v8 is the block of a split before v4. */
+export type CandidateDeduplicationBlockPromptVersion =
+  | 'candidate-deduplication.v8'
+  | typeof CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION;
 /**
  * Provider options of a block call: Anthropic reasoning effort `low`. On the 32 blocks of four saved reviews,
  * Haiku 5.5 at `low` kept 132 of the 134 whole-pool merge pairs (default effort: 131) with 27% fewer output tokens.
@@ -61,7 +67,15 @@ export interface CandidateDeduplicationSplit {
     rule: CandidateDeduplicationRule;
   }>;
   /** Candidates a model judges together: each block is one connected set of possible duplicates. */
-  blocks: Array<{ blockId: string; candidateIds: string[] }>;
+  blocks: Array<{
+    blockId: string;
+    candidateIds: string[];
+    /**
+     * From split v4: the block's candidates that rule merges already join, two or more per group in pool order. A
+     * block holds whole groups, and a model sees each group as one ref.
+     */
+    ruleGroups?: string[][];
+  }>;
 }
 
 const norm = (s: string | null | undefined) =>
@@ -165,7 +179,8 @@ export function planCandidateDeduplication(
       }
       // from v3 one number in another form (`107`, `M107`, `99XXM107`) names the same object whatever the name
       if (
-        version === CANDIDATE_DEDUPLICATION_SPLIT_VERSION &&
+        (version === 'candidate-deduplication-split.v3' ||
+          version === CANDIDATE_DEDUPLICATION_SPLIT_VERSION) &&
         ia &&
         ib &&
         ia !== ib &&
@@ -232,26 +247,54 @@ export function planCandidateDeduplication(
         rule: 'number_correspondence',
       });
   }
+  // from v4 a block holds whole rule groups: a model pair joins the groups of its candidates, and a pair inside one
+  // group is already decided
+  const grouped = version === CANDIDATE_DEDUPLICATION_SPLIT_VERSION;
+  const rule = cands.map((_, i) => i);
+  const findRule = (x: number): number =>
+    rule[x] === x ? x : (rule[x] = findRule(rule[x]));
+  const indexOf = new Map(cands.map((c, i) => [c.candidateId, i]));
+  if (grouped)
+    for (const merge of ruleMerges) {
+      const [a, b] = merge.candidateIds.map((id) => findRule(indexOf.get(id)!));
+      rule[Math.max(a, b)] = Math.min(a, b);
+    }
+  const pairs = grouped
+    ? model.filter(([i, j]) => findRule(i) !== findRule(j))
+    : model;
   const parent = cands.map((_, i) => i);
   const find = (x: number): number =>
     parent[x] === x ? x : (parent[x] = find(parent[x]));
-  for (const [i, j] of model)
-    parent[Math.max(find(i), find(j))] = Math.min(find(i), find(j));
+  const root = (x: number) => find(findRule(x));
+  for (const [i, j] of pairs)
+    parent[Math.max(root(i), root(j))] = Math.min(root(i), root(j));
   const blocks = new Map<number, number[]>();
-  for (const [i, j] of model)
-    for (const x of [i, j])
-      blocks.set(find(x), [...(blocks.get(find(x)) ?? []), x]);
+  const touched = new Set(pairs.flat().map(findRule));
+  for (const x of grouped
+    ? cands.flatMap((_, i) => (touched.has(findRule(i)) ? [i] : []))
+    : pairs.flat())
+    blocks.set(root(x), [...(blocks.get(root(x)) ?? []), x]);
   return {
     version,
     ruleMerges,
     blocks: [...blocks.entries()]
       .sort(([a], [b]) => a - b)
-      .map(([, members], k) => ({
-        blockId: `block-${k + 1}`,
-        candidateIds: [...new Set(members)]
-          .sort((a, b) => a - b)
-          .map((x) => cands[x].candidateId),
-      })),
+      .map(([, members], k) => {
+        const sorted = [...new Set(members)].sort((a, b) => a - b);
+        const groups = new Map<number, string[]>();
+        for (const x of sorted)
+          groups.set(findRule(x), [
+            ...(groups.get(findRule(x)) ?? []),
+            cands[x].candidateId,
+          ]);
+        return {
+          blockId: `block-${k + 1}`,
+          candidateIds: sorted.map((x) => cands[x].candidateId),
+          ...(grouped
+            ? { ruleGroups: [...groups.values()].filter((g) => g.length > 1) }
+            : {}),
+        };
+      }),
   };
 }
 
@@ -259,15 +302,45 @@ const BLOCK_RULE = `
 BLOCK REVIEW: The pool is one block of candidates that code selected as possible duplicates of each other. Candidates outside the block were decided without you, and code has already merged candidates of one kind with the same identifier and name, so do not reason about candidates you were not given. The supplied units hold every source block and table row with these candidates' evidence; use them as the relevant source context.
 `;
 
-/** The candidates of a block with refs C1… in pool order. */
+const MERGED_BY_CODE_RULE = `MERGED BY CODE: A candidate with mergedByCode stands for itself and the candidates listed there, which code has already merged into one record by their identifiers. Judge it as that one record, using the evidence of all of them; its ref covers them all. Do not ask in uncertainMatches whether the candidates it holds are the same object.`;
+
+/**
+ * The candidates of a block with refs C1… in pool order. From split v4 a rule group is one ref: its first candidate,
+ * with the others under `mergedByCode`.
+ */
 function blockCandidates(
   discovery: CandidateDiscoveryResult,
   block: CandidateDeduplicationSplit['blocks'][number],
 ) {
   const ids = new Set(block.candidateIds);
+  const groupOf = new Map(
+    (block.ruleGroups ?? []).flatMap((g) => g.map((id) => [id, g] as const)),
+  );
+  const byId = new Map(discovery.candidates.map((c) => [c.candidateId, c]));
   return discovery.candidates
-    .filter((c) => ids.has(c.candidateId))
-    .map((candidate, i) => ({ ref: `C${i + 1}`, ...candidate }));
+    .filter(
+      (c) =>
+        ids.has(c.candidateId) &&
+        (groupOf.get(c.candidateId)?.[0] ?? c.candidateId) === c.candidateId,
+    )
+    .map((candidate, i) => {
+      const merged = (groupOf.get(candidate.candidateId) ?? [])
+        .slice(1)
+        .map((id) => byId.get(id)!);
+      return {
+        ref: `C${i + 1}`,
+        ...candidate,
+        ...(merged.length ? { mergedByCode: merged } : {}),
+      };
+    });
+}
+
+/** The candidate IDs a block ref stands for. */
+function refMembers(candidate: ReturnType<typeof blockCandidates>[number]) {
+  return [
+    candidate.candidateId,
+    ...(candidate.mergedByCode ?? []).map((c) => c.candidateId),
+  ];
 }
 
 /** Refs of each record kind among a block's candidates, kinds in order of first appearance. */
@@ -291,9 +364,12 @@ export function createCandidateDeduplicationBlockRequest(
 ) {
   requireCompleteDiscovery(plan, discovery);
   const candidates = blockCandidates(discovery, block);
+  const merged = candidates.some((c) => c.mergedByCode);
   return {
     blockId: block.blockId,
-    promptVersion: CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION,
+    promptVersion: (block.ruleGroups
+      ? CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION
+      : 'candidate-deduplication.v8') as CandidateDeduplicationBlockPromptVersion,
     systemPrompt: SYSTEM_PROMPT + BLOCK_RULE,
     userPrompt: JSON.stringify({
       inputSha256: discovery.inputSha256,
@@ -303,7 +379,12 @@ export function createCandidateDeduplicationBlockRequest(
         : {}),
       blockId: block.blockId,
       candidates,
-      units: deduplicationUnits(plan, candidates, true),
+      units: deduplicationUnits(
+        plan,
+        candidates.flatMap((c) => [c, ...(c.mergedByCode ?? [])]),
+        true,
+      ),
+      ...(merged ? { rules: [MERGED_BY_CODE_RULE] } : {}),
     }),
   };
 }
@@ -325,7 +406,7 @@ export function createCandidateDeduplicationBlockSchema(
 
 export interface CandidateDeduplicationBlockAudit {
   blockId: string;
-  promptVersion: typeof CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION;
+  promptVersion: CandidateDeduplicationBlockPromptVersion;
   systemPrompt: string;
   userPrompt: string;
   response: z.infer<typeof savedMergesByKindSchema>;
@@ -333,7 +414,7 @@ export interface CandidateDeduplicationBlockAudit {
 }
 /** A split review: the code split it was made from and one audit per model block. */
 export interface CandidateDeduplicationSplitAudit {
-  promptVersion: typeof CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION;
+  promptVersion: CandidateDeduplicationBlockPromptVersion;
   split: CandidateDeduplicationSplit;
   blocks: CandidateDeduplicationBlockAudit[];
 }
@@ -499,7 +580,7 @@ export function assembleCandidateDeduplicationSplit(
         // a block holds one record kind, since every pair that forms it does
         merge.members.forEach((ref) => used.add(ref));
         join(
-          members.map((m) => m!.candidateId),
+          members.flatMap((m) => refMembers(m!)),
           merge.reason,
         );
       }
