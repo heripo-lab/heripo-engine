@@ -18,12 +18,17 @@ import {
   savedMergesByKindSchema,
 } from './candidate-deduplication';
 import { isSameCandidateDiscoveryScope } from './discovery-plan';
+import { sameObjectNumber } from './object-numbers';
 
 export const CANDIDATE_DEDUPLICATION_SPLIT_VERSION =
-  'candidate-deduplication-split.v2';
-/** Split versions a saved audit may carry; v1 left number-linked pairs under different names apart, unasked. */
+  'candidate-deduplication-split.v3';
+/**
+ * Split versions a saved audit may carry; v1 left number-linked pairs under different names apart, unasked; v2 did not
+ * merge one object's number written in different forms (`107`, `M107`, `99XXM107`).
+ */
 export type CandidateDeduplicationSplitVersion =
   | 'candidate-deduplication-split.v1'
+  | 'candidate-deduplication-split.v2'
   | typeof CANDIDATE_DEDUPLICATION_SPLIT_VERSION;
 export const CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION =
   'candidate-deduplication.v8' as const;
@@ -43,9 +48,11 @@ export const CANDIDATE_DEDUPLICATION_CONTEXT_KINDS: ReadonlySet<
 /**
  * `same_number`: same kind, identifier and name. `number_correspondence`: same kind and name, and one
  * candidate's identifier stands in the other's anchor block or table row as a number of another form, one to one.
+ * `number_form` (from split v3): same kind, and the identifiers are one number in different forms
+ * (`sameObjectNumber`: `107`, `M107`, `99XXM107`), one to one.
  */
 export type CandidateDeduplicationRule =
-  'same_number' | 'number_correspondence';
+  'same_number' | 'number_correspondence' | 'number_form';
 export interface CandidateDeduplicationSplit {
   version: CandidateDeduplicationSplitVersion;
   /** Pairs merged by code, each with the rule that merged it. */
@@ -140,6 +147,7 @@ export function planCandidateDeduplication(
     }
   const sameNumber: Array<[number, number]> = [];
   const correspondence: Array<[number, number]> = [];
+  const forms: Array<[number, number]> = [];
   const otherLinks: Array<[number, number]> = [];
   const model: Array<[number, number]> = [];
   for (let i = 0; i < cands.length; i++)
@@ -153,6 +161,17 @@ export function planCandidateDeduplication(
       const nb = norm(b.sourceName);
       if (ia && ia === ib && na === nb) {
         sameNumber.push([i, j]);
+        continue;
+      }
+      // from v3 one number in another form (`107`, `M107`, `99XXM107`) names the same object whatever the name
+      if (
+        version === CANDIDATE_DEDUPLICATION_SPLIT_VERSION &&
+        ia &&
+        ib &&
+        ia !== ib &&
+        sameObjectNumber(ia, ib)
+      ) {
+        forms.push([i, j]);
         continue;
       }
       const xa = numberTokens(a);
@@ -188,12 +207,23 @@ export function planCandidateDeduplication(
   const degree = new Map<number, number>();
   for (const pair of [...correspondence, ...otherLinks])
     for (const x of pair) degree.set(x, (degree.get(x) ?? 0) + 1);
+  const formDegree = new Map<number, number>();
+  for (const pair of forms)
+    for (const x of pair) formDegree.set(x, (formDegree.get(x) ?? 0) + 1);
   const ruleMerges: CandidateDeduplicationSplit['ruleMerges'] = [];
   for (const [i, j] of sameNumber)
     ruleMerges.push({
       candidateIds: [cands[i].candidateId, cands[j].candidateId],
       rule: 'same_number',
     });
+  for (const pair of forms) {
+    if (pair.some((x) => formDegree.get(x)! > 1)) model.push(pair);
+    else
+      ruleMerges.push({
+        candidateIds: [cands[pair[0]].candidateId, cands[pair[1]].candidateId],
+        rule: 'number_form',
+      });
+  }
   for (const pair of correspondence) {
     if (pair.some((x) => degree.get(x)! > 1)) model.push(pair);
     else
@@ -378,6 +408,7 @@ export async function deduplicateCandidateBlocks(
 const RULE_REASONS: Record<CandidateDeduplicationRule, string> = {
   same_number: '코드 규칙: 같은 종류·번호·이름',
   number_correspondence: '코드 규칙: 같은 이름, 근거 블록·표 행의 번호 대응',
+  number_form: '코드 규칙: 같은 종류, 같은 번호의 다른 표기',
 };
 
 /**

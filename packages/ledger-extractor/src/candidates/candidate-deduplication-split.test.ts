@@ -193,7 +193,7 @@ describe('planCandidateDeduplication', () => {
   test('merges same numbers and one-to-one correspondences by code and blocks the pairs a model must judge', () => {
     const split = planCandidateDeduplication(plan, discovery());
 
-    expect(split.version).toBe('candidate-deduplication-split.v2');
+    expect(split.version).toBe('candidate-deduplication-split.v3');
     expect(split.ruleMerges).toEqual([
       { candidateIds: ['a1', 'a2'], rule: 'same_number' },
       { candidateIds: ['b1', 'b2'], rule: 'number_correspondence' },
@@ -206,6 +206,39 @@ describe('planCandidateDeduplication', () => {
       { blockId: 'block-5', candidateIds: ['g1', 'g2'] },
       { blockId: 'block-6', candidateIds: ['h1', 'h2'] },
     ]);
+  });
+
+  test('merges one number written in different forms by code in split v3, one to one', () => {
+    const forms = (): CandidateDiscoveryResult => ({
+      ...discovery(),
+      candidates: [
+        candidate('t1', 'feature', '墓', '99XXM107', '/t1'),
+        candidate('t2', 'feature', '墓葬', '107', '/r0c0'),
+        candidate('t3', 'feature', '墓', '102A', '/r0c1'),
+        candidate('t4', 'feature', '墓', '99XXM102', '/t2'),
+        candidate('m1', 'feature', '墓', 'M106', '/t1'),
+        candidate('m2', 'feature', '墓', '99XXM106', '/t2'),
+        candidate('m3', 'feature', '墓', '106', '/r1c0'),
+        candidate('x1', 'artifact', '罐', '107', '/r1c1'),
+      ],
+    });
+
+    const v3 = planCandidateDeduplication(plan, forms());
+    const v2 = planCandidateDeduplication(
+      plan,
+      forms(),
+      'candidate-deduplication-split.v2',
+    );
+
+    expect(v3.ruleMerges).toEqual([
+      { candidateIds: ['t1', 't2'], rule: 'number_form' },
+    ]);
+    expect(v3.blocks.map((b) => b.candidateIds)).toContainEqual([
+      'm1',
+      'm2',
+      'm3',
+    ]);
+    expect(v2.ruleMerges).toEqual([]);
   });
 
   test('leaves number-linked pairs under nested names apart in split v1', () => {

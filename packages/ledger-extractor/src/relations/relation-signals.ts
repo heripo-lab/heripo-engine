@@ -11,6 +11,7 @@ import type {
 } from './place-aliases';
 import type { AliasIndex, NameForm } from './record-names';
 
+import { sameObjectNumber } from '../candidates/object-numbers';
 import { createPlaceAliasResolver } from './place-aliases';
 import {
   FORMS,
@@ -370,7 +371,8 @@ export function collectRelationSignals(
         }
       }
     }
-    // a number such as `M104:18` names its container: a record of another kind whose number ends with `M104`
+    // a number such as `M104:18` names its container: a record of another kind numbered `M104` in any form
+    // (`99XXM104`, or `104` in an appendix register)
     for (const identifier of new Set(
       entry.mentions.flatMap((m) =>
         m.sourceIdentifier ? [m.sourceIdentifier] : [],
@@ -383,7 +385,7 @@ export function collectRelationSignals(
           ([id, numbers]) =>
             id !== recordId &&
             kindOf.get(id) !== kind &&
-            numbers.some((n) => n.endsWith(container)),
+            numbers.some((n) => sameObjectNumber(n, container)),
         )
         .map(([id]) => id);
       if (targets.length)
