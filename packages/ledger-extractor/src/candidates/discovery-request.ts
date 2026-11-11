@@ -96,6 +96,13 @@ export const UNANSWERED_NUMBERED_BLOCKS_RULE =
 export const UNANSWERED_NUMBERED_BLOCKS_RULE_V15 =
   'UNANSWERED NUMBERED BLOCKS: When the input lists unansweredNumberedBlocks, each of those body blocks opens with an object number of the same form as a candidate you proposed, or with a numbered investigation area, trench or grid label such as 23-1구역 or 3트렌치, but no candidate or exclusion cited it. Return a candidate for each block that opens the account of one object of this investigation, with that block as first evidence and its number copied unchanged as sourceIdentifier, or an exclusion with its category when it does not; do not repeat other candidates.';
 
+/**
+ * The v16 form of the numbered-blocks rule: a block can also hold an object number right after a numbering label such
+ * as 编号 or 标本, which a catalog of types introduces mid-block for each described specimen.
+ */
+export const UNANSWERED_NUMBERED_BLOCKS_RULE_V16 =
+  'UNANSWERED NUMBERED BLOCKS: When the input lists unansweredNumberedBlocks, each of those body blocks opens with an object number of the same form as a candidate you proposed, opens with a numbered investigation area, trench or grid label such as 23-1구역 or 3트렌치, or holds an object number right after a numbering label such as 编号 or 标本 (a specimen described in a catalog of types), but no candidate or exclusion cited it. Return a candidate for every object of this investigation that the block describes under its own number, with that block as first evidence and its number copied unchanged as sourceIdentifier, or an exclusion with its category when it describes none; do not repeat other candidates.';
+
 export const SYSTEM_PROMPT_V11 =
   SYSTEM_PROMPT_V10 +
   `- ${RECONSIDERED_EXCLUSIONS_RULE}

@@ -13,6 +13,7 @@ import {
   SIDE_BY_SIDE_TABLES_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
   createCandidateDiscoveryRequest,
   getCandidateSources,
   isSectionHeading,
@@ -34,7 +35,13 @@ export const CANDIDATE_DISCOVERY_NAME_LEAD_CHARS = 15;
  * "编号99XXM105" or "标本M102:11", or at the start of a sentence, as in "…说明文字。99XXM102，示例记录".
  */
 const NAME_LABEL =
-  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|No\.?)[:：]?$/iu;
+  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|(?<![A-Za-z])(?:No|NO)\.?)[:：]?$/u;
+/**
+ * From v16, an object number right after a numbering label: a Latin letter, letters or digits up to a digit, then
+ * any separators and digits (`标本M102:11`, `No.SK01`). A permit number such as `허가번호 제2022-0790` does not count.
+ */
+const LABELLED_NUMBER =
+  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|(?<![A-Za-z])(?:No|NO)\.?)[:：]?([A-Za-z][A-Za-z\d]*\d(?:[:：·\-—]\d+)*)/gu;
 /** Sentence punctuation, optionally followed by opening marks, right before a name. */
 const SENTENCE_START = /[。．；！？.;!?][(（「『“"]*$/u;
 
@@ -408,7 +415,9 @@ function identifierShape(identifier: string | null) {
 /**
  * Body blocks of a v13 response that open with a number of the same form as an identifier the response proposed,
  * after any leading marks, while no candidate or exclusion cites the block and no candidate uses that number. A model
- * can stop part way through a run of numbered accounts without saying so; these blocks ask it about the rest.
+ * can stop part way through a run of numbered accounts without saying so; these blocks ask it about the rest. From
+ * v16 a block also counts when it holds a number right after a numbering label (`标本M102:11`), even when the
+ * response proposed nothing: a catalog of types introduces each specimen mid-block, and a long one is easily skipped.
  */
 export function unansweredNumberedBlocks(
   unit: CandidateDiscoveryUnit,
@@ -427,6 +436,7 @@ export function unansweredNumberedBlocks(
     // is a findspot line, not an area's own account
     ...(level.v15 ? [AREA_LABEL] : []),
   ];
+  // from v15 the area label is always a shape, so a v16 response that proposed nothing is still checked
   if (!shapes.length) return [];
   const leading = new RegExp(`^(?:${shapes.join('|')})`, 'u');
   const numbers = new Set(
@@ -438,10 +448,15 @@ export function unansweredNumberedBlocks(
   ]);
   return getCandidateSources(unit).flatMap(({ sourceId, resource }) => {
     if (cited.has(sourceId)) return [];
-    const number = compact(resource.data.text)
-      .replace(/^[^\p{L}0-9]+/u, '')
-      .match(leading)?.[0];
-    return number && !numbers.has(number) ? [{ sourceId, number }] : [];
+    const text = compact(resource.data.text);
+    const opening = text.replace(/^[^\p{L}0-9]+/u, '').match(leading)?.[0];
+    const labelled = level.v16
+      ? [...text.matchAll(LABELLED_NUMBER)].map((m) => m[1])
+      : [];
+    const number = [opening, ...labelled].find(
+      (n): n is string => !!n && !numbers.has(n),
+    );
+    return number ? [{ sourceId, number }] : [];
   });
 }
 
@@ -505,9 +520,11 @@ export function planCandidateDiscoveryFollowUp(
         ...(rowBlocks.length ? [SIDE_BY_SIDE_TABLES_RULE] : []),
         ...(numberedBlocks.length
           ? [
-              level.v15
-                ? UNANSWERED_NUMBERED_BLOCKS_RULE_V15
-                : UNANSWERED_NUMBERED_BLOCKS_RULE,
+              level.v16
+                ? UNANSWERED_NUMBERED_BLOCKS_RULE_V16
+                : level.v15
+                  ? UNANSWERED_NUMBERED_BLOCKS_RULE_V15
+                  : UNANSWERED_NUMBERED_BLOCKS_RULE,
             ]
           : []),
       ]

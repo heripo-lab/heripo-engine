@@ -18,6 +18,7 @@ import {
   SYSTEM_PROMPT_V11,
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
   createCandidateDiscoveryRequest,
   isSectionHeading,
 } from './discovery-request';
@@ -927,7 +928,13 @@ describe('discovery v13 numbered body blocks', () => {
     ]);
     expect(planned.unit).toBe(unit);
     expect(input.unansweredNumberedBlocks).toEqual(planned.numberedBlocks);
-    expect(input.followUpRules).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V15]);
+    expect(input.followUpRules).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V16]);
+    expect(
+      JSON.parse(
+        planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v15')!
+          .userPrompt,
+      ).followUpRules,
+    ).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V15]);
     expect(
       JSON.parse(
         planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v14')!
@@ -938,6 +945,37 @@ describe('discovery v13 numbered body blocks', () => {
     expect(
       planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v12'),
     ).toBeNull();
+  });
+
+  test('asks v16 blocks that hold a labelled specimen number even when nothing was proposed', () => {
+    const { unit, body } = sections([
+      {
+        id: 'b1',
+        text: '示例类型。标本M102:11，灰色。标本M102:12，灰色。',
+        pdfPageNo: 1,
+      },
+      { id: 'b2', text: '另一示例类型。标本M112:18，红色。', pdfPageNo: 1 },
+      { id: 'b3', text: '示例罐 共3件。', pdfPageNo: 1 },
+    ]);
+    const asked = (
+      candidates: CandidateDiscoveryResponse['candidates'],
+      version?: string,
+    ) =>
+      unansweredNumberedBlocks(
+        unit,
+        { tableRole: 'none', candidates, exclusions: [] },
+        version ?? CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      );
+
+    expect(asked([])).toEqual([
+      { sourceId: 'id:b1', number: 'M102:11' },
+      { sourceId: 'id:b2', number: 'M112:18' },
+    ]);
+    expect(asked([body('示例罐', 'M102:11', 'id:b3', '示例罐')])).toEqual([
+      { sourceId: 'id:b1', number: 'M102:12' },
+      { sourceId: 'id:b2', number: 'M112:18' },
+    ]);
+    expect(asked([], 'candidate-discovery.v15')).toEqual([]);
   });
 
   test('merges the answer to numbered blocks and reports blocks left unanswered', async () => {
