@@ -238,6 +238,16 @@ export function checkCandidate(
       ? match[1]
       : null;
   };
+  // from v17 a register row may take a name that is also a header text from the scope passage in its context
+  const registerNamed = () => {
+    const cell = identifierCell?.resource;
+    return (
+      level.v17 &&
+      cell?.kind === 'tableCell' &&
+      !!unit.table!.registerRows?.some((r) => r.rowIndex === cell.rowIndex) &&
+      unit.context.some((c) => c.text.includes(proposal.sourceName))
+    );
+  };
   let invalid = '';
   if (evidence.length !== proposal.evidence.length)
     invalid = 'Evidence does not match an exact input quote in this unit';
@@ -287,7 +297,8 @@ export function checkCandidate(
     // a table item in a body unit failed above, so the unit has a table here
     headerTexts(unit as Parameters<typeof headerTexts>[0]).has(
       proposal.sourceName.trim(),
-    )
+    ) &&
+    !registerNamed()
   )
     invalid = 'Table item name is a column header';
   else if (

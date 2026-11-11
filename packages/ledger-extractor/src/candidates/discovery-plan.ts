@@ -25,6 +25,11 @@ export const CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS = 10;
  */
 export const CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS = 40;
 
+/** A register row's context excerpt keeps this many characters before the number the scope's text writes... */
+export const CANDIDATE_DISCOVERY_REGISTER_EXCERPT_BEFORE = 30;
+/** ...and this many after it. */
+export const CANDIDATE_DISCOVERY_REGISTER_EXCERPT_AFTER = 60;
+
 /**
  * Code chooses scope, chunk sizes and context; the model cannot schedule more work.
  * The scope is one chapter subtree or several distinct, non-nested subtrees planned in document order.
@@ -33,7 +38,8 @@ export const CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS = 40;
  * A text unit also closes before it would hold more than `maxLabelledNumbers` labelled object numbers
  * (default `CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS`); a single block always fits.
  * A table of `tableIds` lists, in each unit, the data rows whose opening number the scope's text writes with a Latin
- * prefix (`table.registerRows`), so the model knows those rows are objects of this investigation.
+ * prefix (`table.registerRows`), and adds to its read-only context, for each, the first passage of the scope's text that
+ * writes that number, so the model knows those rows are objects of this investigation and what they are called.
  */
 export function prepareCandidateDiscovery(
   index: DocumentResourceIndex,
@@ -109,7 +115,7 @@ export function prepareCandidateDiscovery(
     chapterId: string,
     chapterPath: CandidateDiscoveryUnit['chapterPath'],
     context: CandidateDiscoveryUnit['context'],
-    written?: string[],
+    written?: Map<string, { key: string; text: string }>,
   ) => {
     const cells = index.resources.filter(
       (r): r is Extract<DocumentResource, { kind: 'tableCell' }> =>
@@ -120,7 +126,7 @@ export function prepareCandidateDiscovery(
       row < table.data.grid.length;
       row += options.tableRowsPerUnit
     ) {
-      const registerRows = (written ?? []).length
+      const registerRows = written?.size
         ? table.data.grid
             .slice(row, row + options.tableRowsPerUnit)
             .flatMap((cells, offset) => {
@@ -128,7 +134,7 @@ export function prepareCandidateDiscovery(
                 row + offset > 0 && rowLeadingNumber(cells.map((c) => c.text));
               const writtenAs =
                 number &&
-                written!
+                [...written.keys()]
                   .filter((w) => sameObjectNumber(number, w))
                   .sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
               return writtenAs
@@ -150,7 +156,11 @@ export function prepareCandidateDiscovery(
           (c) =>
             c.rowIndex >= row && c.rowIndex < row + options.tableRowsPerUnit,
         ),
-        context,
+        // a register row's number in the scope's text, so the row has a name and a place in this investigation
+        context: [
+          ...context,
+          ...new Set(registerRows.map((r) => written!.get(r.writtenAs)!)),
+        ],
       });
     }
   };
@@ -234,15 +244,27 @@ export function prepareCandidateDiscovery(
       );
   }
   // tables outside the scope, read with their own chapter and the short text blocks on their pages as context
-  const written = [
-    ...new Set(
-      scoped.flatMap((chapter) =>
-        textByChapter
-          .get(chapter.resourceId!)!
-          .flatMap((t) => latinPrefixedNumbers(t.data.text)),
-      ),
-    ),
-  ];
+  const written = new Map<string, { key: string; text: string }>();
+  for (const chapter of scoped)
+    for (const block of textByChapter.get(chapter.resourceId!)!)
+      for (const number of latinPrefixedNumbers(block.data.text))
+        if (!written.has(number)) {
+          const at = new RegExp([...number].join('\\s*'), 'u').exec(
+            block.data.text,
+          )!;
+          written.set(number, {
+            key: block.key,
+            text: block.data.text.slice(
+              Math.max(
+                0,
+                at.index - CANDIDATE_DISCOVERY_REGISTER_EXCERPT_BEFORE,
+              ),
+              at.index +
+                at[0].length +
+                CANDIDATE_DISCOVERY_REGISTER_EXCERPT_AFTER,
+            ),
+          });
+        }
   for (const tableId of options.tableIds ?? []) {
     const table = index.resources.find(
       (r): r is Extract<DocumentResource, { kind: 'table' }> =>

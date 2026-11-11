@@ -470,4 +470,60 @@ describe('candidate discovery', () => {
     );
     expect(replay.issues).toEqual([]);
   });
+
+  test('accepts from v17 a register row named by a header text that its scope passage also writes', async () => {
+    const { plan, id } = registry();
+    const base = plan.units[0];
+    const row = (
+      getCandidateSources(base).find((s) => s.sourceId === id('2'))!
+        .resource as { rowIndex: number }
+    ).rowIndex;
+    const unit = (context: string) => ({
+      ...base,
+      table: {
+        ...base.table!,
+        registerRows: [{ rowIndex: row, number: '2', writtenAs: 'M2' }],
+      },
+      context: [{ key: 'scope', text: context }],
+    });
+    const candidate = {
+      recordKind: 'artifact' as const,
+      sourceName: '유물명',
+      sourceIdentifier: '2',
+      identifierSourceId: id('2'),
+      nameSourceId: null,
+      eligibilityBasis: 'table_item' as const,
+      reason: '등록 행',
+      evidence: [{ sourceId: id('2'), quote: '2' }],
+    };
+    const headerIssues = async (
+      context: string,
+      version?: 'candidate-discovery.v16',
+    ) => {
+      const target = unit(context);
+      const result = await assembleCandidateDiscovery(
+        { ...plan, units: [target] },
+        [
+          {
+            unitId: target.unitId,
+            ...createCandidateDiscoveryRequest(target, version),
+            response: {
+              tableRole: 'item_table',
+              candidates: [candidate],
+              exclusions: [],
+            },
+            usage,
+          },
+        ],
+      );
+      return result.issues.filter((i) => i.reason.includes('column header'))
+        .length;
+    };
+
+    expect(await headerIssues('M2 유물명 기록')).toBe(0);
+    expect(await headerIssues('M2 기록')).toBe(1);
+    expect(
+      await headerIssues('M2 유물명 기록', 'candidate-discovery.v16'),
+    ).toBe(1);
+  });
 });

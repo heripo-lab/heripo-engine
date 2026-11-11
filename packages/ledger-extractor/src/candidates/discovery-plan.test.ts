@@ -106,18 +106,24 @@ describe('candidate discovery', () => {
     doc.tables[0].grid = [
       [{ text: '墓号', colSpan: 1, rowSpan: 1, isHeader: true }],
       [{ text: '2A', colSpan: 1, rowSpan: 1, isHeader: false }],
+      [{ text: '2B', colSpan: 1, rowSpan: 1, isHeader: false }],
       [{ text: '3', colSpan: 1, rowSpan: 1, isHeader: false }],
     ];
     const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
       scopeChapterId: 'child',
       inputSha256: 'h',
       maxTextChars: 100,
-      tableRowsPerUnit: 2,
+      tableRowsPerUnit: 3,
       tableIds: ['t'],
     });
 
     expect(plan.units[1].table?.registerRows).toEqual([
       { rowIndex: 1, number: '2', writtenAs: 'K2' },
+      { rowIndex: 2, number: '2', writtenAs: 'K2' },
+    ]);
+    expect(plan.units[1].context.map((c) => c.text)).toEqual([
+      '1호 우물',
+      '묘 K2, M2와 99XXM2를 조사했다.',
     ]);
     expect(plan.units[2].table).not.toHaveProperty('registerRows');
   });
