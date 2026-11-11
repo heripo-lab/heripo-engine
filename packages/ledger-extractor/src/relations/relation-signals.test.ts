@@ -3,6 +3,7 @@ import type { ArchaeologyLedgerResult } from '../ledger/archaeology-ledger';
 
 import { describe, expect, test } from 'vitest';
 
+import { resolveRelationParents } from './relation-parents';
 import {
   RELATION_SIGNALS_VERSION,
   collectRelationSignals,
@@ -358,5 +359,67 @@ describe('collectRelationSignals with place aliases', () => {
 
     expect(of('P').map((s) => s.targetRecordIds)).toEqual([['record-L29']]);
     expect(of('L29')).toEqual([]);
+  });
+});
+
+describe('collectRelationSignals with contained numbers', () => {
+  test('names the record whose number ends with the part before a separator and decides it as parent', () => {
+    const plan = {
+      candidateSnapshotId: 'snap',
+      units: [{ sources: [] }],
+      registry: [
+        entry('M104', 'feature', '墓', '99X XM104', [ev('/x', '99X XM104')]),
+        entry('M103', 'feature', '墓', '99XXM103', [ev('/x', '99XXM103')]),
+        entry('F1', 'feature', '1호 수혈', '1호', [ev('/x', '1호 수혈')]),
+        entry('Q1', 'area', '구역', 'Q1', [ev('/x', 'Q1')]),
+        entry('A18', 'artifact', '示例瓶', 'M104:18', [ev('/x', 'M104:18')]),
+        entry('A4', 'artifact', '盘', 'M103：4', [ev('/x', 'M103：4')]),
+        entry('A23', 'artifact', '示例瓶', 'M105\\cdot 23', [ev('/x', 'M105')]),
+        entry('A5', 'artifact', '토기', 'Q1:5', [ev('/x', 'Q1:5')]),
+        entry('A6', 'artifact', '토기', '2-3', [ev('/x', '2-3')]),
+        entry('A7', 'artifact', '토기', 'A18:1', [ev('/x', 'A18:1')]),
+      ],
+    } as unknown as ContentAttachmentPlan;
+    const ledger = {
+      records: [
+        { id: 'record-M104', recordKind: 'feature' },
+        { id: 'record-M103', recordKind: 'feature' },
+        { id: 'record-F1', recordKind: 'feature' },
+        { id: 'record-Q1', recordKind: 'area' },
+      ],
+      sources: [
+        {
+          id: 'source-1',
+          recordId: 'record-A5',
+          excerpt: '1호 수혈에서 출토',
+          locator: '/loc/1',
+          pdfPageNo: 3,
+        },
+      ],
+    } as unknown as ArchaeologyLedgerResult;
+
+    const signals = collectRelationSignals(plan, ledger);
+    const of = (ref: string) =>
+      signals.records
+        .find((r) => r.recordId === `record-${ref}`)!
+        .signals.filter((s) => s.kind === 'identifier')
+        .map((s) => [s.text, s.targetRecordIds]);
+    const parents = resolveRelationParents(signals, ledger);
+
+    expect(of('A18')).toEqual([['M104:18', ['record-M104']]]);
+    expect(of('A4')).toEqual([['M103：4', ['record-M103']]]);
+    expect(of('A23')).toEqual([]);
+    expect(of('A6')).toEqual([]);
+    expect(of('A7')).toEqual([]);
+    expect(
+      parents.parents.map((p) => [p.recordId, p.parentRecordId, p.basis]),
+    ).toEqual([
+      ['record-A18', 'record-M104', 'identifier'],
+      ['record-A4', 'record-M103', 'identifier'],
+      ['record-A5', 'record-F1', 'phrase'],
+    ]);
+    expect(
+      parents.links.map((l) => [l.fromRecordId, l.toRecordId, l.relationLabel]),
+    ).toEqual([['record-A5', 'record-Q1', '번호 체계']]);
   });
 });

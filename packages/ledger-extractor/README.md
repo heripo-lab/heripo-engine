@@ -337,16 +337,17 @@ The thin path is the current way to attach body sentences and table items to a f
 
 The functions below collect parent candidates, decide the parents code can decide, send the remaining questions to a three-run model judgment, and put the results into the ledger. All are deterministic and offline except `judgeRelationParentBatch`.
 
-- **Signals** — `collectRelationSignals(plan, ledger)` returns `relation-signals.v1`, the parent candidates of every record with their source text:
+- **Signals** — `collectRelationSignals(plan, ledger)` returns `relation-signals.v2`, the parent candidates of every record with their source text:
   - `phrase`: a find-spot phrase in the record's own excerpts (`X에서 출토된`, `출수위치 X`). `finding` is false for confirming verbs (`확인`, `검출`, `발견`).
   - `table_row`: another record named in the record's own table row. `header` is the column's first-row cell, and `finding` is true only for a find-spot or membership column (`출토`, `출수`, `수습`, `위치`, `소속`); a cell elsewhere in the row, such as a trench's list of features, only proposes a candidate.
+  - `identifier`: from v2, the record's own number holds another record's number before a separator, as item numbers can include the number of their containing feature (`M104:18` in tomb `99XXM104`, also `：` and `·`). The part before the separator must start with a letter and end in a digit, and a record of another kind whose number ends with it is named; plain numbers such as `2-3` never name one. `finding` is always true.
   - `heading_scope`: the record heading the record's first text falls under in reading order. Numbered headings that name no record close the scope.
   - `chapter_title`: the record's own chapter title naming a record.
 
   Names match by identifier with name, longest name first, in the exact form and in a looser form without `호` after a number, so `98호 수혈` meets a record registered as `98` and `수혈`. When several records answer one place — a report that restarts numbering per period registers `29호 수혈` and `29 수혈` in different chapters — the records nearest the speaking record by chapter path are kept, then the exact form among those still tied; records still tied stay an ambiguous target. A place that names the record itself is no find-spot. The relation-sentence finder below chooses names the same way. A numbered place (`98호 수혈`) never matches a record that has only the bare name. Same-kind records are skipped for rows, headings and chapter titles, since they are siblings or classification headings. No kind hierarchy is assumed. A finding phrase whose place matches no record is kept with no target.
 
-- **Code-decided parents** — `resolveRelationParents(signals, ledger)` returns `relation-parents.v1`:
-  - A parent is set only when finding phrases and membership-column table rows name exactly one record. When they name one feature and records of other kinds, the feature is chosen and the others become link candidates.
+- **Code-decided parents** — `resolveRelationParents(signals, ledger)` returns `relation-parents.v2`:
+  - A parent is set only when finding phrases, membership-column table rows and contained numbers name exactly one record; `basis` is `identifier` when only a contained number named it. When they name one feature and records of other kinds, the feature is chosen and the others become link candidates.
   - Heading-scope and chapter-title signals never set a parent. They become questions, as do confirming phrases, other table rows (`row_only`), unmatched places, ambiguous or conflicting targets, and parents that would close a cycle.
   - Questions keep their candidates and signals for a later judgment or a person.
 - **Parent judgment** — For questions code cannot decide, a model judges the parent. Only `judgeRelationParentBatch` calls the caller's model.

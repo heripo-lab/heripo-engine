@@ -45,7 +45,7 @@ const ledger = {
 const signals = (
   records: Record<string, RelationSignal[]>,
 ): RelationSignals => ({
-  version: 'relation-signals.v1',
+  version: 'relation-signals.v2',
   candidateSnapshotId: 'snap',
   records: Object.entries(records).map(([recordId, list]) => ({
     recordId,

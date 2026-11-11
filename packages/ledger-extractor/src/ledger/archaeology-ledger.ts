@@ -83,6 +83,7 @@ export interface LedgerParentEvidence {
   kind:
     | 'phrase'
     | 'table_row'
+    | 'identifier'
     | 'heading_scope'
     | 'chapter_title'
     | 'excerpt'
