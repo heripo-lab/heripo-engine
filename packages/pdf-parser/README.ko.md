@@ -24,6 +24,7 @@
 - [Review Assistance](#review-assistance)
 - [문서 유형 검증](#문서-유형-검증)
 - [대용량 PDF 청크 변환](#대용량-pdf-청크-변환)
+- [옆으로 누운 페이지](#옆으로-누운-페이지)
 - [이미지 PDF 폴백](#이미지-pdf-폴백)
 - [AbortSignal 지원](#abortsignal-지원)
 - [서버 크래시 복구](#서버-크래시-복구)
@@ -43,6 +44,7 @@
 - **이미지 추출**: PDF 내 이미지 자동 추출 및 저장
 - **문서 유형 검증**: LLM 기반 고고학 보고서 여부 검증 (선택)
 - **청크 변환**: 대용량 PDF를 청크로 분할하여 안정적으로 처리
+- **옆으로 누운 페이지**: 옆으로 돌려 인쇄된 페이지를 변환 전에 바로 세움
 - **이미지 PDF 폴백**: 변환 실패 시 이미지 기반 PDF로 자동 재시도
 - **Review Assistance**: page-level VLM review로 audit proposal을 기록하고, 의미 낮은 페이지는 관찰 가능한 사유와 함께 skip하며, 고신뢰도 수정만 자동 적용
 - **표 보정 강화**: 표별 work item으로 셀, span, header, 단위, 각주, 인접 페이지 연속표를 검증
@@ -446,6 +448,10 @@ const tokenUsageReport = await pdfParser.parse(
 
 청크 변환 결과를 합친 뒤 보정을 수행합니다. 현재 구현은 청크 변환 실패 시 `enableImagePdfFallback`과 별개로 이미지 PDF 재시도를 수행하므로 이 경로에도 ImageMagick/Ghostscript가 필요합니다. `chunkedConversion`과 `forceImagePdf`를 함께 지정한 로컬 입력은 청크 분기가 우선합니다.
 
+## 옆으로 누운 페이지
+
+스캔 보고서에는 넓은 표나 도면을 세로 페이지에 옆으로 돌려 인쇄한 경우가 많습니다. Docling의 레이아웃·표 모델은 바로 선 글자를 전제하므로, 이런 페이지는 표 구조를 잃습니다(무덤 등록표의 번호 열이 통째로 빠질 수 있음). 로컬 Docling 서버로 로컬 PDF를 변환하기 전에, 파서는 자신의 Python 환경에서 Apple Vision으로 모든 페이지를 72dpi로 읽고, 인식한 줄마다 글자 수×신뢰도로 가중치를 매겨 밑줄이 향하는 방향별로 모읍니다. 아래에서 위로 읽히는 줄의 가중치가 30 이상이고 나머지 모든 줄의 두 배를 넘는 페이지, 곧 옆으로 돌려 인쇄한 표나 도면은 PDF 회전값으로 시계 방향 90° 돌립니다. 세로쓰기도 위에서 아래로 읽히므로 그렇게 읽히는 줄은 건드리지 않고, 따라서 반대 방향으로 누운 페이지는 그대로 둡니다. 한 페이지라도 돌리면 변환·페이지 렌더링·보정이 모두 임시 디렉터리의 바로 선 사본을 쓰고, 파싱이 끝나면 사본을 지웁니다. 페이지 번호는 그대로입니다. 감지에 실패하면 원본 PDF를 변환합니다. `pageOrientationCorrection: false`로 끌 수 있고, 원격 입력과 외부 `baseUrl` 서버는 이 단계를 건너뜁니다.
+
 ## 이미지 PDF 폴백
 
 변환이 실패하면 파서가 PDF를 이미지 기반 PDF로 변환한 후 재시도할 수 있습니다. 복잡하거나 손상된 구조의 PDF에 유용합니다. ImageMagick과 Ghostscript가 필요합니다.
@@ -652,6 +658,8 @@ type PDFConvertOptions = {
   onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void; // 진행 상황 callback
 
   // 청크 변환 (대용량 PDF)
+  pageOrientationCorrection?: boolean; // 옆으로 누운 페이지를 변환 전에 바로 세움(로컬 파일·로컬 서버, 기본 true)
+
   chunkedConversion?: boolean; // 청크 변환 활성화
   chunkSize?: number; // 청크당 페이지 수
   chunkMaxRetries?: number; // 실패한 청크의 최대 재시도 횟수

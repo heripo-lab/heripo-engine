@@ -3,11 +3,15 @@ import type { TokenUsageReport } from '@heripo/model';
 import type { DoclingAPIClient } from 'docling-sdk';
 
 import { Docling } from 'docling-sdk';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { PDF_PARSER } from '../config/constants';
+import { DEFAULT_OCR_LANGUAGES } from '../detectors/pdf-language-detector';
 import { loadOrCreateDoclingApiKey } from '../environment/docling-api-key';
 import { DoclingEnvironment } from '../environment/docling-environment';
+import { PageOrientationCorrector } from '../processors/page-orientation-corrector';
 import {
   checkCommandExists,
   checkMacOSVersion,
@@ -404,25 +408,51 @@ export class PDFParser {
       );
     }
 
-    return this.executeWithRecovery(async () => {
-      const effectiveFallbackEnabled =
-        this.enableImagePdfFallback && !this.baseUrl;
-      const converter = new PDFConverter(
-        this.logger,
-        this.client!,
-        effectiveFallbackEnabled,
-        this.timeout,
-      );
+    // a local PDF whose pages are printed sideways is converted from an upright copy, so every later stage
+    // (conversion, page rendering, correction) reads the same upright pages
+    const orientationDir =
+      url.startsWith('file://') &&
+      !this.baseUrl &&
+      options.pageOrientationCorrection !== false
+        ? mkdtempSync(join(tmpdir(), 'heripo-orientation-'))
+        : null;
+    try {
+      let sourceUrl = url;
+      if (orientationDir) {
+        const upright = join(orientationDir, 'upright.pdf');
+        const result = await new PageOrientationCorrector(
+          this.logger,
+          join(this.venvPath, 'bin', 'python'),
+        ).correct(
+          url.slice('file://'.length),
+          upright,
+          options.ocr_lang ?? DEFAULT_OCR_LANGUAGES,
+        );
+        if (result?.rotatedPages.length) sourceUrl = `file://${upright}`;
+      }
+      return await this.executeWithRecovery(async () => {
+        const effectiveFallbackEnabled =
+          this.enableImagePdfFallback && !this.baseUrl;
+        const converter = new PDFConverter(
+          this.logger,
+          this.client!,
+          effectiveFallbackEnabled,
+          this.timeout,
+        );
 
-      return converter.convert(
-        url,
-        reportId,
-        onComplete,
-        cleanupAfterCallback,
-        options,
-        abortSignal,
-      );
-    }, abortSignal);
+        return converter.convert(
+          sourceUrl,
+          reportId,
+          onComplete,
+          cleanupAfterCallback,
+          options,
+          abortSignal,
+        );
+      }, abortSignal);
+    } finally {
+      if (orientationDir)
+        rmSync(orientationDir, { recursive: true, force: true });
+    }
   }
 
   /**
