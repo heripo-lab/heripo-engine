@@ -125,6 +125,33 @@ function headerTexts(
  * Resolve a proposal's evidence to exact input locations and check it. Returns the resolved evidence and the first
  * failed check, or an empty reason when the proposal is valid. Never changes the proposal.
  */
+/**
+ * The span of a quote in its source text. From v16 a quote may also differ from its source only in whitespace, as OCR
+ * leaves line-break spaces inside Chinese and Japanese text ("示例区域 以西") that a model drops; the span then covers
+ * the source's own characters, spaces included, and the evidence keeps the source text.
+ */
+function locateQuote(
+  text: string,
+  quote: string,
+  level: CandidateCheckLevel,
+): [number, number] | null {
+  const at = text.indexOf(quote);
+  if (at >= 0) return [at, at + quote.length];
+  const target = compact(quote);
+  if (!level.v16 || !target) return null;
+  const positions: number[] = [];
+  let flat = '';
+  for (let i = 0; i < text.length; i++)
+    if (!/\s/u.test(text[i])) {
+      positions.push(i);
+      flat += text[i];
+    }
+  const found = flat.indexOf(target);
+  return found < 0
+    ? null
+    : [positions[found], positions[found + target.length - 1] + 1];
+}
+
 export function checkCandidate(
   unit: CandidateDiscoveryUnit,
   proposal: CandidateDiscoveryResponse['candidates'][number],
@@ -137,8 +164,9 @@ export function checkCandidate(
     const resource = sources.find(
       (source) => source.sourceId === pointer.sourceId,
     )?.resource;
-    const start = resource?.data.text.indexOf(pointer.quote) ?? -1;
-    if (!resource || start < 0) break;
+    const span =
+      resource && locateQuote(resource.data.text, pointer.quote, level);
+    if (!resource || !span) break;
     evidence.push({
       sourceId: pointer.sourceId,
       resourceKey: resource.key,
@@ -146,9 +174,9 @@ export function checkCandidate(
       sourceRefs: resource.sourceRefs,
       pdfPageNo: resource.pdfPageNo,
       logicalPageRange: resource.logicalPageRange,
-      quote: pointer.quote,
-      charStart: start,
-      charEnd: start + pointer.quote.length,
+      quote: resource.data.text.slice(span[0], span[1]),
+      charStart: span[0],
+      charEnd: span[1],
     });
   }
   // a table item named from the caption, chapter titles or context may still select its number cell

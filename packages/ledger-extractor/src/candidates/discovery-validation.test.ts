@@ -146,6 +146,36 @@ describe('discovery v10 sections, name lead and corrections', () => {
     expect(candidateCheckLevel('candidate-discovery.v15').v16).toBe(false);
   });
 
+  test('accepts a v16 quote that differs from its source only in whitespace and keeps the source span', async () => {
+    const { plan, unit, body } = sections([
+      {
+        id: 'b1',
+        text: '本段仅为合成测试而编写的示例。标本 M109:4，灰色。示例罐。',
+        pdfPageNo: 1,
+      },
+    ]);
+    const candidate = body('罐', 'M109:4', 'id:b1', '标本M109:4，灰色');
+    const assemble = (version?: 'candidate-discovery.v15') =>
+      assembleCandidateDiscovery(plan, [
+        audit(
+          unit,
+          { tableRole: 'none', candidates: [candidate], exclusions: [] },
+          version,
+        ),
+      ]);
+
+    const v16 = await assemble();
+    expect(v16.issues).toEqual([]);
+    expect(v16.candidates[0].evidence[0]).toMatchObject({
+      quote: '标本 M109:4，灰色',
+      charStart: 15,
+      charEnd: 27,
+    });
+    expect(
+      (await assemble('candidate-discovery.v15')).issues.map((i) => i.reason),
+    ).toEqual(['Evidence does not match an exact input quote in this unit']);
+  });
+
   test('asks a v14 body artifact whose block opens with a catalog number for that number', async () => {
     const { plan, unit, body } = sections();
     const ids = Object.fromEntries(
