@@ -102,7 +102,47 @@ describe('discovery v10 sections, name lead and corrections', () => {
       v13: false,
       v14: false,
       v15: false,
+      v16: false,
     });
+  });
+
+  test('accepts a v16 name after a numbering label or at a sentence start', async () => {
+    const { plan, unit, body } = sections([
+      {
+        id: 'b1',
+        text: '类型说明。本段仅为合成测试的示例文字。编号99XXM105（图一），示例墓。',
+        pdfPageNo: 1,
+      },
+      {
+        id: 'b2',
+        text: '类型说明。本段仅为合成测试的示例文字。99XXM102（图二），示例墓。',
+        pdfPageNo: 1,
+      },
+      {
+        id: 'b3',
+        text: '类型说明文字用于合成测试，不表示单独描述的对象（M110、M111）。',
+        pdfPageNo: 1,
+      },
+    ]);
+    const candidates = [
+      body('墓', '99XXM105', 'id:b1', '编号99XXM105'),
+      body('墓', '99XXM102', 'id:b2', '99XXM102'),
+      body('墓', 'M111', 'id:b3', 'M111'),
+    ];
+    const issues = async (version?: 'candidate-discovery.v15') =>
+      (
+        await assembleCandidateDiscovery(plan, [
+          audit(
+            unit,
+            { tableRole: 'none', candidates, exclusions: [] },
+            version,
+          ),
+        ])
+      ).issues.map((i) => i.candidateIndex);
+
+    expect(await issues()).toEqual([2]);
+    expect(await issues('candidate-discovery.v15')).toEqual([0, 1, 2]);
+    expect(candidateCheckLevel('candidate-discovery.v15').v16).toBe(false);
   });
 
   test('asks a v14 body artifact whose block opens with a catalog number for that number', async () => {
@@ -278,6 +318,16 @@ describe('discovery v10 sections, name lead and corrections', () => {
       expect.stringContaining('without circled numerals'),
     ]);
     expect(JSON.parse(v10.userPrompt).unansweredRows).toEqual([5]);
+    expect(
+      planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v15')!
+        .userPrompt,
+    ).toBe(
+      planCandidateDiscoveryFollowUp(
+        unit,
+        first,
+        CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      )!.userPrompt,
+    );
   });
 });
 

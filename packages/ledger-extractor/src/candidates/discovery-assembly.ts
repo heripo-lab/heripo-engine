@@ -121,7 +121,9 @@ export async function assembleCandidateDiscovery(
                           ? 'candidate-discovery.v13'
                           : audit.promptVersion === 'candidate-discovery.v14'
                             ? 'candidate-discovery.v14'
-                            : CANDIDATE_DISCOVERY_PROMPT_VERSION,
+                            : audit.promptVersion === 'candidate-discovery.v15'
+                              ? 'candidate-discovery.v15'
+                              : CANDIDATE_DISCOVERY_PROMPT_VERSION,
     );
     if (
       audit.promptVersion !== expected.promptVersion ||

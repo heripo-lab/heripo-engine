@@ -162,11 +162,11 @@ export const registry = () => {
 };
 
 /** A body unit with numbered item headings, a date line and a passage that lists objects in passing. */
-export const sections = () => {
+export const sections = (textBlocks?: Chapter['textBlocks']) => {
   const doc = input();
   doc.chapters = [
     chapter({
-      textBlocks: [
+      textBlocks: textBlocks ?? [
         {
           id: 'intro',
           text: '유구는 조사대상지 중앙에 분포한다.',

@@ -29,13 +29,21 @@ import {
 const FIGURE_REFERENCE = /도면|도판|사진|그림|Fig\./u;
 /** An independent body names its object within this many leading non-space characters of an evidence block. */
 export const CANDIDATE_DISCOVERY_NAME_LEAD_CHARS = 15;
+/**
+ * From v16, an object can also be named later in its block: right after an explicit numbering label, as in
+ * "编号99XXM105" or "标本M102:11", or at the start of a sentence, as in "…说明文字。99XXM102，示例记录".
+ */
+const NAME_LABEL =
+  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|No\.?)[:：]?$/iu;
+/** Sentence punctuation, optionally followed by opening marks, right before a name. */
+const SENTENCE_START = /[。．；！？.;!?][(（「『“"]*$/u;
 
 const compact = (text: string) => text.replace(/\s+/gu, '');
 
 /**
  * Version-dependent checks: strict table identifiers from v6, table roles and name cells from v9, name leads and
  * corrections from v10, heading reconsideration and row blocks from v11, follow-up rules in the follow-up input from
- * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15.
+ * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15, names after numbering labels or at sentence starts from v16.
  */
 export interface CandidateCheckLevel {
   strictTableIdentifier: boolean;
@@ -46,12 +54,14 @@ export interface CandidateCheckLevel {
   v13: boolean;
   v14: boolean;
   v15: boolean;
+  v16: boolean;
 }
 
 export function candidateCheckLevel(
   promptVersion: string,
 ): CandidateCheckLevel {
-  const v15 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v16 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v15 = v16 || promptVersion === 'candidate-discovery.v15';
   const v14 = v15 || promptVersion === 'candidate-discovery.v14';
   const v13 = v14 || promptVersion === 'candidate-discovery.v13';
   const v12 = v13 || promptVersion === 'candidate-discovery.v12';
@@ -73,6 +83,7 @@ export function candidateCheckLevel(
     v13,
     v14,
     v15,
+    v16,
   };
 }
 
@@ -163,8 +174,16 @@ export function checkCandidate(
         sources.find((s) => s.sourceId === e.sourceId)!.resource.data.text,
       );
       return keys.some((k) => {
-        const at = text.indexOf(k);
-        return at >= 0 && at < CANDIDATE_DISCOVERY_NAME_LEAD_CHARS;
+        for (let at = text.indexOf(k); at >= 0; at = text.indexOf(k, at + 1)) {
+          if (at < CANDIDATE_DISCOVERY_NAME_LEAD_CHARS) return true;
+          const before = text.slice(0, at);
+          if (
+            level.v16 &&
+            (NAME_LABEL.test(before) || SENTENCE_START.test(before))
+          )
+            return true;
+        }
+        return false;
       });
     });
   };
@@ -440,19 +459,21 @@ export function planCandidateDiscoveryFollowUp(
 ) {
   const level = candidateCheckLevel(promptVersion);
   if (!level.v9) return null;
-  const version = level.v15
+  const version = level.v16
     ? CANDIDATE_DISCOVERY_PROMPT_VERSION
-    : level.v14
-      ? 'candidate-discovery.v14'
-      : level.v13
-        ? 'candidate-discovery.v13'
-        : level.v12
-          ? 'candidate-discovery.v12'
-          : level.v11
-            ? 'candidate-discovery.v11'
-            : level.v10
-              ? 'candidate-discovery.v10'
-              : 'candidate-discovery.v9';
+    : level.v15
+      ? 'candidate-discovery.v15'
+      : level.v14
+        ? 'candidate-discovery.v14'
+        : level.v13
+          ? 'candidate-discovery.v13'
+          : level.v12
+            ? 'candidate-discovery.v12'
+            : level.v11
+              ? 'candidate-discovery.v11'
+              : level.v10
+                ? 'candidate-discovery.v10'
+                : 'candidate-discovery.v9';
   // a side-by-side table answers by row blocks from v11, so its rows are asked through those blocks only
   const blocks = level.v11 ? columnBlocks(unit) : null;
   const rowBlocks = blocks ? unansweredItemTableBlocks(unit, response) : [];
