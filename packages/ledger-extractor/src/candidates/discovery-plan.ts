@@ -36,6 +36,8 @@ export function prepareCandidateDiscovery(
     maxTextChars: number;
     tableRowsPerUnit: number;
     maxLabelledNumbers?: number;
+    /** Tables outside the scope chapters to read as well, such as appendix registers of the scope's objects. */
+    tableIds?: string[];
     scopeSource?: CandidateDiscoveryPlan['scopeSource'];
   },
 ): CandidateDiscoveryPlan {
@@ -95,14 +97,47 @@ export function prepareCandidateDiscovery(
       textByChapter.set(current.resourceId!, texts.slice(heading));
     }
   }
-  for (const chapter of scoped) {
-    const chapterId = chapter.resourceId!;
-    const chapterPath = chapters
+  const tableUnits = (
+    table: Extract<DocumentResource, { kind: 'table' }>,
+    chapterId: string,
+    chapterPath: CandidateDiscoveryUnit['chapterPath'],
+    context: CandidateDiscoveryUnit['context'],
+  ) => {
+    const cells = index.resources.filter(
+      (r): r is Extract<DocumentResource, { kind: 'tableCell' }> =>
+        r.kind === 'tableCell' && r.key.startsWith(`${table.key}/grid/`),
+    );
+    for (
+      let row = 0;
+      row < table.data.grid.length;
+      row += options.tableRowsPerUnit
+    )
+      units.push({
+        unitId: `${table.key}:rows:${row}`,
+        chapterId,
+        chapterPath,
+        table: {
+          id: table.resourceId!,
+          caption: table.data.caption?.fullText ?? null,
+          headerRows: table.data.grid.slice(0, 2),
+        },
+        resources: cells.filter(
+          (c) =>
+            c.rowIndex >= row && c.rowIndex < row + options.tableRowsPerUnit,
+        ),
+        context,
+      });
+  };
+  const pathOf = (chapterKey: string) =>
+    chapters
       .filter(
         (r) =>
-          r.key === chapter.key || chapter.key.startsWith(`${r.key}/children/`),
+          r.key === chapterKey || chapterKey.startsWith(`${r.key}/children/`),
       )
       .map((r) => ({ id: r.resourceId!, originTitle: r.data.originTitle }));
+  for (const chapter of scoped) {
+    const chapterId = chapter.resourceId!;
+    const chapterPath = pathOf(chapter.key);
     const texts = textByChapter.get(chapterId)!;
     const numbers = texts.map((t) => labelledNumbers(t.data.text).length);
     const maxNumbers =
@@ -161,36 +196,40 @@ export function prepareCandidateDiscovery(
       (r): r is Extract<DocumentResource, { kind: 'table' }> =>
         r.kind === 'table' && r.chapterIds.includes(chapterId),
     );
-    for (const table of tables) {
-      const cells = index.resources.filter(
-        (r): r is Extract<DocumentResource, { kind: 'tableCell' }> =>
-          r.kind === 'tableCell' && r.key.startsWith(`${table.key}/grid/`),
+    for (const table of tables)
+      tableUnits(
+        table,
+        chapterId,
+        chapterPath,
+        texts
+          .map((t) => ({ key: t.key, text: t.data.text }))
+          .filter((t) => t.text.length < 200)
+          .slice(0, 6),
       );
-      for (
-        let row = 0;
-        row < table.data.grid.length;
-        row += options.tableRowsPerUnit
-      ) {
-        units.push({
-          unitId: `${table.key}:rows:${row}`,
-          chapterId,
-          chapterPath,
-          table: {
-            id: table.resourceId!,
-            caption: table.data.caption?.fullText ?? null,
-            headerRows: table.data.grid.slice(0, 2),
-          },
-          resources: cells.filter(
-            (c) =>
-              c.rowIndex >= row && c.rowIndex < row + options.tableRowsPerUnit,
-          ),
-          context: texts
-            .map((t) => ({ key: t.key, text: t.data.text }))
-            .filter((t) => t.text.length < 200)
-            .slice(0, 6),
-        });
-      }
-    }
+  }
+  // tables outside the scope, read with their own chapter and the short text blocks on their pages as context
+  for (const tableId of options.tableIds ?? []) {
+    const table = index.resources.find(
+      (r): r is Extract<DocumentResource, { kind: 'table' }> =>
+        r.kind === 'table' && r.resourceId === tableId,
+    );
+    if (!table) throw new Error(`Table not found: ${tableId}`);
+    const chapterId = table.chapterIds.at(-1)!;
+    const chapterKey = chapters.find((c) => c.resourceId === chapterId)!.key;
+    tableUnits(
+      table,
+      chapterId,
+      pathOf(chapterKey),
+      index.resources
+        .filter(
+          (r): r is Extract<DocumentResource, { kind: 'text' }> =>
+            r.kind === 'text' &&
+            r.pdfPageNo === table.pdfPageNo &&
+            r.data.text.length < 200,
+        )
+        .map((t) => ({ key: t.key, text: t.data.text }))
+        .slice(0, 6),
+    );
   }
   return {
     scopeChapterId: roots[0].resourceId!,

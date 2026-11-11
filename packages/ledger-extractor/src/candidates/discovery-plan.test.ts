@@ -70,6 +70,34 @@ describe('candidate discovery', () => {
     ).toBe('우물 목록');
   });
 
+  test('reads tables outside the scope with their own chapter and the short text of their page', () => {
+    const index = buildDocumentResourceIndex(input());
+    const plan = prepareCandidateDiscovery(index, {
+      scopeChapterId: 'child',
+      inputSha256: 'h',
+      maxTextChars: 100,
+      tableRowsPerUnit: 1,
+      tableIds: ['t'],
+    });
+
+    expect(plan.units.map((u) => [u.chapterId, u.table?.id ?? null])).toEqual([
+      ['child', null],
+      ['root', 't'],
+      ['root', 't'],
+    ]);
+    expect(plan.units[1].chapterPath.map((c) => c.id)).toEqual(['root']);
+    expect(plan.units[1].context.map((c) => c.text)).toEqual(['1호 우물']);
+    expect(() =>
+      prepareCandidateDiscovery(index, {
+        scopeChapterId: 'child',
+        inputSha256: 'h',
+        maxTextChars: 100,
+        tableRowsPerUnit: 1,
+        tableIds: ['missing'],
+      }),
+    ).toThrow('Table not found: missing');
+  });
+
   test('rejects invalid scope and chunk limits', () => {
     const index = buildDocumentResourceIndex(input());
     for (const [maxTextChars, tableRowsPerUnit] of [
