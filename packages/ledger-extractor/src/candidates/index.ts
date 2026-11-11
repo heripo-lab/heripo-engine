@@ -20,6 +20,7 @@ export {
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
+  REGISTER_ROWS_RULE,
   SIDE_BY_SIDE_TABLES_RULE,
   createCandidateDiscoveryRequest,
   isSectionHeading,
@@ -28,6 +29,7 @@ export { CANDIDATE_DISCOVERY_NAME_LEAD_CHARS } from './discovery-validation';
 export type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryUnit,
+  CandidateDiscoveryRegisterRow,
   CandidateDiscoveryAudit,
   CandidateDiscoveryResult,
   CandidateEvidence,

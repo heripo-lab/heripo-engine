@@ -11,7 +11,9 @@ import {
   sections,
   usage,
 } from './candidate-discovery.test-fixture';
+import { assembleCandidateDiscovery } from './discovery-assembly';
 import {
+  REGISTER_ROWS_RULE,
   createCandidateDiscoveryRequest,
   createCandidateDiscoverySchema,
   getCandidateSources,
@@ -22,6 +24,10 @@ import {
   discoverCandidateUnit,
   recordCandidateDiscoveryUnit,
 } from './discovery-unit';
+import {
+  candidateCheckLevel,
+  planCandidateDiscoveryFollowUp,
+} from './discovery-validation';
 
 vi.mock('@heripo/shared', () => ({ LLMCaller: { call: vi.fn() } }));
 
@@ -412,5 +418,56 @@ describe('candidate discovery', () => {
       { sourceId: getCandidateSources(unit)[5].sourceId, number: '96호' },
     ]);
     expect(result.followUp).not.toHaveProperty('corrections');
+  });
+
+  test('sends register rows and their rule from v17 and rebuilds v16 requests without them', async () => {
+    const { plan } = registry();
+    const unit = {
+      ...plan.units[0],
+      table: {
+        ...plan.units[0].table!,
+        registerRows: [{ rowIndex: 2, number: '2', writtenAs: 'M2' }],
+      },
+    };
+    const v17 = JSON.parse(createCandidateDiscoveryRequest(unit).userPrompt);
+    const v16 = createCandidateDiscoveryRequest(
+      unit,
+      'candidate-discovery.v16',
+    );
+
+    expect(v17.table.registerRows).toEqual(unit.table.registerRows);
+    expect(v17.rules).toEqual([REGISTER_ROWS_RULE]);
+    expect(v16.userPrompt).toBe(
+      createCandidateDiscoveryRequest(plan.units[0]).userPrompt,
+    );
+    expect(candidateCheckLevel('candidate-discovery.v16')).toMatchObject({
+      v16: true,
+      v17: false,
+    });
+    const first = {
+      tableRole: 'non_item_table' as const,
+      candidates: [],
+      exclusions: [],
+    };
+    const asked = (version?: 'candidate-discovery.v16') =>
+      planCandidateDiscoveryFollowUp(
+        unit,
+        { ...first, tableRole: 'item_table' },
+        version ?? 'candidate-discovery.v17',
+      )!.userPrompt;
+    expect(asked('candidate-discovery.v16')).not.toContain('registerRows');
+    expect(JSON.parse(asked()).rules).toEqual([REGISTER_ROWS_RULE]);
+    const replay = await assembleCandidateDiscovery(
+      { ...plan, units: [unit] },
+      [
+        {
+          unitId: unit.unitId,
+          ...v16,
+          response: first,
+          usage,
+        },
+      ],
+    );
+    expect(replay.issues).toEqual([]);
   });
 });

@@ -15,3 +15,20 @@ export function sameObjectNumber(a: string, b: string) {
   if (!/^[A-Za-z]*\d+$/u.test(short) || !long.endsWith(short)) return false;
   return /[A-Za-z]$/u.test(long.slice(0, long.length - short.length));
 }
+
+/** Numbers with a Latin prefix written in a text, whitespace ignored: `M107`, `99XXM102` (as `XXM102`). */
+export function latinPrefixedNumbers(text: string) {
+  return text.replace(/\s+/gu, '').match(/[A-Za-z]+\d+/gu) ?? [];
+}
+
+/**
+ * The object number a table row opens with: the leading digits of the first non-empty cell of its first two columns,
+ * so the burials `102A` and `102B` both give `102`. Null when that cell does not open with up to four digits.
+ */
+export function rowLeadingNumber(cells: readonly string[]) {
+  const cell = cells
+    .slice(0, 2)
+    .map((c) => c.trim())
+    .find(Boolean);
+  return (cell && /^(\d{1,4})(?:[A-Z]|\s|$)/u.exec(cell)?.[1]) || null;
+}

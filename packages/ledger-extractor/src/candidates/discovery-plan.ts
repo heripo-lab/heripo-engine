@@ -8,6 +8,11 @@ import type {
 } from './discovery-types';
 
 import { labelledNumbers } from './discovery-validation';
+import {
+  latinPrefixedNumbers,
+  rowLeadingNumber,
+  sameObjectNumber,
+} from './object-numbers';
 
 /** Text blocks shorter than this count as heading, number or field lines when a unit boundary is aligned. */
 export const CANDIDATE_DISCOVERY_SHORT_BLOCK_CHARS = 120;
@@ -27,6 +32,8 @@ export const CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS = 40;
  * starts the next unit instead, so an object's heading, number and field lines stay with its description.
  * A text unit also closes before it would hold more than `maxLabelledNumbers` labelled object numbers
  * (default `CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS`); a single block always fits.
+ * A table of `tableIds` lists, in each unit, the data rows whose opening number the scope's text writes with a Latin
+ * prefix (`table.registerRows`), so the model knows those rows are objects of this investigation.
  */
 export function prepareCandidateDiscovery(
   index: DocumentResourceIndex,
@@ -102,6 +109,7 @@ export function prepareCandidateDiscovery(
     chapterId: string,
     chapterPath: CandidateDiscoveryUnit['chapterPath'],
     context: CandidateDiscoveryUnit['context'],
+    written?: string[],
   ) => {
     const cells = index.resources.filter(
       (r): r is Extract<DocumentResource, { kind: 'tableCell' }> =>
@@ -111,7 +119,23 @@ export function prepareCandidateDiscovery(
       let row = 0;
       row < table.data.grid.length;
       row += options.tableRowsPerUnit
-    )
+    ) {
+      const registerRows = (written ?? []).length
+        ? table.data.grid
+            .slice(row, row + options.tableRowsPerUnit)
+            .flatMap((cells, offset) => {
+              const number =
+                row + offset > 0 && rowLeadingNumber(cells.map((c) => c.text));
+              const writtenAs =
+                number &&
+                written!
+                  .filter((w) => sameObjectNumber(number, w))
+                  .sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
+              return writtenAs
+                ? [{ rowIndex: row + offset, number, writtenAs }]
+                : [];
+            })
+        : [];
       units.push({
         unitId: `${table.key}:rows:${row}`,
         chapterId,
@@ -120,6 +144,7 @@ export function prepareCandidateDiscovery(
           id: table.resourceId!,
           caption: table.data.caption?.fullText ?? null,
           headerRows: table.data.grid.slice(0, 2),
+          ...(registerRows.length ? { registerRows } : {}),
         },
         resources: cells.filter(
           (c) =>
@@ -127,6 +152,7 @@ export function prepareCandidateDiscovery(
         ),
         context,
       });
+    }
   };
   const pathOf = (chapterKey: string) =>
     chapters
@@ -208,6 +234,15 @@ export function prepareCandidateDiscovery(
       );
   }
   // tables outside the scope, read with their own chapter and the short text blocks on their pages as context
+  const written = [
+    ...new Set(
+      scoped.flatMap((chapter) =>
+        textByChapter
+          .get(chapter.resourceId!)!
+          .flatMap((t) => latinPrefixedNumbers(t.data.text)),
+      ),
+    ),
+  ];
   for (const tableId of options.tableIds ?? []) {
     const table = index.resources.find(
       (r): r is Extract<DocumentResource, { kind: 'table' }> =>
@@ -229,6 +264,7 @@ export function prepareCandidateDiscovery(
         )
         .map((t) => ({ key: t.key, text: t.data.text }))
         .slice(0, 6),
+      written,
     );
   }
   return {

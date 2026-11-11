@@ -54,7 +54,7 @@ const compact = (text: string) => text.replace(/\s+/gu, '');
 /**
  * Version-dependent checks: strict table identifiers from v6, table roles and name cells from v9, name leads and
  * corrections from v10, heading reconsideration and row blocks from v11, follow-up rules in the follow-up input from
- * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15, names after numbering labels or at sentence starts from v16.
+ * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15, names after numbering labels or at sentence starts from v16; v17 changes only the request (register rows).
  */
 export interface CandidateCheckLevel {
   strictTableIdentifier: boolean;
@@ -66,12 +66,14 @@ export interface CandidateCheckLevel {
   v14: boolean;
   v15: boolean;
   v16: boolean;
+  v17: boolean;
 }
 
 export function candidateCheckLevel(
   promptVersion: string,
 ): CandidateCheckLevel {
-  const v16 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v17 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v16 = v17 || promptVersion === 'candidate-discovery.v16';
   const v15 = v16 || promptVersion === 'candidate-discovery.v15';
   const v14 = v15 || promptVersion === 'candidate-discovery.v14';
   const v13 = v14 || promptVersion === 'candidate-discovery.v13';
@@ -95,6 +97,7 @@ export function candidateCheckLevel(
     v14,
     v15,
     v16,
+    v17,
   };
 }
 
@@ -504,21 +507,23 @@ export function planCandidateDiscoveryFollowUp(
 ) {
   const level = candidateCheckLevel(promptVersion);
   if (!level.v9) return null;
-  const version = level.v16
+  const version = level.v17
     ? CANDIDATE_DISCOVERY_PROMPT_VERSION
-    : level.v15
-      ? 'candidate-discovery.v15'
-      : level.v14
-        ? 'candidate-discovery.v14'
-        : level.v13
-          ? 'candidate-discovery.v13'
-          : level.v12
-            ? 'candidate-discovery.v12'
-            : level.v11
-              ? 'candidate-discovery.v11'
-              : level.v10
-                ? 'candidate-discovery.v10'
-                : 'candidate-discovery.v9';
+    : level.v16
+      ? 'candidate-discovery.v16'
+      : level.v15
+        ? 'candidate-discovery.v15'
+        : level.v14
+          ? 'candidate-discovery.v14'
+          : level.v13
+            ? 'candidate-discovery.v13'
+            : level.v12
+              ? 'candidate-discovery.v12'
+              : level.v11
+                ? 'candidate-discovery.v11'
+                : level.v10
+                  ? 'candidate-discovery.v10'
+                  : 'candidate-discovery.v9';
   // a side-by-side table answers by row blocks from v11, so its rows are asked through those blocks only
   const blocks = level.v11 ? columnBlocks(unit) : null;
   const rowBlocks = blocks ? unansweredItemTableBlocks(unit, response) : [];

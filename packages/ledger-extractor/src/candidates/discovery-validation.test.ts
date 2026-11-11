@@ -104,6 +104,7 @@ describe('discovery v10 sections, name lead and corrections', () => {
       v14: false,
       v15: false,
       v16: false,
+      v17: false,
     });
   });
 

@@ -87,6 +87,13 @@ export type InputResource = Extract<
   DocumentResource,
   { kind: 'text' | 'tableCell' }
 >;
+export interface CandidateDiscoveryRegisterRow {
+  rowIndex: number;
+  /** The leading digits of the row's number cell. */
+  number: string;
+  /** How the scope's text writes that number. */
+  writtenAs: string;
+}
 export interface CandidateDiscoveryUnit {
   unitId: string;
   chapterId: string;
@@ -95,6 +102,11 @@ export interface CandidateDiscoveryUnit {
     id: string;
     caption: string | null;
     headerRows: string[][] | ProcessedTableCell[][];
+    /**
+     * Present on a register table read from outside the scope: its data rows in this unit whose opening number the
+     * scope's text writes with a Latin prefix, each with the written form (`107` as `M107`). Sent from v17.
+     */
+    registerRows?: CandidateDiscoveryRegisterRow[];
   } | null;
   resources: InputResource[];
   /** Read-only adjacent context cannot anchor candidates in this unit. */

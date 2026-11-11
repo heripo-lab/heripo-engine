@@ -1,7 +1,11 @@
 import type { DocumentResourceIndex } from '../resources/document-resource-index';
 import type { ReportSignals } from './report-signals';
 
-import { sameObjectNumber } from '../candidates/object-numbers';
+import {
+  latinPrefixedNumbers,
+  rowLeadingNumber,
+  sameObjectNumber,
+} from '../candidates/object-numbers';
 
 export const REPORT_SCOPE_COMPLETION_VERSION =
   'report-scope-completion.v2' as const;
@@ -48,7 +52,7 @@ function registerTables(index: DocumentResourceIndex, scope: string[]) {
   const numbers = new Set(
     index.resources.flatMap((r) =>
       r.kind === 'text' && r.chapterIds.some(inScope)
-        ? (r.data.text.replace(/\s+/gu, '').match(/[A-Za-z]+\d+/gu) ?? [])
+        ? latinPrefixedNumbers(r.data.text)
         : [],
     ),
   );
@@ -57,11 +61,7 @@ function registerTables(index: DocumentResourceIndex, scope: string[]) {
     const chapter = r.chapterIds.at(-1);
     if (!chapter || inScope(chapter) || order.get(chapter)! < last) return [];
     const rowNumbers = r.data.grid.slice(1).flatMap((row) => {
-      const cell = row
-        .slice(0, 2)
-        .map((c) => c.text.trim())
-        .find(Boolean);
-      const digits = cell && /^(\d{1,4})(?:[A-Z]|\s|$)/u.exec(cell)?.[1];
+      const digits = rowLeadingNumber(row.map((c) => c.text));
       return digits ? [digits] : [];
     });
     const linked = rowNumbers.filter((n) =>

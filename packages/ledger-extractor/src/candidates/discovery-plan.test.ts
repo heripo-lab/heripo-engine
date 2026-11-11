@@ -98,6 +98,30 @@ describe('candidate discovery', () => {
     ).toThrow('Table not found: missing');
   });
 
+  test('lists the register rows of a table outside the scope whose number the scope writes with a Latin prefix', () => {
+    const doc = input();
+    doc.chapters[0].children![0].textBlocks = [
+      { text: '묘 K2, M2와 99XXM2를 조사했다.', pdfPageNo: 3 },
+    ];
+    doc.tables[0].grid = [
+      [{ text: '墓号', colSpan: 1, rowSpan: 1, isHeader: true }],
+      [{ text: '2A', colSpan: 1, rowSpan: 1, isHeader: false }],
+      [{ text: '3', colSpan: 1, rowSpan: 1, isHeader: false }],
+    ];
+    const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+      scopeChapterId: 'child',
+      inputSha256: 'h',
+      maxTextChars: 100,
+      tableRowsPerUnit: 2,
+      tableIds: ['t'],
+    });
+
+    expect(plan.units[1].table?.registerRows).toEqual([
+      { rowIndex: 1, number: '2', writtenAs: 'K2' },
+    ]);
+    expect(plan.units[2].table).not.toHaveProperty('registerRows');
+  });
+
   test('rejects invalid scope and chunk limits', () => {
     const index = buildDocumentResourceIndex(input());
     for (const [maxTextChars, tableRowsPerUnit] of [
