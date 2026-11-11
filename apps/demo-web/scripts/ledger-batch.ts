@@ -14,6 +14,8 @@
  * usual task and output directories but are not registered in the demo database, so the demo server never
  * resumes or rewrites them; run one batch process at a time and do not read a task while it is running.
  * `--dry-run` makes no model call: it checks the inputs, the package build and the budget arithmetic.
+ * `--resume-task <taskId>` makes a new batch of one input file continue that stopped task instead of creating one:
+ * its saved report profile and complete discovery are kept, and only its duplicate review and later steps run.
  */
 import { createHash, randomUUID } from 'crypto';
 import {
@@ -50,6 +52,8 @@ interface BatchReport {
   sha256: string;
   taskId: string | null;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted';
+  /** Continue the existing task `taskId` instead of creating a new one. */
+  resume?: boolean;
   startedAt: string | null;
   finishedAt: string | null;
   /** What the pipeline reported; absent when it stopped before returning. */
@@ -93,6 +97,7 @@ const { values, positionals } = parseArgs({
     model: { type: 'string' },
     'no-batch': { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
+    'resume-task': { type: 'string' },
   },
 });
 
@@ -172,6 +177,9 @@ function main() {
     const files = inputFiles(positionals);
     if (!files.length)
       throw new Error('Name at least one input file or directory');
+    const resumeTask = values['resume-task'];
+    if (resumeTask && (files.length !== 1 || !/^task_[\w-]+$/.test(resumeTask)))
+      throw new Error('--resume-task needs one task ID and one input file');
     const model = values.model;
     manifest = {
       version: 'ledger-batch.v1',
@@ -201,7 +209,8 @@ function main() {
       reports: files.map((file) => ({
         file,
         sha256: createHash('sha256').update(readFileSync(file)).digest('hex'),
-        taskId: null,
+        taskId: resumeTask ?? null,
+        ...(resumeTask ? { resume: true } : {}),
         status: 'pending',
         startedAt: null,
         finishedAt: null,
@@ -305,14 +314,29 @@ async function run() {
         save(manifest);
         continue;
       }
-      const taskId = `task_${randomUUID()}`;
+      const taskId = r.resume ? r.taskId! : `task_${randomUUID()}`;
       const options = {
         models: manifest.models,
         budget: reportBudget,
         batch: manifest.batch,
       };
-      mkdirSync(paths.task(taskId).root, { recursive: true });
-      writeFileSync(paths.task(taskId).inputJson, rawText, 'utf8');
+      if (r.resume) {
+        // the task keeps its input; a different file would not match its saved steps
+        const saved = paths.task(taskId).inputJson;
+        if (
+          !existsSync(saved) ||
+          createHash('sha256').update(readFileSync(saved)).digest('hex') !==
+            r.sha256
+        ) {
+          r.status = 'failed';
+          r.error = 'the task to resume has another input';
+          save(manifest);
+          continue;
+        }
+      } else {
+        mkdirSync(paths.task(taskId).root, { recursive: true });
+        writeFileSync(paths.task(taskId).inputJson, rawText, 'utf8');
+      }
       writeFileSync(
         ledgerOptionsFile(taskId),
         JSON.stringify(options, null, 2),
@@ -323,12 +347,13 @@ async function run() {
         startedAt: new Date().toISOString(),
       });
       save(manifest);
-      log(`Start ${basename(r.file)} as ${taskId}`);
+      log(`${r.resume ? 'Resume' : 'Start'} ${basename(r.file)} as ${taskId}`);
       try {
         const result = await runLedgerPipeline(taskId, options, {
           onStep: (step) => log(`  step ${step}`),
           log: (message) => log(`  ${message}`),
           abortSignal: controller.signal,
+          resume: r.resume,
         });
         const view = await getArchaeologyLedger(taskId);
         Object.assign(r, {

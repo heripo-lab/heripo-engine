@@ -88,10 +88,15 @@ export async function runLedgerPipeline(
     onStep: (step: LedgerPipelineStep) => void;
     log: (message: string) => void;
     abortSignal?: AbortSignal;
+    /**
+     * Continue a task that stopped: a saved report profile is used without a router call, and a complete saved
+     * discovery snapshot is kept, so only its duplicate review and the later steps are run again.
+     */
+    resume?: boolean;
   },
 ) {
   const { models } = options;
-  const { onStep, log, abortSignal } = hooks;
+  const { onStep, log, abortSignal, resume } = hooks;
   // a task without caps gets a guard that only counts and leaves output limits to each call
   const guard = createSpendGuard(options.budget);
   const budget = guard.limits;
@@ -113,13 +118,17 @@ export async function runLedgerPipeline(
 
   // 1. report profile: one router call
   onStep('report-profile');
-  log(`Classifying the report with ${models.router}...`);
-  const router = await runReportRouter(taskId, models.router, { guard });
-  stopAtCap();
-  const stored = await getReportProfile(taskId);
-  log(
-    `Report profile ${router.profileSaved ? 'saved' : 'not saved'} (${router.usage.totalTokens} tokens)`,
-  );
+  const saved = resume ? await getReportProfile(taskId) : null;
+  if (saved) log('Using the saved report profile');
+  else {
+    log(`Classifying the report with ${models.router}...`);
+    const router = await runReportRouter(taskId, models.router, { guard });
+    stopAtCap();
+    log(
+      `Report profile ${router.profileSaved ? 'saved' : 'not saved'} (${router.usage.totalTokens} tokens)`,
+    );
+  }
+  const stored = saved ?? (await getReportProfile(taskId));
   abortSignal?.throwIfAborted();
 
   // 2. candidate discovery and duplicate review
@@ -158,6 +167,13 @@ export async function runLedgerPipeline(
     inputSha256: 'count',
   }).units.length;
   const beforeDiscovery = guard.used();
+  const previous = resume ? getCandidateDiscoveryRun(taskId) : null;
+  const keepDiscovery =
+    !!previous && previous.completedUnits === previous.totalUnits;
+  if (keepDiscovery)
+    log(
+      `Keeping the saved discovery of ${previous.totalUnits} units and reviewing its duplicates again`,
+    );
   log(
     completion
       ? `Discovering candidates in ${units} units of ${scope.join(', ')} (router proposal ${completion.proposedChapterIds.join(', ') || 'none'}; added from investigation chapters: ${completion.addedChapterIds.join(', ') || 'none'}; register tables outside the scope: ${completion.tableIds.join(', ') || 'none'})...`
@@ -178,6 +194,7 @@ export async function runLedgerPipeline(
       ...DISCOVERY,
       maxTextChars: discoveryMaxTextChars(models.discovery),
       ...(decided ? { useProfileScope: true } : {}),
+      ...(keepDiscovery ? { deduplicationOnly: true } : {}),
     },
     { guard },
   );
