@@ -45,6 +45,8 @@ export interface CandidateDiscoveryRunSettings {
   discoveryBatch?: boolean;
   maxTextChars: number;
   tableRowsPerUnit: number;
+  /** Tables outside the scope chapters to read as well: appendix registers of the scope's objects. */
+  tableIds?: string[];
   maxRetries: number;
   deduplicationOnly?: boolean;
   retryFailedUnits?: boolean;

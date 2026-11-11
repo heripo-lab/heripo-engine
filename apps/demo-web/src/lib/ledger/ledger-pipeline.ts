@@ -146,8 +146,13 @@ export async function runLedgerPipeline(
     );
   if (completion) saveDiscoveryScope(taskId, completion);
   const scopeChapterId = scope.length === 1 ? scope[0] : scope;
+  // appendix registers of the scope's objects that sit outside its chapters are read as tables of their own
+  const tableIds = completion?.tableIds.length
+    ? completion.tableIds
+    : undefined;
   const units = prepareCandidateDiscovery(index, {
     scopeChapterId,
+    tableIds,
     ...DISCOVERY,
     maxTextChars: discoveryMaxTextChars(models.discovery),
     inputSha256: 'count',
@@ -155,7 +160,7 @@ export async function runLedgerPipeline(
   const beforeDiscovery = guard.used();
   log(
     completion
-      ? `Discovering candidates in ${units} units of ${scope.join(', ')} (router proposal ${completion.proposedChapterIds.join(', ') || 'none'}; added from investigation chapters: ${completion.addedChapterIds.join(', ') || 'none'})...`
+      ? `Discovering candidates in ${units} units of ${scope.join(', ')} (router proposal ${completion.proposedChapterIds.join(', ') || 'none'}; added from investigation chapters: ${completion.addedChapterIds.join(', ') || 'none'}; register tables outside the scope: ${completion.tableIds.join(', ') || 'none'})...`
       : `Discovering candidates in ${units} units of ${scope.join(', ')} (profile scope)...`,
   );
   log(
@@ -165,6 +170,7 @@ export async function runLedgerPipeline(
     taskId,
     {
       scopeChapterId,
+      tableIds,
       modelId: models.discovery,
       deduplicationModelId: models.deduplication,
       deduplicationBatch: usesBatch(options, models.deduplication),
