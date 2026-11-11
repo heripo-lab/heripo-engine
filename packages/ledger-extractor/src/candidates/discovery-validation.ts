@@ -42,6 +42,10 @@ const NAME_LABEL =
  */
 const LABELLED_NUMBER =
   /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|(?<![A-Za-z])(?:No|NO)\.?)[:：]?([A-Za-z][A-Za-z\d]*\d(?:[:：·\-—]\d+)*)/gu;
+
+/** The object numbers a text holds right after numbering labels (`标本M102:11`), in order. */
+export const labelledNumbers = (text: string) =>
+  [...compact(text).matchAll(LABELLED_NUMBER)].map((m) => m[1]);
 /** Sentence punctuation, optionally followed by opening marks, right before a name. */
 const SENTENCE_START = /[。．；！？.;!?][(（「『“"]*$/u;
 
@@ -450,9 +454,7 @@ export function unansweredNumberedBlocks(
     if (cited.has(sourceId)) return [];
     const text = compact(resource.data.text);
     const opening = text.replace(/^[^\p{L}0-9]+/u, '').match(leading)?.[0];
-    const labelled = level.v16
-      ? [...text.matchAll(LABELLED_NUMBER)].map((m) => m[1])
-      : [];
+    const labelled = level.v16 ? labelledNumbers(text) : [];
     const number = [opening, ...labelled].find(
       (n): n is string => !!n && !numbers.has(n),
     );

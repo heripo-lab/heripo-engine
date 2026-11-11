@@ -7,16 +7,26 @@ import type {
   CandidateDiscoveryUnit,
 } from './discovery-types';
 
+import { labelledNumbers } from './discovery-validation';
+
 /** Text blocks shorter than this count as heading, number or field lines when a unit boundary is aligned. */
 export const CANDIDATE_DISCOVERY_SHORT_BLOCK_CHARS = 120;
 /** A trailing run of short blocks longer than this is not moved to the next unit. */
 export const CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS = 10;
+/**
+ * A text unit closes before it would hold more numbers after numbering labels (`标本M102:11`) than this: a catalog of
+ * types describes a specimen in a few dozen characters, so a unit within `maxTextChars` can hold a hundred of them,
+ * more than one answer can list within its output limit.
+ */
+export const CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS = 40;
 
 /**
  * Code chooses scope, chunk sizes and context; the model cannot schedule more work.
  * The scope is one chapter subtree or several distinct, non-nested subtrees planned in document order.
  * When a text unit would end with a run of short blocks followed by a long block of the same chapter, the run
  * starts the next unit instead, so an object's heading, number and field lines stay with its description.
+ * A text unit also closes before it would hold more than `maxLabelledNumbers` labelled object numbers
+ * (default `CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS`); a single block always fits.
  */
 export function prepareCandidateDiscovery(
   index: DocumentResourceIndex,
@@ -25,6 +35,7 @@ export function prepareCandidateDiscovery(
     inputSha256: string;
     maxTextChars: number;
     tableRowsPerUnit: number;
+    maxLabelledNumbers?: number;
     scopeSource?: CandidateDiscoveryPlan['scopeSource'];
   },
 ): CandidateDiscoveryPlan {
@@ -93,16 +104,22 @@ export function prepareCandidateDiscovery(
       )
       .map((r) => ({ id: r.resourceId!, originTitle: r.data.originTitle }));
     const texts = textByChapter.get(chapterId)!;
+    const numbers = texts.map((t) => labelledNumbers(t.data.text).length);
+    const maxNumbers =
+      options.maxLabelledNumbers ?? CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS;
     let start = 0;
     while (start < texts.length) {
       let end = start;
       let length = 0;
+      let labelled = 0;
       while (
         end < texts.length &&
         (end === start ||
-          length + texts[end].data.text.length <= options.maxTextChars)
+          (length + texts[end].data.text.length <= options.maxTextChars &&
+            labelled + numbers[end] <= maxNumbers))
       ) {
         length += texts[end].data.text.length;
+        labelled += numbers[end];
         end++;
       }
       // align the boundary: a trailing short run before a long block moves to the next unit

@@ -174,7 +174,11 @@ describe('original table identifiers and chapter continuations', () => {
 
 describe('aligned text unit boundaries', () => {
   const long = (label: string) => `${label} ${'설명'.repeat(70)}`;
-  const plan = (texts: string[], maxTextChars: number) => {
+  const plan = (
+    texts: string[],
+    maxTextChars: number,
+    maxLabelledNumbers?: number,
+  ) => {
     const doc = input();
     doc.tables = [];
     doc.chapters = [
@@ -192,6 +196,7 @@ describe('aligned text unit boundaries', () => {
       inputSha256: 'hash',
       maxTextChars,
       tableRowsPerUnit: 1,
+      maxLabelledNumbers,
     }).units.map((u) => u.resources.map((r) => r.resourceId));
   };
 
@@ -228,6 +233,18 @@ describe('aligned text unit boundaries', () => {
     ]);
     expect(plan(allShort, size(allShort, 2))).toEqual([['t0', 't1'], ['t2']]);
     expect(plan(manyShort, size(manyShort, 12))[0]).toHaveLength(12);
+  });
+
+  test('closes a unit before it would hold more labelled numbers than the limit', () => {
+    const catalog = [
+      `示例类型。标本M102:11，灰色。标本M102:12，灰色。${'口径'.repeat(60)}`,
+      `另一示例类型。标本M112:18，红色。${'口径'.repeat(60)}`,
+      `第三示例类型。标本M111:2，灰色。标本M111:3，灰色。${'口径'.repeat(60)}`,
+      `第四示例类型。标本M107:10，灰色。标本M107:11。标本M107:12。${'口径'.repeat(60)}`,
+    ];
+
+    expect(plan(catalog, 100_000, 3)).toEqual([['t0', 't1'], ['t2'], ['t3']]);
+    expect(plan(catalog, 100_000)).toEqual([['t0', 't1', 't2', 't3']]);
   });
 });
 
