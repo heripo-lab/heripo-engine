@@ -66,6 +66,12 @@ export interface AttachmentRegistryEntry {
     sourceIdentifier: string | null;
     chapterPath: CandidateDiscoveryPlan['units'][number]['chapterPath'];
     evidence: CandidateEvidence[];
+    /**
+     * Present when the candidate was found in a register table read from outside the discovery scope chapters. Such a
+     * table often sits under a closing chapter, so its chapter says nothing about where the report describes the
+     * object, and the mention joins no chapter handle. Plans prepared before this field read as before.
+     */
+    outsideScope?: true;
   }>;
 }
 export interface ContentAttachmentPlan {

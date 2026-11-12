@@ -103,6 +103,21 @@ describe('bounded content attachment', () => {
       f.doc.tables[0].grid,
     );
     expect(p.registryUncertainties).toEqual(f.groups.uncertainMatches);
+    expect(p.registry[0].mentions[0].outsideScope).toBeUndefined();
+    const register = fixture();
+    const appendix = [{ id: 'appendix', originTitle: '附表' }];
+    register.dp.units[0].chapterPath = appendix;
+    expect(
+      (
+        await prepareContentAttachment(
+          register.index,
+          register.dp,
+          register.discovery,
+          register.groups,
+          register.options,
+        )
+      ).registry[0].mentions[0],
+    ).toMatchObject({ chapterPath: appendix, outsideScope: true });
     expect(p.registrySha256).toMatch(/^[a-f0-9]{64}$/);
     expect((await prepare()).registrySha256).toBe(p.registrySha256);
     const mixed = (await prepare()).units.find((u) => u.pdfPageNo === 3)!;

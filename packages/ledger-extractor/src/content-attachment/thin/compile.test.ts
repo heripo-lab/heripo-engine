@@ -428,6 +428,23 @@ describe('createContentAttachmentThinInput', () => {
     });
   });
 
+  test('leaves mentions from register tables outside the discovery scope out of every handle', () => {
+    const { plan, unit } = fixture();
+    const feature = plan.registry.find((r) => r.recordKind === 'feature')!;
+    const before = createContentAttachmentThinInput(plan, unit).input.handles;
+    feature.mentions.forEach((m) => (m.outsideScope = true));
+
+    const { input } = createContentAttachmentThinInput(plan, unit);
+
+    expect(input.handles.find((h) => h[2] === 'feature')).toEqual([
+      'H3',
+      '2. 발굴조사',
+      'feature',
+      5,
+    ]);
+    expect(input.handles).toHaveLength(before.length);
+  });
+
   test('addresses words in windows and segments sentences in Q/L ranges', () => {
     const { plan, unit } = fixture();
 

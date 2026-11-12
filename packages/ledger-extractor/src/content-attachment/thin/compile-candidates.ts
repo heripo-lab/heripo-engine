@@ -168,7 +168,10 @@ export function localLayerHomes(plan: ContentAttachmentPlan) {
   return homes;
 }
 
-/** One handle per chapter node and record kind, in registry traversal order. */
+/**
+ * One handle per chapter node and record kind, in registry traversal order. Mentions from register tables outside the
+ * discovery scope join no handle.
+ */
 export function collectiveHandles(
   plan: ContentAttachmentPlan,
 ): ContentAttachmentThinHandle[] {
@@ -181,7 +184,7 @@ export function collectiveHandles(
     }
   >();
   for (const r of plan.registry)
-    for (const m of r.mentions)
+    for (const m of r.mentions.filter((x) => !x.outsideScope))
       m.chapterPath.forEach((c, i) => {
         const key = `${c.id}|${r.recordKind}`;
         const handle = handles.get(key) ?? {
