@@ -15,7 +15,8 @@
  * resumes or rewrites them; run one batch process at a time and do not read a task while it is running.
  * `--dry-run` makes no model call: it checks the inputs, the package build and the budget arithmetic.
  * `--resume-task <taskId>` makes a new batch of one input file continue that stopped task instead of creating one:
- * its saved report profile and complete discovery are kept, and only its duplicate review and later steps run.
+ * its saved report profile is kept, and so is its discovery when complete, of the current prompt version and still
+ * reproducible, so only its duplicate review and later steps run; otherwise discovery runs again.
  */
 import { createHash, randomUUID } from 'crypto';
 import {

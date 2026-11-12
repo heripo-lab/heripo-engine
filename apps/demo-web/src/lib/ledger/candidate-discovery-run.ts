@@ -6,6 +6,7 @@ import type {
 } from '@heripo/ledger-extractor';
 
 import {
+  CANDIDATE_DISCOVERY_PROMPT_VERSION,
   assembleCandidateDeduplication,
   assembleCandidateDiscovery,
   buildDocumentResourceIndex,
@@ -95,6 +96,29 @@ export function getCandidateDiscoveryRun(
     writeFileSync(manifestPath, JSON.stringify(run, null, 2));
   }
   return run;
+}
+
+/**
+ * Whether the task's latest discovery can be kept as it is: every unit answered under the current prompt version, and
+ * its saved audits still assemble every unit. A discovery from an earlier version, or one whose saved requests the
+ * current code no longer rebuilds, has to be run again.
+ */
+export async function isCandidateDiscoveryCurrent(taskId: string) {
+  const run = getCandidateDiscoveryRun(taskId);
+  if (!run || run.completedUnits !== run.totalUnits) return false;
+  const root = join(rootFor(taskId), run.runId);
+  const plan = readJson(join(root, 'plan.json'));
+  const files = plan.units.map((_: unknown, i: number) =>
+    join(root, `unit-${String(i).padStart(4, '0')}.json`),
+  );
+  if (!files.every(existsSync)) return false;
+  const audits: CandidateDiscoveryAudit[] = files.map(readJson);
+  if (
+    audits.some((a) => a.promptVersion !== CANDIDATE_DISCOVERY_PROMPT_VERSION)
+  )
+    return false;
+  const result = await assembleCandidateDiscovery(plan, audits);
+  return result.completedUnitIds.length === plan.units.length;
 }
 
 export function getCandidateDiscoveryAudit(

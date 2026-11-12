@@ -31,6 +31,7 @@ import {
 import {
   cancelCandidateDiscovery,
   getCandidateDiscoveryRun,
+  isCandidateDiscoveryCurrent,
   startCandidateDiscovery,
 } from './candidate-discovery-run';
 import { prepareContentAttachmentRun } from './content-attachment-run';
@@ -168,11 +169,16 @@ export async function runLedgerPipeline(
   }).units.length;
   const beforeDiscovery = guard.used();
   const previous = resume ? getCandidateDiscoveryRun(taskId) : null;
+  // a saved discovery is kept only while it is complete, of the current prompt version and still reproducible
   const keepDiscovery =
-    !!previous && previous.completedUnits === previous.totalUnits;
+    !!previous && (await isCandidateDiscoveryCurrent(taskId));
   if (keepDiscovery)
     log(
       `Keeping the saved discovery of ${previous.totalUnits} units and reviewing its duplicates again`,
+    );
+  else if (previous)
+    log(
+      'Discovering again: the saved discovery is incomplete, of an earlier prompt version or no longer reproducible',
     );
   log(
     completion
