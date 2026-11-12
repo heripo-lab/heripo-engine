@@ -34,7 +34,10 @@ import {
   isCandidateDiscoveryCurrent,
   startCandidateDiscovery,
 } from './candidate-discovery-run';
-import { prepareContentAttachmentRun } from './content-attachment-run';
+import {
+  getContentAttachmentRun,
+  prepareContentAttachmentRun,
+} from './content-attachment-run';
 import {
   getContentAttachmentThinState,
   startContentAttachmentThin,
@@ -172,9 +175,24 @@ export async function runLedgerPipeline(
   // a saved discovery is kept only while it is complete, of the current prompt version and still reproducible
   const keepDiscovery =
     !!previous && (await isCandidateDiscoveryCurrent(taskId));
-  if (keepDiscovery)
+  // an attachment run prepared from that discovery and its duplicate review is continued as it is: its submitted
+  // batch is collected and only its open units are asked
+  const savedAttachment = keepDiscovery
+    ? getContentAttachmentRun(taskId)
+    : null;
+  const keepAttachment =
+    !!previous &&
+    !!savedAttachment &&
+    previous.status === 'completed' &&
+    !!previous.deduplication &&
+    savedAttachment.candidateSnapshotId === previous.runId;
+  if (keepAttachment)
     log(
-      `Keeping the saved discovery of ${previous.totalUnits} units and reviewing its duplicates again`,
+      `Keeping the saved discovery of ${previous!.totalUnits} units with its duplicate review and continuing its content attachment run`,
+    );
+  else if (keepDiscovery)
+    log(
+      `Keeping the saved discovery of ${previous!.totalUnits} units and reviewing its duplicates again`,
     );
   else if (previous)
     log(
@@ -188,22 +206,23 @@ export async function runLedgerPipeline(
   log(
     `Discovery model ${models.discovery}, duplicate review model ${models.deduplication}`,
   );
-  await startCandidateDiscovery(
-    taskId,
-    {
-      scopeChapterId,
-      tableIds,
-      modelId: models.discovery,
-      deduplicationModelId: models.deduplication,
-      deduplicationBatch: usesBatch(options, models.deduplication),
-      discoveryBatch: usesBatch(options, models.discovery),
-      ...DISCOVERY,
-      maxTextChars: discoveryMaxTextChars(models.discovery),
-      ...(decided ? { useProfileScope: true } : {}),
-      ...(keepDiscovery ? { deduplicationOnly: true } : {}),
-    },
-    { guard },
-  );
+  if (!keepAttachment)
+    await startCandidateDiscovery(
+      taskId,
+      {
+        scopeChapterId,
+        tableIds,
+        modelId: models.discovery,
+        deduplicationModelId: models.deduplication,
+        deduplicationBatch: usesBatch(options, models.deduplication),
+        discoveryBatch: usesBatch(options, models.discovery),
+        ...DISCOVERY,
+        maxTextChars: discoveryMaxTextChars(models.discovery),
+        ...(decided ? { useProfileScope: true } : {}),
+        ...(keepDiscovery ? { deduplicationOnly: true } : {}),
+      },
+      { guard },
+    );
   try {
     while (getCandidateDiscoveryRun(taskId)?.status === 'running')
       await sleep(POLL_MS, abortSignal);
@@ -231,10 +250,12 @@ export async function runLedgerPipeline(
     log(
       `Left out ${dropped.length} discovery proposals that failed their checks: ${dropped.map((d) => d.reason).join('; ')}`,
     );
-  const plan = await prepareContentAttachmentRun(taskId, {
-    maxUnitChars: MAX_UNIT_CHARS,
-    acceptDroppedProposals: true,
-  });
+  const plan = keepAttachment
+    ? savedAttachment
+    : await prepareContentAttachmentRun(taskId, {
+        maxUnitChars: MAX_UNIT_CHARS,
+        acceptDroppedProposals: true,
+      });
   // direct calls go through the guard one attempt at a time; batches are sized by the thin run against what is
   // left, so the rest of the run is held for them and settled with what they used
   const batch = usesBatch(options, models.attachment);

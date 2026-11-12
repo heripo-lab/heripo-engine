@@ -102,8 +102,27 @@ export const createAnthropicBatch = (
   }>,
 ): Promise<MessageBatch> => anthropic().messages.batches.create({ requests });
 
+/** Reads of a batch that fail with a server or connection error are tried this many more times... */
+const READ_RETRIES = 5;
+/** ...this long apart, since reading a batch is free and a submitted batch keeps running meanwhile. */
+const READ_RETRY_MS = 30_000;
+
+/** A free batch read, tried again on server and connection errors so one failed poll does not end a long run. */
+async function read<T>(call: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (attempt >= READ_RETRIES || (status !== undefined && status < 500))
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, READ_RETRY_MS));
+    }
+  }
+}
+
 export const retrieveAnthropicBatch = (id: string): Promise<MessageBatch> =>
-  anthropic().messages.batches.retrieve(id);
+  read(() => anthropic().messages.batches.retrieve(id));
 
 export const cancelAnthropicBatch = (id: string): Promise<MessageBatch> =>
   anthropic().messages.batches.cancel(id);
@@ -111,10 +130,12 @@ export const cancelAnthropicBatch = (id: string): Promise<MessageBatch> =>
 export async function anthropicBatchResults(
   id: string,
 ): Promise<MessageBatchIndividualResponse[]> {
-  const out: MessageBatchIndividualResponse[] = [];
-  for await (const item of await anthropic().messages.batches.results(id))
-    out.push(item);
-  return out;
+  return read(async () => {
+    const out: MessageBatchIndividualResponse[] = [];
+    for await (const item of await anthropic().messages.batches.results(id))
+      out.push(item);
+    return out;
+  });
 }
 
 /**
