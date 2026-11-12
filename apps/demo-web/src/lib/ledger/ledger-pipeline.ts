@@ -175,14 +175,15 @@ export async function runLedgerPipeline(
   // a saved discovery is kept only while it is complete, of the current prompt version and still reproducible
   const keepDiscovery =
     !!previous && (await isCandidateDiscoveryCurrent(taskId));
-  // an attachment run prepared from that discovery and its duplicate review is continued as it is: its submitted
-  // batch is collected and only its open units are asked
+  // an unfinished attachment run prepared from that discovery and its duplicate review is continued as it is: its
+  // submitted batch is collected and only its open units are asked; a finished one is prepared and run again
   const savedAttachment = keepDiscovery
     ? getContentAttachmentRun(taskId)
     : null;
   const keepAttachment =
     !!previous &&
     !!savedAttachment &&
+    getContentAttachmentThinState(taskId)?.status !== 'completed' &&
     previous.status === 'completed' &&
     !!previous.deduplication &&
     savedAttachment.candidateSnapshotId === previous.runId;
