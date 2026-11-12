@@ -18,19 +18,23 @@ import {
   savedMergesByKindSchema,
 } from './candidate-deduplication';
 import { isSameCandidateDiscoveryScope } from './discovery-plan';
+import { columnBlocks } from './discovery-rows';
 import { sameObjectNumber } from './object-numbers';
 
 export const CANDIDATE_DEDUPLICATION_SPLIT_VERSION =
-  'candidate-deduplication-split.v4';
+  'candidate-deduplication-split.v5';
 /**
  * Split versions a saved audit may carry; v1 left number-linked pairs under different names apart, unasked; v2 did not
  * merge one object's number written in different forms (`107`, `M107`, `99XXM107`); v3 put candidates that code had
- * merged into a block as separate refs, so a model could call two of them uncertain.
+ * merged into a block as separate refs, so a model could call two of them uncertain; v4 counted a number form link
+ * one to one per candidate rather than per rule group, read a side-by-side table row across all its blocks and sent
+ * one number under two names the source never writes beside it (`墓`, `墓葬`) to a model.
  */
 export type CandidateDeduplicationSplitVersion =
   | 'candidate-deduplication-split.v1'
   | 'candidate-deduplication-split.v2'
   | 'candidate-deduplication-split.v3'
+  | 'candidate-deduplication-split.v4'
   | typeof CANDIDATE_DEDUPLICATION_SPLIT_VERSION;
 export const CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION =
   'candidate-deduplication.v9' as const;
@@ -55,10 +59,13 @@ export const CANDIDATE_DEDUPLICATION_CONTEXT_KINDS: ReadonlySet<
  * `same_number`: same kind, identifier and name. `number_correspondence`: same kind and name, and one
  * candidate's identifier stands in the other's anchor block or table row as a number of another form, one to one.
  * `number_form` (from split v3): same kind, and the identifiers are one number in different forms
- * (`sameObjectNumber`: `107`, `M107`, `99XXM107`), one to one.
+ * (`sameObjectNumber`: `107`, `M107`, `99XXM107`), one to one; from v5 one to one between rule groups.
+ * `inferred_name` (from split v5): same kind and identifier under two names, one inside the other, that the source
+ * text of neither candidate writes, so both are labels discovery gave a bare register number (`墓`, `墓葬`), one to one
+ * between rule groups.
  */
 export type CandidateDeduplicationRule =
-  'same_number' | 'number_correspondence' | 'number_form';
+  'same_number' | 'number_correspondence' | 'number_form' | 'inferred_name';
 export interface CandidateDeduplicationSplit {
   version: CandidateDeduplicationSplitVersion;
   /** Pairs merged by code, each with the rule that merged it. */
@@ -114,7 +121,9 @@ function requireCompleteDiscovery(
  * one to one, and (from v2) when numbers of different forms link it under names one of which contains the other,
  * such as a catalogue
  * entry `마도23-26 청자양각연판문병(호)` and the table row `마도시굴23-12 청자양각연판문 병(호)저부편` under the
- * heading "마도23-26 마도시굴23-12"; v1 left such pairs apart without asking. `version` replans a saved split. Pairs that neither code nor a model can join stay separate. Blocks are the connected sets of model
+ * heading "마도23-26 마도시굴23-12"; v1 left such pairs apart without asking. From v5 code also merges one identifier under
+ * two nested names that neither source writes beside it, links number forms one to one between rule groups, and reads
+ * a side-by-side register cell within its column block. `version` replans a saved split. Pairs that neither code nor a model can join stay separate. Blocks are the connected sets of model
  * pairs, in pool order. Deterministic and offline.
  */
 export function planCandidateDeduplication(
@@ -126,23 +135,46 @@ export function planCandidateDeduplication(
   const resources = new Map(
     plan.units.flatMap((u) => u.resources.map((r) => [r.key, r] as const)),
   );
+  const v5 = version === CANDIDATE_DEDUPLICATION_SPLIT_VERSION;
+  // from v5 a cell of a side-by-side register is read within its own column block
+  const blocksOf = new Map(
+    v5
+      ? plan.units.flatMap((u) => {
+          const blocks = columnBlocks(u);
+          return blocks && u.table ? [[u.table.id, blocks] as const] : [];
+        })
+      : [],
+  );
+  // the text of an evidence block, or of every cell of its table row (its column block, from v5)
+  const sourceTexts = (key: string) => {
+    const r = resources.get(key);
+    if (!r) return [];
+    if (r.kind !== 'tableCell') return [r.data.text];
+    const width = blocksOf.get(r.tableId)?.columnsPerBlock;
+    return [...resources.values()].flatMap((x) =>
+      x.kind === 'tableCell' &&
+      x.tableId === r.tableId &&
+      x.rowIndex === r.rowIndex &&
+      (!width ||
+        Math.floor(x.columnIndex / width) === Math.floor(r.columnIndex / width))
+        ? [x.data.text]
+        : [],
+    );
+  };
+  // whether the source of any evidence writes the candidate's name beside its number, or discovery labelled a bare number
+  const writesName = (c: LedgerObjectCandidate) => {
+    const [id, name] = [norm(c.sourceIdentifier), norm(c.sourceName)];
+    return c.evidence.some((e) => {
+      const source = norm(sourceTexts(e.resourceKey).join(' '));
+      return source.includes(id + name) || source.includes(name + id);
+    });
+  };
   const tokenCache = new Map<string, Set<string>>();
   // the words of a candidate's anchor block, or every cell of its table row
   const tokensOf = (c: LedgerObjectCandidate) => {
     const cached = tokenCache.get(c.candidateId);
     if (cached) return cached;
-    const r = resources.get(c.evidence[0].resourceKey);
-    const texts = !r
-      ? []
-      : r.kind === 'tableCell'
-        ? [...resources.values()].flatMap((x) =>
-            x.kind === 'tableCell' &&
-            x.tableId === r.tableId &&
-            x.rowIndex === r.rowIndex
-              ? [x.data.text]
-              : [],
-          )
-        : [r.data.text];
+    const texts = sourceTexts(c.evidence[0].resourceKey);
     const tokens = new Set(
       texts
         .flatMap((t) => t.split(/[\s|,;()（）[\]]+/u))
@@ -162,6 +194,7 @@ export function planCandidateDeduplication(
   const sameNumber: Array<[number, number]> = [];
   const correspondence: Array<[number, number]> = [];
   const forms: Array<[number, number]> = [];
+  const inferred: Array<[number, number]> = [];
   const otherLinks: Array<[number, number]> = [];
   const model: Array<[number, number]> = [];
   for (let i = 0; i < cands.length; i++)
@@ -177,10 +210,22 @@ export function planCandidateDeduplication(
         sameNumber.push([i, j]);
         continue;
       }
+      if (
+        v5 &&
+        ia &&
+        ia === ib &&
+        (na.includes(nb) || nb.includes(na)) &&
+        !writesName(a) &&
+        !writesName(b)
+      ) {
+        inferred.push([i, j]);
+        continue;
+      }
       // from v3 one number in another form (`107`, `M107`, `99XXM107`) names the same object whatever the name
       if (
         (version === 'candidate-deduplication-split.v3' ||
-          version === CANDIDATE_DEDUPLICATION_SPLIT_VERSION) &&
+          version === 'candidate-deduplication-split.v4' ||
+          v5) &&
         ia &&
         ib &&
         ia !== ib &&
@@ -222,23 +267,52 @@ export function planCandidateDeduplication(
   const degree = new Map<number, number>();
   for (const pair of [...correspondence, ...otherLinks])
     for (const x of pair) degree.set(x, (degree.get(x) ?? 0) + 1);
-  const formDegree = new Map<number, number>();
-  for (const pair of forms)
-    for (const x of pair) formDegree.set(x, (formDegree.get(x) ?? 0) + 1);
+  const rule = cands.map((_, i) => i);
+  const findRule = (x: number): number =>
+    rule[x] === x ? x : (rule[x] = findRule(rule[x]));
+  const unite = (i: number, j: number) => {
+    const [a, b] = [findRule(i), findRule(j)];
+    rule[Math.max(a, b)] = Math.min(a, b);
+  };
   const ruleMerges: CandidateDeduplicationSplit['ruleMerges'] = [];
-  for (const [i, j] of sameNumber)
+  for (const [i, j] of sameNumber) {
     ruleMerges.push({
       candidateIds: [cands[i].candidateId, cands[j].candidateId],
       rule: 'same_number',
     });
-  for (const pair of forms) {
-    if (pair.some((x) => formDegree.get(x)! > 1)) model.push(pair);
-    else
-      ruleMerges.push({
-        candidateIds: [cands[pair[0]].candidateId, cands[pair[1]].candidateId],
-        rule: 'number_form',
-      });
+    unite(i, j);
   }
+  // a link counts one to one per candidate before v5, and from v5 per rule group, so a number written in several
+  // registers that code already joined still links one to one to its prefixed form in the account
+  const oneToOne = (
+    pairs: Array<[number, number]>,
+    ruleName: CandidateDeduplicationRule,
+  ) => {
+    const at = (x: number) => (v5 ? findRule(x) : x);
+    const partners = new Map<number, Set<number>>();
+    // the paired identifiers or names differ, so code has not joined the two candidates of a pair before
+    for (const [i, j] of pairs)
+      for (const [x, y] of [
+        [at(i), at(j)],
+        [at(j), at(i)],
+      ])
+        partners.set(x, (partners.get(x) ?? new Set()).add(y));
+    const accepted = pairs.filter(([i, j]) => {
+      if (partners.get(at(i))!.size > 1 || partners.get(at(j))!.size > 1) {
+        model.push([i, j]);
+        return false;
+      }
+      return true;
+    });
+    for (const [i, j] of accepted)
+      ruleMerges.push({
+        candidateIds: [cands[i].candidateId, cands[j].candidateId],
+        rule: ruleName,
+      });
+    for (const [i, j] of accepted) unite(i, j);
+  };
+  oneToOne(inferred, 'inferred_name');
+  oneToOne(forms, 'number_form');
   for (const pair of correspondence) {
     if (pair.some((x) => degree.get(x)! > 1)) model.push(pair);
     else
@@ -249,16 +323,14 @@ export function planCandidateDeduplication(
   }
   // from v4 a block holds whole rule groups: a model pair joins the groups of its candidates, and a pair inside one
   // group is already decided
-  const grouped = version === CANDIDATE_DEDUPLICATION_SPLIT_VERSION;
-  const rule = cands.map((_, i) => i);
-  const findRule = (x: number): number =>
-    rule[x] === x ? x : (rule[x] = findRule(rule[x]));
+  const grouped = version === 'candidate-deduplication-split.v4' || v5;
   const indexOf = new Map(cands.map((c, i) => [c.candidateId, i]));
   if (grouped)
     for (const merge of ruleMerges) {
-      const [a, b] = merge.candidateIds.map((id) => findRule(indexOf.get(id)!));
-      rule[Math.max(a, b)] = Math.min(a, b);
+      const [a, b] = merge.candidateIds.map((id) => indexOf.get(id)!);
+      unite(a, b);
     }
+  else rule.forEach((_, i) => (rule[i] = i));
   const pairs = grouped
     ? model.filter(([i, j]) => findRule(i) !== findRule(j))
     : model;
@@ -490,6 +562,7 @@ const RULE_REASONS: Record<CandidateDeduplicationRule, string> = {
   same_number: '코드 규칙: 같은 종류·번호·이름',
   number_correspondence: '코드 규칙: 같은 이름, 근거 블록·표 행의 번호 대응',
   number_form: '코드 규칙: 같은 종류, 같은 번호의 다른 표기',
+  inferred_name: '코드 규칙: 같은 종류·번호, 원문에 없는 이름의 다른 표기',
 };
 
 /**

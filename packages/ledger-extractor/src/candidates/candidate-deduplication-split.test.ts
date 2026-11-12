@@ -193,7 +193,7 @@ describe('planCandidateDeduplication', () => {
   test('merges same numbers and one-to-one correspondences by code and blocks the pairs a model must judge', () => {
     const split = planCandidateDeduplication(plan, discovery());
 
-    expect(split.version).toBe('candidate-deduplication-split.v4');
+    expect(split.version).toBe('candidate-deduplication-split.v5');
     expect(split.ruleMerges).toEqual([
       { candidateIds: ['a1', 'a2'], rule: 'same_number' },
       { candidateIds: ['b1', 'b2'], rule: 'number_correspondence' },
@@ -240,7 +240,11 @@ describe('planCandidateDeduplication', () => {
       ],
     });
 
-    const v4 = planCandidateDeduplication(plan, tombs());
+    const v4 = planCandidateDeduplication(
+      plan,
+      tombs(),
+      'candidate-deduplication-split.v4',
+    );
     const v3 = planCandidateDeduplication(
       plan,
       tombs(),
@@ -260,6 +264,90 @@ describe('planCandidateDeduplication', () => {
         candidateIds: ['m1', 'r1', 'r2'],
         ruleGroups: [['r1', 'r2']],
       },
+    ]);
+  });
+
+  test('merges labels discovery gave one bare number and number forms one to one per rule group from split v5', () => {
+    const register = (
+      tableId: string,
+      rowIndex: number,
+      texts: string[],
+    ): CandidateDiscoveryUnit['resources'] =>
+      texts.map((value, columnIndex) => ({
+        ...cell(
+          `/${tableId}/${rowIndex}/${columnIndex}`,
+          rowIndex,
+          columnIndex,
+          value,
+        ),
+        tableId,
+      }));
+    const registers: CandidateDiscoveryPlan = {
+      ...plan,
+      units: [
+        unit('u1', [
+          text('/x1', '99XXM206位于墓地东部。'),
+          text('/x2', '墓M300'),
+        ]),
+        {
+          ...unit(
+            'u2',
+            register('side', 0, ['218', '墓葬', '206', '丙']).concat(
+              register('side', 1, ['300', '甲', '', '']),
+            ),
+          ),
+          table: {
+            id: 'side',
+            caption: null,
+            headerRows: [],
+            columnBlocks: { count: 2, columnsPerBlock: 2 },
+          },
+        },
+        unit('u3', [
+          ...register('plain', 0, ['218', '墓主']),
+          ...register('plain', 1, ['206', '']),
+          ...register('plain', 2, ['300', '']),
+          ...register('plain', 3, ['300', '']),
+        ]),
+      ],
+    };
+    const tombs = (): CandidateDiscoveryResult => ({
+      ...discovery(),
+      candidates: [
+        candidate('r1', 'feature', '墓葬', '218', '/side/0/0'),
+        candidate('r2', 'feature', '墓', '218', '/plain/0/0'),
+        candidate('s1', 'feature', '墓葬', '206', '/side/0/2'),
+        candidate('s2', 'feature', '墓', '206', '/plain/1/0'),
+        candidate('s3', 'feature', '墓', '206', '/plain/1/0'),
+        candidate('m1', 'feature', '墓', '99XXM206', '/x1'),
+        candidate('t1', 'feature', '墓', '300', '/side/1/0'),
+        candidate('t2', 'feature', '墓葬', '300', '/plain/2/0'),
+        candidate('t3', 'feature', '墓葬祔', '300', '/plain/3/0'),
+        candidate('t4', 'feature', '墓', 'M300', '/x2'),
+      ],
+    });
+
+    const v5 = planCandidateDeduplication(registers, tombs());
+    const v4 = planCandidateDeduplication(
+      registers,
+      tombs(),
+      'candidate-deduplication-split.v4',
+    );
+
+    expect(v5.ruleMerges).toEqual([
+      { candidateIds: ['s2', 's3'], rule: 'same_number' },
+      { candidateIds: ['s1', 's2'], rule: 'inferred_name' },
+      { candidateIds: ['s1', 's3'], rule: 'inferred_name' },
+      { candidateIds: ['s1', 'm1'], rule: 'number_form' },
+      { candidateIds: ['s2', 'm1'], rule: 'number_form' },
+      { candidateIds: ['s3', 'm1'], rule: 'number_form' },
+    ]);
+    expect(v5.blocks.map((b) => b.candidateIds)).toEqual([
+      ['r1', 'r2'],
+      ['t1', 't2', 't3', 't4'],
+    ]);
+    expect(v4.ruleMerges).toEqual([
+      { candidateIds: ['s2', 's3'], rule: 'same_number' },
     ]);
   });
 
