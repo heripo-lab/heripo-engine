@@ -9,11 +9,14 @@ import {
   proposal,
   registry,
   sections,
+  sideBySideRegister,
   usage,
 } from './candidate-discovery.test-fixture';
 import { assembleCandidateDiscovery } from './discovery-assembly';
 import {
   REGISTER_ROWS_RULE,
+  REGISTER_ROW_BLOCKS_RULE,
+  SIDE_BY_SIDE_TABLES_RULE,
   createCandidateDiscoveryRequest,
   createCandidateDiscoverySchema,
   getCandidateSources,
@@ -525,5 +528,79 @@ describe('candidate discovery', () => {
     expect(
       await headerIssues('M2 유물명 기록', 'candidate-discovery.v16'),
     ).toBe(1);
+  });
+
+  test('sends register blocks with the side-by-side rules from v18 and rebuilds v17 requests without them', () => {
+    const { unit } = sideBySideRegister();
+    const asked = (target: typeof unit, version?: 'candidate-discovery.v17') =>
+      JSON.parse(createCandidateDiscoveryRequest(target, version).userPrompt);
+    const v18 = asked(unit);
+    const v17 = asked(unit, 'candidate-discovery.v17');
+    const plain = registry().plan.units[0];
+
+    expect(v18.table.columnBlocks).toEqual({ count: 2, columnsPerBlock: 3 });
+    expect(v18.table.registerRows).toEqual(unit.table!.registerRows);
+    expect(v18.rules).toEqual([
+      REGISTER_ROWS_RULE,
+      SIDE_BY_SIDE_TABLES_RULE,
+      REGISTER_ROW_BLOCKS_RULE,
+    ]);
+    expect(v17.table).not.toHaveProperty('columnBlocks');
+    expect(v17.table.registerRows).toEqual([
+      { rowIndex: 2, number: '201', writtenAs: 'M201' },
+      { rowIndex: 2, number: '301', writtenAs: 'M301' },
+      { rowIndex: 3, number: '202', writtenAs: 'M202' },
+    ]);
+    expect(v17.rules).toEqual([REGISTER_ROWS_RULE]);
+    expect(
+      asked({ ...unit, table: { ...unit.table!, registerRows: undefined } })
+        .rules,
+    ).toEqual([SIDE_BY_SIDE_TABLES_RULE]);
+    expect(
+      createCandidateDiscoveryRequest(plain, 'candidate-discovery.v17')
+        .userPrompt,
+    ).toBe(createCandidateDiscoveryRequest(plain).userPrompt);
+    expect(candidateCheckLevel('candidate-discovery.v17')).toMatchObject({
+      v17: true,
+      v18: false,
+    });
+  });
+
+  test('requires from v18 an item of a register read block by block to quote only its block, named by its block', async () => {
+    const { plan, unit, item } = sideBySideRegister();
+    const response = {
+      tableRole: 'item_table' as const,
+      candidates: [item(2, 0, [1, 2]), item(2, 1, [1]), item(3, 0), item(3, 1)],
+      exclusions: [],
+    };
+    const issues = async (version?: 'candidate-discovery.v17') =>
+      (
+        await assembleCandidateDiscovery({ ...plan, units: [unit] }, [
+          {
+            unitId: unit.unitId,
+            ...createCandidateDiscoveryRequest(unit, version),
+            response,
+            usage,
+          },
+        ])
+      ).issues
+        .map((i) => i.reason)
+        .filter((r) => !r.startsWith('Table row blocks'));
+
+    expect(await issues()).toEqual([
+      'Table item quotes cells outside the column block of its number',
+      'Table item name is a column header',
+    ]);
+    expect(await issues('candidate-discovery.v17')).toEqual([]);
+    expect(
+      planCandidateDiscoveryFollowUp(
+        unit,
+        response,
+        'candidate-discovery.v18',
+      )!.corrections.map((c) => c.fix),
+    ).toEqual([
+      expect.stringContaining('quote only cells of the block'),
+      expect.stringContaining('never a column header'),
+    ]);
   });
 });

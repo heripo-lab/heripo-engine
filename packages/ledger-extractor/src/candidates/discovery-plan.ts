@@ -7,6 +7,7 @@ import type {
   CandidateDiscoveryUnit,
 } from './discovery-types';
 
+import { dataColumnBlocks } from './discovery-rows';
 import { labelledNumbers } from './discovery-validation';
 import {
   latinPrefixedNumbers,
@@ -40,6 +41,8 @@ export const CANDIDATE_DISCOVERY_REGISTER_EXCERPT_AFTER = 60;
  * A table of `tableIds` lists, in each unit, the data rows whose opening number the scope's text writes with a Latin
  * prefix (`table.registerRows`), and adds to its read-only context, for each, the first passage of the scope's text that
  * writes that number, so the model knows those rows are objects of this investigation and what they are called.
+ * When such a table lists several numbered objects in each row (`dataColumnBlocks`), its units carry those
+ * `columnBlocks` and each register row names the block that opens with its number.
  */
 export function prepareCandidateDiscovery(
   index: DocumentResourceIndex,
@@ -121,6 +124,20 @@ export function prepareCandidateDiscovery(
       (r): r is Extract<DocumentResource, { kind: 'tableCell' }> =>
         r.kind === 'tableCell' && r.key.startsWith(`${table.key}/grid/`),
     );
+    // a register that lists several numbered objects in each row is read block by block
+    const blocks = written?.size ? dataColumnBlocks(table.data.grid) : null;
+    const parts = (row: Array<{ text: string }>) =>
+      blocks
+        ? Array.from({ length: blocks.count }, (_, block) => ({
+            block,
+            texts: row
+              .slice(
+                block * blocks.columnsPerBlock,
+                (block + 1) * blocks.columnsPerBlock,
+              )
+              .map((c) => c.text),
+          }))
+        : [{ block: undefined, texts: row.map((c) => c.text) }];
     for (
       let row = 0;
       row < table.data.grid.length;
@@ -129,18 +146,28 @@ export function prepareCandidateDiscovery(
       const registerRows = written?.size
         ? table.data.grid
             .slice(row, row + options.tableRowsPerUnit)
-            .flatMap((cells, offset) => {
-              const number =
-                row + offset > 0 && rowLeadingNumber(cells.map((c) => c.text));
-              const writtenAs =
-                number &&
-                [...written.keys()]
-                  .filter((w) => sameObjectNumber(number, w))
-                  .sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
-              return writtenAs
-                ? [{ rowIndex: row + offset, number, writtenAs }]
-                : [];
-            })
+            .flatMap((cells, offset) =>
+              parts(cells).flatMap(({ block, texts }) => {
+                const number = row + offset > 0 && rowLeadingNumber(texts);
+                const writtenAs =
+                  number &&
+                  [...written.keys()]
+                    .filter((w) => sameObjectNumber(number, w))
+                    .sort(
+                      (a, b) => a.length - b.length || a.localeCompare(b),
+                    )[0];
+                return writtenAs
+                  ? [
+                      {
+                        rowIndex: row + offset,
+                        ...(block === undefined ? {} : { block }),
+                        number,
+                        writtenAs,
+                      },
+                    ]
+                  : [];
+              }),
+            )
         : [];
       units.push({
         unitId: `${table.key}:rows:${row}`,
@@ -151,15 +178,22 @@ export function prepareCandidateDiscovery(
           caption: table.data.caption?.fullText ?? null,
           headerRows: table.data.grid.slice(0, 2),
           ...(registerRows.length ? { registerRows } : {}),
+          ...(blocks ? { columnBlocks: blocks } : {}),
         },
         resources: cells.filter(
           (c) =>
             c.rowIndex >= row && c.rowIndex < row + options.tableRowsPerUnit,
         ),
-        // a register row's number in the scope's text, so the row has a name and a place in this investigation
+        // a register row's number in the scope's text, so the row has a name and a place in this investigation;
+        // numbers written in one passage share its excerpt
         context: [
           ...context,
-          ...new Set(registerRows.map((r) => written!.get(r.writtenAs)!)),
+          ...new Map(
+            registerRows.map((r) => {
+              const passage = written!.get(r.writtenAs)!;
+              return [passage.text, passage];
+            }),
+          ).values(),
         ],
       });
     }

@@ -5,10 +5,12 @@ import {
   prepare,
   registry,
   sections,
+  sideBySideRegister,
 } from './candidate-discovery.test-fixture';
 import {
   columnBlocks,
   createFollowUpUnit,
+  dataColumnBlocks,
   unansweredItemTableBlocks,
   unansweredItemTableRows,
 } from './discovery-rows';
@@ -202,5 +204,91 @@ describe('side-by-side table blocks', () => {
         )
         .sort((a, b) => a.localeCompare(b, 'en', { numeric: true })),
     );
+  });
+});
+
+describe('column blocks from number columns', () => {
+  const grid = (...rows: string[][]) =>
+    rows.map((row) => row.map((text) => ({ text })));
+
+  test('finds a register that repeats numbered blocks across each row and stands them for its header', () => {
+    const { doc, unit } = sideBySideRegister();
+
+    expect(dataColumnBlocks(doc.tables[0].grid)).toEqual({
+      count: 2,
+      columnsPerBlock: 3,
+    });
+    expect(columnBlocks(unit)).toEqual({ count: 2, columnsPerBlock: 3 });
+    expect(
+      columnBlocks({
+        ...unit,
+        table: { ...unit.table!, columnBlocks: undefined },
+      }),
+    ).toBeNull();
+  });
+
+  test('leaves count, year, unordered and adjacent number columns and empty tables alone', () => {
+    const rows = (...values: string[][]) =>
+      dataColumnBlocks(grid(['No', 'a', 'b', 'c'], ...values));
+
+    // counts repeat
+    expect(
+      rows(['1', 'x', '1', 'y'], ['2', 'x', '1', 'y'], ['3', 'x', '1', 'y']),
+    ).toBeNull();
+    // a year beside the number leaves no room for a second block
+    expect(
+      dataColumnBlocks(
+        grid(
+          ['1', 'x', 'y', '290'],
+          ['2', 'x', 'y', '311'],
+          ['3', 'x', 'y', '341'],
+        ),
+      ),
+    ).toBeNull();
+    // serials beside years, with room for a second block
+    expect(
+      dataColumnBlocks(
+        grid(
+          ['1', 'x', '1986', 'y', 'z'],
+          ['2', 'x', '2000', 'y', 'z'],
+          ['3', 'x', '2001', 'y', 'z'],
+        ),
+      ),
+    ).toBeNull();
+    // numbers that do not run down the column
+    expect(
+      rows(['9', 'x', '19', 'y'], ['5', 'x', '15', 'y'], ['1', 'x', '11', 'y']),
+    ).toBeNull();
+    // numbers that do not run rightwards across the rows
+    expect(
+      rows(['11', 'x', '1', 'y'], ['12', 'x', '2', 'y'], ['13', 'x', '3', 'y']),
+    ).toBeNull();
+    // adjacent number columns, or none in the first column
+    expect(
+      rows(['1', '11', 'x', 'y'], ['2', '12', 'x', 'y'], ['3', '13', 'x', 'y']),
+    ).toBeNull();
+    expect(
+      rows(['x', '1', 'y', '11'], ['x', '2', 'y', '12'], ['x', '3', 'y', '13']),
+    ).toBeNull();
+    expect(dataColumnBlocks([])).toBeNull();
+    // a short row has no cell in the later columns
+    expect(
+      dataColumnBlocks(
+        grid(['1', 'x', '11', 'y'], ['2', 'x', '12', 'y'], ['3']),
+      ),
+    ).toBeNull();
+    // a register whose rows never hold two numbers still has its blocks
+    expect(
+      dataColumnBlocks(
+        grid(
+          ['1', 'x', '', 'y'],
+          ['2', 'x', '', 'y'],
+          ['3', 'x', '', 'y'],
+          ['', 'x', '4', 'y'],
+          ['', 'x', '5', 'y'],
+          ['', 'x', '6', 'y'],
+        ),
+      ),
+    ).toEqual({ count: 2, columnsPerBlock: 2 });
   });
 });

@@ -54,7 +54,8 @@ const compact = (text: string) => text.replace(/\s+/gu, '');
 /**
  * Version-dependent checks: strict table identifiers from v6, table roles and name cells from v9, name leads and
  * corrections from v10, heading reconsideration and row blocks from v11, follow-up rules in the follow-up input from
- * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15, names after numbering labels or at sentence starts from v16; v17 changes only the request (register rows).
+ * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15, names after numbering labels or at sentence starts from v16; v17 changes only the request (register rows); table items
+ * of a register read block by block quoting only their own block, and its register rows matched by block, from v18.
  */
 export interface CandidateCheckLevel {
   strictTableIdentifier: boolean;
@@ -67,12 +68,14 @@ export interface CandidateCheckLevel {
   v15: boolean;
   v16: boolean;
   v17: boolean;
+  v18: boolean;
 }
 
 export function candidateCheckLevel(
   promptVersion: string,
 ): CandidateCheckLevel {
-  const v17 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v18 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v17 = v18 || promptVersion === 'candidate-discovery.v17';
   const v16 = v17 || promptVersion === 'candidate-discovery.v16';
   const v15 = v16 || promptVersion === 'candidate-discovery.v15';
   const v14 = v15 || promptVersion === 'candidate-discovery.v14';
@@ -98,6 +101,7 @@ export function candidateCheckLevel(
     v15,
     v16,
     v17,
+    v18,
   };
 }
 
@@ -244,8 +248,30 @@ export function checkCandidate(
     return (
       level.v17 &&
       cell?.kind === 'tableCell' &&
-      !!unit.table!.registerRows?.some((r) => r.rowIndex === cell.rowIndex) &&
+      !!unit.table!.registerRows?.some(
+        (r) =>
+          r.rowIndex === cell.rowIndex &&
+          // from v18 a register row of a register read block by block names its block
+          (r.block === undefined || !blocks || r.block === blockOf(cell)),
+      ) &&
       unit.context.some((c) => c.text.includes(proposal.sourceName))
+    );
+  };
+  // from v18 an item of a register read block by block quotes only its identifier's block; header-found blocks of
+  // other side-by-side tables keep accepting a quoted whole row
+  const blocks = (level.v18 && unit.table?.columnBlocks) || null;
+  // called only when blocks are present
+  const blockOf = (cell: { columnIndex: number }) =>
+    Math.floor(cell.columnIndex / blocks!.columnsPerBlock);
+  const outsideBlock = () => {
+    const cell = identifierCell?.resource;
+    return (
+      !!blocks &&
+      cell?.kind === 'tableCell' &&
+      evidence.some((e) => {
+        const quoted = sources.find((s) => s.sourceId === e.sourceId)!.resource;
+        return quoted.kind === 'tableCell' && blockOf(quoted) !== blockOf(cell);
+      })
     );
   };
   let invalid = '';
@@ -272,6 +298,8 @@ export function checkCandidate(
   )
     invalid =
       'Table identifier must equal the selected original number cell and first evidence';
+  else if (outsideBlock())
+    invalid = 'Table item quotes cells outside the column block of its number';
   else if (
     ['feature', 'artifact'].includes(proposal.recordKind) &&
     proposal.eligibilityBasis === 'explicit_context_unit'
@@ -363,6 +391,10 @@ const FIXES: Array<[RegExp, string]> = [
   [
     /not named at the start/u,
     'An independent body names its object at its start: cite the heading or opening words that name the object, or exclude an object that the passage only mentions in passing.',
+  ],
+  [
+    /outside the column block/u,
+    'This table repeats its columns side by side, so each column block of a row is its own item: quote only cells of the block that holds the number cell, and give every other numbered block its own candidate.',
   ],
   [
     /Duplicate anchor/u,
@@ -518,23 +550,25 @@ export function planCandidateDiscoveryFollowUp(
 ) {
   const level = candidateCheckLevel(promptVersion);
   if (!level.v9) return null;
-  const version = level.v17
+  const version = level.v18
     ? CANDIDATE_DISCOVERY_PROMPT_VERSION
-    : level.v16
-      ? 'candidate-discovery.v16'
-      : level.v15
-        ? 'candidate-discovery.v15'
-        : level.v14
-          ? 'candidate-discovery.v14'
-          : level.v13
-            ? 'candidate-discovery.v13'
-            : level.v12
-              ? 'candidate-discovery.v12'
-              : level.v11
-                ? 'candidate-discovery.v11'
-                : level.v10
-                  ? 'candidate-discovery.v10'
-                  : 'candidate-discovery.v9';
+    : level.v17
+      ? 'candidate-discovery.v17'
+      : level.v16
+        ? 'candidate-discovery.v16'
+        : level.v15
+          ? 'candidate-discovery.v15'
+          : level.v14
+            ? 'candidate-discovery.v14'
+            : level.v13
+              ? 'candidate-discovery.v13'
+              : level.v12
+                ? 'candidate-discovery.v12'
+                : level.v11
+                  ? 'candidate-discovery.v11'
+                  : level.v10
+                    ? 'candidate-discovery.v10'
+                    : 'candidate-discovery.v9';
   // a side-by-side table answers by row blocks from v11, so its rows are asked through those blocks only
   const blocks = level.v11 ? columnBlocks(unit) : null;
   const rowBlocks = blocks ? unansweredItemTableBlocks(unit, response) : [];

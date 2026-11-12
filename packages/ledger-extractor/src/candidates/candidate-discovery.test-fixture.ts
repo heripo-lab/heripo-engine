@@ -294,3 +294,67 @@ export const pairs = () => {
   };
   return { plan, unit, cellId, item };
 };
+
+/**
+ * A register outside the scope chapter that lists two tombs in each data row, in blocks of three columns (number, type,
+ * phase), under a title row and an OCR-uneven header row that do not repeat. The scope writes M201, M301 and M202,
+ * so rows 2 and 3 hold register blocks; 302, 203 and 304 are not written.
+ */
+export const sideBySideRegister = () => {
+  const cell = (text: string, isHeader = false) => ({
+    text,
+    colSpan: 1,
+    rowSpan: 1,
+    isHeader,
+  });
+  const doc = input();
+  doc.chapters[0].children![0].textBlocks = [
+    { text: '墓 M201、M301、M202。', pdfPageNo: 3 },
+  ];
+  doc.tables[0].grid = [
+    ['', '', '附表一', '', '', '', ''].map((t) => cell(t)),
+    ['墓', '型式', '分期', '墓号：型式', '', '分 期', ''].map((t) =>
+      cell(t, true),
+    ),
+    ['201', '甲A', '三', '301', '乙B', '二', ''].map((t) => cell(t)),
+    ['202', '丙A', '三', '302', '丙B', '四', ''].map((t) => cell(t)),
+    ['203', '', '', '304', '丁', '五', ''].map((t) => cell(t)),
+  ];
+  const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+    scopeChapterId: 'child',
+    inputSha256: 'h',
+    maxTextChars: 100,
+    tableRowsPerUnit: 10,
+    tableIds: ['t'],
+  });
+  const unit = plan.units[1];
+  const cellId = (row: number, column: number) =>
+    getCandidateSources(unit).find(
+      (s) =>
+        s.resource.kind === 'tableCell' &&
+        s.resource.rowIndex === row &&
+        s.resource.columnIndex === column,
+    )!.sourceId;
+  /** The register candidate of one block, named 墓, quoting its number cell and the given columns of its row. */
+  const item = (
+    row: number,
+    block: number,
+    columns: number[] = [],
+  ): CandidateDiscoveryResponse['candidates'][number] => {
+    const quote = (column: number) => ({
+      sourceId: cellId(row, column),
+      quote: doc.tables[0].grid[row][column].text,
+    });
+    return {
+      recordKind: 'feature',
+      sourceName: '墓',
+      sourceIdentifier: doc.tables[0].grid[row][block * 3].text,
+      identifierSourceId: cellId(row, block * 3),
+      nameSourceId: null,
+      eligibilityBasis: 'table_item',
+      reason: '등록 행',
+      evidence: [quote(block * 3), ...columns.map(quote)],
+    };
+  };
+  return { doc, plan, unit, cellId, item };
+};

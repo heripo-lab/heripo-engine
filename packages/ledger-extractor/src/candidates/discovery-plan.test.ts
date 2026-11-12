@@ -3,7 +3,11 @@ import type { ProcessedDocument } from '@heripo/model';
 import { describe, expect, test, vi } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
-import { chapter, input } from './candidate-discovery.test-fixture';
+import {
+  chapter,
+  input,
+  sideBySideRegister,
+} from './candidate-discovery.test-fixture';
 import { assembleCandidateDiscovery } from './discovery-assembly';
 import {
   CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS,
@@ -126,6 +130,22 @@ describe('candidate discovery', () => {
       '묘 K2, M2와 99XXM2를 조사했다.',
     ]);
     expect(plan.units[2].table).not.toHaveProperty('registerRows');
+    expect(plan.units[1].table).not.toHaveProperty('columnBlocks');
+  });
+
+  test('lists the register blocks of a register that holds several numbered objects in each row', () => {
+    const { unit } = sideBySideRegister();
+
+    expect(unit.table?.columnBlocks).toEqual({ count: 2, columnsPerBlock: 3 });
+    expect(unit.table?.registerRows).toEqual([
+      { rowIndex: 2, block: 0, number: '201', writtenAs: 'M201' },
+      { rowIndex: 2, block: 1, number: '301', writtenAs: 'M301' },
+      { rowIndex: 3, block: 0, number: '202', writtenAs: 'M202' },
+    ]);
+    expect(unit.context.map((c) => c.text)).toEqual([
+      '1호 우물',
+      '墓 M201、M301、M202。',
+    ]);
   });
 
   test('rejects invalid scope and chunk limits', () => {

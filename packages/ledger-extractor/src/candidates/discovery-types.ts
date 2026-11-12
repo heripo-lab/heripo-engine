@@ -89,6 +89,8 @@ export type InputResource = Extract<
 >;
 export interface CandidateDiscoveryRegisterRow {
   rowIndex: number;
+  /** The column block that opens with the number, present only when the table has `columnBlocks` (v18). */
+  block?: number;
   /** The leading digits of the row's number cell. */
   number: string;
   /** How the scope's text writes that number. */
@@ -107,6 +109,11 @@ export interface CandidateDiscoveryUnit {
      * scope's text writes with a Latin prefix, each with the written form (`107` as `M107`). Sent from v17.
      */
     registerRows?: CandidateDiscoveryRegisterRow[];
+    /**
+     * Present on a register table whose data rows hold several numbered objects side by side, found from its number
+     * columns rather than its header; each register row then names the block that opens with its number. Sent from v18.
+     */
+    columnBlocks?: CandidateDiscoveryColumnBlocks;
   } | null;
   resources: InputResource[];
   /** Read-only adjacent context cannot anchor candidates in this unit. */
