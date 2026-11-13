@@ -1076,6 +1076,9 @@ describe('discovery v13 numbered body blocks', () => {
       { sourceId: 'id:b3', number: 'XM5:1' },
     ]);
     expect(excluding('id:b1', 'M102:1 언급')).toEqual(asked(all));
+    // a longer number that starts with a listed one does not name it
+    for (const longer of ['M102:12-1', 'M102:12：3', 'M102:12+4'])
+      expect(excluding('id:b1', `标本${longer} 참조`)).toEqual(asked(all));
     // an excluded block no candidate cites is answered whole
     const { unit: lone } = sections([
       { id: 'b9', text: '另见标本M102:11、标本M102:12。', pdfPageNo: 1 },

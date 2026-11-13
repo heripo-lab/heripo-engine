@@ -555,9 +555,10 @@ export function unansweredNumberedBlocks(
       ...(reasons.get(e.sourceId) ?? []),
       colon(compact(e.reason)),
     ]);
+  // a number is named only as a whole, not as the start of a longer one (`M102:12` in `M102:12-1`)
   const named = (sourceId: string, number: string) => {
     const pattern = new RegExp(
-      `(?<![A-Za-z\\d])${number.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?!\\d)`,
+      `(?<![A-Za-z\\d])${number.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![\\d]|[:·\\-—+*#]\\d)`,
       'u',
     );
     return !!reasons.get(sourceId)?.some((r) => pattern.test(r));
