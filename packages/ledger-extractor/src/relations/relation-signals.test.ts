@@ -380,6 +380,8 @@ describe('collectRelationSignals with contained numbers', () => {
         entry('A5', 'artifact', '토기', 'Q1:5', [ev('/x', 'Q1:5')]),
         entry('A6', 'artifact', '토기', '2-3', [ev('/x', '2-3')]),
         entry('A7', 'artifact', '토기', 'A18:1', [ev('/x', 'A18:1')]),
+        entry('A8', 'artifact', '罐', 'M107+8', [ev('/x', 'M107+8')]),
+        entry('A9', 'artifact', '盘', 'M103.9', [ev('/x', 'M103.9')]),
       ],
     } as unknown as ContentAttachmentPlan;
     const ledger = {
@@ -412,6 +414,8 @@ describe('collectRelationSignals with contained numbers', () => {
     expect(of('A18')).toEqual([['M104:18', ['record-M104']]]);
     expect(of('A4')).toEqual([['M103：4', ['record-M103']]]);
     expect(of('A2')).toEqual([['M107:2', ['record-R107']]]);
+    expect(of('A8')).toEqual([['M107+8', ['record-R107']]]);
+    expect(of('A9')).toEqual([['M103.9', ['record-M103']]]);
     expect(of('A23')).toEqual([]);
     expect(of('A6')).toEqual([]);
     expect(of('A7')).toEqual([]);
@@ -422,6 +426,8 @@ describe('collectRelationSignals with contained numbers', () => {
       ['record-A18', 'record-M104', 'identifier'],
       ['record-A4', 'record-M103', 'identifier'],
       ['record-A5', 'record-F1', 'phrase'],
+      ['record-A8', 'record-R107', 'identifier'],
+      ['record-A9', 'record-M103', 'identifier'],
     ]);
     expect(
       parents.links.map((l) => [l.fromRecordId, l.toRecordId, l.relationLabel]),

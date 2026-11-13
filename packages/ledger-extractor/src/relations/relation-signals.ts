@@ -120,10 +120,11 @@ const LEADING_NUMBERING =
 const headingTitle = (text: string) =>
   text.replace(LEADING_NUMBERING, '').replace(/\([^)]*\)\s*$/, '');
 /**
- * A number with a container part before a separator: `M104:18`, `M102：45—1`, `M105·23`. The container must
- * hold a letter and end in a digit, so plain catalog numbers (`2-3`, `21`) never name a container.
+ * A number with a container part before a separator: `M104:18`, `M102：45—1`, `M105·23`, or a colon OCR read as
+ * `.`, `+`, `*`, `#` or `,` (`M323+10`, `M336.4`). The container must hold a letter and end in a digit, so plain
+ * catalog numbers (`2-3`, `21`) never name a container.
  */
-const CONTAINED_NUMBER = /^(\p{L}[\p{L}\d]*\d)[:：·]\S/u;
+const CONTAINED_NUMBER = /^(\p{L}[\p{L}\d]*\d)[:：·.+*#,]\S/u;
 /** The container part of a record's own number, or null; OCR's `\cdot` is read as `·`. */
 const containerOf = (identifier: string) =>
   CONTAINED_NUMBER.exec(norm(identifier).replace(/\\cdot/g, '·'))?.[1] ?? null;
