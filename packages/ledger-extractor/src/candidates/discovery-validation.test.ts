@@ -1063,14 +1063,33 @@ describe('discovery v13 numbered body blocks', () => {
       { sourceId: 'id:b3', number: 'XM5:1' },
     ]);
     expect(asked(all, 'candidate-discovery.v18')).toEqual([]);
-    expect(
+    const excluding = (sourceId: string, reason: string) =>
       asked(
         response(
           [specimen, tomb, other, near, ocr],
-          [{ sourceId: 'id:b1', category: 'passing_mention', reason: '언급' }],
+          [{ sourceId, category: 'passing_mention', reason }],
         ),
+      );
+    // beside a candidate, an exclusion answers only the numbers its reason names, colon forms alike
+    expect(excluding('id:b1', '언급')).toEqual(asked(all));
+    expect(excluding('id:b1', '标本M102:12는 다른 곳의 유물')).toEqual([
+      { sourceId: 'id:b3', number: 'XM5:1' },
+    ]);
+    expect(excluding('id:b1', 'M102:1 언급')).toEqual(asked(all));
+    // an excluded block no candidate cites is answered whole
+    const { unit: lone } = sections([
+      { id: 'b9', text: '另见标本M102:11、标本M102:12。', pdfPageNo: 1 },
+    ]);
+    expect(
+      unansweredNumberedBlocks(
+        lone,
+        response(
+          [],
+          [{ sourceId: 'id:b9', category: 'passing_mention', reason: '참조' }],
+        ),
+        CANDIDATE_DISCOVERY_PROMPT_VERSION,
       ),
-    ).toEqual([{ sourceId: 'id:b3', number: 'XM5:1' }]);
+    ).toEqual([]);
     const v18 = await assembleCandidateDiscovery(plan, [
       audit(unit, response([other]), 'candidate-discovery.v18'),
     ]);

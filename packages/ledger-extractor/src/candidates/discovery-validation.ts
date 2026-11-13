@@ -509,10 +509,11 @@ function identifierShape(identifier: string | null) {
  * can stop part way through a run of numbered accounts without saying so; these blocks ask it about the rest. From
  * v16 a block also counts when it holds a number right after a numbering label (`标本M102:11`), even when the
  * response proposed nothing: a catalog of types introduces each specimen mid-block, and a long one is easily skipped.
- * From v19 every block no exclusion cites, cited by a candidate or not, lists each labelled number that no candidate
- * carries (the same text, or the number at the end of an identifier such as `标本M102:11`, or the same object in
+ * From v19 a block, cited by a candidate or not, lists each labelled number that no candidate carries (the same text, or the number at the end of an identifier such as `标本M102:11`, or the same object in
  * another form such as `99XXM362`), since a model can answer only some of the specimens one block describes; a
  * labelled number then runs on through an OCR colon (`M105+3`), and an uncited block still lists its opening number.
+ * An exclusion answers a whole block only when no candidate cites the block; in a block a candidate cites, it answers
+ * only the numbers its reason names.
  */
 export function unansweredNumberedBlocks(
   unit: CandidateDiscoveryUnit,
@@ -544,6 +545,23 @@ export function unansweredNumberedBlocks(
   ]);
   const colon = (n: string) => n.replace(/：/gu, ':');
   const identifiers = [...numbers].map(colon);
+  const candidateCited = new Set(
+    response.candidates.flatMap((c) => c.evidence.map((e) => e.sourceId)),
+  );
+  // the exclusion reasons of each block, without whitespace, to see which numbers they name
+  const reasons = new Map<string, string[]>();
+  for (const e of response.exclusions)
+    reasons.set(e.sourceId, [
+      ...(reasons.get(e.sourceId) ?? []),
+      colon(compact(e.reason)),
+    ]);
+  const named = (sourceId: string, number: string) => {
+    const pattern = new RegExp(
+      `(?<![A-Za-z\\d])${number.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?!\\d)`,
+      'u',
+    );
+    return !!reasons.get(sourceId)?.some((r) => pattern.test(r));
+  };
   const carried = (number: string) =>
     identifiers.some(
       (id) =>
@@ -554,7 +572,9 @@ export function unansweredNumberedBlocks(
   return getCandidateSources(unit).flatMap(({ sourceId, resource }) => {
     const text = compact(resource.data.text);
     if (level.v19) {
-      if (excluded.has(sourceId)) return [];
+      // an exclusion answers a whole block only when no candidate cites it; beside a candidate it answers the
+      // numbers its reason names, so excluding one reference does not hide the block's other specimens
+      if (excluded.has(sourceId) && !candidateCited.has(sourceId)) return [];
       // every labelled number no candidate carries, and an uncited block's opening number as before
       const opening = cited.has(sourceId)
         ? undefined
@@ -564,7 +584,7 @@ export function unansweredNumberedBlocks(
           ...(opening && !numbers.has(opening) ? [opening] : []),
           ...[...compact(text).matchAll(LABELLED_NUMBER_V19)]
             .map((m) => m[1])
-            .filter((n) => !carried(colon(n))),
+            .filter((n) => !carried(colon(n)) && !named(sourceId, colon(n))),
         ]),
       ].map((number) => ({ sourceId, number }));
     }
