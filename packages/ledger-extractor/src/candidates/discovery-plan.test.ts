@@ -105,7 +105,8 @@ describe('candidate discovery', () => {
   test('lists the register rows of a table outside the scope whose number the scope writes with a Latin prefix', () => {
     const doc = input();
     doc.chapters[0].children![0].textBlocks = [
-      { text: '묘 K2, M2와 99XXM2를 조사했다.', pdfPageNo: 3 },
+      { text: '묘 M2와 99XXM2를 조사했다.', pdfPageNo: 3 },
+      { text: '묘 K3과 수혈 H3도 조사했다.', pdfPageNo: 3 },
     ];
     doc.tables[0].grid = [
       [{ text: '墓号', colSpan: 1, rowSpan: 1, isHeader: true }],
@@ -121,13 +122,14 @@ describe('candidate discovery', () => {
       tableIds: ['t'],
     });
 
+    // row 3 is left out: the scope writes 3 for a tomb (K3) and for a pit (H3)
     expect(plan.units[1].table?.registerRows).toEqual([
-      { rowIndex: 1, number: '2', writtenAs: 'K2' },
-      { rowIndex: 2, number: '2', writtenAs: 'K2' },
+      { rowIndex: 1, number: '2', writtenAs: 'M2' },
+      { rowIndex: 2, number: '2', writtenAs: 'M2' },
     ]);
     expect(plan.units[1].context.map((c) => c.text)).toEqual([
       '1호 우물',
-      '묘 K2, M2와 99XXM2를 조사했다.',
+      '묘 M2와 99XXM2를 조사했다.',
     ]);
     expect(plan.units[2].table).not.toHaveProperty('registerRows');
     expect(plan.units[1].table).not.toHaveProperty('columnBlocks');

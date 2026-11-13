@@ -149,13 +149,20 @@ export function prepareCandidateDiscovery(
             .flatMap((cells, offset) =>
               parts(cells).flatMap(({ block, texts }) => {
                 const number = row + offset > 0 && rowLeadingNumber(texts);
+                const forms = number
+                  ? [...written.keys()]
+                      .filter((w) => sameObjectNumber(number, w))
+                      .sort((a, b) => a.length - b.length)
+                  : [];
+                // the shortest form, when every form writes that one object (`M304`, `99XXM304`); a number the scope
+                // writes for objects of different letters (`M304`, `H304`) gives no form, since the row could be either
                 const writtenAs =
                   number &&
-                  [...written.keys()]
-                    .filter((w) => sameObjectNumber(number, w))
-                    .sort(
-                      (a, b) => a.length - b.length || a.localeCompare(b),
-                    )[0];
+                  forms.length > 0 &&
+                  forms.every(
+                    (f) => f === forms[0] || sameObjectNumber(forms[0], f),
+                  ) &&
+                  forms[0];
                 return writtenAs
                   ? [
                       {
