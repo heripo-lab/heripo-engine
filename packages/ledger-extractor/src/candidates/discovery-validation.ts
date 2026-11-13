@@ -14,6 +14,7 @@ import {
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V19,
   createCandidateDiscoveryRequest,
   getCandidateSources,
   isSectionHeading,
@@ -25,6 +26,7 @@ import {
   unansweredItemTableBlocks,
   unansweredItemTableRows,
 } from './discovery-rows';
+import { sameObjectNumber } from './object-numbers';
 
 /** A figure, plate or photograph reference copied into an identifier. */
 const FIGURE_REFERENCE = /도면|도판|사진|그림|Fig\./u;
@@ -46,6 +48,13 @@ const LABELLED_NUMBER =
 /** The object numbers a text holds right after numbering labels (`标本M102:11`), in order. */
 export const labelledNumbers = (text: string) =>
   [...compact(text).matchAll(LABELLED_NUMBER)].map((m) => m[1]);
+
+/**
+ * From v19, a labelled number also runs on through a mark OCR can read for its colon (`标本M105+3`, also `*` and
+ * `#`), so the number is not cut to the object that contains it.
+ */
+const LABELLED_NUMBER_V19 =
+  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|(?<![A-Za-z])(?:No|NO)\.?)[:：]?([A-Za-z][A-Za-z\d]*\d(?:[:：·\-—+*#]\d+)*)/gu;
 /** Sentence punctuation, optionally followed by opening marks, right before a name. */
 const SENTENCE_START = /[。．；！？.;!?][(（「『“"]*$/u;
 
@@ -55,7 +64,8 @@ const compact = (text: string) => text.replace(/\s+/gu, '');
  * Version-dependent checks: strict table identifiers from v6, table roles and name cells from v9, name leads and
  * corrections from v10, heading reconsideration and row blocks from v11, follow-up rules in the follow-up input from
  * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15, names after numbering labels or at sentence starts from v16; v17 changes only the request (register rows); table items
- * of a register read block by block quoting only their own block, and its register rows matched by block, from v18.
+ * of a register read block by block quoting only their own block, and its register rows matched by block, from v18;
+ * labelled numbers no candidate carries in blocks a candidate cites, from v19.
  */
 export interface CandidateCheckLevel {
   strictTableIdentifier: boolean;
@@ -69,12 +79,14 @@ export interface CandidateCheckLevel {
   v16: boolean;
   v17: boolean;
   v18: boolean;
+  v19: boolean;
 }
 
 export function candidateCheckLevel(
   promptVersion: string,
 ): CandidateCheckLevel {
-  const v18 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v19 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v18 = v19 || promptVersion === 'candidate-discovery.v18';
   const v17 = v18 || promptVersion === 'candidate-discovery.v17';
   const v16 = v17 || promptVersion === 'candidate-discovery.v16';
   const v15 = v16 || promptVersion === 'candidate-discovery.v15';
@@ -102,6 +114,7 @@ export function candidateCheckLevel(
     v16,
     v17,
     v18,
+    v19,
   };
 }
 
@@ -496,6 +509,10 @@ function identifierShape(identifier: string | null) {
  * can stop part way through a run of numbered accounts without saying so; these blocks ask it about the rest. From
  * v16 a block also counts when it holds a number right after a numbering label (`标本M102:11`), even when the
  * response proposed nothing: a catalog of types introduces each specimen mid-block, and a long one is easily skipped.
+ * From v19 every block no exclusion cites, cited by a candidate or not, lists each labelled number that no candidate
+ * carries (the same text, or the number at the end of an identifier such as `标本M102:11`, or the same object in
+ * another form such as `99XXM362`), since a model can answer only some of the specimens one block describes; a
+ * labelled number then runs on through an OCR colon (`M105+3`), and an uncited block still lists its opening number.
  */
 export function unansweredNumberedBlocks(
   unit: CandidateDiscoveryUnit,
@@ -520,13 +537,38 @@ export function unansweredNumberedBlocks(
   const numbers = new Set(
     response.candidates.map((c) => compact(c.sourceIdentifier ?? '')),
   );
+  const excluded = new Set(response.exclusions.map((e) => e.sourceId));
   const cited = new Set([
     ...response.candidates.flatMap((c) => c.evidence.map((e) => e.sourceId)),
-    ...response.exclusions.map((e) => e.sourceId),
+    ...excluded,
   ]);
+  const colon = (n: string) => n.replace(/：/gu, ':');
+  const identifiers = [...numbers].map(colon);
+  const carried = (number: string) =>
+    identifiers.some(
+      (id) =>
+        sameObjectNumber(id, number) ||
+        (id.endsWith(number) &&
+          !/[A-Za-z\d]/u.test(id.charAt(id.length - number.length - 1))),
+    );
   return getCandidateSources(unit).flatMap(({ sourceId, resource }) => {
-    if (cited.has(sourceId)) return [];
     const text = compact(resource.data.text);
+    if (level.v19) {
+      if (excluded.has(sourceId)) return [];
+      // every labelled number no candidate carries, and an uncited block's opening number as before
+      const opening = cited.has(sourceId)
+        ? undefined
+        : text.replace(/^[^\p{L}0-9]+/u, '').match(leading)?.[0];
+      return [
+        ...new Set([
+          ...(opening && !numbers.has(opening) ? [opening] : []),
+          ...[...compact(text).matchAll(LABELLED_NUMBER_V19)]
+            .map((m) => m[1])
+            .filter((n) => !carried(colon(n))),
+        ]),
+      ].map((number) => ({ sourceId, number }));
+    }
+    if (cited.has(sourceId)) return [];
     const opening = text.replace(/^[^\p{L}0-9]+/u, '').match(leading)?.[0];
     const labelled = level.v16 ? labelledNumbers(text) : [];
     const number = [opening, ...labelled].find(
@@ -550,25 +592,27 @@ export function planCandidateDiscoveryFollowUp(
 ) {
   const level = candidateCheckLevel(promptVersion);
   if (!level.v9) return null;
-  const version = level.v18
+  const version = level.v19
     ? CANDIDATE_DISCOVERY_PROMPT_VERSION
-    : level.v17
-      ? 'candidate-discovery.v17'
-      : level.v16
-        ? 'candidate-discovery.v16'
-        : level.v15
-          ? 'candidate-discovery.v15'
-          : level.v14
-            ? 'candidate-discovery.v14'
-            : level.v13
-              ? 'candidate-discovery.v13'
-              : level.v12
-                ? 'candidate-discovery.v12'
-                : level.v11
-                  ? 'candidate-discovery.v11'
-                  : level.v10
-                    ? 'candidate-discovery.v10'
-                    : 'candidate-discovery.v9';
+    : level.v18
+      ? 'candidate-discovery.v18'
+      : level.v17
+        ? 'candidate-discovery.v17'
+        : level.v16
+          ? 'candidate-discovery.v16'
+          : level.v15
+            ? 'candidate-discovery.v15'
+            : level.v14
+              ? 'candidate-discovery.v14'
+              : level.v13
+                ? 'candidate-discovery.v13'
+                : level.v12
+                  ? 'candidate-discovery.v12'
+                  : level.v11
+                    ? 'candidate-discovery.v11'
+                    : level.v10
+                      ? 'candidate-discovery.v10'
+                      : 'candidate-discovery.v9';
   // a side-by-side table answers by row blocks from v11, so its rows are asked through those blocks only
   const blocks = level.v11 ? columnBlocks(unit) : null;
   const rowBlocks = blocks ? unansweredItemTableBlocks(unit, response) : [];
@@ -600,11 +644,13 @@ export function planCandidateDiscoveryFollowUp(
         ...(rowBlocks.length ? [SIDE_BY_SIDE_TABLES_RULE] : []),
         ...(numberedBlocks.length
           ? [
-              level.v16
-                ? UNANSWERED_NUMBERED_BLOCKS_RULE_V16
-                : level.v15
-                  ? UNANSWERED_NUMBERED_BLOCKS_RULE_V15
-                  : UNANSWERED_NUMBERED_BLOCKS_RULE,
+              level.v19
+                ? UNANSWERED_NUMBERED_BLOCKS_RULE_V19
+                : level.v16
+                  ? UNANSWERED_NUMBERED_BLOCKS_RULE_V16
+                  : level.v15
+                    ? UNANSWERED_NUMBERED_BLOCKS_RULE_V15
+                    : UNANSWERED_NUMBERED_BLOCKS_RULE,
             ]
           : []),
       ]

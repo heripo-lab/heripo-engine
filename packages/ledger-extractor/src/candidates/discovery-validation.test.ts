@@ -19,6 +19,7 @@ import {
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V19,
   createCandidateDiscoveryRequest,
   isSectionHeading,
 } from './discovery-request';
@@ -106,6 +107,7 @@ describe('discovery v10 sections, name lead and corrections', () => {
       v16: false,
       v17: false,
       v18: false,
+      v19: false,
     });
   });
 
@@ -960,7 +962,13 @@ describe('discovery v13 numbered body blocks', () => {
     ]);
     expect(planned.unit).toBe(unit);
     expect(input.unansweredNumberedBlocks).toEqual(planned.numberedBlocks);
-    expect(input.followUpRules).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V16]);
+    expect(input.followUpRules).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V19]);
+    expect(
+      JSON.parse(
+        planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v18')!
+          .userPrompt,
+      ).followUpRules,
+    ).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V16]);
     expect(
       JSON.parse(
         planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v15')!
@@ -996,11 +1004,17 @@ describe('discovery v13 numbered body blocks', () => {
       unansweredNumberedBlocks(
         unit,
         { tableRole: 'none', candidates, exclusions: [] },
-        version ?? CANDIDATE_DISCOVERY_PROMPT_VERSION,
+        version ?? 'candidate-discovery.v18',
       );
 
     expect(asked([])).toEqual([
       { sourceId: 'id:b1', number: 'M102:11' },
+      { sourceId: 'id:b2', number: 'M112:18' },
+    ]);
+    // from v19 an uncited block lists every labelled number, not only its first
+    expect(asked([], CANDIDATE_DISCOVERY_PROMPT_VERSION)).toEqual([
+      { sourceId: 'id:b1', number: 'M102:11' },
+      { sourceId: 'id:b1', number: 'M102:12' },
       { sourceId: 'id:b2', number: 'M112:18' },
     ]);
     expect(asked([body('示例罐', 'M102:11', 'id:b3', '示例罐')])).toEqual([
@@ -1008,6 +1022,61 @@ describe('discovery v13 numbered body blocks', () => {
       { sourceId: 'id:b2', number: 'M112:18' },
     ]);
     expect(asked([], 'candidate-discovery.v15')).toEqual([]);
+  });
+
+  test('asks v19 labelled numbers that no candidate carries in a block a candidate already cites', async () => {
+    const { plan, unit, body } = sections([
+      {
+        id: 'b1',
+        text: '示例类型。标本M102:11，灰色。标本M102：12，灰色。标本M102:12。编号XXM362。标本M105+3。',
+        pdfPageNo: 1,
+      },
+      { id: 'b2', text: '另一示例类型。标本M112:18，红色。', pdfPageNo: 1 },
+      { id: 'b3', text: '示例罐。标本XM5:1。', pdfPageNo: 1 },
+    ]);
+    const specimen = body('罐', '标本M102:11', 'id:b1', '标本M102:11');
+    // an OCR colon (+) keeps the labelled number whole, so M105+3 is carried rather than asked as M105
+    const ocr = body('罐', 'M105+3', 'id:b1', '标本M105+3');
+    const tomb = body('墓', 'M362', 'id:b1', '编号XXM362');
+    const other = body('罐', 'M112:18', 'id:b2', '标本M112:18');
+    // an identifier ending in the number after a Latin letter does not carry it
+    const near = body('罐', 'YXM5:1', 'id:b3', '标本XM5:1');
+    const response = (
+      candidates: CandidateDiscoveryResponse['candidates'],
+      exclusions: CandidateDiscoveryResponse['exclusions'] = [],
+    ): CandidateDiscoveryResponse => ({
+      tableRole: 'none',
+      candidates,
+      exclusions,
+    });
+    const asked = (r: CandidateDiscoveryResponse, version?: string) =>
+      unansweredNumberedBlocks(
+        unit,
+        r,
+        version ?? CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      );
+    const all = response([specimen, tomb, other, near, ocr]);
+
+    expect(asked(all)).toEqual([
+      { sourceId: 'id:b1', number: 'M102：12' },
+      { sourceId: 'id:b1', number: 'M102:12' },
+      { sourceId: 'id:b3', number: 'XM5:1' },
+    ]);
+    expect(asked(all, 'candidate-discovery.v18')).toEqual([]);
+    expect(
+      asked(
+        response(
+          [specimen, tomb, other, near, ocr],
+          [{ sourceId: 'id:b1', category: 'passing_mention', reason: '언급' }],
+        ),
+      ),
+    ).toEqual([{ sourceId: 'id:b3', number: 'XM5:1' }]);
+    const v18 = await assembleCandidateDiscovery(plan, [
+      audit(unit, response([other]), 'candidate-discovery.v18'),
+    ]);
+    expect(v18.issues.map((i) => i.reason)).toEqual([
+      'Numbered body blocks neither proposed nor excluded: M102:11, XM5:1',
+    ]);
   });
 
   test('merges the answer to numbered blocks and reports blocks left unanswered', async () => {
