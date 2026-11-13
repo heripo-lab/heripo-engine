@@ -21,7 +21,7 @@ import {
   norm,
 } from './record-names';
 
-export const RELATION_SIGNALS_VERSION = 'relation-signals.v2' as const;
+export const RELATION_SIGNALS_VERSION = 'relation-signals.v3' as const;
 
 /**
  * Where a parent candidate comes from, strongest first (implementation spec, parent evidence priority):
@@ -125,6 +125,8 @@ const headingTitle = (text: string) =>
  * catalog numbers (`2-3`, `21`) never name a container.
  */
 const CONTAINED_NUMBER = /^(\p{L}[\p{L}\d]*\d)[:：·.+*#,]\S/u;
+/** A number of one part of a numbered object: digits, optionally prefixed, and one trailing capital letter. */
+const PART_NUMBER = /^([\p{L}\d]*\d)[A-Z]$/u;
 /** The container part of a record's own number, or null; OCR's `\cdot` is read as `·`. */
 const containerOf = (identifier: string) =>
   CONTAINED_NUMBER.exec(norm(identifier).replace(/\\cdot/g, '·'))?.[1] ?? null;
@@ -220,7 +222,7 @@ function phrasesOf(text: string) {
 
 /**
  * Collect parent candidates for every ledger record from the attachment plan and the assembled ledger,
- * deterministically and without model calls (`relation-signals.v2`). Names are matched exactly (identifier
+ * deterministically and without model calls (`relation-signals.v3`). Names are matched exactly (identifier
  * with name, longest name first), never by a kind hierarchy. A phrase whose place matches no record is kept
  * with no target, so it can be asked about rather than dropped. With an injected place alias table (validated
  * here; errors throw `PlaceAliasValidationError`), such a place, or a table cell, is retried through the
@@ -387,6 +389,31 @@ export function collectRelationSignals(
             id !== recordId &&
             kindOf.get(id) !== kind &&
             numbers.some((n) => sameObjectNumber(n, container)),
+        )
+        .map(([id]) => id);
+      if (targets.length)
+        signals.push({
+          kind: 'identifier',
+          targetRecordIds: targets,
+          text: identifier,
+          finding: true,
+        });
+    }
+    // from v3 a number with a trailing capital letter (`304A`, one burial of tomb `M304`) names the record of the
+    // same kind numbered without the letter, in any form; the part's own records never carry that number alone
+    for (const identifier of new Set(
+      entry.mentions.flatMap((m) =>
+        m.sourceIdentifier ? [m.sourceIdentifier] : [],
+      ),
+    )) {
+      const whole = PART_NUMBER.exec(norm(identifier))?.[1];
+      if (!whole) continue;
+      const targets = [...numbersOf]
+        .filter(
+          ([id, numbers]) =>
+            id !== recordId &&
+            kindOf.get(id) === kind &&
+            numbers.some((n) => sameObjectNumber(n, whole)),
         )
         .map(([id]) => id);
       if (targets.length)
