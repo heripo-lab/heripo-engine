@@ -277,9 +277,13 @@ describe('inspectContentAttachmentThinResponse', () => {
       DocumentResource,
       { kind: 'text' }
     >;
-    text.data.text = '标本M220:8，灰色（图五五）。口径10.8厘米';
-    const spaced = createContentAttachmentThinInput(plan, unit);
     plan.wordBreaks = 'cjk_punctuation';
+    const unmarked = createContentAttachmentThinInput(plan, unit);
+    text.data.text = '标本M220:8，灰色（图五五）。口径10.8厘米';
+    const spaced = createContentAttachmentThinInput(
+      { ...plan, wordBreaks: undefined },
+      unit,
+    );
     const compilation = createContentAttachmentThinInput(plan, unit);
     const request = createContentAttachmentThinRequest(compilation, {
       format: 'object',
@@ -297,6 +301,15 @@ describe('inspectContentAttachmentThinResponse', () => {
     });
 
     expect(spaced.input.bodyBlocks[0].segments).toHaveLength(1);
+    expect(spaced.wordBreaks).toBeUndefined();
+    expect(unmarked.wordBreaks).toBeUndefined();
+    expect(
+      createContentAttachmentThinRequest(spaced).systemPrompt,
+    ).not.toContain('ONE-WORD RANGES');
+    expect(compilation.wordBreaks).toBe('cjk_punctuation');
+    expect(request.systemPrompt).toContain(
+      'Evidence of one word still names both endpoints, as in "Q7:L7-L7"',
+    );
     expect(compilation.input.bodyBlocks[0]).toEqual({
       ref: 'E1',
       windows: [['Q1', ['标本M220:8，', '灰色（图五五）。', '口径10.8厘米']]],

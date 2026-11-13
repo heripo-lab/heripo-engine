@@ -55,8 +55,11 @@ export function createContentAttachmentThinInput(
   const handles = collectiveHandles(plan);
 
   const windows: ContentAttachmentThinWindow[] = [];
+  // whether CJK word breaks split some text differently from whitespace
+  let clauseWords = false;
   const toWindows = (sourceRef: string, text: string) => {
     const words = thinWordMatches(text, plan).map((m) => m[0]);
+    if (words.length !== (text.match(/\S+/gu)?.length ?? 0)) clauseWords = true;
     const rows: WindowRow[] = [];
     for (
       let i = 0;
@@ -257,6 +260,7 @@ export function createContentAttachmentThinInput(
       : local
         ? CONTENT_ATTACHMENT_THIN_LOCAL_COMPILE_VERSION
         : CONTENT_ATTACHMENT_THIN_COMPILE_VERSION,
+    ...(clauseWords ? { wordBreaks: 'cjk_punctuation' as const } : {}),
     input: {
       candidateColumns: grounded.columns,
       contexts,
