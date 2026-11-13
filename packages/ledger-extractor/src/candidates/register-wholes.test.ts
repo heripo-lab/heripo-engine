@@ -199,13 +199,13 @@ describe('proposeRegisterWholeCandidates', () => {
     ]);
   });
 
-  test('finds a whole touching Han text or led by its site code, but not inside a Latin number', async () => {
+  test('finds a whole touching Han text or led by its site code, but not inside a Latin number or with a separate number', async () => {
     const touching: CandidateDiscoveryPlan = {
       ...plan,
       units: [
         body('b1', [
           text('/t1', '另见XM330和QM340A。'),
-          text('/t2', '发现99XXM330墓葬，在M340墓室内。'),
+          text('/t2', '发现99XXM330墓葬，2026 M340墓室内。'),
         ]),
         register(
           'r1',
@@ -233,7 +233,8 @@ describe('proposeRegisterWholeCandidates', () => {
       proposals.map((p) => [p.sourceIdentifier, p.evidence[0].charStart]),
     ).toEqual([
       ['99XXM330', 2],
-      ['M340', 14],
+      // a year apart from the number is not a site code
+      ['M340', 18],
     ]);
   });
 

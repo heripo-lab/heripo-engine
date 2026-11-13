@@ -77,11 +77,11 @@ export async function proposeRegisterWholeCandidates(
     )
       continue;
     const prefix = writtenAs.slice(0, writtenAs.length - number.length);
-    // the written number alone: Han or Hangul text may touch it (`发现M304，`), and a site code's digits may lead it
-    // (`99XXM304`, written `XXM304`), but it is not inside another Latin number, an item number (`M304:15`) or a part
-    // (`M304A`)
+    // the written number alone: Han or Hangul text may touch it (`发现M304，`), and a site code's digits right before
+    // its letters may lead it (`99XXM304`, written `XXM304`; not a separate number such as the year in `2026 M304`),
+    // but it is not inside another Latin number, an item number (`M304:15`) or a part (`M304A`)
     const pattern = new RegExp(
-      `(?<![A-Za-z\\d])(?:\\d+\\s*)?${prefix.split('').join('\\s*')}\\s*${number}(?![A-Za-z\\d:：·.+*#])`,
+      `(?<![A-Za-z\\d])(?:\\d+)?${prefix.split('').join('\\s*')}\\s*${number}(?![A-Za-z\\d:：·.+*#])`,
       'u',
     );
     const found = plan.units
