@@ -97,6 +97,9 @@ export async function prepareContentAttachment(
         ...mentionPlace(
           discoveryPlan.units.find((u) => c.unitIds.includes(u.unitId))!,
         ),
+        ...(c.eligibilityBasis === 'register_parts'
+          ? { codeProposed: true as const }
+          : {}),
         evidence: c.evidence,
       })),
     };

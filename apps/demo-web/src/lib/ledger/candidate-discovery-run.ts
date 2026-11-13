@@ -1,6 +1,7 @@
 import type {
   CandidateDeduplicationResult,
   CandidateDiscoveryAudit,
+  CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
   SpendGuard,
 } from '@heripo/ledger-extractor';
@@ -15,6 +16,7 @@ import {
   isSameCandidateDiscoveryScope,
   prepareCandidateDiscovery,
   prepareCandidateDiscoveryRetry,
+  withRegisterWholeCandidates,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
 import {
@@ -99,6 +101,20 @@ export function getCandidateDiscoveryRun(
 }
 
 /**
+ * A discovery result assembled from saved audits, with the wholes code proposes for objects a register lists only by
+ * their parts once every unit is answered (`withRegisterWholeCandidates`).
+ */
+async function assembleDiscovery(
+  plan: CandidateDiscoveryPlan,
+  audits: CandidateDiscoveryAudit[],
+) {
+  return withRegisterWholeCandidates(
+    plan,
+    await assembleCandidateDiscovery(plan, audits),
+  );
+}
+
+/**
  * Whether the task's latest discovery can be kept as it is: every unit answered under the current prompt version, and
  * its saved audits still assemble every unit. A discovery from an earlier version, or one whose saved requests the
  * current code no longer rebuilds, has to be run again.
@@ -117,7 +133,7 @@ export async function isCandidateDiscoveryCurrent(taskId: string) {
     audits.some((a) => a.promptVersion !== CANDIDATE_DISCOVERY_PROMPT_VERSION)
   )
     return false;
-  const result = await assembleCandidateDiscovery(plan, audits);
+  const result = await assembleDiscovery(plan, audits);
   return result.completedUnitIds.length === plan.units.length;
 }
 
@@ -217,10 +233,11 @@ export async function startCandidateDiscovery(
         ),
       )
     : [];
-  let initialResult = await assembleCandidateDiscovery(plan, savedAudits);
+  let initialResult = await assembleDiscovery(plan, savedAudits);
   if (
     reuse &&
-    JSON.stringify(initialResult) !== JSON.stringify(existing!.result)
+    JSON.stringify(initialResult) !==
+      JSON.stringify(await withRegisterWholeCandidates(plan, existing!.result))
   ) {
     throw new Error(
       'Saved discovery audit no longer reproduces the original snapshot',
@@ -313,7 +330,7 @@ export async function startCandidateDiscovery(
             );
             audits.push(audit);
           }
-          run.result = await assembleCandidateDiscovery(plan, audits);
+          run.result = await assembleDiscovery(plan, audits);
           run.completedUnits = run.result.completedUnitIds.length;
           save();
           // the answered units stay saved; the failed ones can be asked again with a retry of failed units
@@ -336,7 +353,7 @@ export async function startCandidateDiscovery(
           JSON.stringify(audit, null, 2),
         );
         audits.push(audit);
-        run.result = await assembleCandidateDiscovery(plan, audits);
+        run.result = await assembleDiscovery(plan, audits);
         run.completedUnits = run.result.completedUnitIds.length;
         save();
       }

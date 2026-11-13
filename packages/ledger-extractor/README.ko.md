@@ -287,6 +287,15 @@ const result = await assembleCandidateDiscovery(plan, audits);
 
 저장한 응답은 `assembleCandidateDiscovery()`로 모델 재호출 없이 다시 검증·조립할 수 있습니다. 부모·속성·매체 연결과 최종 원장 등록은 이 단계에 포함하지 않습니다.
 
+`withRegisterWholeCandidates(plan, result)`는 모든 단위의 답이 모이면 `proposeRegisterWholeCandidates`가 찾은 후보를 덧붙입니다. 부록 등록표에 문자가 붙은 부분으로만 나오고 자기 기록이 없는 대상을 위한 후보입니다. 등록 번호(`registerRows`: `M304`로 적힌 `304`)는 다음 네 조건을 모두 갖출 때 해당합니다.
+
+- 그 번호의 등록표 행이 모두 부분 번호(`304A`, `304B`)로 시작합니다.
+- 발견 단계가 그런 부분을 하나 이상 제안했습니다.
+- 그 종류의 어떤 후보도 어떤 표기로든 전체 번호를 갖고 있지 않습니다.
+- 조사 장 본문 블록이 그 번호를 단독으로 적습니다. 형식 목록의 `2座（M304、M320）`가 그런 예이고, `M304:15` 같은 유물 번호 안에 든 경우는 해당하지 않습니다.
+
+후보는 처음 나오는 그런 표기를 식별자와 근거로 인용하고, 종류와 이름은 그 부분들의 종류와 가장 많이 쓰인 이름을 따릅니다. `eligibilityBasis`는 `register_parts`이고 사유는 `REGISTER_WHOLE_REASON`입니다. 내용 첨부 계획에서는 그 언급에 `codeProposed`가 붙고, 원장은 그 기록을 `identity` 검수 항목(`code_proposed_record`)으로 묻습니다. 같은 결과에 여러 번 적용해도 결과가 같고, 데모는 발견 결과를 조립하는 모든 곳에서 이 함수를 적용합니다. 저장된 실행에서는 부록 등록표가 무덤을 문자 붙은 부분으로만 적는 보고서 하나에서 무덤 9기를 제안하고, 다른 보고서에는 아무것도 제안하지 않습니다.
+
 ### 전체 후보 중복 검토
 
 모든 탐색 묶음이 끝난 뒤 `deduplicateCandidates(plan, discovery, options)`가 검증된 전체 후보를 하나의 구조화된 LLM 호출로 검토합니다. 장 경로, 원문 본문, 관련 표 행·머리글과 인접 문맥을 함께 제공합니다. `createCandidateDeduplicationRequest`로 실행 전 입력을 확인할 수 있습니다. `assembleCandidateDeduplication`은 저장된 감사 기록이 전체 입력과 일치하고 모든 후보가 정확히 하나의 묶음에 속하는지 검사합니다. 알 수 없는 후보, 누락, 중복 배정, 서로 다른 종류의 통합이 있으면 묶음 전체를 적용하지 않습니다. 현재 프롬프트 v7(`CANDIDATE_DEDUPLICATION_PROMPT_VERSION`)은 한 그룹을 한 종류 안에서만 만들게 하므로 이름이 같은 유적과 조사구역을 한 그룹으로 묶을 수 없으며, 병합만 요청합니다. `mergesByKind`는 한 종류 안에서 둘 이상을 묶는 그룹만 담고, 어느 병합에도 없는 후보는 각자 단독 기록으로 남습니다. 조립은 그런 후보를 코드 사유 `CANDIDATE_DEDUPLICATION_UNMERGED_REASON`을 단 단독 그룹으로 더하고, 모든 그룹을 첫 구성원의 후보 풀 순서로 정렬합니다. 중복되거나 알 수 없는 후보, 종류 섞임, 풀에 없는 종류의 목록, 같은 그룹 안의 불확실 일치는 계속 거절합니다. 그래서 모델이 후보 하나를 빠뜨려도 결과 전체가 무효가 되지 않고 그 후보만 병합되지 않은 채 남습니다. 이전 프롬프트 버전으로 저장된 감사 기록은 각자의 응답 형식으로 재현하며 여전히 완전한 분할을 요구합니다([지시문 변경 이력](https://github.com/heripo-lab/heripo-engine/blob/main/packages/ledger-extractor/docs/prompt-history.ko.md#중복-검토-프롬프트-변경-이력) 참고). 불확실한 동일성은 합치지 않고 검토 사항으로 남깁니다.

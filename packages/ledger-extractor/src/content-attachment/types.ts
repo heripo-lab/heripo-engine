@@ -72,6 +72,8 @@ export interface AttachmentRegistryEntry {
      * object, and the mention joins no chapter handle. Plans prepared before this field read as before.
      */
     outsideScope?: true;
+    /** Present when code proposed the candidate for an object a register lists only by its parts (`register_parts`). */
+    codeProposed?: true;
   }>;
 }
 export interface ContentAttachmentPlan {

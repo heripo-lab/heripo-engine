@@ -16,6 +16,7 @@ import {
   createContentAttachmentTableAnchorInput,
   prepareContentAttachment,
   resolveContentAttachmentThinPolicy,
+  withRegisterWholeCandidates,
 } from '@heripo/ledger-extractor';
 import { createHash, randomUUID } from 'crypto';
 import {
@@ -148,9 +149,10 @@ export async function prepareContentAttachmentRun(
   const raw = readFileSync(paths.task(taskId).inputJson);
   const document = parseLedgerInputText(raw.toString('utf8'));
   const snapshot = getCandidateDiscoveryAudit(taskId, source);
-  const discovery = await assembleCandidateDiscovery(
+  // the snapshot holds the wholes code proposed for objects a register lists only by their parts
+  const discovery = await withRegisterWholeCandidates(
     snapshot.plan,
-    snapshot.audits,
+    await assembleCandidateDiscovery(snapshot.plan, snapshot.audits),
   );
   if (
     JSON.stringify(discovery) !== JSON.stringify(source.result) ||

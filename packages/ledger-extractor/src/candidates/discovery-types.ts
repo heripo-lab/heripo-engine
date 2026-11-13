@@ -146,7 +146,11 @@ export interface LedgerObjectCandidate {
   recordKind: z.infer<typeof kindSchema>;
   sourceName: string;
   sourceIdentifier: string | null;
-  eligibilityBasis: z.infer<typeof basisSchema>;
+  /**
+   * `register_parts`: proposed by code, not a model, for an object a register lists only by its parts
+   * (`proposeRegisterWholeCandidates`).
+   */
+  eligibilityBasis: z.infer<typeof basisSchema> | 'register_parts';
   reason: string;
   chapterId: string;
   unitIds: string[];

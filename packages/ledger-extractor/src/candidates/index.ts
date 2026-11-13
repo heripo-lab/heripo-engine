@@ -15,6 +15,11 @@ export {
 export type { CandidateDiscoveryCallResult } from './discovery-unit';
 export { assembleCandidateDiscovery } from './discovery-assembly';
 export {
+  REGISTER_WHOLE_REASON,
+  proposeRegisterWholeCandidates,
+  withRegisterWholeCandidates,
+} from './register-wholes';
+export {
   CANDIDATE_DISCOVERY_PROMPT_VERSION,
   RECONSIDERED_EXCLUSIONS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE,
