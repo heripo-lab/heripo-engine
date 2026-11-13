@@ -199,6 +199,44 @@ describe('proposeRegisterWholeCandidates', () => {
     ]);
   });
 
+  test('finds a whole touching Han text or led by its site code, but not inside a Latin number', async () => {
+    const touching: CandidateDiscoveryPlan = {
+      ...plan,
+      units: [
+        body('b1', [
+          text('/t1', '另见XM330和QM340A。'),
+          text('/t2', '发现99XXM330墓葬，在M340墓室内。'),
+        ]),
+        register(
+          'r1',
+          'plain',
+          [cell('plain', 1, 0, '330A'), cell('plain', 2, 0, '340A')],
+          [
+            { rowIndex: 1, number: '330', writtenAs: 'XXM330' },
+            { rowIndex: 2, number: '340', writtenAs: 'M340' },
+          ],
+        ),
+      ],
+    };
+    const proposals = await proposeRegisterWholeCandidates(touching, {
+      ...result(
+        [
+          candidate('a', 'feature', '墓', '330A'),
+          candidate('b', 'feature', '墓', '340A'),
+        ],
+        ['b1', 'r1'],
+      ),
+      totalUnits: 2,
+    });
+
+    expect(
+      proposals.map((p) => [p.sourceIdentifier, p.evidence[0].charStart]),
+    ).toEqual([
+      ['99XXM330', 2],
+      ['M340', 14],
+    ]);
+  });
+
   test('proposes nothing before every unit is answered', async () => {
     expect(
       await proposeRegisterWholeCandidates(plan, result(pool(), ['b1'])),

@@ -292,7 +292,7 @@ Reassemble saved audits with `assembleCandidateDiscovery()` without another mode
 - every register row with that number opens with a part (`304A`, `304B`);
 - discovery proposed at least one such part;
 - no candidate of that kind carries the whole number in any form;
-- a scope body block writes the number by itself, as in a type list `2座（M304、M320）`, not inside an item number such as `M304:15`.
+- a scope body block writes the number by itself, as in a type list `2座（M304、M320）`, touching Han text (`发现M304，`) or led by a site code (`99XXM304`), not inside another Latin number, a part such as `M304A` or an item number such as `M304:15`.
 
 The candidate quotes the first such writing as identifier and evidence, and takes the kind and most frequent name of its parts. Its `eligibilityBasis` is `register_parts` and its reason is `REGISTER_WHOLE_REASON`. In the content attachment plan its mentions carry `codeProposed`, and the ledger asks about the record in an `identity` review item (`code_proposed_record`). The call is idempotent, and the demo applies it wherever it assembles a discovery. On the saved runs it proposes nine tombs for one report whose appendix registers list them only by lettered parts, and nothing for the other reports.
 

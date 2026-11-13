@@ -22,7 +22,7 @@ const PART = /^([\p{L}\d]*\d)[A-Z]$/u;
  * A register number (`registerRows`, `304` written `M304`) qualifies when every register row with that number opens
  * with a lettered part (`304A`, `304B`), discovery proposed at least one such part and no candidate of that kind
  * carries the whole number in any form, and a body block of the scope writes the number as the register says (`M304`
- * in a type list, not inside an item number such as `M304:15`). The candidate quotes the first such writing in plan
+ * in a type list or touching Han text, `99XXM304` with its site code, not inside an item number such as `M304:15`). The candidate quotes the first such writing in plan
  * order, takes the kind and the most frequent name of its parts, and its identifier is the quoted text. Nothing is
  * proposed before discovery is complete. Deterministic and offline.
  */
@@ -77,9 +77,11 @@ export async function proposeRegisterWholeCandidates(
     )
       continue;
     const prefix = writtenAs.slice(0, writtenAs.length - number.length);
-    // the written number alone: not inside another number, an item number (`M304:15`) or a part (`M304A`)
+    // the written number alone: Han or Hangul text may touch it (`发现M304，`), and a site code's digits may lead it
+    // (`99XXM304`, written `XXM304`), but it is not inside another Latin number, an item number (`M304:15`) or a part
+    // (`M304A`)
     const pattern = new RegExp(
-      `(?<![\\p{L}\\d])${prefix.split('').join('\\s*')}\\s*${number}(?![\\p{L}\\d:：·.+*#])`,
+      `(?<![A-Za-z\\d])(?:\\d+\\s*)?${prefix.split('').join('\\s*')}\\s*${number}(?![A-Za-z\\d:：·.+*#])`,
       'u',
     );
     const found = plan.units
