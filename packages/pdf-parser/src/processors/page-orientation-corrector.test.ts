@@ -47,6 +47,7 @@ describe('PageOrientationCorrector', () => {
       String(PAGE_ORIENTATION_UPWARD_RATIO),
       String(PAGE_ORIENTATION_MIN_UPWARD_CHARS),
     ]);
+    expect(mockSpawnAsync.mock.calls[0][2]).toEqual({ signal: undefined });
     expect(logger.info).toHaveBeenCalledWith(
       '[PageOrientationCorrector] 2 of 12 pages turned upright: 3, 9',
     );
@@ -83,5 +84,35 @@ describe('PageOrientationCorrector', () => {
       'no ocrmac',
       'spawn ENOENT',
     ]);
+  });
+
+  test('passes the abort signal to the detection process and rethrows its abort error', async () => {
+    const controller = new AbortController();
+    const abortError = new Error('The operation was aborted');
+    mockSpawnAsync.mockImplementationOnce(async () => {
+      controller.abort();
+      throw abortError;
+    });
+
+    await expect(
+      corrector.correct('/in.pdf', '/out.pdf', ['ko-KR'], controller.signal),
+    ).rejects.toBe(abortError);
+    expect(mockSpawnAsync.mock.calls[0][2]).toEqual({
+      signal: controller.signal,
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  test('still returns null for a failure while its signal is not aborted', async () => {
+    mockSpawnAsync.mockRejectedValueOnce(new Error('spawn ENOENT'));
+
+    expect(
+      await corrector.correct(
+        '/in.pdf',
+        '/out.pdf',
+        ['ko-KR'],
+        new AbortController().signal,
+      ),
+    ).toBeNull();
   });
 });

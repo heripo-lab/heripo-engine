@@ -72,27 +72,32 @@ export class PageOrientationCorrector {
 
   /**
    * Detects sideways pages of `pdfPath` and, when there are any, saves an upright copy to `outputPath`. Returns null
-   * when detection fails, so conversion goes on with the original PDF.
+   * when detection fails, so conversion goes on with the original PDF. Aborting `abortSignal` ends the detection
+   * process and rejects with the abort error.
    */
   async correct(
     pdfPath: string,
     outputPath: string,
     languages: readonly string[],
+    abortSignal?: AbortSignal,
   ): Promise<PageOrientationResult | null> {
-    const result = await spawnAsync(this.pythonPath, [
-      '-I',
-      '-c',
-      SCRIPT,
-      pdfPath,
-      outputPath,
-      languages.join(','),
-      String(PAGE_ORIENTATION_UPWARD_RATIO),
-      String(PAGE_ORIENTATION_MIN_UPWARD_CHARS),
-    ]).catch((error: Error) => ({
-      code: -1,
-      stdout: '',
-      stderr: error.message,
-    }));
+    const result = await spawnAsync(
+      this.pythonPath,
+      [
+        '-I',
+        '-c',
+        SCRIPT,
+        pdfPath,
+        outputPath,
+        languages.join(','),
+        String(PAGE_ORIENTATION_UPWARD_RATIO),
+        String(PAGE_ORIENTATION_MIN_UPWARD_CHARS),
+      ],
+      { signal: abortSignal },
+    ).catch((error: Error) => {
+      if (abortSignal?.aborted) throw error;
+      return { code: -1, stdout: '', stderr: error.message };
+    });
     if (result.code !== 0) {
       this.logger.warn(
         '[PageOrientationCorrector] Page orientation detection failed; converting the original PDF:',

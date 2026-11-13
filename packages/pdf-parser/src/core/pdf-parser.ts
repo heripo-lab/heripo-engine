@@ -427,6 +427,7 @@ export class PDFParser {
           url.slice('file://'.length),
           upright,
           options.ocr_lang ?? DEFAULT_OCR_LANGUAGES,
+          abortSignal,
         );
         if (result?.rotatedPages.length) sourceUrl = `file://${upright}`;
       }

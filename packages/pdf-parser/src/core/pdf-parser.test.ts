@@ -1197,9 +1197,24 @@ describe('PDFParser page orientation', () => {
     await parse('http://host/in.pdf');
 
     expect(correct.mock.calls).toEqual([
-      ['/in.pdf', '/tmp/heripo-orientation-x/upright.pdf', ['zh-Hans']],
-      ['/in.pdf', '/tmp/heripo-orientation-x/upright.pdf', ['ko-KR', 'en-US']],
-      ['/in.pdf', '/tmp/heripo-orientation-x/upright.pdf', ['ko-KR', 'en-US']],
+      [
+        '/in.pdf',
+        '/tmp/heripo-orientation-x/upright.pdf',
+        ['zh-Hans'],
+        undefined,
+      ],
+      [
+        '/in.pdf',
+        '/tmp/heripo-orientation-x/upright.pdf',
+        ['ko-KR', 'en-US'],
+        undefined,
+      ],
+      [
+        '/in.pdf',
+        '/tmp/heripo-orientation-x/upright.pdf',
+        ['ko-KR', 'en-US'],
+        undefined,
+      ],
     ]);
     expect(PageOrientationCorrector).toHaveBeenCalledWith(
       expect.anything(),
@@ -1213,5 +1228,35 @@ describe('PDFParser page orientation', () => {
       'http://host/in.pdf',
     ]);
     expect(fs.rmSync).toHaveBeenCalledTimes(3);
+  });
+
+  test('passes the abort signal to orientation detection and removes the copy when detection is aborted', async () => {
+    const { __correctMock: correct } =
+      (await import('../processors/page-orientation-corrector')) as any;
+    const fs = await import('node:fs');
+    doclingClient.health.mockResolvedValue(undefined);
+    vi.mocked(envMocks.setupMock).mockResolvedValue();
+    const parser = new PDFParser({ logger: makeLogger(), port: 5001 });
+    await parser.init();
+    const controller = new AbortController();
+    const abortError = new Error('The operation was aborted');
+    correct.mockRejectedValueOnce(abortError);
+
+    await expect(
+      parser.parse(
+        'file:///in.pdf',
+        'r',
+        vi.fn(),
+        false,
+        withCorrection({}),
+        controller.signal,
+      ),
+    ).rejects.toBe(abortError);
+    expect(correct.mock.calls[0][3]).toBe(controller.signal);
+    expect(convertMock).not.toHaveBeenCalled();
+    expect(fs.rmSync).toHaveBeenCalledWith('/tmp/heripo-orientation-x', {
+      recursive: true,
+      force: true,
+    });
   });
 });
