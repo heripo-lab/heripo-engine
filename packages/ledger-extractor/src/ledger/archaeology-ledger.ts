@@ -83,6 +83,7 @@ export interface LedgerParentEvidence {
   kind:
     | 'phrase'
     | 'table_row'
+    | 'identifier'
     | 'heading_scope'
     | 'chapter_title'
     | 'excerpt'
@@ -459,6 +460,16 @@ export function assembleArchaeologyLedger(
       detail: u.reason,
     });
   }
+  // a record only code proposed, from a register listing its parts, is asked about as an object of its own
+  for (const r of plan.registry)
+    if (r.mentions.every((m) => m.codeProposed))
+      reviewItems.push({
+        id: `review-${reviewItems.length + 1}`,
+        kind: 'identity',
+        recordIds: toRecords([r.ref]),
+        confirmedRecordIds: [],
+        reasons: ['code_proposed_record'],
+      });
   for (const d of plan.thinPolicyDecisions ?? [])
     if (d.needsDecision)
       reviewItems.push({

@@ -141,6 +141,9 @@ const THIN_AGGREGATE_RULE = `COUNTS AND COLLECTIVE SUMMARIES: A sentence that de
 
 const THIN_LAYER_RULE = `LAYER CONTEXTS: For a registered current layer, this rule replaces RELATION COUNTERPARTS. A segment stating that an identified artifact or feature was found in, recovered from, cut into, founded on or built on that layer describes both: put the object and the layer in r. A segment about a layer's own formation, composition, sequence, depth or extent describes that layer, even when it also names other objects. A layer named only as overburden removed to expose an object, as in "표토층과 현대 퇴적층을 제거하자 유구가 드러났다", is not described: do not attach it. A common layer name such as topsoil (표토) alone does not identify one registered layer; when the source may mean one of several layers, use ia instead of guessing. Relations between other objects still follow RELATION COUNTERPARTS.`;
 
+/** Added under CJK word breaks, where a word is a clause and one-word evidence is common. */
+const THIN_SINGLE_WORD_RANGE_RULE = `ONE-WORD RANGES: A word may be a whole clause. Evidence of one word still names both endpoints, as in "Q7:L7-L7"; never shorten it to "Q7:L7".`;
+
 export function contentAttachmentThinSystemPrompt(
   options: {
     linked?: boolean;
@@ -153,6 +156,8 @@ export function contentAttachmentThinSystemPrompt(
     aggregate?: boolean;
     /** v15/v16: add the layer-context rule. */
     layers?: boolean;
+    /** Under CJK word breaks: spell out one-word ranges. */
+    singleWordRanges?: boolean;
   } = {},
 ): string {
   const head =
@@ -169,6 +174,7 @@ export function contentAttachmentThinSystemPrompt(
     ...(options.catalog ? [THIN_CATALOG_RULE] : []),
     ...(options.aggregate ? [THIN_AGGREGATE_RULE] : []),
     ...(options.layers ? [THIN_LAYER_RULE] : []),
+    ...(options.singleWordRanges ? [THIN_SINGLE_WORD_RANGE_RULE] : []),
   ].join('\n\n');
   return options.linked
     ? `${withHeadings}\n\n${THIN_LINKED_RULE}`
@@ -326,6 +332,7 @@ export function createContentAttachmentThinRequest(
       catalog,
       aggregate,
       layers,
+      singleWordRanges: compilation.wordBreaks === 'cjk_punctuation',
     }),
     userPrompt: JSON.stringify(compilation.input),
     providerOutputSchema:

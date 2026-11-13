@@ -18,6 +18,8 @@ import {
   SYSTEM_PROMPT_V11,
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V19,
   createCandidateDiscoveryRequest,
   isSectionHeading,
 } from './discovery-request';
@@ -102,7 +104,80 @@ describe('discovery v10 sections, name lead and corrections', () => {
       v13: false,
       v14: false,
       v15: false,
+      v16: false,
+      v17: false,
+      v18: false,
+      v19: false,
     });
+  });
+
+  test('accepts a v16 name after a numbering label or at a sentence start', async () => {
+    const { plan, unit, body } = sections([
+      {
+        id: 'b1',
+        text: '类型说明。本段仅为合成测试的示例文字。编号99XXM105（图一），示例墓。',
+        pdfPageNo: 1,
+      },
+      {
+        id: 'b2',
+        text: '类型说明。本段仅为合成测试的示例文字。99XXM102（图二），示例墓。',
+        pdfPageNo: 1,
+      },
+      {
+        id: 'b3',
+        text: '类型说明文字用于合成测试，不表示单独描述的对象（M110、M111）。',
+        pdfPageNo: 1,
+      },
+    ]);
+    const candidates = [
+      body('墓', '99XXM105', 'id:b1', '编号99XXM105'),
+      body('墓', '99XXM102', 'id:b2', '99XXM102'),
+      body('墓', 'M111', 'id:b3', 'M111'),
+    ];
+    const issues = async (version?: 'candidate-discovery.v15') =>
+      (
+        await assembleCandidateDiscovery(plan, [
+          audit(
+            unit,
+            { tableRole: 'none', candidates, exclusions: [] },
+            version,
+          ),
+        ])
+      ).issues.map((i) => i.candidateIndex);
+
+    expect(await issues()).toEqual([2]);
+    expect(await issues('candidate-discovery.v15')).toEqual([0, 1, 2]);
+    expect(candidateCheckLevel('candidate-discovery.v15').v16).toBe(false);
+  });
+
+  test('accepts a v16 quote that differs from its source only in whitespace and keeps the source span', async () => {
+    const { plan, unit, body } = sections([
+      {
+        id: 'b1',
+        text: '本段仅为合成测试而编写的示例。标本 M109:4，灰色。示例罐。',
+        pdfPageNo: 1,
+      },
+    ]);
+    const candidate = body('罐', 'M109:4', 'id:b1', '标本M109:4，灰色');
+    const assemble = (version?: 'candidate-discovery.v15') =>
+      assembleCandidateDiscovery(plan, [
+        audit(
+          unit,
+          { tableRole: 'none', candidates: [candidate], exclusions: [] },
+          version,
+        ),
+      ]);
+
+    const v16 = await assemble();
+    expect(v16.issues).toEqual([]);
+    expect(v16.candidates[0].evidence[0]).toMatchObject({
+      quote: '标本 M109:4，灰色',
+      charStart: 15,
+      charEnd: 27,
+    });
+    expect(
+      (await assemble('candidate-discovery.v15')).issues.map((i) => i.reason),
+    ).toEqual(['Evidence does not match an exact input quote in this unit']);
   });
 
   test('asks a v14 body artifact whose block opens with a catalog number for that number', async () => {
@@ -278,6 +353,16 @@ describe('discovery v10 sections, name lead and corrections', () => {
       expect.stringContaining('without circled numerals'),
     ]);
     expect(JSON.parse(v10.userPrompt).unansweredRows).toEqual([5]);
+    expect(
+      planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v15')!
+        .userPrompt,
+    ).toBe(
+      planCandidateDiscoveryFollowUp(
+        unit,
+        first,
+        CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      )!.userPrompt,
+    );
   });
 });
 
@@ -877,7 +962,19 @@ describe('discovery v13 numbered body blocks', () => {
     ]);
     expect(planned.unit).toBe(unit);
     expect(input.unansweredNumberedBlocks).toEqual(planned.numberedBlocks);
-    expect(input.followUpRules).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V15]);
+    expect(input.followUpRules).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V19]);
+    expect(
+      JSON.parse(
+        planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v18')!
+          .userPrompt,
+      ).followUpRules,
+    ).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V16]);
+    expect(
+      JSON.parse(
+        planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v15')!
+          .userPrompt,
+      ).followUpRules,
+    ).toEqual([UNANSWERED_NUMBERED_BLOCKS_RULE_V15]);
     expect(
       JSON.parse(
         planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v14')!
@@ -888,6 +985,120 @@ describe('discovery v13 numbered body blocks', () => {
     expect(
       planCandidateDiscoveryFollowUp(unit, first, 'candidate-discovery.v12'),
     ).toBeNull();
+  });
+
+  test('asks v16 blocks that hold a labelled specimen number even when nothing was proposed', () => {
+    const { unit, body } = sections([
+      {
+        id: 'b1',
+        text: '示例类型。标本M102:11，灰色。标本M102:12，灰色。',
+        pdfPageNo: 1,
+      },
+      { id: 'b2', text: '另一示例类型。标本M112:18，红色。', pdfPageNo: 1 },
+      { id: 'b3', text: '示例罐 共3件。', pdfPageNo: 1 },
+    ]);
+    const asked = (
+      candidates: CandidateDiscoveryResponse['candidates'],
+      version?: string,
+    ) =>
+      unansweredNumberedBlocks(
+        unit,
+        { tableRole: 'none', candidates, exclusions: [] },
+        version ?? 'candidate-discovery.v18',
+      );
+
+    expect(asked([])).toEqual([
+      { sourceId: 'id:b1', number: 'M102:11' },
+      { sourceId: 'id:b2', number: 'M112:18' },
+    ]);
+    // from v19 an uncited block lists every labelled number, not only its first
+    expect(asked([], CANDIDATE_DISCOVERY_PROMPT_VERSION)).toEqual([
+      { sourceId: 'id:b1', number: 'M102:11' },
+      { sourceId: 'id:b1', number: 'M102:12' },
+      { sourceId: 'id:b2', number: 'M112:18' },
+    ]);
+    expect(asked([body('示例罐', 'M102:11', 'id:b3', '示例罐')])).toEqual([
+      { sourceId: 'id:b1', number: 'M102:12' },
+      { sourceId: 'id:b2', number: 'M112:18' },
+    ]);
+    expect(asked([], 'candidate-discovery.v15')).toEqual([]);
+  });
+
+  test('asks v19 labelled numbers that no candidate carries in a block a candidate already cites', async () => {
+    const { plan, unit, body } = sections([
+      {
+        id: 'b1',
+        text: '示例类型。标本M102:11，灰色。标本M102：12，灰色。标本M102:12。编号XXM362。标本M105+3。',
+        pdfPageNo: 1,
+      },
+      { id: 'b2', text: '另一示例类型。标本M112:18，红色。', pdfPageNo: 1 },
+      { id: 'b3', text: '示例罐。标本XM5:1。', pdfPageNo: 1 },
+    ]);
+    const specimen = body('罐', '标本M102:11', 'id:b1', '标本M102:11');
+    // an OCR colon (+) keeps the labelled number whole, so M105+3 is carried rather than asked as M105
+    const ocr = body('罐', 'M105+3', 'id:b1', '标本M105+3');
+    const tomb = body('墓', 'M362', 'id:b1', '编号XXM362');
+    const other = body('罐', 'M112:18', 'id:b2', '标本M112:18');
+    // an identifier ending in the number after a Latin letter does not carry it
+    const near = body('罐', 'YXM5:1', 'id:b3', '标本XM5:1');
+    const response = (
+      candidates: CandidateDiscoveryResponse['candidates'],
+      exclusions: CandidateDiscoveryResponse['exclusions'] = [],
+    ): CandidateDiscoveryResponse => ({
+      tableRole: 'none',
+      candidates,
+      exclusions,
+    });
+    const asked = (r: CandidateDiscoveryResponse, version?: string) =>
+      unansweredNumberedBlocks(
+        unit,
+        r,
+        version ?? CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      );
+    const all = response([specimen, tomb, other, near, ocr]);
+
+    expect(asked(all)).toEqual([
+      { sourceId: 'id:b1', number: 'M102：12' },
+      { sourceId: 'id:b1', number: 'M102:12' },
+      { sourceId: 'id:b3', number: 'XM5:1' },
+    ]);
+    expect(asked(all, 'candidate-discovery.v18')).toEqual([]);
+    const excluding = (sourceId: string, reason: string) =>
+      asked(
+        response(
+          [specimen, tomb, other, near, ocr],
+          [{ sourceId, category: 'passing_mention', reason }],
+        ),
+      );
+    // beside a candidate, an exclusion answers only the numbers its reason names, colon forms alike
+    expect(excluding('id:b1', '언급')).toEqual(asked(all));
+    expect(excluding('id:b1', '标本M102:12는 다른 곳의 유물')).toEqual([
+      { sourceId: 'id:b3', number: 'XM5:1' },
+    ]);
+    expect(excluding('id:b1', 'M102:1 언급')).toEqual(asked(all));
+    // a longer number that starts with a listed one does not name it
+    for (const longer of ['M102:12-1', 'M102:12：3', 'M102:12+4'])
+      expect(excluding('id:b1', `标本${longer} 참조`)).toEqual(asked(all));
+    // an excluded block no candidate cites is answered whole
+    const { unit: lone } = sections([
+      { id: 'b9', text: '另见标本M102:11、标本M102:12。', pdfPageNo: 1 },
+    ]);
+    expect(
+      unansweredNumberedBlocks(
+        lone,
+        response(
+          [],
+          [{ sourceId: 'id:b9', category: 'passing_mention', reason: '참조' }],
+        ),
+        CANDIDATE_DISCOVERY_PROMPT_VERSION,
+      ),
+    ).toEqual([]);
+    const v18 = await assembleCandidateDiscovery(plan, [
+      audit(unit, response([other]), 'candidate-discovery.v18'),
+    ]);
+    expect(v18.issues.map((i) => i.reason)).toEqual([
+      'Numbered body blocks neither proposed nor excluded: M102:11, XM5:1',
+    ]);
   });
 
   test('merges the answer to numbered blocks and reports blocks left unanswered', async () => {

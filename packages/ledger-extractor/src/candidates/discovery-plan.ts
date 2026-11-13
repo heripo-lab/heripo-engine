@@ -7,16 +7,42 @@ import type {
   CandidateDiscoveryUnit,
 } from './discovery-types';
 
+import { dataColumnBlocks } from './discovery-rows';
+import { labelledNumbers } from './discovery-validation';
+import {
+  latinPrefixedNumbers,
+  rowLeadingNumber,
+  sameObjectNumber,
+} from './object-numbers';
+
 /** Text blocks shorter than this count as heading, number or field lines when a unit boundary is aligned. */
 export const CANDIDATE_DISCOVERY_SHORT_BLOCK_CHARS = 120;
 /** A trailing run of short blocks longer than this is not moved to the next unit. */
 export const CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS = 10;
+/**
+ * A text unit closes before it would hold more numbers after numbering labels (`标本M102:11`) than this: a catalog of
+ * types describes a specimen in a few dozen characters, so a unit within `maxTextChars` can hold a hundred of them,
+ * more than one answer can list within its output limit.
+ */
+export const CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS = 40;
+
+/** A register row's context excerpt keeps this many characters before the number the scope's text writes... */
+export const CANDIDATE_DISCOVERY_REGISTER_EXCERPT_BEFORE = 30;
+/** ...and this many after it. */
+export const CANDIDATE_DISCOVERY_REGISTER_EXCERPT_AFTER = 60;
 
 /**
  * Code chooses scope, chunk sizes and context; the model cannot schedule more work.
  * The scope is one chapter subtree or several distinct, non-nested subtrees planned in document order.
  * When a text unit would end with a run of short blocks followed by a long block of the same chapter, the run
  * starts the next unit instead, so an object's heading, number and field lines stay with its description.
+ * A text unit also closes before it would hold more than `maxLabelledNumbers` labelled object numbers
+ * (default `CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS`); a single block always fits.
+ * A table of `tableIds` lists, in each unit, the data rows whose opening number the scope's text writes with a Latin
+ * prefix (`table.registerRows`), and adds to its read-only context, for each, the first passage of the scope's text that
+ * writes that number, so the model knows those rows are objects of this investigation and what they are called.
+ * When such a table lists several numbered objects in each row (`dataColumnBlocks`), its units carry those
+ * `columnBlocks` and each register row names the block that opens with its number.
  */
 export function prepareCandidateDiscovery(
   index: DocumentResourceIndex,
@@ -25,6 +51,9 @@ export function prepareCandidateDiscovery(
     inputSha256: string;
     maxTextChars: number;
     tableRowsPerUnit: number;
+    maxLabelledNumbers?: number;
+    /** Tables outside the scope chapters to read as well, such as appendix registers of the scope's objects. */
+    tableIds?: string[];
     scopeSource?: CandidateDiscoveryPlan['scopeSource'];
   },
 ): CandidateDiscoveryPlan {
@@ -84,25 +113,125 @@ export function prepareCandidateDiscovery(
       textByChapter.set(current.resourceId!, texts.slice(heading));
     }
   }
-  for (const chapter of scoped) {
-    const chapterId = chapter.resourceId!;
-    const chapterPath = chapters
+  const tableUnits = (
+    table: Extract<DocumentResource, { kind: 'table' }>,
+    chapterId: string,
+    chapterPath: CandidateDiscoveryUnit['chapterPath'],
+    context: CandidateDiscoveryUnit['context'],
+    written?: Map<string, { key: string; text: string }>,
+  ) => {
+    const cells = index.resources.filter(
+      (r): r is Extract<DocumentResource, { kind: 'tableCell' }> =>
+        r.kind === 'tableCell' && r.key.startsWith(`${table.key}/grid/`),
+    );
+    // a register that lists several numbered objects in each row is read block by block
+    const blocks = written?.size ? dataColumnBlocks(table.data.grid) : null;
+    const parts = (row: Array<{ text: string }>) =>
+      blocks
+        ? Array.from({ length: blocks.count }, (_, block) => ({
+            block,
+            texts: row
+              .slice(
+                block * blocks.columnsPerBlock,
+                (block + 1) * blocks.columnsPerBlock,
+              )
+              .map((c) => c.text),
+          }))
+        : [{ block: undefined, texts: row.map((c) => c.text) }];
+    for (
+      let row = 0;
+      row < table.data.grid.length;
+      row += options.tableRowsPerUnit
+    ) {
+      const registerRows = written?.size
+        ? table.data.grid
+            .slice(row, row + options.tableRowsPerUnit)
+            .flatMap((cells, offset) =>
+              parts(cells).flatMap(({ block, texts }) => {
+                const number = row + offset > 0 && rowLeadingNumber(texts);
+                const forms = number
+                  ? [...written.keys()]
+                      .filter((w) => sameObjectNumber(number, w))
+                      .sort((a, b) => a.length - b.length)
+                  : [];
+                // the shortest form, when every form writes that one object (`M304`, `99XXM304`); a number the scope
+                // writes for objects of different letters (`M304`, `H304`) gives no form, since the row could be either
+                const writtenAs =
+                  number &&
+                  forms.length > 0 &&
+                  forms.every(
+                    (f) => f === forms[0] || sameObjectNumber(forms[0], f),
+                  ) &&
+                  forms[0];
+                return writtenAs
+                  ? [
+                      {
+                        rowIndex: row + offset,
+                        ...(block === undefined ? {} : { block }),
+                        number,
+                        writtenAs,
+                      },
+                    ]
+                  : [];
+              }),
+            )
+        : [];
+      units.push({
+        unitId: `${table.key}:rows:${row}`,
+        chapterId,
+        chapterPath,
+        table: {
+          id: table.resourceId!,
+          caption: table.data.caption?.fullText ?? null,
+          headerRows: table.data.grid.slice(0, 2),
+          ...(registerRows.length ? { registerRows } : {}),
+          ...(blocks ? { columnBlocks: blocks } : {}),
+        },
+        resources: cells.filter(
+          (c) =>
+            c.rowIndex >= row && c.rowIndex < row + options.tableRowsPerUnit,
+        ),
+        // a register row's number in the scope's text, so the row has a name and a place in this investigation;
+        // numbers written in one passage share its excerpt
+        context: [
+          ...context,
+          ...new Map(
+            registerRows.map((r) => {
+              const passage = written!.get(r.writtenAs)!;
+              return [passage.text, passage];
+            }),
+          ).values(),
+        ],
+      });
+    }
+  };
+  const pathOf = (chapterKey: string) =>
+    chapters
       .filter(
         (r) =>
-          r.key === chapter.key || chapter.key.startsWith(`${r.key}/children/`),
+          r.key === chapterKey || chapterKey.startsWith(`${r.key}/children/`),
       )
       .map((r) => ({ id: r.resourceId!, originTitle: r.data.originTitle }));
+  for (const chapter of scoped) {
+    const chapterId = chapter.resourceId!;
+    const chapterPath = pathOf(chapter.key);
     const texts = textByChapter.get(chapterId)!;
+    const numbers = texts.map((t) => labelledNumbers(t.data.text).length);
+    const maxNumbers =
+      options.maxLabelledNumbers ?? CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS;
     let start = 0;
     while (start < texts.length) {
       let end = start;
       let length = 0;
+      let labelled = 0;
       while (
         end < texts.length &&
         (end === start ||
-          length + texts[end].data.text.length <= options.maxTextChars)
+          (length + texts[end].data.text.length <= options.maxTextChars &&
+            labelled + numbers[end] <= maxNumbers))
       ) {
         length += texts[end].data.text.length;
+        labelled += numbers[end];
         end++;
       }
       // align the boundary: a trailing short run before a long block moves to the next unit
@@ -144,36 +273,62 @@ export function prepareCandidateDiscovery(
       (r): r is Extract<DocumentResource, { kind: 'table' }> =>
         r.kind === 'table' && r.chapterIds.includes(chapterId),
     );
-    for (const table of tables) {
-      const cells = index.resources.filter(
-        (r): r is Extract<DocumentResource, { kind: 'tableCell' }> =>
-          r.kind === 'tableCell' && r.key.startsWith(`${table.key}/grid/`),
+    for (const table of tables)
+      tableUnits(
+        table,
+        chapterId,
+        chapterPath,
+        texts
+          .map((t) => ({ key: t.key, text: t.data.text }))
+          .filter((t) => t.text.length < 200)
+          .slice(0, 6),
       );
-      for (
-        let row = 0;
-        row < table.data.grid.length;
-        row += options.tableRowsPerUnit
-      ) {
-        units.push({
-          unitId: `${table.key}:rows:${row}`,
-          chapterId,
-          chapterPath,
-          table: {
-            id: table.resourceId!,
-            caption: table.data.caption?.fullText ?? null,
-            headerRows: table.data.grid.slice(0, 2),
-          },
-          resources: cells.filter(
-            (c) =>
-              c.rowIndex >= row && c.rowIndex < row + options.tableRowsPerUnit,
-          ),
-          context: texts
-            .map((t) => ({ key: t.key, text: t.data.text }))
-            .filter((t) => t.text.length < 200)
-            .slice(0, 6),
-        });
-      }
-    }
+  }
+  // tables outside the scope, read with their own chapter and the short text blocks on their pages as context
+  const written = new Map<string, { key: string; text: string }>();
+  for (const chapter of scoped)
+    for (const block of textByChapter.get(chapter.resourceId!)!)
+      for (const number of latinPrefixedNumbers(block.data.text))
+        if (!written.has(number)) {
+          const at = new RegExp([...number].join('\\s*'), 'u').exec(
+            block.data.text,
+          )!;
+          written.set(number, {
+            key: block.key,
+            text: block.data.text.slice(
+              Math.max(
+                0,
+                at.index - CANDIDATE_DISCOVERY_REGISTER_EXCERPT_BEFORE,
+              ),
+              at.index +
+                at[0].length +
+                CANDIDATE_DISCOVERY_REGISTER_EXCERPT_AFTER,
+            ),
+          });
+        }
+  for (const tableId of options.tableIds ?? []) {
+    const table = index.resources.find(
+      (r): r is Extract<DocumentResource, { kind: 'table' }> =>
+        r.kind === 'table' && r.resourceId === tableId,
+    );
+    if (!table) throw new Error(`Table not found: ${tableId}`);
+    const chapterId = table.chapterIds.at(-1)!;
+    const chapterKey = chapters.find((c) => c.resourceId === chapterId)!.key;
+    tableUnits(
+      table,
+      chapterId,
+      pathOf(chapterKey),
+      index.resources
+        .filter(
+          (r): r is Extract<DocumentResource, { kind: 'text' }> =>
+            r.kind === 'text' &&
+            r.pdfPageNo === table.pdfPageNo &&
+            r.data.text.length < 200,
+        )
+        .map((t) => ({ key: t.key, text: t.data.text }))
+        .slice(0, 6),
+      written,
+    );
   }
   return {
     scopeChapterId: roots[0].resourceId!,

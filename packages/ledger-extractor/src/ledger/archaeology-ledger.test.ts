@@ -348,6 +348,7 @@ describe('assembleArchaeologyLedger', () => {
     attachments.missingUnitIds = ['page-4'];
     const bare = fixture();
     bare.plan.registry[2].mentions[0].evidence = [];
+    bare.plan.registry[2].mentions[0].codeProposed = true;
     bare.plan.profile = { profileSha256: 'abc', source: 'manual' };
 
     const result = assembleArchaeologyLedger(plan, attachments, options);
@@ -396,5 +397,13 @@ describe('assembleArchaeologyLedger', () => {
       source: 'manual',
     });
     expect(minimal.records[2].content).toEqual([]);
+    expect(minimal.reviewItems).toContainEqual(
+      expect.objectContaining({
+        kind: 'identity',
+        recordIds: [minimal.records[2].id],
+        reasons: ['code_proposed_record'],
+      }),
+    );
+    expect(minimal.records[2].needsReview).toBe(true);
   });
 });

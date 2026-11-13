@@ -2,6 +2,7 @@ import type { CandidateDeduplicationResult } from '../candidates/candidate-dedup
 import type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryResult,
+  CandidateDiscoveryUnit,
 } from '../candidates/discovery-types';
 import type {
   DocumentResource,
@@ -56,6 +57,14 @@ export async function prepareContentAttachment(
       'A matching complete candidate snapshot and positive chunk limit are required',
     );
   const byId = new Map(discovery.candidates.map((c) => [c.candidateId, c]));
+  const scope = new Set(
+    discoveryPlan.scopeChapterIds ?? [discoveryPlan.scopeChapterId],
+  );
+  // a unit outside every scope chapter is a register table read through the scope's table list
+  const mentionPlace = ({ chapterPath }: CandidateDiscoveryUnit) =>
+    chapterPath.some((c) => scope.has(c.id))
+      ? { chapterPath }
+      : { chapterPath, outsideScope: true as const };
   const assigned = new Set<string>();
   const registry = groups.groups.map((g, i) => {
     if (!g.memberCandidateIds.length)
@@ -85,9 +94,12 @@ export async function prepareContentAttachment(
         candidateId: c.candidateId,
         sourceName: c.sourceName,
         sourceIdentifier: c.sourceIdentifier,
-        chapterPath: discoveryPlan.units.find((u) =>
-          c.unitIds.includes(u.unitId),
-        )!.chapterPath,
+        ...mentionPlace(
+          discoveryPlan.units.find((u) => c.unitIds.includes(u.unitId))!,
+        ),
+        ...(c.eligibilityBasis === 'register_parts'
+          ? { codeProposed: true as const }
+          : {}),
         evidence: c.evidence,
       })),
     };
@@ -225,6 +237,7 @@ export async function prepareContentAttachment(
       : {}),
     pages,
     units,
+    wordBreaks: 'cjk_punctuation',
     ...(options.thinPolicy ? { thinPolicy: { ...options.thinPolicy } } : {}),
     ...(options.thinPolicyDecisions
       ? { thinPolicyDecisions: structuredClone(options.thinPolicyDecisions) }

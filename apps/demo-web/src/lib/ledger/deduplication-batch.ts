@@ -6,7 +6,6 @@ import type {
 } from '@heripo/ledger-extractor';
 
 import {
-  CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION,
   CANDIDATE_DEDUPLICATION_BLOCK_PROVIDER_OPTIONS,
   createCandidateDeduplicationBlockRequest,
   createCandidateDeduplicationBlockSchema,
@@ -38,17 +37,24 @@ export async function answerDeduplicationBlocksByBatch(input: {
   guard?: SpendGuard;
 }): Promise<CandidateDeduplicationBlockAudit[]> {
   const { plan, discovery, modelId } = input;
-  const done = new Set(input.completed.map((a) => a.blockId));
-  const open = planCandidateDeduplication(plan, discovery).blocks.filter(
-    (b) => !done.has(b.blockId),
-  );
-  if (!open.length) return [];
+  const blocks = planCandidateDeduplication(plan, discovery).blocks;
   const requests = new Map(
-    open.map((block) => [
+    blocks.map((block) => [
       block.blockId,
       createCandidateDeduplicationBlockRequest(plan, discovery, block),
     ]),
   );
+  // a saved audit counts only for the same request: a block of another split or pool is asked again
+  const open = blocks.filter((b) => {
+    const request = requests.get(b.blockId)!;
+    return !input.completed.some(
+      (a) =>
+        a.blockId === b.blockId &&
+        a.systemPrompt === request.systemPrompt &&
+        a.userPrompt === request.userPrompt,
+    );
+  });
+  if (!open.length) return [];
   const answers = await runStructuredBatch({
     modelId,
     batchFile: input.batchFile,
@@ -75,7 +81,6 @@ export async function answerDeduplicationBlocksByBatch(input: {
     const request = requests.get(block.blockId)!;
     const audit: CandidateDeduplicationBlockAudit = {
       ...request,
-      promptVersion: CANDIDATE_DEDUPLICATION_BLOCK_PROMPT_VERSION,
       response: answer.output as CandidateDeduplicationBlockAudit['response'],
       usage: toExtendedUsage(answer.usage!, {
         component: 'LedgerCandidateDeduplication',

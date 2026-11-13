@@ -66,6 +66,14 @@ export interface AttachmentRegistryEntry {
     sourceIdentifier: string | null;
     chapterPath: CandidateDiscoveryPlan['units'][number]['chapterPath'];
     evidence: CandidateEvidence[];
+    /**
+     * Present when the candidate was found in a register table read from outside the discovery scope chapters. Such a
+     * table often sits under a closing chapter, so its chapter says nothing about where the report describes the
+     * object, and the mention joins no chapter handle. Plans prepared before this field read as before.
+     */
+    outsideScope?: true;
+    /** Present when code proposed the candidate for an object a register lists only by its parts (`register_parts`). */
+    codeProposed?: true;
   }>;
 }
 export interface ContentAttachmentPlan {
@@ -82,6 +90,12 @@ export interface ContentAttachmentPlan {
     status: 'planned' | 'no_body_or_table_text';
   }>;
   units: AttachmentUnit[];
+  /**
+   * `cjk_punctuation`: thin compilation also ends a word after Chinese and Japanese clause and sentence marks
+   * (`，、；：。！？`) and a sentence after `。！？`, so text without spaces is addressed by clause. Plans prepared
+   * before this field split words at whitespace only, and replay as before.
+   */
+  wordBreaks?: 'cjk_punctuation';
   /** Thin attachment rules from a confirmed report profile; without it every rule stays as before. */
   thinPolicy?: ContentAttachmentThinPolicy;
   /** How each branch of `thinPolicy` was decided, with branches left to a default marked `needsDecision`. */

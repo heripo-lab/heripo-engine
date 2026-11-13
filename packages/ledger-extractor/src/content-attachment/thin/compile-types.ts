@@ -119,4 +119,6 @@ export interface ContentAttachmentThinCompilation {
     | typeof CONTENT_ATTACHMENT_THIN_LOCAL_LINKED_COMPILE_VERSION;
   input: ContentAttachmentThinInput;
   codeMap: ContentAttachmentThinCodeMap;
+  /** Set when the plan's CJK word breaks split some of the unit's text differently from whitespace; the request then spells out one-word ranges. */
+  wordBreaks?: 'cjk_punctuation';
 }

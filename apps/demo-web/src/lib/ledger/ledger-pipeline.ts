@@ -31,9 +31,13 @@ import {
 import {
   cancelCandidateDiscovery,
   getCandidateDiscoveryRun,
+  isCandidateDiscoveryCurrent,
   startCandidateDiscovery,
 } from './candidate-discovery-run';
-import { prepareContentAttachmentRun } from './content-attachment-run';
+import {
+  getContentAttachmentRun,
+  prepareContentAttachmentRun,
+} from './content-attachment-run';
 import {
   getContentAttachmentThinState,
   startContentAttachmentThin,
@@ -88,10 +92,15 @@ export async function runLedgerPipeline(
     onStep: (step: LedgerPipelineStep) => void;
     log: (message: string) => void;
     abortSignal?: AbortSignal;
+    /**
+     * Continue a task that stopped: a saved report profile is used without a router call, and a complete saved
+     * discovery snapshot is kept, so only its duplicate review and the later steps are run again.
+     */
+    resume?: boolean;
   },
 ) {
   const { models } = options;
-  const { onStep, log, abortSignal } = hooks;
+  const { onStep, log, abortSignal, resume } = hooks;
   // a task without caps gets a guard that only counts and leaves output limits to each call
   const guard = createSpendGuard(options.budget);
   const budget = guard.limits;
@@ -113,13 +122,17 @@ export async function runLedgerPipeline(
 
   // 1. report profile: one router call
   onStep('report-profile');
-  log(`Classifying the report with ${models.router}...`);
-  const router = await runReportRouter(taskId, models.router, { guard });
-  stopAtCap();
-  const stored = await getReportProfile(taskId);
-  log(
-    `Report profile ${router.profileSaved ? 'saved' : 'not saved'} (${router.usage.totalTokens} tokens)`,
-  );
+  const saved = resume ? await getReportProfile(taskId) : null;
+  if (saved) log('Using the saved report profile');
+  else {
+    log(`Classifying the report with ${models.router}...`);
+    const router = await runReportRouter(taskId, models.router, { guard });
+    stopAtCap();
+    log(
+      `Report profile ${router.profileSaved ? 'saved' : 'not saved'} (${router.usage.totalTokens} tokens)`,
+    );
+  }
+  const stored = saved ?? (await getReportProfile(taskId));
   abortSignal?.throwIfAborted();
 
   // 2. candidate discovery and duplicate review
@@ -146,35 +159,71 @@ export async function runLedgerPipeline(
     );
   if (completion) saveDiscoveryScope(taskId, completion);
   const scopeChapterId = scope.length === 1 ? scope[0] : scope;
+  // appendix registers of the scope's objects that sit outside its chapters are read as tables of their own
+  const tableIds = completion?.tableIds.length
+    ? completion.tableIds
+    : undefined;
   const units = prepareCandidateDiscovery(index, {
     scopeChapterId,
+    tableIds,
     ...DISCOVERY,
     maxTextChars: discoveryMaxTextChars(models.discovery),
     inputSha256: 'count',
   }).units.length;
   const beforeDiscovery = guard.used();
+  const previous = resume ? getCandidateDiscoveryRun(taskId) : null;
+  // a saved discovery is kept only while it is complete, of the current prompt version and still reproducible
+  const keepDiscovery =
+    !!previous && (await isCandidateDiscoveryCurrent(taskId));
+  // an unfinished attachment run prepared from that discovery and its duplicate review is continued as it is: its
+  // submitted batch is collected and only its open units are asked; a finished one is prepared and run again
+  const savedAttachment = keepDiscovery
+    ? getContentAttachmentRun(taskId)
+    : null;
+  const keepAttachment =
+    !!previous &&
+    !!savedAttachment &&
+    getContentAttachmentThinState(taskId)?.status !== 'completed' &&
+    previous.status === 'completed' &&
+    !!previous.deduplication &&
+    savedAttachment.candidateSnapshotId === previous.runId;
+  if (keepAttachment)
+    log(
+      `Keeping the saved discovery of ${previous!.totalUnits} units with its duplicate review and continuing its content attachment run`,
+    );
+  else if (keepDiscovery)
+    log(
+      `Keeping the saved discovery of ${previous!.totalUnits} units and reviewing its duplicates again`,
+    );
+  else if (previous)
+    log(
+      'Discovering again: the saved discovery is incomplete, of an earlier prompt version or no longer reproducible',
+    );
   log(
     completion
-      ? `Discovering candidates in ${units} units of ${scope.join(', ')} (router proposal ${completion.proposedChapterIds.join(', ') || 'none'}; added from investigation chapters: ${completion.addedChapterIds.join(', ') || 'none'})...`
+      ? `Discovering candidates in ${units} units of ${scope.join(', ')} (router proposal ${completion.proposedChapterIds.join(', ') || 'none'}; added from investigation chapters: ${completion.addedChapterIds.join(', ') || 'none'}; register tables outside the scope: ${completion.tableIds.join(', ') || 'none'})...`
       : `Discovering candidates in ${units} units of ${scope.join(', ')} (profile scope)...`,
   );
   log(
     `Discovery model ${models.discovery}, duplicate review model ${models.deduplication}`,
   );
-  await startCandidateDiscovery(
-    taskId,
-    {
-      scopeChapterId,
-      modelId: models.discovery,
-      deduplicationModelId: models.deduplication,
-      deduplicationBatch: usesBatch(options, models.deduplication),
-      discoveryBatch: usesBatch(options, models.discovery),
-      ...DISCOVERY,
-      maxTextChars: discoveryMaxTextChars(models.discovery),
-      ...(decided ? { useProfileScope: true } : {}),
-    },
-    { guard },
-  );
+  if (!keepAttachment)
+    await startCandidateDiscovery(
+      taskId,
+      {
+        scopeChapterId,
+        tableIds,
+        modelId: models.discovery,
+        deduplicationModelId: models.deduplication,
+        deduplicationBatch: usesBatch(options, models.deduplication),
+        discoveryBatch: usesBatch(options, models.discovery),
+        ...DISCOVERY,
+        maxTextChars: discoveryMaxTextChars(models.discovery),
+        ...(decided ? { useProfileScope: true } : {}),
+        ...(keepDiscovery ? { deduplicationOnly: true } : {}),
+      },
+      { guard },
+    );
   try {
     while (getCandidateDiscoveryRun(taskId)?.status === 'running')
       await sleep(POLL_MS, abortSignal);
@@ -202,10 +251,12 @@ export async function runLedgerPipeline(
     log(
       `Left out ${dropped.length} discovery proposals that failed their checks: ${dropped.map((d) => d.reason).join('; ')}`,
     );
-  const plan = await prepareContentAttachmentRun(taskId, {
-    maxUnitChars: MAX_UNIT_CHARS,
-    acceptDroppedProposals: true,
-  });
+  const plan = keepAttachment
+    ? savedAttachment
+    : await prepareContentAttachmentRun(taskId, {
+        maxUnitChars: MAX_UNIT_CHARS,
+        acceptDroppedProposals: true,
+      });
   // direct calls go through the guard one attempt at a time; batches are sized by the thin run against what is
   // left, so the rest of the run is held for them and settled with what they used
   const batch = usesBatch(options, models.attachment);

@@ -25,7 +25,13 @@ const CONTEXT_EXCERPT_CHARS = 200;
 export interface RelationParentEvidence {
   ref: string;
   questionRef: string;
-  kind: 'phrase' | 'table_row' | 'heading_scope' | 'chapter_title' | 'excerpt';
+  kind:
+    | 'phrase'
+    | 'table_row'
+    | 'identifier'
+    | 'heading_scope'
+    | 'chapter_title'
+    | 'excerpt';
   text: string;
   locator?: string;
   chapterId?: string;

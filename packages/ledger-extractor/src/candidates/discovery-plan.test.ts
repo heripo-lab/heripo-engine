@@ -3,7 +3,11 @@ import type { ProcessedDocument } from '@heripo/model';
 import { describe, expect, test, vi } from 'vitest';
 
 import { buildDocumentResourceIndex } from '../resources/document-resource-index';
-import { chapter, input } from './candidate-discovery.test-fixture';
+import {
+  chapter,
+  input,
+  sideBySideRegister,
+} from './candidate-discovery.test-fixture';
 import { assembleCandidateDiscovery } from './discovery-assembly';
 import {
   CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS,
@@ -68,6 +72,82 @@ describe('candidate discovery', () => {
         tableRowsPerUnit: 1,
       }).units[1].table?.caption,
     ).toBe('우물 목록');
+  });
+
+  test('reads tables outside the scope with their own chapter and the short text of their page', () => {
+    const index = buildDocumentResourceIndex(input());
+    const plan = prepareCandidateDiscovery(index, {
+      scopeChapterId: 'child',
+      inputSha256: 'h',
+      maxTextChars: 100,
+      tableRowsPerUnit: 1,
+      tableIds: ['t'],
+    });
+
+    expect(plan.units.map((u) => [u.chapterId, u.table?.id ?? null])).toEqual([
+      ['child', null],
+      ['root', 't'],
+      ['root', 't'],
+    ]);
+    expect(plan.units[1].chapterPath.map((c) => c.id)).toEqual(['root']);
+    expect(plan.units[1].context.map((c) => c.text)).toEqual(['1호 우물']);
+    expect(() =>
+      prepareCandidateDiscovery(index, {
+        scopeChapterId: 'child',
+        inputSha256: 'h',
+        maxTextChars: 100,
+        tableRowsPerUnit: 1,
+        tableIds: ['missing'],
+      }),
+    ).toThrow('Table not found: missing');
+  });
+
+  test('lists the register rows of a table outside the scope whose number the scope writes with a Latin prefix', () => {
+    const doc = input();
+    doc.chapters[0].children![0].textBlocks = [
+      { text: '묘 M2와 99XXM2를 조사했다.', pdfPageNo: 3 },
+      { text: '묘 K3과 수혈 H3도 조사했다.', pdfPageNo: 3 },
+    ];
+    doc.tables[0].grid = [
+      [{ text: '墓号', colSpan: 1, rowSpan: 1, isHeader: true }],
+      [{ text: '2A', colSpan: 1, rowSpan: 1, isHeader: false }],
+      [{ text: '2B', colSpan: 1, rowSpan: 1, isHeader: false }],
+      [{ text: '3', colSpan: 1, rowSpan: 1, isHeader: false }],
+    ];
+    const plan = prepareCandidateDiscovery(buildDocumentResourceIndex(doc), {
+      scopeChapterId: 'child',
+      inputSha256: 'h',
+      maxTextChars: 100,
+      tableRowsPerUnit: 3,
+      tableIds: ['t'],
+    });
+
+    // row 3 is left out: the scope writes 3 for a tomb (K3) and for a pit (H3)
+    expect(plan.units[1].table?.registerRows).toEqual([
+      { rowIndex: 1, number: '2', writtenAs: 'M2' },
+      { rowIndex: 2, number: '2', writtenAs: 'M2' },
+    ]);
+    expect(plan.units[1].context.map((c) => c.text)).toEqual([
+      '1호 우물',
+      '묘 M2와 99XXM2를 조사했다.',
+    ]);
+    expect(plan.units[2].table).not.toHaveProperty('registerRows');
+    expect(plan.units[1].table).not.toHaveProperty('columnBlocks');
+  });
+
+  test('lists the register blocks of a register that holds several numbered objects in each row', () => {
+    const { unit } = sideBySideRegister();
+
+    expect(unit.table?.columnBlocks).toEqual({ count: 2, columnsPerBlock: 3 });
+    expect(unit.table?.registerRows).toEqual([
+      { rowIndex: 2, block: 0, number: '201', writtenAs: 'M201' },
+      { rowIndex: 2, block: 1, number: '301', writtenAs: 'M301' },
+      { rowIndex: 3, block: 0, number: '202', writtenAs: 'M202' },
+    ]);
+    expect(unit.context.map((c) => c.text)).toEqual([
+      '1호 우물',
+      '墓 M201、M301、M202。',
+    ]);
   });
 
   test('rejects invalid scope and chunk limits', () => {
@@ -174,7 +254,11 @@ describe('original table identifiers and chapter continuations', () => {
 
 describe('aligned text unit boundaries', () => {
   const long = (label: string) => `${label} ${'설명'.repeat(70)}`;
-  const plan = (texts: string[], maxTextChars: number) => {
+  const plan = (
+    texts: string[],
+    maxTextChars: number,
+    maxLabelledNumbers?: number,
+  ) => {
     const doc = input();
     doc.tables = [];
     doc.chapters = [
@@ -192,6 +276,7 @@ describe('aligned text unit boundaries', () => {
       inputSha256: 'hash',
       maxTextChars,
       tableRowsPerUnit: 1,
+      maxLabelledNumbers,
     }).units.map((u) => u.resources.map((r) => r.resourceId));
   };
 
@@ -228,6 +313,18 @@ describe('aligned text unit boundaries', () => {
     ]);
     expect(plan(allShort, size(allShort, 2))).toEqual([['t0', 't1'], ['t2']]);
     expect(plan(manyShort, size(manyShort, 12))[0]).toHaveLength(12);
+  });
+
+  test('closes a unit before it would hold more labelled numbers than the limit', () => {
+    const catalog = [
+      `示例类型。标本M102:11，灰色。标本M102:12，灰色。${'口径'.repeat(60)}`,
+      `另一示例类型。标本M112:18，红色。${'口径'.repeat(60)}`,
+      `第三示例类型。标本M111:2，灰色。标本M111:3，灰色。${'口径'.repeat(60)}`,
+      `第四示例类型。标本M107:10，灰色。标本M107:11。标本M107:12。${'口径'.repeat(60)}`,
+    ];
+
+    expect(plan(catalog, 100_000, 3)).toEqual([['t0', 't1'], ['t2'], ['t3']]);
+    expect(plan(catalog, 100_000)).toEqual([['t0', 't1', 't2', 't3']]);
   });
 });
 

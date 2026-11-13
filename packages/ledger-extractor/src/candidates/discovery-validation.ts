@@ -13,6 +13,8 @@ import {
   SIDE_BY_SIDE_TABLES_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V19,
   createCandidateDiscoveryRequest,
   getCandidateSources,
   isSectionHeading,
@@ -24,18 +26,46 @@ import {
   unansweredItemTableBlocks,
   unansweredItemTableRows,
 } from './discovery-rows';
+import { sameObjectNumber } from './object-numbers';
 
 /** A figure, plate or photograph reference copied into an identifier. */
 const FIGURE_REFERENCE = /도면|도판|사진|그림|Fig\./u;
 /** An independent body names its object within this many leading non-space characters of an evidence block. */
 export const CANDIDATE_DISCOVERY_NAME_LEAD_CHARS = 15;
+/**
+ * From v16, an object can also be named later in its block: right after an explicit numbering label, as in
+ * "编号99XXM105" or "标本M102:11", or at the start of a sentence, as in "…说明文字。99XXM102，示例记录".
+ */
+const NAME_LABEL =
+  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|(?<![A-Za-z])(?:No|NO)\.?)[:：]?$/u;
+/**
+ * From v16, an object number right after a numbering label: a Latin letter, letters or digits up to a digit, then
+ * any separators and digits (`标本M102:11`, `No.SK01`). A permit number such as `허가번호 제2022-0790` does not count.
+ */
+const LABELLED_NUMBER =
+  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|(?<![A-Za-z])(?:No|NO)\.?)[:：]?([A-Za-z][A-Za-z\d]*\d(?:[:：·\-—]\d+)*)/gu;
+
+/** The object numbers a text holds right after numbering labels (`标本M102:11`), in order. */
+export const labelledNumbers = (text: string) =>
+  [...compact(text).matchAll(LABELLED_NUMBER)].map((m) => m[1]);
+
+/**
+ * From v19, a labelled number also runs on through a mark OCR can read for its colon (`标本M105+3`, also `*` and
+ * `#`), so the number is not cut to the object that contains it.
+ */
+const LABELLED_NUMBER_V19 =
+  /(?:编号|編號|标本|標本|番号|番號|号码|號碼|번호|표본|(?<![A-Za-z])(?:No|NO)\.?)[:：]?([A-Za-z][A-Za-z\d]*\d(?:[:：·\-—+*#]\d+)*)/gu;
+/** Sentence punctuation, optionally followed by opening marks, right before a name. */
+const SENTENCE_START = /[。．；！？.;!?][(（「『“"]*$/u;
 
 const compact = (text: string) => text.replace(/\s+/gu, '');
 
 /**
  * Version-dependent checks: strict table identifiers from v6, table roles and name cells from v9, name leads and
  * corrections from v10, heading reconsideration and row blocks from v11, follow-up rules in the follow-up input from
- * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15.
+ * v12, numbered body blocks from v13, missing catalog numbers of body artifacts from v14, numbered area, trench and grid labels among numbered blocks from v15, names after numbering labels or at sentence starts from v16; v17 changes only the request (register rows); table items
+ * of a register read block by block quoting only their own block, and its register rows matched by block, from v18;
+ * labelled numbers no candidate carries in blocks a candidate cites, from v19.
  */
 export interface CandidateCheckLevel {
   strictTableIdentifier: boolean;
@@ -46,12 +76,20 @@ export interface CandidateCheckLevel {
   v13: boolean;
   v14: boolean;
   v15: boolean;
+  v16: boolean;
+  v17: boolean;
+  v18: boolean;
+  v19: boolean;
 }
 
 export function candidateCheckLevel(
   promptVersion: string,
 ): CandidateCheckLevel {
-  const v15 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v19 = promptVersion === CANDIDATE_DISCOVERY_PROMPT_VERSION;
+  const v18 = v19 || promptVersion === 'candidate-discovery.v18';
+  const v17 = v18 || promptVersion === 'candidate-discovery.v17';
+  const v16 = v17 || promptVersion === 'candidate-discovery.v16';
+  const v15 = v16 || promptVersion === 'candidate-discovery.v15';
   const v14 = v15 || promptVersion === 'candidate-discovery.v14';
   const v13 = v14 || promptVersion === 'candidate-discovery.v13';
   const v12 = v13 || promptVersion === 'candidate-discovery.v12';
@@ -73,6 +111,10 @@ export function candidateCheckLevel(
     v13,
     v14,
     v15,
+    v16,
+    v17,
+    v18,
+    v19,
   };
 }
 
@@ -103,6 +145,33 @@ function headerTexts(
  * Resolve a proposal's evidence to exact input locations and check it. Returns the resolved evidence and the first
  * failed check, or an empty reason when the proposal is valid. Never changes the proposal.
  */
+/**
+ * The span of a quote in its source text. From v16 a quote may also differ from its source only in whitespace, as OCR
+ * leaves line-break spaces inside Chinese and Japanese text ("示例区域 以西") that a model drops; the span then covers
+ * the source's own characters, spaces included, and the evidence keeps the source text.
+ */
+function locateQuote(
+  text: string,
+  quote: string,
+  level: CandidateCheckLevel,
+): [number, number] | null {
+  const at = text.indexOf(quote);
+  if (at >= 0) return [at, at + quote.length];
+  const target = compact(quote);
+  if (!level.v16 || !target) return null;
+  const positions: number[] = [];
+  let flat = '';
+  for (let i = 0; i < text.length; i++)
+    if (!/\s/u.test(text[i])) {
+      positions.push(i);
+      flat += text[i];
+    }
+  const found = flat.indexOf(target);
+  return found < 0
+    ? null
+    : [positions[found], positions[found + target.length - 1] + 1];
+}
+
 export function checkCandidate(
   unit: CandidateDiscoveryUnit,
   proposal: CandidateDiscoveryResponse['candidates'][number],
@@ -115,8 +184,9 @@ export function checkCandidate(
     const resource = sources.find(
       (source) => source.sourceId === pointer.sourceId,
     )?.resource;
-    const start = resource?.data.text.indexOf(pointer.quote) ?? -1;
-    if (!resource || start < 0) break;
+    const span =
+      resource && locateQuote(resource.data.text, pointer.quote, level);
+    if (!resource || !span) break;
     evidence.push({
       sourceId: pointer.sourceId,
       resourceKey: resource.key,
@@ -124,9 +194,9 @@ export function checkCandidate(
       sourceRefs: resource.sourceRefs,
       pdfPageNo: resource.pdfPageNo,
       logicalPageRange: resource.logicalPageRange,
-      quote: pointer.quote,
-      charStart: start,
-      charEnd: start + pointer.quote.length,
+      quote: resource.data.text.slice(span[0], span[1]),
+      charStart: span[0],
+      charEnd: span[1],
     });
   }
   // a table item named from the caption, chapter titles or context may still select its number cell
@@ -163,8 +233,16 @@ export function checkCandidate(
         sources.find((s) => s.sourceId === e.sourceId)!.resource.data.text,
       );
       return keys.some((k) => {
-        const at = text.indexOf(k);
-        return at >= 0 && at < CANDIDATE_DISCOVERY_NAME_LEAD_CHARS;
+        for (let at = text.indexOf(k); at >= 0; at = text.indexOf(k, at + 1)) {
+          if (at < CANDIDATE_DISCOVERY_NAME_LEAD_CHARS) return true;
+          const before = text.slice(0, at);
+          if (
+            level.v16 &&
+            (NAME_LABEL.test(before) || SENTENCE_START.test(before))
+          )
+            return true;
+        }
+        return false;
       });
     });
   };
@@ -176,6 +254,38 @@ export function checkCandidate(
     return match && compact(match[2]).startsWith(compact(name))
       ? match[1]
       : null;
+  };
+  // from v17 a register row may take a name that is also a header text from the scope passage in its context
+  const registerNamed = () => {
+    const cell = identifierCell?.resource;
+    return (
+      level.v17 &&
+      cell?.kind === 'tableCell' &&
+      !!unit.table!.registerRows?.some(
+        (r) =>
+          r.rowIndex === cell.rowIndex &&
+          // from v18 a register row of a register read block by block names its block
+          (r.block === undefined || !blocks || r.block === blockOf(cell)),
+      ) &&
+      unit.context.some((c) => c.text.includes(proposal.sourceName))
+    );
+  };
+  // from v18 an item of a register read block by block quotes only its identifier's block; header-found blocks of
+  // other side-by-side tables keep accepting a quoted whole row
+  const blocks = (level.v18 && unit.table?.columnBlocks) || null;
+  // called only when blocks are present
+  const blockOf = (cell: { columnIndex: number }) =>
+    Math.floor(cell.columnIndex / blocks!.columnsPerBlock);
+  const outsideBlock = () => {
+    const cell = identifierCell?.resource;
+    return (
+      !!blocks &&
+      cell?.kind === 'tableCell' &&
+      evidence.some((e) => {
+        const quoted = sources.find((s) => s.sourceId === e.sourceId)!.resource;
+        return quoted.kind === 'tableCell' && blockOf(quoted) !== blockOf(cell);
+      })
+    );
   };
   let invalid = '';
   if (evidence.length !== proposal.evidence.length)
@@ -201,6 +311,8 @@ export function checkCandidate(
   )
     invalid =
       'Table identifier must equal the selected original number cell and first evidence';
+  else if (outsideBlock())
+    invalid = 'Table item quotes cells outside the column block of its number';
   else if (
     ['feature', 'artifact'].includes(proposal.recordKind) &&
     proposal.eligibilityBasis === 'explicit_context_unit'
@@ -226,7 +338,8 @@ export function checkCandidate(
     // a table item in a body unit failed above, so the unit has a table here
     headerTexts(unit as Parameters<typeof headerTexts>[0]).has(
       proposal.sourceName.trim(),
-    )
+    ) &&
+    !registerNamed()
   )
     invalid = 'Table item name is a column header';
   else if (
@@ -291,6 +404,10 @@ const FIXES: Array<[RegExp, string]> = [
   [
     /not named at the start/u,
     'An independent body names its object at its start: cite the heading or opening words that name the object, or exclude an object that the passage only mentions in passing.',
+  ],
+  [
+    /outside the column block/u,
+    'This table repeats its columns side by side, so each column block of a row is its own item: quote only cells of the block that holds the number cell, and give every other numbered block its own candidate.',
   ],
   [
     /Duplicate anchor/u,
@@ -389,7 +506,14 @@ function identifierShape(identifier: string | null) {
 /**
  * Body blocks of a v13 response that open with a number of the same form as an identifier the response proposed,
  * after any leading marks, while no candidate or exclusion cites the block and no candidate uses that number. A model
- * can stop part way through a run of numbered accounts without saying so; these blocks ask it about the rest.
+ * can stop part way through a run of numbered accounts without saying so; these blocks ask it about the rest. From
+ * v16 a block also counts when it holds a number right after a numbering label (`标本M102:11`), even when the
+ * response proposed nothing: a catalog of types introduces each specimen mid-block, and a long one is easily skipped.
+ * From v19 a block, cited by a candidate or not, lists each labelled number that no candidate carries (the same text, or the number at the end of an identifier such as `标本M102:11`, or the same object in
+ * another form such as `99XXM362`), since a model can answer only some of the specimens one block describes; a
+ * labelled number then runs on through an OCR colon (`M105+3`), and an uncited block still lists its opening number.
+ * An exclusion answers a whole block only when no candidate cites the block; in a block a candidate cites, it answers
+ * only the numbers its reason names.
  */
 export function unansweredNumberedBlocks(
   unit: CandidateDiscoveryUnit,
@@ -408,21 +532,70 @@ export function unansweredNumberedBlocks(
     // is a findspot line, not an area's own account
     ...(level.v15 ? [AREA_LABEL] : []),
   ];
+  // from v15 the area label is always a shape, so a v16 response that proposed nothing is still checked
   if (!shapes.length) return [];
   const leading = new RegExp(`^(?:${shapes.join('|')})`, 'u');
   const numbers = new Set(
     response.candidates.map((c) => compact(c.sourceIdentifier ?? '')),
   );
+  const excluded = new Set(response.exclusions.map((e) => e.sourceId));
   const cited = new Set([
     ...response.candidates.flatMap((c) => c.evidence.map((e) => e.sourceId)),
-    ...response.exclusions.map((e) => e.sourceId),
+    ...excluded,
   ]);
+  const colon = (n: string) => n.replace(/：/gu, ':');
+  const identifiers = [...numbers].map(colon);
+  const candidateCited = new Set(
+    response.candidates.flatMap((c) => c.evidence.map((e) => e.sourceId)),
+  );
+  // the exclusion reasons of each block, without whitespace, to see which numbers they name
+  const reasons = new Map<string, string[]>();
+  for (const e of response.exclusions)
+    reasons.set(e.sourceId, [
+      ...(reasons.get(e.sourceId) ?? []),
+      colon(compact(e.reason)),
+    ]);
+  // a number is named only as a whole, not as the start of a longer one (`M102:12` in `M102:12-1`)
+  const named = (sourceId: string, number: string) => {
+    const pattern = new RegExp(
+      `(?<![A-Za-z\\d])${number.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![\\d]|[:·\\-—+*#]\\d)`,
+      'u',
+    );
+    return !!reasons.get(sourceId)?.some((r) => pattern.test(r));
+  };
+  const carried = (number: string) =>
+    identifiers.some(
+      (id) =>
+        sameObjectNumber(id, number) ||
+        (id.endsWith(number) &&
+          !/[A-Za-z\d]/u.test(id.charAt(id.length - number.length - 1))),
+    );
   return getCandidateSources(unit).flatMap(({ sourceId, resource }) => {
+    const text = compact(resource.data.text);
+    if (level.v19) {
+      // an exclusion answers a whole block only when no candidate cites it; beside a candidate it answers the
+      // numbers its reason names, so excluding one reference does not hide the block's other specimens
+      if (excluded.has(sourceId) && !candidateCited.has(sourceId)) return [];
+      // every labelled number no candidate carries, and an uncited block's opening number as before
+      const opening = cited.has(sourceId)
+        ? undefined
+        : text.replace(/^[^\p{L}0-9]+/u, '').match(leading)?.[0];
+      return [
+        ...new Set([
+          ...(opening && !numbers.has(opening) ? [opening] : []),
+          ...[...compact(text).matchAll(LABELLED_NUMBER_V19)]
+            .map((m) => m[1])
+            .filter((n) => !carried(colon(n)) && !named(sourceId, colon(n))),
+        ]),
+      ].map((number) => ({ sourceId, number }));
+    }
     if (cited.has(sourceId)) return [];
-    const number = compact(resource.data.text)
-      .replace(/^[^\p{L}0-9]+/u, '')
-      .match(leading)?.[0];
-    return number && !numbers.has(number) ? [{ sourceId, number }] : [];
+    const opening = text.replace(/^[^\p{L}0-9]+/u, '').match(leading)?.[0];
+    const labelled = level.v16 ? labelledNumbers(text) : [];
+    const number = [opening, ...labelled].find(
+      (n): n is string => !!n && !numbers.has(n),
+    );
+    return number ? [{ sourceId, number }] : [];
   });
 }
 
@@ -440,19 +613,27 @@ export function planCandidateDiscoveryFollowUp(
 ) {
   const level = candidateCheckLevel(promptVersion);
   if (!level.v9) return null;
-  const version = level.v15
+  const version = level.v19
     ? CANDIDATE_DISCOVERY_PROMPT_VERSION
-    : level.v14
-      ? 'candidate-discovery.v14'
-      : level.v13
-        ? 'candidate-discovery.v13'
-        : level.v12
-          ? 'candidate-discovery.v12'
-          : level.v11
-            ? 'candidate-discovery.v11'
-            : level.v10
-              ? 'candidate-discovery.v10'
-              : 'candidate-discovery.v9';
+    : level.v18
+      ? 'candidate-discovery.v18'
+      : level.v17
+        ? 'candidate-discovery.v17'
+        : level.v16
+          ? 'candidate-discovery.v16'
+          : level.v15
+            ? 'candidate-discovery.v15'
+            : level.v14
+              ? 'candidate-discovery.v14'
+              : level.v13
+                ? 'candidate-discovery.v13'
+                : level.v12
+                  ? 'candidate-discovery.v12'
+                  : level.v11
+                    ? 'candidate-discovery.v11'
+                    : level.v10
+                      ? 'candidate-discovery.v10'
+                      : 'candidate-discovery.v9';
   // a side-by-side table answers by row blocks from v11, so its rows are asked through those blocks only
   const blocks = level.v11 ? columnBlocks(unit) : null;
   const rowBlocks = blocks ? unansweredItemTableBlocks(unit, response) : [];
@@ -484,9 +665,13 @@ export function planCandidateDiscoveryFollowUp(
         ...(rowBlocks.length ? [SIDE_BY_SIDE_TABLES_RULE] : []),
         ...(numberedBlocks.length
           ? [
-              level.v15
-                ? UNANSWERED_NUMBERED_BLOCKS_RULE_V15
-                : UNANSWERED_NUMBERED_BLOCKS_RULE,
+              level.v19
+                ? UNANSWERED_NUMBERED_BLOCKS_RULE_V19
+                : level.v16
+                  ? UNANSWERED_NUMBERED_BLOCKS_RULE_V16
+                  : level.v15
+                    ? UNANSWERED_NUMBERED_BLOCKS_RULE_V15
+                    : UNANSWERED_NUMBERED_BLOCKS_RULE,
             ]
           : []),
       ]

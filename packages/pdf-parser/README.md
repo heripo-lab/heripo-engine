@@ -24,6 +24,7 @@
 - [Review Assistance](#review-assistance)
 - [Document Type Validation](#document-type-validation)
 - [Large PDF Chunked Conversion](#large-pdf-chunked-conversion)
+- [Sideways Pages](#sideways-pages)
 - [Image PDF Fallback](#image-pdf-fallback)
 - [AbortSignal Support](#abortsignal-support)
 - [Server Crash Recovery](#server-crash-recovery)
@@ -43,6 +44,7 @@
 - **Image Extraction**: Automatic extraction and saving of images from PDFs
 - **Document Type Validation**: Optional LLM-based validation that a PDF is an archaeological report
 - **Chunked Conversion**: Split large PDFs into chunks for reliable processing
+- **Sideways Pages**: Turn pages printed sideways upright before conversion
 - **Image PDF Fallback**: Automatic fallback to image-based PDF when conversion fails
 - **Review Assistance**: Page-level VLM review writes audit proposals, skips low-value pages with observable reasons, and can auto-apply high-confidence fixes
 - **Table Correction**: Table-specific work items validate cells, spans, headers, units, footnotes, and adjacent-page continuations
@@ -446,6 +448,10 @@ const tokenUsageReport = await pdfParser.parse(
 
 Correction runs after chunk results are merged. The current chunked failure path attempts image-PDF conversion independently of `enableImagePdfFallback`, so ImageMagick/Ghostscript are needed for that recovery path too. For local inputs, the chunked branch takes precedence when `chunkedConversion` and `forceImagePdf` are both set.
 
+## Sideways Pages
+
+Scanned reports often print wide tables and figures sideways on a portrait page. Docling's layout and table models expect upright text, so such a page loses its table structure (a tomb register can come out without its number column). Before converting a local PDF with a local Docling server, the parser reads every page with Apple Vision in its Python environment at 72 dpi and weighs each recognized line by its characters times confidence, grouped by the direction its baseline runs. A page whose lines reading bottom to top hold at least 30 weighted characters and more than twice all its other lines, as a table or figure printed sideways does, is turned a quarter clockwise through its PDF rotation. Lines reading top to bottom are left alone, because vertical writing reads that way too; a page printed sideways the other way round therefore stays as it is. When any page is turned, conversion, page rendering and correction all use an upright copy in a temporary directory, removed after parsing. Page numbers stay the same. If detection fails, the original PDF is converted; aborting the parse ends detection and rejects the parse. Set `pageOrientationCorrection: false` to skip it; remote inputs and an external `baseUrl` server skip it.
+
 ## Image PDF Fallback
 
 When conversion fails, the parser can automatically fall back to converting the PDF to an image-based PDF first, then retrying conversion. This is useful for PDFs with complex or corrupt structures. Requires ImageMagick and Ghostscript.
@@ -650,6 +656,9 @@ type PDFConvertOptions = {
 
   // Correction progress
   onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void; // Progress callback
+
+  // Sideways pages (local files with a local server)
+  pageOrientationCorrection?: boolean; // Turn sideways pages upright before conversion (default: true)
 
   // Chunked conversion (large PDFs)
   chunkedConversion?: boolean; // Enable chunked conversion

@@ -271,6 +271,60 @@ describe('inspectContentAttachmentThinResponse', () => {
     ]);
   });
 
+  test('addresses text without spaces by clause and sentence under CJK word breaks', () => {
+    const { plan, unit } = fixture();
+    const text = unit.sources[0].resource as Extract<
+      DocumentResource,
+      { kind: 'text' }
+    >;
+    plan.wordBreaks = 'cjk_punctuation';
+    const unmarked = createContentAttachmentThinInput(plan, unit);
+    text.data.text = '标本M220:8，灰色（图五五）。口径10.8厘米';
+    const spaced = createContentAttachmentThinInput(
+      { ...plan, wordBreaks: undefined },
+      unit,
+    );
+    const compilation = createContentAttachmentThinInput(plan, unit);
+    const request = createContentAttachmentThinRequest(compilation, {
+      format: 'object',
+    });
+
+    const result = inspectContentAttachmentThinResponse(plan, unit, {
+      request,
+      rawResponse: {
+        d: {
+          'E1:S1': attach({ r: ['R1'], e: ['Q1:L1-L1'] }),
+          'E1:S2': { k: 'n' },
+          'E2:S1': { k: 'n' },
+        },
+      },
+    });
+
+    expect(spaced.input.bodyBlocks[0].segments).toHaveLength(1);
+    expect(spaced.wordBreaks).toBeUndefined();
+    expect(unmarked.wordBreaks).toBeUndefined();
+    expect(
+      createContentAttachmentThinRequest(spaced).systemPrompt,
+    ).not.toContain('ONE-WORD RANGES');
+    expect(compilation.wordBreaks).toBe('cjk_punctuation');
+    expect(request.systemPrompt).toContain(
+      'Evidence of one word still names both endpoints, as in "Q7:L7-L7"',
+    );
+    expect(compilation.input.bodyBlocks[0]).toEqual({
+      ref: 'E1',
+      windows: [['Q1', ['标本M220:8，', '灰色（图五五）。', '口径10.8厘米']]],
+      segments: [
+        ['E1:S1', ['Q1:L1-L2']],
+        ['E1:S2', ['Q1:L3-L3']],
+      ],
+    });
+    expect(result.issues).toEqual([]);
+    expect(result.decisions[0].evidence[0]).toMatchObject({
+      charStart: 0,
+      charEnd: 9,
+    });
+  });
+
   test('reports structural problems per segment and keeps the valid segments', () => {
     const result = inspect({
       d: {

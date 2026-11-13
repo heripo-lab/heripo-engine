@@ -1,16 +1,17 @@
 import type { ArchaeologyLedgerResult } from '../ledger/archaeology-ledger';
 import type { RelationSignal, RelationSignals } from './relation-signals';
 
-export const RELATION_PARENTS_VERSION = 'relation-parents.v1' as const;
+export const RELATION_PARENTS_VERSION = 'relation-parents.v2' as const;
 
 /**
- * A parent set by code: exactly one record named by a find-spot phrase or the record's own table row, or by
- * an injected place alias rule (`alias`) when no record name named it directly.
+ * A parent set by code: exactly one record named by a find-spot phrase, the record's own table row or, from v2,
+ * the container part of its own number (`identifier`), or by an injected place alias rule (`alias`) when no
+ * record name named it directly.
  */
 export interface RelationParentDecision {
   recordId: string;
   parentRecordId: string;
-  basis: 'phrase' | 'table_row' | 'alias';
+  basis: 'phrase' | 'table_row' | 'identifier' | 'alias';
   /** Strong signals naming the parent. */
   evidence: RelationSignal[];
   /** Heading or chapter signals naming another record; kept for review, they do not override the parent. */
@@ -51,16 +52,24 @@ export interface RelationParents {
   aliasDuplicates?: RelationSignals['aliasDuplicates'];
 }
 
-/** A finding phrase or find-spot field, or a table row under a find-spot or membership column, can decide a parent. */
+/**
+ * A finding phrase or find-spot field, a table row under a find-spot or membership column, or a number inside
+ * another record's number can decide a parent.
+ */
 const isStrong = (s: RelationSignal) =>
-  (s.kind === 'phrase' || s.kind === 'table_row') && s.finding === true;
+  (s.kind === 'phrase' || s.kind === 'table_row' || s.kind === 'identifier') &&
+  s.finding === true;
 const VERB = /출토|출수|수습|인양|채집|검출|확인|발견/;
 const unique = (ids: string[]) => [...new Set(ids)];
 const labelOf = (signal: RelationSignal) =>
-  signal.kind === 'phrase' ? signal.text.match(VERB)![0] : '같은 표 행';
+  signal.kind === 'phrase'
+    ? signal.text.match(VERB)![0]
+    : signal.kind === 'identifier'
+      ? '번호 체계'
+      : '같은 표 행';
 
 /**
- * Decide parents by code from relation signals (`relation-parents.v1`), deterministically. A parent is set only
+ * Decide parents by code from relation signals (`relation-parents.v2`), deterministically. A parent is set only
  * when every finding phrase and membership-column table row names exactly one and the same record; when they name one feature
  * and records of other kinds, the feature is chosen (the spec's feature priority) and the others become link
  * candidates. Heading-scope and chapter-title signals never set a parent: alone, or with a phrase naming no
@@ -129,7 +138,9 @@ export function resolveRelationParents(
         ? 'alias'
         : evidence.some((s) => s.kind === 'phrase' && !s.alias)
           ? 'phrase'
-          : 'table_row',
+          : evidence.some((s) => s.kind === 'table_row')
+            ? 'table_row'
+            : 'identifier',
       evidence,
       otherSignals: weak.filter((s) => !s.targetRecordIds.includes(parent)),
     });

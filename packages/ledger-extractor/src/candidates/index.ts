@@ -1,5 +1,6 @@
 export {
   CANDIDATE_DISCOVERY_MAX_MOVED_BLOCKS,
+  CANDIDATE_DISCOVERY_MAX_LABELLED_NUMBERS,
   CANDIDATE_DISCOVERY_SHORT_BLOCK_CHARS,
   isSameCandidateDiscoveryScope,
   prepareCandidateDiscovery,
@@ -14,10 +15,19 @@ export {
 export type { CandidateDiscoveryCallResult } from './discovery-unit';
 export { assembleCandidateDiscovery } from './discovery-assembly';
 export {
+  REGISTER_WHOLE_REASON,
+  proposeRegisterWholeCandidates,
+  withRegisterWholeCandidates,
+} from './register-wholes';
+export {
   CANDIDATE_DISCOVERY_PROMPT_VERSION,
   RECONSIDERED_EXCLUSIONS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE,
   UNANSWERED_NUMBERED_BLOCKS_RULE_V15,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V16,
+  UNANSWERED_NUMBERED_BLOCKS_RULE_V19,
+  REGISTER_ROWS_RULE,
+  REGISTER_ROW_BLOCKS_RULE,
   SIDE_BY_SIDE_TABLES_RULE,
   createCandidateDiscoveryRequest,
   isSectionHeading,
@@ -26,6 +36,7 @@ export { CANDIDATE_DISCOVERY_NAME_LEAD_CHARS } from './discovery-validation';
 export type {
   CandidateDiscoveryPlan,
   CandidateDiscoveryUnit,
+  CandidateDiscoveryRegisterRow,
   CandidateDiscoveryAudit,
   CandidateDiscoveryResult,
   CandidateEvidence,

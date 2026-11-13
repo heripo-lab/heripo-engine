@@ -87,6 +87,15 @@ export type InputResource = Extract<
   DocumentResource,
   { kind: 'text' | 'tableCell' }
 >;
+export interface CandidateDiscoveryRegisterRow {
+  rowIndex: number;
+  /** The column block that opens with the number, present only when the table has `columnBlocks` (v18). */
+  block?: number;
+  /** The leading digits of the row's number cell. */
+  number: string;
+  /** How the scope's text writes that number. */
+  writtenAs: string;
+}
 export interface CandidateDiscoveryUnit {
   unitId: string;
   chapterId: string;
@@ -95,6 +104,16 @@ export interface CandidateDiscoveryUnit {
     id: string;
     caption: string | null;
     headerRows: string[][] | ProcessedTableCell[][];
+    /**
+     * Present on a register table read from outside the scope: its data rows in this unit whose opening number the
+     * scope's text writes with a Latin prefix, each with the written form (`107` as `M107`). Sent from v17.
+     */
+    registerRows?: CandidateDiscoveryRegisterRow[];
+    /**
+     * Present on a register table whose data rows hold several numbered objects side by side, found from its number
+     * columns rather than its header; each register row then names the block that opens with its number. Sent from v18.
+     */
+    columnBlocks?: CandidateDiscoveryColumnBlocks;
   } | null;
   resources: InputResource[];
   /** Read-only adjacent context cannot anchor candidates in this unit. */
@@ -127,7 +146,11 @@ export interface LedgerObjectCandidate {
   recordKind: z.infer<typeof kindSchema>;
   sourceName: string;
   sourceIdentifier: string | null;
-  eligibilityBasis: z.infer<typeof basisSchema>;
+  /**
+   * `register_parts`: proposed by code, not a model, for an object a register lists only by its parts
+   * (`proposeRegisterWholeCandidates`).
+   */
+  eligibilityBasis: z.infer<typeof basisSchema> | 'register_parts';
   reason: string;
   chapterId: string;
   unitIds: string[];

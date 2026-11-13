@@ -67,6 +67,11 @@ export type PDFConvertOptions = Omit<
   onReviewAssistanceProgress?: (event: ReviewAssistanceProgressEvent) => void;
   /** Document processing timeout in seconds for the Docling server (default: server default) */
   document_timeout?: number;
+  /**
+   * Turn pages printed sideways (rotated landscape tables and figures) upright before conversion, detected with Apple
+   * Vision in the parser's Python environment (local files with a local server only; default: true)
+   */
+  pageOrientationCorrection?: boolean;
   /** Enable chunked conversion for large PDFs (local files only) */
   chunkedConversion?: boolean;
   /** Pages per chunk (default: CHUNKED_CONVERSION.DEFAULT_CHUNK_SIZE) */

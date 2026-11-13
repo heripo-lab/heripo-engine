@@ -16,8 +16,20 @@ export const titleCore = (title: string) =>
   norm(
     title.replace(/^\s*(?:[IVXⅠ-Ⅻ]+\.|[0-9]+[.)]|\([0-9]+\)|[A-Z]\.)\s*/, ''),
   );
-export const wordOffsets = (text: string) =>
-  [...text.matchAll(/\S+/g)].map((m) => [m.index, m.index + m[0].length]);
+/** A word: a run of non-space text, ended under `cjk_punctuation` also by Chinese clause and sentence marks. */
+const WORD = /\S+/g;
+const CJK_WORD = /[^\s，、；：。！？]+[，、；：。！？]*|[，、；：。！？]+/gu;
+/** The words of a text as the plan's word breaks find them, with their positions. */
+export const thinWordMatches = (
+  text: string,
+  plan: Pick<ContentAttachmentPlan, 'wordBreaks'>,
+) => [
+  ...text.matchAll(plan.wordBreaks === 'cjk_punctuation' ? CJK_WORD : WORD),
+];
+export const wordOffsets = (
+  text: string,
+  plan: Pick<ContentAttachmentPlan, 'wordBreaks'>,
+) => thinWordMatches(text, plan).map((m) => [m.index, m.index + m[0].length]);
 
 const TRIVIAL_NUMBER = /^[\d\s,.~\-–—()%×x:/]*\d[\d\s,.~\-–—()%×x:/]*$/;
 const TRIVIAL_DATE = /^(?:\d{4}년\s*)?\d{1,2}월\s*\d{1,2}일$/;
@@ -46,12 +58,23 @@ export function isContentAttachmentThinTrivialText(text: string): boolean {
   );
 }
 
-/** Split words into sentences at terminal punctuation, ignoring list numbers such as "29.". */
-export function sentenceSpans(words: Words): Array<[number, number]> {
+/**
+ * Split words into sentences at terminal punctuation, ignoring list numbers such as "29."; under `cjk_punctuation`
+ * also after `。！？`, with any closing quote or bracket.
+ */
+export function sentenceSpans(
+  words: Words,
+  plan: Pick<ContentAttachmentPlan, 'wordBreaks'>,
+): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   let start = 0;
+  const cjk = plan.wordBreaks === 'cjk_punctuation';
   words.forEach((w, i) => {
-    if ((/[.?!]$/.test(w) && !/^[0-9]+\.$/.test(w)) || i === words.length - 1) {
+    if (
+      (/[.?!]$/.test(w) && !/^[0-9]+\.$/.test(w)) ||
+      (cjk && /[。！？][”"’）)」』]*$/u.test(w)) ||
+      i === words.length - 1
+    ) {
       spans.push([start, i]);
       start = i + 1;
     }
@@ -168,7 +191,10 @@ export function localLayerHomes(plan: ContentAttachmentPlan) {
   return homes;
 }
 
-/** One handle per chapter node and record kind, in registry traversal order. */
+/**
+ * One handle per chapter node and record kind, in registry traversal order. Mentions from register tables outside the
+ * discovery scope join no handle.
+ */
 export function collectiveHandles(
   plan: ContentAttachmentPlan,
 ): ContentAttachmentThinHandle[] {
@@ -181,7 +207,7 @@ export function collectiveHandles(
     }
   >();
   for (const r of plan.registry)
-    for (const m of r.mentions)
+    for (const m of r.mentions.filter((x) => !x.outsideScope))
       m.chapterPath.forEach((c, i) => {
         const key = `${c.id}|${r.recordKind}`;
         const handle = handles.get(key) ?? {

@@ -1,3 +1,5 @@
+import type * as Fs from 'node:fs';
+
 import * as DoclingSdk from 'docling-sdk';
 import { describe, expect, test, vi } from 'vitest';
 
@@ -51,6 +53,20 @@ vi.mock('../environment/docling-environment', () => {
     DoclingEnvironment,
     __envMocks: { setupMock, assertServerOwnershipMock, stopOwnServerMock },
   };
+});
+
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof Fs>()),
+  mkdtempSync: vi.fn(() => '/tmp/heripo-orientation-x'),
+  rmSync: vi.fn(),
+}));
+
+vi.mock('../processors/page-orientation-corrector', () => {
+  const correct = vi.fn();
+  const PageOrientationCorrector = vi.fn(function () {
+    return { correct };
+  });
+  return { PageOrientationCorrector, __correctMock: correct };
 });
 
 vi.mock('./pdf-converter', () => {
@@ -1154,6 +1170,93 @@ describe('PDFParser', () => {
 
       // Should NOT attempt recovery when aborted
       expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('PDFParser page orientation', () => {
+  test('converts a local PDF from its upright copy only when pages were turned', async () => {
+    const { __correctMock: correct, PageOrientationCorrector } =
+      (await import('../processors/page-orientation-corrector')) as any;
+    const fs = await import('node:fs');
+    doclingClient.health.mockResolvedValue(undefined);
+    vi.mocked(envMocks.setupMock).mockResolvedValue();
+    convertMock.mockResolvedValue('OK');
+    const parser = new PDFParser({ logger: makeLogger(), port: 5001 });
+    await parser.init();
+    const parse = (url: string, options: Record<string, unknown> = {}) =>
+      parser.parse(url, 'r', vi.fn(), false, withCorrection(options));
+
+    correct.mockResolvedValueOnce({ pages: 2, rotatedPages: [2] });
+    await parse('file:///in.pdf', { ocr_lang: ['zh-Hans'] });
+    correct.mockResolvedValueOnce({ pages: 2, rotatedPages: [] });
+    await parse('file:///in.pdf');
+    correct.mockResolvedValueOnce(null);
+    await parse('file:///in.pdf');
+    await parse('file:///in.pdf', { pageOrientationCorrection: false });
+    await parse('http://host/in.pdf');
+
+    expect(correct.mock.calls).toEqual([
+      [
+        '/in.pdf',
+        '/tmp/heripo-orientation-x/upright.pdf',
+        ['zh-Hans'],
+        undefined,
+      ],
+      [
+        '/in.pdf',
+        '/tmp/heripo-orientation-x/upright.pdf',
+        ['ko-KR', 'en-US'],
+        undefined,
+      ],
+      [
+        '/in.pdf',
+        '/tmp/heripo-orientation-x/upright.pdf',
+        ['ko-KR', 'en-US'],
+        undefined,
+      ],
+    ]);
+    expect(PageOrientationCorrector).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringMatching(/\/bin\/python$/),
+    );
+    expect(convertMock.mock.calls.map((c: any[]) => c[0])).toEqual([
+      'file:///tmp/heripo-orientation-x/upright.pdf',
+      'file:///in.pdf',
+      'file:///in.pdf',
+      'file:///in.pdf',
+      'http://host/in.pdf',
+    ]);
+    expect(fs.rmSync).toHaveBeenCalledTimes(3);
+  });
+
+  test('passes the abort signal to orientation detection and removes the copy when detection is aborted', async () => {
+    const { __correctMock: correct } =
+      (await import('../processors/page-orientation-corrector')) as any;
+    const fs = await import('node:fs');
+    doclingClient.health.mockResolvedValue(undefined);
+    vi.mocked(envMocks.setupMock).mockResolvedValue();
+    const parser = new PDFParser({ logger: makeLogger(), port: 5001 });
+    await parser.init();
+    const controller = new AbortController();
+    const abortError = new Error('The operation was aborted');
+    correct.mockRejectedValueOnce(abortError);
+
+    await expect(
+      parser.parse(
+        'file:///in.pdf',
+        'r',
+        vi.fn(),
+        false,
+        withCorrection({}),
+        controller.signal,
+      ),
+    ).rejects.toBe(abortError);
+    expect(correct.mock.calls[0][3]).toBe(controller.signal);
+    expect(convertMock).not.toHaveBeenCalled();
+    expect(fs.rmSync).toHaveBeenCalledWith('/tmp/heripo-orientation-x', {
+      recursive: true,
+      force: true,
     });
   });
 });
