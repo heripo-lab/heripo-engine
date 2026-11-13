@@ -237,6 +237,7 @@ export async function prepareContentAttachment(
       : {}),
     pages,
     units,
+    wordBreaks: 'cjk_punctuation',
     ...(options.thinPolicy ? { thinPolicy: { ...options.thinPolicy } } : {}),
     ...(options.thinPolicyDecisions
       ? { thinPolicyDecisions: structuredClone(options.thinPolicyDecisions) }

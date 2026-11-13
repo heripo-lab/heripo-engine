@@ -90,6 +90,12 @@ export interface ContentAttachmentPlan {
     status: 'planned' | 'no_body_or_table_text';
   }>;
   units: AttachmentUnit[];
+  /**
+   * `cjk_punctuation`: thin compilation also ends a word after Chinese and Japanese clause and sentence marks
+   * (`，、；：。！？`) and a sentence after `。！？`, so text without spaces is addressed by clause. Plans prepared
+   * before this field split words at whitespace only, and replay as before.
+   */
+  wordBreaks?: 'cjk_punctuation';
   /** Thin attachment rules from a confirmed report profile; without it every rule stays as before. */
   thinPolicy?: ContentAttachmentThinPolicy;
   /** How each branch of `thinPolicy` was decided, with branches left to a default marked `needsDecision`. */

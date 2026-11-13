@@ -14,6 +14,7 @@ import {
   isContentAttachmentThinTrivialText,
   offeredCandidates,
   sentenceSpans,
+  thinWordMatches,
   wordOffsets,
 } from './compile-candidates';
 import {
@@ -55,7 +56,7 @@ export function createContentAttachmentThinInput(
 
   const windows: ContentAttachmentThinWindow[] = [];
   const toWindows = (sourceRef: string, text: string) => {
-    const words = text.split(/\s+/).filter(Boolean);
+    const words = thinWordMatches(text, plan).map((m) => m[0]);
     const rows: WindowRow[] = [];
     for (
       let i = 0;
@@ -105,8 +106,8 @@ export function createContentAttachmentThinInput(
     const text = r.data.text.trim();
     if (r.kind === 'text') {
       const { words, rows } = toWindows(ref, text);
-      const off = wordOffsets(r.data.text);
-      const spans = sentenceSpans(words).flatMap(([a, b], i) => {
+      const off = wordOffsets(r.data.text, plan);
+      const spans = sentenceSpans(words, plan).flatMap(([a, b], i) => {
         const seg = `${ref}:S${i + 1}`;
         const charStart = off[a][0];
         const charEnd = off[b][1];
@@ -144,7 +145,7 @@ export function createContentAttachmentThinInput(
       windows: cellWindows,
     };
     if (!r.data.isHeader && text) {
-      const off = wordOffsets(r.data.text);
+      const off = wordOffsets(r.data.text, plan);
       const seg = `${ref}:S1`;
       const trivial =
         !owner && trivialByCode && isContentAttachmentThinTrivialText(text);

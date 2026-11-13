@@ -3,6 +3,7 @@ import type { ContentAttachmentThinCompilation } from './compile-types';
 import type { ContentAttachmentThinRequest } from './prompt';
 
 import { createContentAttachmentThinInput } from './compile';
+import { thinWordMatches } from './compile-candidates';
 import {
   createContentAttachmentThinRequest,
   isContentAttachmentThinArrayVersion,
@@ -222,7 +223,7 @@ export function inspectContentAttachmentThinResponse(
         continue;
       }
       const source = texts.get(w.sourceRef)!;
-      const offsets = [...source.text.matchAll(/\S+/g)];
+      const offsets = thinWordMatches(source.text, plan);
       const originalWords = w.originalWords.slice(a - 1, b);
       const first = offsets[Number(originalWords[0].slice(1)) - 1];
       const last = offsets[Number(originalWords.at(-1)!.slice(1)) - 1];
