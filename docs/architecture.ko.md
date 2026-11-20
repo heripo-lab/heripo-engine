@@ -567,7 +567,7 @@ heripo-engine/
 │   └── shared/               # 공유 유틸리티 (LLM 호출기, 지출 가드 등)
 └── tools/
     ├── tsconfig/             # 공유 TypeScript 설정
-    ├── tsup-config/          # 공유 tsup 설정
+    ├── tsdown-config/        # 공유 tsdown 설정
     └── vitest-config/        # 공유 Vitest 설정
 ```
 

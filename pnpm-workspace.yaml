@@ -15,7 +15,7 @@ catalog:
   'ai': ^7.0.159
   'ai-sdk-ollama': ^4.6.1
   'es-toolkit': ^1.53.1
-  'tsup': '^9.0.0'
+  'tsdown': 0.23.7
   'tsx': ^4.23.15
   'vitest': ^5.0.5
   'zod': ^4.6.7

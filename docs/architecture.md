@@ -567,7 +567,7 @@ heripo-engine/
 │   └── shared/               # Shared utilities (LLM caller, spend guard, etc.)
 └── tools/
     ├── tsconfig/             # Shared TypeScript configurations
-    ├── tsup-config/          # Shared tsup configuration
+    ├── tsdown-config/        # Shared tsdown configuration
     └── vitest-config/        # Shared Vitest configuration
 ```
 

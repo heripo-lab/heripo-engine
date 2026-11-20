@@ -53,8 +53,8 @@
   },
   "scripts": {
     "clean": "rimraf dist",
-    "build": "pnpm clean && tsup",
-    "dev": "tsup --watch",
+    "build": "pnpm clean && tsdown",
+    "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -66,10 +66,10 @@
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "@heripo/tsup-config": "workspace:*",
+    "@heripo/tsdown-config": "workspace:*",
     "@heripo/vitest-config": "workspace:*",
     "@vitest/coverage-v8": "catalog:",
-    "tsup": "catalog:",
+    "tsdown": "catalog:",
     "vitest": "catalog:"
   }
 }

@@ -52,15 +52,15 @@
   },
   "scripts": {
     "clean": "rimraf dist",
-    "build": "pnpm clean && tsup",
-    "dev": "tsup --watch",
+    "build": "pnpm clean && tsdown",
+    "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix"
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "@heripo/tsup-config": "workspace:*",
-    "tsup": "catalog:"
+    "@heripo/tsdown-config": "workspace:*",
+    "tsdown": "catalog:"
   }
 }
