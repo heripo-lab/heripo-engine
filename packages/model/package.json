@@ -4,14 +4,12 @@
   "type": "module",
   "version": "0.2.6",
   "description": "Document models and type definitions for heripo engine",
-  "main": "dist/index.cjs",
-  "module": "dist/index.js",
+  "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     }
   },
@@ -53,8 +51,8 @@
   },
   "scripts": {
     "clean": "rimraf dist",
-    "build": "pnpm clean && tsup",
-    "dev": "tsup --watch",
+    "build": "pnpm clean && tsdown",
+    "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -66,10 +64,10 @@
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "@heripo/tsup-config": "workspace:*",
+    "@heripo/tsdown-config": "workspace:*",
     "@heripo/vitest-config": "workspace:*",
     "@vitest/coverage-v8": "catalog:",
-    "tsup": "catalog:",
+    "tsdown": "catalog:",
     "vitest": "catalog:"
   }
 }

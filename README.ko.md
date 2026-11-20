@@ -184,7 +184,7 @@ heripo-engine/
 │   └── demo-web/          # Next.js 웹 데모
 └── tools/                 # 빌드 도구 설정
     ├── tsconfig/          # 공유 TypeScript 설정
-    ├── tsup-config/       # 빌드 설정
+    ├── tsdown-config/     # 빌드 설정
     └── vitest-config/     # 테스트 설정
 ```
 
@@ -245,7 +245,7 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/ledger-extractor 
 | [@heripo/model](./packages/model/README.ko.md)                           | 0.2.x | 데이터 모델 및 타입 정의        |
 | [@heripo/logger](./packages/logger/README.ko.md)                         | 0.2.x | 로거 인터페이스 및 adapter      |
 
-파서, 문서 프로세서, 원장 추출기는 ESM으로 배포되며, `model`과 `logger`는 ESM/CommonJS를 모두 제공합니다. 워크스페이스 개발·빌드에는 tsup 9의 요구사항에 맞는 Node.js `^24.11.0 || >=26.0.0`과 pnpm 12가 필요합니다. 배포 라이브러리의 런타임 요구사항은 Node.js 24 이상으로 유지됩니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
+모든 배포 라이브러리는 ESM으로만 제공됩니다. 워크스페이스 개발·빌드에는 워크스페이스 `engines` 범위인 Node.js `^24.11.0 || >=26.0.0`과 pnpm 12가 필요합니다. 배포 라이브러리의 런타임 요구사항은 Node.js 24 이상으로 유지됩니다. AI SDK 및 provider 버전은 [pnpm-workspace.yaml](./pnpm-workspace.yaml)의 catalog를 기준으로 맞추세요.
 
 ```bash
 pnpm add @ai-sdk/openai
@@ -255,7 +255,7 @@ pnpm add @ai-sdk/openai
 
 - [@heripo/shared](./packages/shared/README.ko.md)
 - [@heripo/tsconfig](./tools/tsconfig/README.ko.md)
-- [@heripo/tsup-config](./tools/tsup-config/README.ko.md)
+- [@heripo/tsdown-config](./tools/tsdown-config/README.ko.md)
 - [@heripo/vitest-config](./tools/vitest-config/README.ko.md)
 
 ## 사용 예제

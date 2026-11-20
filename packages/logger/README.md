@@ -57,7 +57,7 @@ Pass the instance into any heripo engine package that accepts a `Logger`.
 
 ### Runtime and Method Binding
 
-Targets Node.js 24+ with ESM and CommonJS exports. Callers can also pass an object satisfying `LoggerMethods`; constructing `Logger` is optional.
+Targets Node.js 24+ and ships as ESM only. Callers can also pass an object satisfying `LoggerMethods`; constructing `Logger` is optional.
 
 `Logger` stores function references without filtering, formatting, file output or automatic binding. Wrap or bind methods of loggers that depend on `this`.
 

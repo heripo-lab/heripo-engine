@@ -1,5 +1,5 @@
 {
-  "name": "@heripo/tsup-config",
+  "name": "@heripo/tsdown-config",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,10 +11,10 @@
     "lint:fix": "eslint src/**/*.ts --fix"
   },
   "peerDependencies": {
-    "tsup": "^9.0.0"
+    "tsdown": "0.23.7"
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "tsup": "catalog:"
+    "tsdown": "catalog:"
   }
 }

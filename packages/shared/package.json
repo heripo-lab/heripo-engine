@@ -6,8 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,11 +24,11 @@
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
-    "@heripo/tsup-config": "workspace:*",
+    "@heripo/tsdown-config": "workspace:*",
     "@heripo/vitest-config": "workspace:*",
     "@vitest/coverage-v8": "catalog:",
     "@vitest/expect": "catalog:",
-    "tsup": "catalog:",
+    "tsdown": "catalog:",
     "vitest": "catalog:"
   }
 }

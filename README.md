@@ -188,7 +188,7 @@ heripo-engine/
 │   └── demo-web/          # Next.js web demo
 └── tools/                 # Build tool configurations
     ├── tsconfig/          # Shared TypeScript config
-    ├── tsup-config/       # Build config
+    ├── tsdown-config/     # Build config
     └── vitest-config/     # Test config
 ```
 
@@ -249,7 +249,7 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/ledger-extractor 
 | [@heripo/model](./packages/model/README.md)                           | 0.2.x   | Data models and type definitions               |
 | [@heripo/logger](./packages/logger/README.md)                         | 0.2.x   | Logger interface and adapter                   |
 
-The parser, document processor and ledger extractor ship as ESM; `model` and `logger` provide both ESM and CommonJS. Workspace development and builds require Node.js `^24.11.0 || >=26.0.0` for tsup 9 and pnpm 12. Published libraries retain their Node.js >= 24 runtime requirement. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
+All published libraries ship as ESM only. Workspace development and builds require Node.js `^24.11.0 || >=26.0.0` (the workspace `engines` range) and pnpm 12. Published libraries retain their Node.js >= 24 runtime requirement. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
 
 ```bash
 pnpm add @ai-sdk/openai
@@ -259,7 +259,7 @@ Internal package documentation:
 
 - [@heripo/shared](./packages/shared/README.md)
 - [@heripo/tsconfig](./tools/tsconfig/README.md)
-- [@heripo/tsup-config](./tools/tsup-config/README.md)
+- [@heripo/tsdown-config](./tools/tsdown-config/README.md)
 - [@heripo/vitest-config](./tools/vitest-config/README.md)
 
 ## Usage Examples

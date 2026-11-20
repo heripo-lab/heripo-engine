@@ -4,7 +4,7 @@ Thank you for your interest in this project! This guide explains local developme
 
 ## Development Environment
 
-- Node.js: `^24.11.0 || >=26.0.0` for workspace development and builds (required by tsup 9)
+- Node.js: `^24.11.0 || >=26.0.0` for workspace development and builds (the workspace `engines` range)
 - Package manager: pnpm 12
 - Monorepo: pnpm workspaces with Turbo
 - Language/Runtime: TypeScript, ESM (ES2022)

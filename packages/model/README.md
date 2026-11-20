@@ -35,7 +35,7 @@ ProcessedDocument (LLM-optimized intermediate model)
 
 `@heripo/model` defines data models currently used in the PDF parsing and document structure extraction stages. Various domain-specific models for archaeological data analysis, standardization, semantic modeling, etc. will be added in the future.
 
-Targets Node.js 24+ with ESM and CommonJS entry points. Use `import type` for document interfaces and ordinary imports for language utilities. A TypeScript assertion on parsed JSON does not perform runtime validation.
+Targets Node.js 24+ and ships as ESM only. Use `import type` for document interfaces and ordinary imports for language utilities. A TypeScript assertion on parsed JSON does not perform runtime validation.
 
 ## Installation
 
