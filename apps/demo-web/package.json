@@ -10,11 +10,11 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test scripts/local-model-reconnect.integration.test.ts src/lib/queue/mask-file-paths.test.ts",
+    "test": "node --import @oxc-node/core/register --test scripts/local-model-reconnect.integration.test.ts src/lib/queue/mask-file-paths.test.ts",
     "test:ci": "pnpm test",
     "generate:otp-secret": "node scripts/generate-otp-secret.js",
     "release": "node scripts/release.mjs",
-    "ledger:batch": "tsx --env-file-if-exists=.env scripts/ledger-batch.ts"
+    "ledger:batch": "node --import @oxc-node/core/register --env-file-if-exists=.env scripts/ledger-batch.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:",
@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@heripo/tsconfig": "workspace:*",
+    "@oxc-node/core": "catalog:",
     "@tailwindcss/postcss": "^4.3.3",
     "@tanstack/react-query-devtools": "^5.105.0",
     "@types/archiver": "^8.0.0",
@@ -62,7 +63,6 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.6.2",
     "postcss": "^8.5.32",
-    "tailwindcss": "^4.3.3",
-    "tsx": "catalog:"
+    "tailwindcss": "^4.3.3"
   }
 }
