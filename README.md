@@ -249,7 +249,7 @@ pnpm add @heripo/pdf-parser @heripo/document-processor @heripo/ledger-extractor 
 | [@heripo/model](./packages/model/README.md)                           | 0.2.x   | Data models and type definitions               |
 | [@heripo/logger](./packages/logger/README.md)                         | 0.2.x   | Logger interface and adapter                   |
 
-The parser, document processor and ledger extractor ship as ESM; `model` and `logger` provide both ESM and CommonJS. Workspace development and builds require Node.js `^24.11.0 || >=26.0.0` (the workspace `engines` range) and pnpm 12. Published libraries retain their Node.js >= 24 runtime requirement. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
+All published libraries ship as ESM only. Workspace development and builds require Node.js `^24.11.0 || >=26.0.0` (the workspace `engines` range) and pnpm 12. Published libraries retain their Node.js >= 24 runtime requirement. Align AI SDK and provider versions with the catalog in [pnpm-workspace.yaml](./pnpm-workspace.yaml).
 
 ```bash
 pnpm add @ai-sdk/openai

@@ -4,9 +4,9 @@
 
 [tsdown](https://tsdown.dev)으로 라이브러리를 빌드할 때 사용하는 비공개 workspace 패키지입니다. `defineConfig(options)`는 기본값 위에 사용자 옵션을 얕게 덮어씁니다.
 
-기본값은 CJS/ESM, 타입 선언, 출력 정리, sourcemap 활성화입니다. 패키지 `exports`와 맞도록 `.js`/`.cjs`, `.d.ts`/`.d.cts` 파일 이름을 유지하고(`fixedExtension: false`), `src/`를 배포하지 않으므로 선언 sourcemap은 끕니다. `entry`는 소비 패키지에서 지정해야 합니다.
+기본값은 ESM 단일 출력, 타입 선언, 출력 정리, sourcemap 활성화입니다. 패키지 `exports`와 맞도록 `.js`, `.d.ts` 파일 이름을 유지하고(`fixedExtension: false`), `src/`를 배포하지 않으므로 선언 sourcemap은 끕니다. `entry`는 소비 패키지에서 지정해야 합니다.
 
-`model`과 `logger`는 두 형식을 사용합니다. `shared`, `pdf-parser`, `document-processor`, `ledger-extractor`는 ESM으로 재정의합니다. 이 중 뒤의 세 패키지는 `deps.alwaysBundle: ['@heripo/shared']`로 비공개 shared 패키지를 JavaScript 번들과 타입 선언 파일 양쪽에 포함합니다.
+모든 워크스페이스 라이브러리는 ESM으로만 배포합니다. `pdf-parser`, `document-processor`, `ledger-extractor`는 `deps.alwaysBundle: ['@heripo/shared']`로 비공개 shared 패키지를 JavaScript 번들과 타입 선언 파일 양쪽에 포함합니다.
 
 ```typescript
 import { defineConfig } from '@heripo/tsdown-config';
