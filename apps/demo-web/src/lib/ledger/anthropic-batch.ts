@@ -9,7 +9,7 @@ import type {
   ContentAttachmentThinRequest,
   SpendGuard,
 } from '@heripo/ledger-extractor';
-import type { LanguageModelUsage } from 'ai';
+import type { FlexibleSchema, LanguageModelUsage } from 'ai';
 import type { z } from 'zod';
 
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -68,7 +68,7 @@ export async function captureAnthropicParams(
   call: {
     instructions: Parameters<typeof generateText>[0]['instructions'];
     prompt: string;
-    schema: Parameters<typeof Output.object>[0]['schema'];
+    schema: FlexibleSchema<unknown>;
     providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
   },
 ): Promise<MessageCreateParamsNonStreaming> {
