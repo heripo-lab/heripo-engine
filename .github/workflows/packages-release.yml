@@ -75,6 +75,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
 
       # Trusted Publishing requires npm 11.5.1 or later.
       - name: Ensure npm supports Trusted Publishing
