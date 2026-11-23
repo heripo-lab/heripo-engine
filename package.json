@@ -56,10 +56,10 @@
     "pdf-parser:test:coverage": "pnpm --filter pdf-parser test:coverage",
     "document-processor:test:coverage": "pnpm --filter document-processor test:coverage",
     "test:ci": "turbo test:ci",
-    "release": "node scripts/publish-all.mjs none",
-    "release:patch": "node scripts/publish-all.mjs patch",
-    "release:minor": "node scripts/publish-all.mjs minor",
-    "release:major": "node scripts/publish-all.mjs major"
+    "release": "node scripts/release-packages.mjs none",
+    "release:patch": "node scripts/release-packages.mjs patch",
+    "release:minor": "node scripts/release-packages.mjs minor",
+    "release:major": "node scripts/release-packages.mjs major"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

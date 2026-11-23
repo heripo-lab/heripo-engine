@@ -1,0 +1,92 @@
+name: Packages Release
+
+# Started by `pnpm release[:patch|:minor|:major]`, which pushes a trigger tag.
+# The npm Trusted Publisher of every @heripo/* package must reference this
+# workflow file name (packages-release.yml).
+on:
+  push:
+    tags:
+      - 'packages-release-*'
+
+concurrency:
+  group: packages-release
+  # Keep every trigger queued instead of silently cancelling pending runs.
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # npm Trusted Publishing (OIDC) and provenance
+
+jobs:
+  release:
+    name: Bump, Build, Push and Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parse release level
+        id: level
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^packages-release-(none|patch|minor|major)-[0-9]{14}$ ]]; then
+            echo "ERROR: 잘못된 릴리즈 태그입니다: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          echo "level=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release bot token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+
+      # Check out main (not the tag commit) so the release commit is created on
+      # top of the latest main and pushed with the bot token.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Check tag points to latest main
+        run: |
+          tag_sha="$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")"
+          main_sha="$(git rev-parse HEAD)"
+          if [ "$tag_sha" != "$main_sha" ]; then
+            echo "ERROR: 태그 커밋($tag_sha)이 main 최신 커밋($main_sha)이 아닙니다." >&2
+            exit 1
+          fi
+
+      - name: Configure git identity
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Trusted Publishing requires npm 11.5.1 or later.
+      - name: Ensure npm supports Trusted Publishing
+        run: |
+          current="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "$current" | sort -V | head -n1)" != "11.5.1" ]; then
+            npm install -g npm@latest
+          fi
+          npm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bump, build, push and publish
+        run: node scripts/publish-packages.mjs "${{ steps.level.outputs.level }}"
