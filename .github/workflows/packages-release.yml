@@ -129,7 +129,7 @@ jobs:
             {
               echo "### :warning: Release $tag has no Releases entry"
               echo
-              echo "\`gh release create\` failed. The release itself is complete."
+              echo "\`gh release create\` failed. Only the Releases entry is missing: the commit, the tag and the staged npm versions are all in place, and they still need 2FA approval."
               echo "Add the entry with:"
               echo
               echo "\`\`\`"
