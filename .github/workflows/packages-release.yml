@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   release:
-    name: Bump, Build, Push and Publish
+    name: Bump, Build, Push and Stage
     runs-on: ubuntu-latest
     steps:
       - name: Parse release level
@@ -77,11 +77,12 @@ jobs:
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted Publishing requires npm 11.5.1 or later.
-      - name: Ensure npm supports Trusted Publishing
+      # 스테이징 배포는 npm 11.15.0 이상이 필요하다. Trusted Publishing 자체는
+      # 11.5.1이면 되지만, 둘 중 높은 쪽을 기준으로 삼는다.
+      - name: Ensure npm supports staged publishing
         run: |
           current="$(npm --version)"
-          if [ "$(printf '%s\n' 11.5.1 "$current" | sort -V | head -n1)" != "11.5.1" ]; then
+          if [ "$(printf '%s\n' 11.15.0 "$current" | sort -V | head -n1)" != "11.15.0" ]; then
             npm install -g npm@latest
           fi
           npm --version
@@ -89,5 +90,53 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Bump, build, push and publish
+      - name: Bump, build, push and stage
         run: node scripts/publish-packages.mjs "${{ steps.level.outputs.level }}"
+
+      # publish-packages.mjs가 푸시한 버전 태그를 저장소 Releases 항목으로
+      # 만든다. 스테이징 이후에 실행되므로 npm 승인 전에 항목이 먼저 생기지만,
+      # 그 시점에 태그와 그 커밋은 이미 main에 올라가 있다.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; leaving it unchanged." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # 릴리즈 노트 기준을 직전 버전 태그로 고정한다. 이전 Release가 없을 때
+          # --generate-notes가 어떤 기준을 쓰는지는 gh 매뉴얼에 없고, 이 저장소는
+          # demo-web-release-* 태그도 함께 쓰므로 --match 'v*'로 버전 태그만
+          # 고른다. 버전 정렬이 아니라 커밋 이력을 따르므로 다른 곳의 더 높은
+          # 태그가 기준이 되지 않는다.
+          previous="$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)"
+          args=(--title "$tag" --generate-notes --verify-tag)
+          if [ -n "$previous" ]; then
+            args+=(--notes-start-tag "$previous")
+            echo "Generating notes since $previous."
+          fi
+
+          # Releases 항목이 없다고 해서 릴리즈가 무효가 되지는 않는다. 이 시점에
+          # 커밋·태그·스테이징이 모두 끝나 있으므로, 여기서 job을 실패시키면
+          # 끝난 릴리즈를 실패로 표시하게 된다. 그에 대한 통상적인 대응인
+          # 재트리거는 버전을 또 올리고, level `none`은 이미 스테이징된 버전
+          # 때문에 복구하지 못한다. 그래서 누락만 알리고 실행은 통과시킨다.
+          if gh release create "$tag" "${args[@]}"; then
+            echo "Created release $tag." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### :warning: Release $tag has no Releases entry"
+              echo
+              echo "\`gh release create\` failed. The release itself is complete."
+              echo "Add the entry with:"
+              echo
+              echo "\`\`\`"
+              echo "gh release create $tag --title $tag --generate-notes --verify-tag${previous:+ --notes-start-tag $previous}"
+              echo "\`\`\`"
+              echo
+              echo "Or on the Releases page: Draft a new release, choose the existing tag \`$tag\`, then Generate release notes."
+              echo "Do not re-run this workflow or push another trigger tag: that would release a new version."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
