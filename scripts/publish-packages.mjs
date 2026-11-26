@@ -7,8 +7,18 @@
  * by a trigger tag pushed with `pnpm release[:patch|:minor|:major]`. Do not run
  * it locally: it pushes to main and publishes to npm through Trusted Publishing.
  *
- * Order: bump -> build -> atomic git push (commit + version tag) -> stage.
- * Staging last guarantees that every released version exists on main.
+ * Order: bump -> pack -> atomic git push (commit + version tag) -> stage.
+ * Pushing after the pack keeps a packing failure from moving main, and staging
+ * last guarantees that every released version exists on main.
+ *
+ * It does not build. Each published package's `dist` is produced by the
+ * workflow's `build` job and arrives here as an artifact, so that dependency
+ * and build-tool code never runs in the job holding the release token. This
+ * script therefore runs without `node_modules` and must stay that way: node
+ * builtins, git, `npm version`, `pnpm pack` and `npm stage publish` only.
+ * `pnpm pack` resolves `workspace:` and `catalog:` ranges by reading
+ * `pnpm-workspace.yaml` and the sibling `package.json` files out of the
+ * repository, so it needs no install to do it.
  *
  * The trusted publishers are configured stage-only, so this script never puts a
  * version on the registry by itself: it stages all five, and a maintainer
@@ -32,6 +42,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -42,6 +53,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const LEVELS = ['none', 'patch', 'minor', 'major'];
+
+// What each package's `files` field publishes out of the build output. A
+// tarball would pack happily without them — README, LICENSE and NOTICE alone
+// make a valid-looking package — so their absence has to be an error here.
+const BUILD_OUTPUT = ['dist/index.js', 'dist/index.d.ts'];
 
 const level = process.argv[2];
 if (!LEVELS.includes(level)) {
@@ -139,11 +155,40 @@ const ensureNoneReleaseMatchesHead = (tag) => {
   }
 };
 
+// `preversion` and `postversion` are deliberately absent from every
+// package.json here, and `--ignore-scripts` holds that open: this job has no
+// `node_modules` to run a version hook with, and `postversion`'s usual
+// `git push --follow-tags` would push before the release commit exists.
 const bumpVersions = () => {
   for (const pkg of packages) {
-    run('npm', ['-C', pkg.dir, 'version', level, '--no-git-tag-version']);
+    run('npm', [
+      '-C',
+      pkg.dir,
+      'version',
+      level,
+      '--no-git-tag-version',
+      '--ignore-scripts',
+    ]);
   }
-  run('npm', ['version', level, '--no-git-tag-version']);
+  run('npm', ['version', level, '--no-git-tag-version', '--ignore-scripts']);
+};
+
+// The build output crosses from the build job as an artifact. Check it before
+// the bump, so a handoff that arrived empty or at an unexpected depth fails
+// while another trigger tag can still release the version cleanly, rather than
+// leaving a bumped version on main that only level `none` can finish.
+const requireBuildOutput = () => {
+  const missing = packages.flatMap((pkg) =>
+    BUILD_OUTPUT.map((file) => `${pkg.dir}/${file}`).filter(
+      (file) => !existsSync(join(rootDir, file)),
+    ),
+  );
+  if (missing.length > 0) {
+    console.error(
+      `Missing build output: ${missing.join(', ')}. The build job's \`packages-dist\` artifact did not arrive as expected.`,
+    );
+    process.exit(1);
+  }
 };
 
 const commitTagAndPush = (tag) => {
@@ -256,55 +301,70 @@ const isPublished = (name, version) => {
   return result.status === 0 && result.stdout.trim() === version;
 };
 
-const packAndStage = (version) => {
-  const tempDir = mkdtempSync(join(tmpdir(), 'heripo-pack-'));
+// Publishing a tarball rather than the directory is what lets this job skip the
+// install: `pnpm pack` reads `package.json`, `pnpm-workspace.yaml` and the
+// sibling manifests, and needs no `node_modules`. `--ignore-scripts` keeps it
+// that way — no package has a `prepack` or `prepare` script today, and one
+// added later must not quietly become a build step in the job that holds the
+// token.
+const packAll = (tempDir) =>
+  packages.map((pkg, i) => {
+    console.log(`Packing ${pkg.name} (${i + 1}/${packages.length})...`);
+    const packOutput = runCapture('pnpm', [
+      '-C',
+      pkg.dir,
+      'pack',
+      '--ignore-scripts',
+      '--pack-destination',
+      tempDir,
+    ]);
+    return findPackedTarball(packOutput, tempDir);
+  });
 
-  try {
-    // Pack everything first so that a packing failure publishes nothing.
-    // pnpm pack rewrites workspace: dependency ranges to real versions.
-    const tarballs = packages.map((pkg, i) => {
-      console.log(`Packing ${pkg.name} (${i + 1}/${packages.length})...`);
-      const packOutput = runCapture('pnpm', [
-        '-C',
-        pkg.dir,
-        'pack',
-        '--pack-destination',
-        tempDir,
-      ]);
-      return findPackedTarball(packOutput, tempDir);
-    });
-
-    const staged = [];
-    for (let i = 0; i < packages.length; i++) {
-      const pkg = packages[i];
-      if (isPublished(pkg.name, version)) {
-        console.log(`Skipping ${pkg.name}@${version}: already published.`);
-        continue;
-      }
-      console.log(
-        `Staging ${pkg.name}@${version} (${i + 1}/${packages.length})...`,
-      );
-      // Authentication and provenance come from npm Trusted Publishing (OIDC).
-      // publishConfig.access is public in every package, so no flag is needed.
-      const result = spawnSync('npm', ['stage', 'publish', tarballs[i]], {
+const stageAll = (version, tarballs) => {
+  const staged = [];
+  for (let i = 0; i < packages.length; i++) {
+    const pkg = packages[i];
+    if (isPublished(pkg.name, version)) {
+      console.log(`Skipping ${pkg.name}@${version}: already published.`);
+      continue;
+    }
+    console.log(
+      `Staging ${pkg.name}@${version} (${i + 1}/${packages.length})...`,
+    );
+    // Authentication and provenance come from npm Trusted Publishing (OIDC).
+    // publishConfig.access is public in every package, so no flag is needed.
+    // npm runs no lifecycle script of the current directory when it is handed a
+    // tarball, so `prepublishOnly` does not rebuild here; `--ignore-scripts`
+    // only makes sure a future npm cannot reintroduce a build into this job.
+    const result = spawnSync(
+      'npm',
+      ['stage', 'publish', tarballs[i], '--ignore-scripts'],
+      {
         stdio: 'inherit',
         cwd: rootDir,
-      });
-      if (result.status !== 0) {
-        // Whatever was staged before this point is now pending approval and
-        // blocks a `none` retry until it is approved or rejected, so name it.
-        reportStagingFailure(pkg.name, version, staged);
-        process.exit(result.status ?? 1);
-      }
-      staged.push(`${pkg.name}@${version}`);
+      },
+    );
+    if (result.status !== 0) {
+      // Whatever was staged before this point is now pending approval and
+      // blocks a `none` retry until it is approved or rejected, so name it.
+      reportStagingFailure(pkg.name, version, staged);
+      process.exit(result.status ?? 1);
     }
-    return staged;
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+    staged.push(`${pkg.name}@${version}`);
   }
+  return staged;
 };
 
 const main = () => {
+  // Before anything is bumped, committed or staged: a missing artifact must
+  // stop the run while main is still untouched.
+  requireBuildOutput();
+  // Must stay after the workflow's artifact download. The upload glob is
+  // `packages/*/dist`, but a compromised build job could upload an artifact
+  // containing a tracked file outside `dist` — a `package.json`, say — and the
+  // download would overwrite the trusted checkout with it. This is the check
+  // that catches that, which is also why it cannot be moved earlier.
   ensureCleanGit();
 
   const currentVersion = readVersion('.');
@@ -325,15 +385,22 @@ const main = () => {
     process.exit(1);
   }
 
-  run('pnpm', ['build:packages:force']);
+  const tempDir = mkdtempSync(join(tmpdir(), 'heripo-pack-'));
+  try {
+    // Pack everything first so that a packing failure publishes nothing and,
+    // since the push comes after it, leaves main untouched as well: the bump is
+    // local at that point and another trigger tag can release cleanly.
+    const tarballs = packAll(tempDir);
 
-  if (level !== 'none') {
-    commitTagAndPush(tag);
+    if (level !== 'none') {
+      commitTagAndPush(tag);
+    }
+
+    const staged = stageAll(version, tarballs);
+    reportStaged(tag, staged);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
   }
-
-  const staged = packAndStage(version);
-
-  reportStaged(tag, staged);
 };
 
 main();
