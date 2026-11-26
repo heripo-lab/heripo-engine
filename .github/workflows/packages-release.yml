@@ -16,21 +16,135 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write # npm Trusted Publishing (OIDC) and provenance
 
 jobs:
-  release:
-    name: Bump, Build, Push and Stage
+  # Dependency and build-tool code runs in this job and nowhere else, so this
+  # job holds no release credentials: no GitHub App token, no `id-token`, and
+  # the checkout credentials are not persisted. Deferring the token to a later
+  # step of a single job would not have been a boundary — every step of a job
+  # shares one machine and one user, so a background process left behind by
+  # `pnpm install` or the build outlives the step that started it and can read a
+  # later step's environment or `.git/config`. Two jobs are two machines.
+  #
+  # What a compromised build can still do is corrupt the packages' `dist`. That
+  # reaches the registry only as a staged version a maintainer approves with
+  # 2FA, and never reaches a token that can push to `main`.
+  build:
+    name: Build packages
     runs-on: ubuntu-latest
+    steps:
+      # Re-checked in `release`, which trusts nothing from this job. Here it
+      # only rejects a malformed tag before paying for an install and a build.
+      - name: Parse release level
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^packages-release-(none|patch|minor|major)-[0-9]{14}$ ]]; then
+            echo "ERROR: Invalid release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      # The trigger tag's own commit, which `release` separately requires to be
+      # the latest main.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build:packages:force
+
+      # `packages/*/dist` is the only thing that crosses into `release`, and it
+      # is used there for the npm tarballs alone — never for a commit, since the
+      # release commit is produced by `release` from its own checkout and stages
+      # only the `package.json` files and `pnpm-lock.yaml`. `release`
+      # deliberately takes no job output from here either: an output
+      # interpolated into a `run:` block would be a way back in.
+      #
+      # upload-artifact preserves the directory levels below the first wildcard,
+      # so the artifact holds `logger/dist/...` and a download into
+      # `path: packages` restores `packages/logger/dist/...`. If that path
+      # assumption is ever wrong, publish-packages.mjs checks the build output
+      # before it bumps anything and stops the run while main is untouched.
+      - name: Upload build output
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-dist
+          path: packages/*/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # Holds the release credentials and runs no project dependency or build-tool
+  # code: no `pnpm install`, no build. `scripts/publish-packages.mjs` needs no
+  # `node_modules` — git, `npm version`, `pnpm pack` and `npm stage publish`
+  # only, and nothing is installed. The npm the runner ships with either
+  # satisfies the staged publishing floor or the run fails. npm itself is
+  # trusted here and has to be, since it is what talks to the registry. pnpm is
+  # trusted on the same terms: `packageManager` pins its version, and it is the
+  # tool that rewrites the `workspace:` and `catalog:` ranges.
+  release:
+    name: Bump, Pack, Push and Stage
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm Trusted Publishing (OIDC) and provenance
     steps:
       - name: Parse release level
         id: level
         run: |
           if [[ ! "$GITHUB_REF_NAME" =~ ^packages-release-(none|patch|minor|major)-[0-9]{14}$ ]]; then
-            echo "ERROR: 잘못된 릴리즈 태그입니다: $GITHUB_REF_NAME" >&2
+            echo "ERROR: Invalid release tag: $GITHUB_REF_NAME" >&2
             exit 1
           fi
           echo "level=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      # No `cache: pnpm`: this job installs nothing, and restoring the cache
+      # would pull a pnpm store the build job wrote into the credentialed job.
+      # With no install it does not need the repository either, so the step is
+      # ordered before the checkout.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      # Staged publishing needs npm >= 11.15.0; Trusted Publishing alone needs
+      # only 11.5.1, so this gate is the higher of the two on purpose.
+      #
+      # It fails rather than upgrading. `npm install -g npm@latest` would fetch
+      # unpinned code into the job that holds the release credentials, and
+      # ordering it before the app token would not have contained it: a process
+      # it leaves behind outlives its step and can read the token afterwards,
+      # which is the same reasoning that put the build in a separate job. The
+      # `id-token` permission is job-wide and cannot be narrowed to a step
+      # either, so the containment has to be that no third-party code runs here
+      # at all, not that it runs early.
+      #
+      # Node 24 has bundled npm >= 11.16.0 since 24.18.0, so this never fires
+      # today. If a future Node ships an older npm, pin `node-version` to a
+      # release that does not. The gate runs before publish-packages.mjs, so a
+      # failure here leaves `main` untouched and a new trigger tag retries
+      # cleanly.
+      - name: Ensure npm supports staged publishing
+        run: |
+          npm_version="$(npm --version)"
+          echo "npm $npm_version"
+          if [ "$(printf '%s\n' 11.15.0 "$npm_version" | sort -V | head -n1)" != "11.15.0" ]; then
+            echo "ERROR: npm $npm_version cannot stage a publish; >= 11.15.0 is required." >&2
+            echo "Pin this job's node-version to a release bundling npm >= 11.15.0." >&2
+            exit 1
+          fi
 
       - name: Create release bot token
         id: app-token
@@ -54,9 +168,25 @@ jobs:
           tag_sha="$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")"
           main_sha="$(git rev-parse HEAD)"
           if [ "$tag_sha" != "$main_sha" ]; then
-            echo "ERROR: 태그 커밋($tag_sha)이 main 최신 커밋($main_sha)이 아닙니다." >&2
+            echo "ERROR: Tag commit ($tag_sha) is not the latest main commit ($main_sha)." >&2
             exit 1
           fi
+
+      # After the checkout, because pnpm/action-setup reads the version from the
+      # `packageManager` field of the checked-out root package.json. pnpm is
+      # here for `pnpm pack` alone — it rewrites the `workspace:` and `catalog:`
+      # ranges — and never for an install.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      # After the checkout, which cleans the workspace. publish-packages.mjs
+      # checks that the expected files actually arrived before it bumps
+      # anything.
+      - name: Download build output
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-dist
+          path: packages
 
       - name: Configure git identity
         env:
@@ -67,35 +197,14 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          registry-url: 'https://registry.npmjs.org'
-
-      # 스테이징 배포는 npm 11.15.0 이상이 필요하다. Trusted Publishing 자체는
-      # 11.5.1이면 되지만, 둘 중 높은 쪽을 기준으로 삼는다.
-      - name: Ensure npm supports staged publishing
-        run: |
-          current="$(npm --version)"
-          if [ "$(printf '%s\n' 11.15.0 "$current" | sort -V | head -n1)" != "11.15.0" ]; then
-            npm install -g npm@latest
-          fi
-          npm --version
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Bump, build, push and stage
+      - name: Bump, pack, push and stage
         run: node scripts/publish-packages.mjs "${{ steps.level.outputs.level }}"
 
-      # publish-packages.mjs가 푸시한 버전 태그를 저장소 Releases 항목으로
-      # 만든다. 스테이징 이후에 실행되므로 npm 승인 전에 항목이 먼저 생기지만,
-      # 그 시점에 태그와 그 커밋은 이미 main에 올라가 있다.
+      # The version tag is pushed by publish-packages.mjs; this turns it into an
+      # entry on the repository's Releases page. It runs after a successful
+      # stage publish, so the entry appears before the npm versions are
+      # approved — the tag and the code it points at are already on main at that
+      # moment.
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -106,11 +215,12 @@ jobs:
             exit 0
           fi
 
-          # 릴리즈 노트 기준을 직전 버전 태그로 고정한다. 이전 Release가 없을 때
-          # --generate-notes가 어떤 기준을 쓰는지는 gh 매뉴얼에 없고, 이 저장소는
-          # demo-web-release-* 태그도 함께 쓰므로 --match 'v*'로 버전 태그만
-          # 고른다. 버전 정렬이 아니라 커밋 이력을 따르므로 다른 곳의 더 높은
-          # 태그가 기준이 되지 않는다.
+          # Pin the notes baseline to the previous version tag. The gh manual
+          # does not say what baseline it picks when no prior Release exists,
+          # and this repository also carries demo-web-release-* tags, so
+          # --match 'v*' selects version tags only. The baseline follows the
+          # commit history rather than version ordering, so a stray higher tag
+          # elsewhere cannot become the starting point.
           previous="$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)"
           args=(--title "$tag" --generate-notes --verify-tag)
           if [ -n "$previous" ]; then
@@ -118,11 +228,12 @@ jobs:
             echo "Generating notes since $previous."
           fi
 
-          # Releases 항목이 없다고 해서 릴리즈가 무효가 되지는 않는다. 이 시점에
-          # 커밋·태그·스테이징이 모두 끝나 있으므로, 여기서 job을 실패시키면
-          # 끝난 릴리즈를 실패로 표시하게 된다. 그에 대한 통상적인 대응인
-          # 재트리거는 버전을 또 올리고, level `none`은 이미 스테이징된 버전
-          # 때문에 복구하지 못한다. 그래서 누락만 알리고 실행은 통과시킨다.
+          # A missing Release entry does not undo a release: the commit, the tag
+          # and the staged npm versions are all in place by now. Failing the job
+          # here would mark a finished release as failed, and the usual answer
+          # to that — re-triggering — bumps the versions again, while level
+          # `none` cannot recover either because the versions are already
+          # staged. So the gap is reported and the run is allowed to finish.
           if gh release create "$tag" "${args[@]}"; then
             echo "Created release $tag." >> "$GITHUB_STEP_SUMMARY"
           else
